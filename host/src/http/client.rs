@@ -5,7 +5,6 @@ use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
 use log::debug;
-use serde::de::DeserializeOwned;
 use url::Url;
 
 use tc_error::*;
@@ -13,6 +12,7 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::label;
 
+use crate::http::Encoding;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -38,7 +38,7 @@ impl Client {
 
 #[async_trait]
 impl crate::gateway::Client for Client {
-    async fn fetch<T: DeserializeOwned>(
+    async fn fetch<T: destream::FromStream<Context = ()>>(
         &self,
         txn_id: &TxnId,
         link: &Link,
@@ -55,21 +55,10 @@ impl crate::gateway::Client for Client {
             .await?;
 
         if response.status().is_success() {
-            let mut response = response.into_body();
-            let mut body = Vec::new();
-            while let Some(chunk) = response
-                .try_next()
-                .map_err(|e| {
-                    TCError::bad_request(format!("error decoding response from {}", link), e)
-                })
-                .await?
-            {
-                body.extend_from_slice(&chunk);
-            }
-
-            serde_json::from_slice(&body).map_err(|e| {
-                TCError::bad_request(format!("error decoding response from {}", link), e)
-            })
+            let body = response.into_body();
+            tbon::de::try_decode((), body)
+                .map_err(|e| TCError::bad_gateway(e))
+                .await
         } else {
             let err = transform_error(link, response).await;
             Err(err)
@@ -92,7 +81,7 @@ impl crate::gateway::Client for Client {
             .await?;
 
         if response.status().is_success() {
-            destream_json::try_decode(txn, response.into_body())
+            tbon::de::try_decode(txn, response.into_body())
                 .map_err(|e| {
                     TCError::bad_request(format!("error decoding response from {}", link), e)
                 })
@@ -109,15 +98,19 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = url(&link, txn.id(), &key)?;
-        let req = req_builder("PUT", uri, Some(txn.request().token()));
+        let req = req_builder("PUT", uri, Some(txn.request().token()))
+            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.to_string());
 
         let txn = txn.subcontext_tmp().await?;
-        let body = destream_json::encode(value.into_view(txn))
+        let body = tbon::en::encode(value.into_view(txn))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
         let response = self
             .client
-            .request(req.body(Body::wrap_stream(body)).unwrap())
+            .request(
+                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
+                    .unwrap(),
+            )
             .map_err(|e| TCError::bad_gateway(e))
             .await?;
 
@@ -135,21 +128,25 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = url(&link, txn.id(), &Value::default())?;
-        let req = req_builder("POST", uri, Some(txn.request().token()));
+        let req = req_builder("POST", uri, Some(txn.request().token()))
+            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.to_string());
 
         let txn = txn.subcontext_tmp().await?;
         let subcontext = txn.subcontext(label("_params").into()).await?;
-        let body = destream_json::encode(params.into_view(subcontext))
+        let body = tbon::en::encode(params.into_view(subcontext))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
         let response = self
             .client
-            .request(req.body(Body::wrap_stream(body)).unwrap())
+            .request(
+                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
+                    .unwrap(),
+            )
             .map_err(|e| TCError::bad_gateway(e))
             .await?;
 
         if response.status().is_success() {
-            destream_json::try_decode(txn, response.into_body())
+            tbon::de::try_decode(txn, response.into_body())
                 .map_err(|e| {
                     TCError::bad_request(format!("error decoding response from {}", link), e)
                 })
@@ -203,6 +200,7 @@ fn url(link: &Link, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
 fn req_builder(method: &str, url: Url, auth: Option<&str>) -> http::request::Builder {
     let req = hyper::Request::builder()
         .method(method)
+        .header(hyper::header::ACCEPT_ENCODING, Encoding::Tbon.to_string())
         .uri(url.to_string());
 
     if let Some(token) = auth {

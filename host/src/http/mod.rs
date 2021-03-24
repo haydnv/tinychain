@@ -63,8 +63,10 @@ trait Accept: Default + FromStr {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum Encoding {
     Json,
+    Tbon,
 }
 
 impl Default for Encoding {
@@ -79,6 +81,7 @@ impl FromStr for Encoding {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "application/json" => Ok(Self::Json),
+            "application/tbon" => Ok(Self::Tbon),
             _ => Err(TCError::bad_request("encoding not supported", s)),
         }
     }
@@ -88,8 +91,9 @@ impl Accept for Encoding {}
 
 impl fmt::Display for Encoding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Json => f.write_str("application/json"),
-        }
+        f.write_str(match self {
+            Self::Json => "application/json",
+            Self::Tbon => "application/tbon",
+        })
     }
 }

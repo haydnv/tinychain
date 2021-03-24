@@ -10,7 +10,6 @@ use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
 use futures::try_join;
 use log::debug;
-use serde::de::DeserializeOwned;
 
 use tc_error::*;
 use tcgeneric::{NetworkTime, TCPathBuf};
@@ -32,7 +31,7 @@ pub struct Config {
 #[async_trait]
 pub trait Client {
     /// Read a simple value.
-    async fn fetch<T: DeserializeOwned>(
+    async fn fetch<T: destream::FromStream<Context = ()>>(
         &self,
         txn_id: &TxnId,
         link: &Link,
@@ -130,7 +129,7 @@ impl Gateway {
     }
 
     /// Read a simple value.
-    pub async fn fetch<T: DeserializeOwned>(
+    pub async fn fetch<T: destream::FromStream<Context = ()>>(
         &self,
         txn_id: &TxnId,
         link: &Link,

@@ -3,6 +3,7 @@
 use std::convert::TryInto;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::TryFutureExt;
 
 use tc_error::*;
@@ -85,18 +86,11 @@ impl<'a> rjwt::Resolve for Resolver<'a> {
     }
 
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {
-        let public_key: String = self
+        let public_key: Bytes = self
             .gateway
             .fetch(&self.txn_id, host, actor_id)
             .map_err(|e| rjwt::Error::new(rjwt::ErrorKind::Fetch, e))
             .await?;
-
-        let public_key = base64::decode(&public_key).map_err(|e| {
-            rjwt::Error::new(
-                rjwt::ErrorKind::Format,
-                format!("invalid public key {} for {}: {}", &public_key, actor_id, e),
-            )
-        })?;
 
         Actor::with_public_key(actor_id.clone(), &public_key)
     }

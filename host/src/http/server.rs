@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::{future, stream, StreamExt, TryFutureExt};
+use futures::future::{self, TryFutureExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
@@ -35,30 +36,35 @@ impl HTTPServer {
         self: Arc<Self>,
         request: hyper::Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
-        let (params, txn, encoding) = match self.process_headers(&request).await {
-            Ok(header_data) => header_data,
-            Err(cause) => return Ok(transform_error(cause)),
-        };
+        let (params, txn, accept_encoding, request_encoding) =
+            match self.process_headers(&request).await {
+                Ok(header_data) => header_data,
+                Err(cause) => return Ok(transform_error(cause)),
+            };
 
-        let state = match self.route(&txn, params, request).await {
+        let state = match self.route(request_encoding, &txn, params, request).await {
             Ok(state) => state,
             Err(cause) => return Ok(transform_error(cause)),
         };
 
-        let response = match encoding {
+        let response = match accept_encoding {
             Encoding::Json => match destream_json::encode(state.into_view(txn)) {
-                Ok(response) => {
-                    response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n")))))
-                }
+                Ok(response) => Body::wrap_stream(
+                    response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n"))))),
+                ),
+                Err(cause) => return Ok(transform_error(TCError::internal(cause))),
+            },
+            Encoding::Tbon => match tbon::en::encode(state.into_view(txn)) {
+                Ok(response) => Body::wrap_stream(response.map_err(TCError::internal)),
                 Err(cause) => return Ok(transform_error(TCError::internal(cause))),
             },
         };
 
-        let mut response = Response::new(Body::wrap_stream(response));
+        let mut response = Response::new(response);
 
         response.headers_mut().insert(
             hyper::header::CONTENT_TYPE,
-            encoding.to_string().parse().unwrap(),
+            accept_encoding.to_string().parse().unwrap(),
         );
 
         Ok(response)
@@ -67,9 +73,19 @@ impl HTTPServer {
     async fn process_headers(
         &self,
         http_request: &hyper::Request<Body>,
-    ) -> TCResult<(GetParams, Txn, Encoding)> {
+    ) -> TCResult<(GetParams, Txn, Encoding, Encoding)> {
+        let content_type =
+            if let Some(header) = http_request.headers().get(hyper::header::CONTENT_TYPE) {
+                header
+                    .to_str()
+                    .map_err(|e| TCError::bad_request("request has invalid Content-Type", e))?
+                    .parse()?
+            } else {
+                Encoding::default()
+            };
+
         let accept_encoding = http_request.headers().get(hyper::header::ACCEPT_ENCODING);
-        let encoding = Encoding::parse_header(accept_encoding)?;
+        let accept_encoding = Encoding::parse_header(accept_encoding)?;
 
         let mut params = http_request
             .uri()
@@ -105,11 +121,12 @@ impl HTTPServer {
         };
 
         let txn = self.gateway.new_txn(txn_id, token).await?;
-        Ok((params, txn, encoding))
+        Ok((params, txn, accept_encoding, content_type))
     }
 
     async fn route(
         &self,
+        encoding: Encoding,
         txn: &Txn,
         mut params: GetParams,
         http_request: hyper::Request<Body>,
@@ -124,7 +141,7 @@ impl HTTPServer {
 
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                let value = destream_body(http_request.into_body(), txn.clone()).await?;
+                let value = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
                 self.gateway
                     .put(txn, path.into(), key, value)
                     .map_ok(State::from)
@@ -132,7 +149,7 @@ impl HTTPServer {
             }
 
             &hyper::Method::POST => {
-                let data = destream_body(http_request.into_body(), txn.clone()).await?;
+                let data = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
 
@@ -174,10 +191,21 @@ impl crate::gateway::Server for HTTPServer {
     }
 }
 
-async fn destream_body(body: hyper::Body, txn: Txn) -> TCResult<State> {
-    destream_json::try_decode(txn, body)
-        .map_err(|e| TCError::bad_request("error deserializing HTTP request body", e))
-        .await
+async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCResult<State> {
+    const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
+
+    match encoding {
+        Encoding::Json => {
+            destream_json::try_decode(txn, body)
+                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .await
+        }
+        Encoding::Tbon => {
+            tbon::de::try_decode(txn, body)
+                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .await
+        }
+    }
 }
 
 fn get_param<T: DeserializeOwned>(
