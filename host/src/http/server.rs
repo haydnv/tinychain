@@ -5,10 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{future, stream, StreamExt, TryFutureExt};
-use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
-use log::debug;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
@@ -19,7 +17,7 @@ use crate::gateway::Gateway;
 use crate::state::State;
 use crate::txn::*;
 
-use super::Encoding;
+use super::{Accept, Encoding};
 
 type GetParams = HashMap<String, String>;
 
@@ -38,7 +36,7 @@ impl HTTPServer {
         request: hyper::Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
         let (params, txn, encoding) = match self.process_headers(&request).await {
-            Ok((params, txn, encoding)) => (params, txn, encoding),
+            Ok(header_data) => header_data,
             Err(cause) => return Ok(transform_error(cause)),
         };
 
@@ -70,14 +68,13 @@ impl HTTPServer {
         &self,
         http_request: &hyper::Request<Body>,
     ) -> TCResult<(GetParams, Txn, Encoding)> {
-        let encoding =
-            parse_accept_encoding(http_request.headers().get(hyper::header::ACCEPT_ENCODING))?;
+        let accept_encoding = http_request.headers().get(hyper::header::ACCEPT_ENCODING);
+        let encoding = Encoding::parse_header(accept_encoding)?;
 
         let mut params = http_request
             .uri()
             .query()
             .map(|v| {
-                debug!("param {}", v);
                 url::form_urlencoded::parse(v.as_bytes())
                     .into_owned()
                     .collect()
@@ -196,54 +193,6 @@ fn get_param<T: DeserializeOwned>(
     } else {
         Ok(None)
     }
-}
-
-fn parse_accept_encoding(header: Option<&HeaderValue>) -> TCResult<Encoding> {
-    let header = if let Some(header) = header {
-        header
-            .to_str()
-            .map_err(|e| TCError::bad_request("invalid Accept-Encoding header", e))?
-    } else {
-        return Ok(Encoding::Json);
-    };
-
-    let accept = header.split(',');
-
-    let mut quality = 0.;
-    let mut encoding = None;
-    for opt in accept {
-        if opt.contains(';') {
-            let opt: Vec<&str> = opt.split(';').collect();
-
-            if opt.len() != 2 {
-                return Err(TCError::bad_request(
-                    "invalid encoding specified in Accept-Encoding header",
-                    opt.join(";"),
-                ));
-            }
-
-            let format = opt[0].parse();
-            let q = opt[1].parse().map_err(|e| {
-                TCError::bad_request("invalid quality value in Accept-Encoding header", e)
-            })?;
-
-            if q > quality {
-                if let Ok(format) = format {
-                    encoding = Some(format);
-                    quality = q;
-                }
-            }
-        } else {
-            if let Ok(format) = opt.parse() {
-                if encoding.is_none() {
-                    encoding = Some(format);
-                    quality = 1.;
-                }
-            }
-        }
-    }
-
-    Ok(encoding.unwrap_or_default())
 }
 
 fn transform_error(err: TCError) -> hyper::Response<Body> {
