@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{future, stream, StreamExt, TryFutureExt};
+use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
@@ -18,7 +19,7 @@ use crate::gateway::Gateway;
 use crate::state::State;
 use crate::txn::*;
 
-const CONTENT_TYPE: &str = "application/json";
+use super::Encoding;
 
 type GetParams = HashMap<String, String>;
 
@@ -36,34 +37,42 @@ impl HTTPServer {
         self: Arc<Self>,
         request: hyper::Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
-        let (params, txn) = match self.process_headers(&request).await {
-            Ok((params, txn)) => (params, txn),
+        let (params, txn, encoding) = match self.process_headers(&request).await {
+            Ok((params, txn, encoding)) => (params, txn, encoding),
             Err(cause) => return Ok(transform_error(cause)),
         };
 
-        match self.route(&txn, params, request).await {
-            Ok(state) => match destream_json::encode(state.into_view(txn)) {
+        let state = match self.route(&txn, params, request).await {
+            Ok(state) => state,
+            Err(cause) => return Ok(transform_error(cause)),
+        };
+
+        let response = match encoding {
+            Encoding::Json => match destream_json::encode(state.into_view(txn)) {
                 Ok(response) => {
-                    let mut response = Response::new(Body::wrap_stream(
-                        response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n"))))),
-                    ));
-
-                    response
-                        .headers_mut()
-                        .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
-
-                    Ok(response)
+                    response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n")))))
                 }
-                Err(cause) => Ok(transform_error(TCError::internal(cause))),
+                Err(cause) => return Ok(transform_error(TCError::internal(cause))),
             },
-            Err(cause) => Ok(transform_error(cause)),
-        }
+        };
+
+        let mut response = Response::new(Body::wrap_stream(response));
+
+        response.headers_mut().insert(
+            hyper::header::CONTENT_TYPE,
+            encoding.to_string().parse().unwrap(),
+        );
+
+        Ok(response)
     }
 
     async fn process_headers(
         &self,
         http_request: &hyper::Request<Body>,
-    ) -> TCResult<(GetParams, Txn)> {
+    ) -> TCResult<(GetParams, Txn, Encoding)> {
+        let encoding =
+            parse_accept_encoding(http_request.headers().get(hyper::header::ACCEPT_ENCODING))?;
+
         let mut params = http_request
             .uri()
             .query()
@@ -99,7 +108,7 @@ impl HTTPServer {
         };
 
         let txn = self.gateway.new_txn(txn_id, token).await?;
-        Ok((params, txn))
+        Ok((params, txn, encoding))
     }
 
     async fn route(
@@ -187,6 +196,54 @@ fn get_param<T: DeserializeOwned>(
     } else {
         Ok(None)
     }
+}
+
+fn parse_accept_encoding(header: Option<&HeaderValue>) -> TCResult<Encoding> {
+    let header = if let Some(header) = header {
+        header
+            .to_str()
+            .map_err(|e| TCError::bad_request("invalid Accept-Encoding header", e))?
+    } else {
+        return Ok(Encoding::Json);
+    };
+
+    let accept = header.split(',');
+
+    let mut quality = 0.;
+    let mut encoding = None;
+    for opt in accept {
+        if opt.contains(';') {
+            let opt: Vec<&str> = opt.split(';').collect();
+
+            if opt.len() != 2 {
+                return Err(TCError::bad_request(
+                    "invalid encoding specified in Accept-Encoding header",
+                    opt.join(";"),
+                ));
+            }
+
+            let format = opt[0].parse();
+            let q = opt[1].parse().map_err(|e| {
+                TCError::bad_request("invalid quality value in Accept-Encoding header", e)
+            })?;
+
+            if q > quality {
+                if let Ok(format) = format {
+                    encoding = Some(format);
+                    quality = q;
+                }
+            }
+        } else {
+            if let Ok(format) = opt.parse() {
+                if encoding.is_none() {
+                    encoding = Some(format);
+                    quality = 1.;
+                }
+            }
+        }
+    }
+
+    Ok(encoding.unwrap_or_default())
 }
 
 fn transform_error(err: TCError) -> hyper::Response<Body> {
