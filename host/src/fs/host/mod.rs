@@ -6,9 +6,14 @@ use log::debug;
 use tokio::fs;
 
 use tc_error::*;
+use tc_transact::fs::{BlockData, BlockId};
 use tcgeneric::PathSegment;
 
+use super::cache::*;
 use super::io_err;
+
+#[allow(dead_code)]
+mod file;
 
 pub type DirContents = Vec<(fs::DirEntry, Metadata)>;
 
