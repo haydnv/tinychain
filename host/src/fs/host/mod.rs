@@ -13,6 +13,8 @@ use super::cache::*;
 use super::io_err;
 
 #[allow(dead_code)]
+mod dir;
+#[allow(dead_code)]
 mod file;
 
 pub type DirContents = Vec<(fs::DirEntry, Metadata)>;
