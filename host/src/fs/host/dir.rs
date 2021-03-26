@@ -8,6 +8,7 @@ use uplock::RwLock;
 use tc_error::*;
 use tcgeneric::PathSegment;
 
+use crate::chain::ChainBlock;
 use crate::scalar::Value;
 
 use super::file::File;
@@ -32,7 +33,28 @@ impl fmt::Display for DirEntry {
 
 #[derive(Clone)]
 pub enum FileEntry {
+    Chain(File<ChainBlock>),
     Value(File<Value>),
+}
+
+impl From<File<ChainBlock>> for FileEntry {
+    fn from(file: File<ChainBlock>) -> Self {
+        Self::Chain(file)
+    }
+}
+
+impl TryFrom<FileEntry> for File<ChainBlock> {
+    type Error = TCError;
+
+    fn try_from(file: FileEntry) -> TCResult<Self> {
+        match file {
+            FileEntry::Chain(file) => Ok(file),
+            other => Err(TCError::bad_request(
+                "expected File<Chain> but found",
+                other,
+            )),
+        }
+    }
 }
 
 impl From<File<Value>> for FileEntry {
@@ -47,6 +69,10 @@ impl TryFrom<FileEntry> for File<Value> {
     fn try_from(file: FileEntry) -> TCResult<Self> {
         match file {
             FileEntry::Value(file) => Ok(file),
+            other => Err(TCError::bad_request(
+                "expected File<Value> but found",
+                other,
+            )),
         }
     }
 }
@@ -54,6 +80,7 @@ impl TryFrom<FileEntry> for File<Value> {
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
+            Self::Chain(_) => "File<Chain>",
             Self::Value(_) => "File<Value>",
         })
     }
