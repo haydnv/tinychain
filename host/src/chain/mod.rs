@@ -5,11 +5,12 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use log::debug;
-use safecast::{CastFrom, TryCastFrom};
+use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::File;
+use tc_transact::fs::{File, Persist};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::*;
 
@@ -19,14 +20,17 @@ use crate::state::State;
 use crate::txn::Txn;
 
 mod block;
+mod blockchain;
 mod sync;
 
 pub use block::ChainBlock;
+pub use blockchain::*;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 const SUBJECT: Label = label("subject");
+const ERR_INVALID_SCHEMA: &str = "invalid Chain schema";
 
 /// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
@@ -131,6 +135,7 @@ pub trait ChainInstance {
 /// The type of a [`Chain`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ChainType {
+    Block,
     Sync,
 }
 
@@ -142,6 +147,7 @@ impl NativeClass for ChainType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 3 && &path[0..2] == &PREFIX[..] {
             match path[2].as_str() {
+                "block" => Some(Self::Block),
                 "sync" => Some(Self::Sync),
                 _ => None,
             }
@@ -152,6 +158,7 @@ impl NativeClass for ChainType {
 
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
+            Self::Block => "block",
             Self::Sync => "sync",
         };
 
@@ -168,6 +175,7 @@ impl fmt::Display for ChainType {
 /// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
 #[derive(Clone)]
 pub enum Chain {
+    Block(blockchain::BlockChain),
     Sync(sync::SyncChain),
 }
 
@@ -176,6 +184,7 @@ impl Instance for Chain {
 
     fn class(&self) -> Self::Class {
         match self {
+            Self::Block(_) => ChainType::Block,
             Self::Sync(_) => ChainType::Sync,
         }
     }
@@ -191,18 +200,21 @@ impl ChainInstance for Chain {
         value: Scalar,
     ) -> TCResult<()> {
         match self {
+            Self::Block(chain) => chain.append(txn_id, path, key, value).await,
             Self::Sync(chain) => chain.append(txn_id, path, key, value).await,
         }
     }
 
     fn subject(&self) -> &Subject {
         match self {
+            Self::Block(chain) => chain.subject(),
             Self::Sync(chain) => chain.subject(),
         }
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         match self {
+            Self::Block(chain) => chain.replicate(txn, source).await,
             Self::Sync(chain) => chain.replicate(txn, source).await,
         }
     }
@@ -212,19 +224,38 @@ impl ChainInstance for Chain {
 impl Transact for Chain {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
+            Self::Block(chain) => chain.commit(txn_id).await,
             Self::Sync(chain) => chain.commit(txn_id).await,
         }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
+            Self::Block(chain) => chain.finalize(txn_id).await,
             Self::Sync(chain) => chain.finalize(txn_id).await,
         }
     }
 }
 
+pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) -> TCResult<Chain> {
+    let schema = schema.try_cast_into(|v| TCError::bad_request(ERR_INVALID_SCHEMA, v))?;
+
+    match class {
+        ChainType::Block => {
+            BlockChain::load(schema, dir, txn_id)
+                .map_ok(Chain::Block)
+                .await
+        }
+        ChainType::Sync => {
+            SyncChain::load(schema, dir, txn_id)
+                .map_ok(Chain::Sync)
+                .await
+        }
+    }
+}
+
 impl fmt::Display for Chain {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "instance of {}", self.class())
     }
 }

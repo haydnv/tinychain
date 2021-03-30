@@ -2,17 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use futures::future::TryFutureExt;
 use log::debug;
-use safecast::TryCastInto;
 use uplock::RwLock;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
 use tc_transact::lock::TxnLock;
 use tcgeneric::*;
 
-use crate::chain::{Chain, ChainType, SyncChain};
+use crate::chain::{self, Chain, ChainType};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::{Link, LinkHost, OpRef, Scalar, Value};
@@ -77,17 +74,7 @@ pub async fn instantiate(
     let mut chains = HashMap::<Id, Chain>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
         let dir = dir.get_or_create_dir(txn_id, id.clone()).await?;
-        let chain = match class {
-            ChainType::Sync => {
-                let schema =
-                    schema.try_cast_into(|v| TCError::bad_request("invalid Chain schema", v))?;
-
-                SyncChain::load(schema, dir, txn_id)
-                    .map_ok(Chain::Sync)
-                    .await?
-            }
-        };
-
+        let chain = chain::load(class, schema, dir, txn_id).await?;
         chains.insert(id, chain);
     }
 
