@@ -1,4 +1,4 @@
-//! The filesystem cache, with LFU eviction. INCOMPLETE.
+//! The filesystem cache, with LFU eviction
 
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
@@ -103,17 +103,14 @@ impl<T> CacheLock<T> {
         }
     }
 
-    /// Lock this value immutably for reading.
     pub async fn read(&self) -> RwLockReadGuard<T> {
         self.lock.read().await
     }
 
-    /// Lock this value mutably and exclusively for writing.
     pub async fn write(&self) -> RwLockWriteGuard<T> {
         self.lock.write().await
     }
 
-    /// Return the number of references to this cache entry.
     pub fn ref_count(&self) -> usize {
         self.lock.ref_count()
     }

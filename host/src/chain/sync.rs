@@ -48,7 +48,7 @@ impl ChainInstance for SyncChain {
         }
 
         let block_id = CHAIN_BLOCK.into();
-        let mut block = fs::File::get_block_mut(&self.file, &txn_id, block_id).await?;
+        let mut block = self.file.write_block(txn_id, block_id).await?;
         block.append(txn_id, path, key, value);
         Ok(())
     }
@@ -59,7 +59,7 @@ impl ChainInstance for SyncChain {
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let subject = txn.get(source, Value::None).await?;
-        self.subject.put(txn.id(), Value::None, subject).await
+        self.subject.put(*txn.id(), Value::None, subject).await
     }
 }
 
@@ -126,7 +126,9 @@ impl Persist for SyncChain {
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
         {
-            let mut block = fs::File::get_block_mut(&self.file, &txn_id, CHAIN_BLOCK.into())
+            let mut block = self
+                .file
+                .write_block(*txn_id, CHAIN_BLOCK.into())
                 .await
                 .unwrap();
 

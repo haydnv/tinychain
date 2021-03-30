@@ -56,14 +56,14 @@ impl Subject {
 
         match self {
             Self::Value(file) => {
-                let value = file.get_block(txn_id, SUBJECT.into()).await?;
+                let value = file.read_block(txn_id, &SUBJECT.into()).await?;
                 Ok(value.deref().clone().into())
             }
         }
     }
 
     /// Set the state of this `Subject` to `value` at the given [`TxnId`].
-    pub async fn put(&self, txn_id: &TxnId, key: Value, value: State) -> TCResult<()> {
+    pub async fn put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
         match self {
             Self::Value(file) => {
                 if key.is_some() {
@@ -74,7 +74,8 @@ impl Subject {
                     TCError::bad_request("cannot update a Value to", v)
                 })?;
 
-                let mut block = file.get_block_mut(txn_id, SUBJECT.into()).await?;
+                let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
+
                 debug!(
                     "set new Value of chain subject to {} at {}",
                     new_value, txn_id

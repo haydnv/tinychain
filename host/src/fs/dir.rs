@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -10,21 +11,19 @@ use futures::future::{join_all, Future, TryFutureExt};
 use log::debug;
 
 use tc_error::*;
+use tc_transact::fs::{self, BlockData};
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::TxnId;
-use tc_transact::{fs, Transact};
+use tc_transact::{Transact, TxnId};
 use tcgeneric::{Id, PathSegment};
 
 use crate::chain::{self, ChainBlock};
 use crate::scalar::{ScalarType, Value};
 use crate::state::StateType;
 
-use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
-use crate::fs::io_err;
+use super::{dir_contents, file_ext, file_name, fs_path, io_err, Cache, DirContents, File};
 
-pub const VALUE_EXT: &str = "value";
+const VALUE_EXT: &'static str = "value";
 
-/// A file in a [`Dir`].
 #[derive(Clone)]
 pub enum FileEntry {
     Chain(File<ChainBlock>),
@@ -34,9 +33,9 @@ pub enum FileEntry {
 impl FileEntry {
     fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
         match class {
-            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, chain::EXT))),
+            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
             StateType::Scalar(st) => match st {
-                ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, VALUE_EXT))),
+                ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, Value::ext()))),
                 other => Err(TCError::bad_request("cannot create file for", other)),
             },
             other => Err(TCError::bad_request("cannot create file for", other)),
@@ -49,11 +48,11 @@ impl FileEntry {
 
         match ext {
             chain::EXT => {
-                let file = File::load(cache.clone(), path, contents).await?;
+                let file = File::load(cache.clone(), path, contents)?;
                 Ok(FileEntry::Chain(file))
             }
             VALUE_EXT => {
-                let file = File::load(cache.clone(), path, contents).await?;
+                let file = File::load(cache.clone(), path, contents)?;
                 Ok(FileEntry::Value(file))
             }
             other => Err(TCError::internal(format!(
@@ -64,86 +63,105 @@ impl FileEntry {
     }
 }
 
+impl From<File<ChainBlock>> for FileEntry {
+    fn from(file: File<ChainBlock>) -> Self {
+        Self::Chain(file)
+    }
+}
+
 impl TryFrom<FileEntry> for File<ChainBlock> {
     type Error = TCError;
 
-    fn try_from(file: FileEntry) -> TCResult<Self> {
-        match file {
+    fn try_from(entry: FileEntry) -> TCResult<Self> {
+        match entry {
             FileEntry::Chain(file) => Ok(file),
-            _ => Err(TCError::unsupported("this is not a Chain file!")),
+            other => Err(TCError::bad_request(
+                "expected a Chain file but found",
+                other,
+            )),
         }
+    }
+}
+
+impl From<File<Value>> for FileEntry {
+    fn from(file: File<Value>) -> Self {
+        Self::Value(file)
     }
 }
 
 impl TryFrom<FileEntry> for File<Value> {
     type Error = TCError;
 
-    fn try_from(file: FileEntry) -> TCResult<Self> {
-        match file {
+    fn try_from(entry: FileEntry) -> TCResult<Self> {
+        match entry {
             FileEntry::Value(file) => Ok(file),
-            _ => Err(TCError::unsupported("this is not a persistent Value!")),
+            other => Err(TCError::bad_request(
+                "expected a Chain file but found",
+                other,
+            )),
         }
     }
 }
 
-/// An entry in a [`Dir`], either a [`FileEntry`] or sub-[`Dir`].
+impl fmt::Display for FileEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Value(value) => fmt::Display::fmt(value, f),
+        }
+    }
+}
+
 #[derive(Clone)]
-pub enum DirEntry {
+enum DirEntry {
     Dir(Dir),
     File(FileEntry),
 }
 
+impl fmt::Display for DirEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Dir(dir) => fmt::Display::fmt(dir, f),
+            Self::File(file) => fmt::Display::fmt(file, f),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Dir {
-    cache: Cache,
     path: PathBuf,
-    entries: TxnLock<Mutable<HashMap<PathSegment, DirEntry>>>,
+    cache: Cache,
+    contents: TxnLock<Mutable<HashMap<PathSegment, DirEntry>>>,
 }
 
 impl Dir {
-    fn new(cache: Cache, path: PathBuf, entries: HashMap<PathSegment, DirEntry>) -> Self {
-        let entries = TxnLock::new(format!("Dir {:?}", &path), entries.into());
-        Self {
-            cache,
-            path,
-            entries,
-        }
-    }
-
-    fn load(
+    pub fn load(
         cache: Cache,
         path: PathBuf,
-        contents: DirContents,
+        entries: DirContents,
     ) -> Pin<Box<dyn Future<Output = TCResult<Self>>>> {
         Box::pin(async move {
-            if contents.iter().all(|(_, meta)| meta.is_dir()) {
-                let mut entries = HashMap::new();
+            if entries.iter().all(|(_, meta)| meta.is_dir()) {
+                let mut contents = HashMap::new();
 
-                for (handle, _) in contents.into_iter() {
+                for (handle, _) in entries.into_iter() {
                     let name = file_name(&handle)?;
                     let path = handle.path();
-
-                    if name == super::VERSION {
-                        debug!("skipping old version file at {:?}", handle.path());
-                        continue;
-                    }
-
-                    let contents = dir_contents(&path).await?;
-
-                    if is_empty(&contents) {
+                    let entries = dir_contents(&path).await?;
+                    if is_empty(&entries) {
                         if file_ext(&path).is_some() {
-                            let file = FileEntry::load(cache.clone(), path, contents).await?;
-                            entries.insert(name, DirEntry::File(file));
+                            let file = FileEntry::load(cache.clone(), path, entries).await?;
+                            contents.insert(name, DirEntry::File(file));
                         } else {
-                            let dir = Dir::load(cache.clone(), path, contents).await?;
-                            entries.insert(name, DirEntry::Dir(dir));
+                            let dir = Dir::load(cache.clone(), path, entries).await?;
+                            contents.insert(name, DirEntry::Dir(dir));
                         }
-                    } else if contents.iter().all(|(_, meta)| meta.is_file()) {
-                        let file = FileEntry::load(cache.clone(), path, contents).await?;
-                        entries.insert(name, DirEntry::File(file));
-                    } else if contents.iter().all(|(_, meta)| meta.is_dir()) {
-                        let dir = Dir::load(cache.clone(), path, contents).await?;
-                        entries.insert(name, DirEntry::Dir(dir));
+                    } else if entries.iter().all(|(_, meta)| meta.is_file()) {
+                        let file = FileEntry::load(cache.clone(), path, entries).await?;
+                        contents.insert(name, DirEntry::File(file));
+                    } else if entries.iter().all(|(_, meta)| meta.is_dir()) {
+                        let dir = Dir::load(cache.clone(), path, entries).await?;
+                        contents.insert(name, DirEntry::Dir(dir));
                     } else {
                         return Err(TCError::internal(format!(
                             "directory at {:?} contains both blocks and subdirectories",
@@ -152,7 +170,12 @@ impl Dir {
                     }
                 }
 
-                Ok(Self::new(cache, path, entries))
+                let lock_name = format!("contents of {:?}", path);
+                Ok(Dir {
+                    path,
+                    cache,
+                    contents: TxnLock::new(lock_name, contents.into()),
+                })
             } else {
                 Err(TCError::internal(format!(
                     "directory at {:?} contains both blocks and subdirectories",
@@ -162,48 +185,26 @@ impl Dir {
         })
     }
 
-    /// Return the [`DirEntry`] at the given path if there is one, otherwise
-    pub fn find<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Option<DirEntry>>> + 'a>> {
-        Box::pin(async move {
-            if path.is_empty() {
-                return Ok(None);
-            }
-
-            let entries = self.entries.read(txn_id).await?;
-            if path.len() == 1 {
-                Ok(entries.get(&path[0]).cloned())
-            } else {
-                match entries.get(&path[0]) {
-                    Some(DirEntry::Dir(dir)) => dir.find(txn_id, &path[1..]).await,
-                    _ => Ok(None),
-                }
-            }
-        })
+    pub async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
+        let contents = self.contents.read(txn_id).await?;
+        Ok(contents.keys().cloned().collect())
     }
 
     pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        match fs::Dir::get_dir(self, &txn_id, &name).await? {
-            Some(dir) => Ok(dir),
-            None => fs::Dir::create_dir(self, txn_id, name).await,
+        if let Some(dir) = fs::Dir::get_dir(self, &txn_id, &name).await? {
+            Ok(dir)
+        } else {
+            fs::Dir::create_dir(self, txn_id, name).await
         }
-    }
-
-    pub async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
-        let entries = self.entries.read(txn_id).await?;
-        Ok(entries.keys().cloned().collect())
     }
 }
 
 #[async_trait]
 impl fs::Store for Dir {
     async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.entries
+        self.contents
             .read(txn_id)
-            .map_ok(|entries| entries.is_empty())
+            .map_ok(|contents| contents.is_empty())
             .await
     }
 }
@@ -214,51 +215,63 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool> {
-        let entries = self.entries.read(txn_id).await?;
-        Ok(entries.contains_key(name))
+        self.contents
+            .read(txn_id)
+            .map_ok(|contents| contents.contains_key(name))
+            .await
     }
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        let mut entries = self.entries.write(txn_id).await?;
-        if entries.contains_key(&name) {
+        let mut contents = self.contents.write(txn_id).await?;
+        if contents.contains_key(&name) {
             return Err(TCError::bad_request(
-                "there is already a directory at",
-                &name,
+                "filesystem entry already exists",
+                name,
+            ));
+        }
+
+        let subdir = Dir {
+            path: fs_path(&self.path, &name),
+            cache: self.cache.clone(),
+            contents: TxnLock::new(
+                format!("transactional subdirectory at {}", name),
+                HashMap::new().into(),
+            ),
+        };
+
+        contents.insert(name, DirEntry::Dir(subdir.clone()));
+        Ok(subdir)
+    }
+
+    async fn create_file(&self, txn_id: TxnId, name: Id, class: StateType) -> TCResult<Self::File> {
+        let mut contents = self.contents.write(txn_id).await?;
+        if contents.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "filesystem entry already exists",
+                name,
             ));
         }
 
         let path = fs_path(&self.path, &name);
-        let dir = Dir::new(self.cache.clone(), path, HashMap::new());
-
-        entries.insert(name, DirEntry::Dir(dir.clone()));
-
-        Ok(dir)
-    }
-
-    async fn create_file(&self, txn_id: TxnId, name: Id, class: StateType) -> TCResult<Self::File> {
-        let path = fs_path(&self.path, &name);
         let file = FileEntry::new(self.cache.clone(), path, class)?;
-
-        let mut entries = self.entries.write(txn_id).await?;
-        entries.insert(name, DirEntry::File(file.clone()));
-
-        Ok(file)
+        contents.insert(name, DirEntry::File(file.clone()));
+        Ok(file.into())
     }
 
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
-        let entries = self.entries.read(txn_id).await?;
-        match entries.get(&name) {
+        let contents = self.contents.read(txn_id).await?;
+        match contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
-            Some(_) => Err(TCError::bad_request("not a dir", name)),
+            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
             None => Ok(None),
         }
     }
 
     async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>> {
-        let entries = self.entries.read(txn_id).await?;
-        match entries.get(&name) {
+        let contents = self.contents.read(txn_id).await?;
+        match contents.get(name) {
             Some(DirEntry::File(file)) => Ok(Some(file.clone())),
-            Some(_) => Err(TCError::bad_request("not a file", name)),
+            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
             None => Ok(None),
         }
     }
@@ -279,8 +292,8 @@ impl Transact for Dir {
         }
 
         {
-            let entries = self.entries.read(&txn_id).await.unwrap();
-            join_all(entries.values().map(|entry| match entry {
+            let contents = self.contents.read(&txn_id).await.unwrap();
+            join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
                     FileEntry::Chain(file) => file.commit(txn_id),
@@ -290,13 +303,13 @@ impl Transact for Dir {
             .await;
         }
 
-        self.entries.commit(txn_id).await
+        self.contents.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         {
-            let entries = self.entries.read(&txn_id).await.unwrap();
-            join_all(entries.values().map(|entry| match entry {
+            let contents = self.contents.read(&txn_id).await.unwrap();
+            join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
                     FileEntry::Chain(file) => file.finalize(txn_id),
@@ -306,14 +319,14 @@ impl Transact for Dir {
             .await;
         }
 
-        self.entries.finalize(txn_id).await
+        self.contents.finalize(txn_id).await
     }
 }
 
-/// Load a [`Dir`] from the given filesystem path.
-pub async fn load(cache: Cache, mount_point: PathBuf) -> TCResult<Dir> {
-    let contents = dir_contents(&mount_point).await?;
-    Dir::load(cache, mount_point, contents).await
+impl fmt::Display for Dir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "directory at {:?}", self.path)
+    }
 }
 
 fn is_empty(contents: &DirContents) -> bool {

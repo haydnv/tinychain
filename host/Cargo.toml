@@ -37,7 +37,7 @@ serde_json = { version = "1.0" }
 structopt = "0.3"
 tbon = "0.1"
 tc-error = "0.1"
-tc-transact = "0.2"
+tc-transact = { path = "transact" }
 tc-value = ">=0.1.4"
 tcgeneric = ">=0.1.1"
 tokio = { version = "1.2", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
