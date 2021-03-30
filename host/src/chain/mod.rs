@@ -1,6 +1,7 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 //! INCOMPLETE AND UNSTABLE.
 
+use std::convert::TryInto;
 use std::fmt;
 use std::ops::Deref;
 
@@ -10,7 +11,7 @@ use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::{File, Persist};
+use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::*;
 
@@ -87,6 +88,33 @@ impl Subject {
                 *block = new_value;
 
                 Ok(())
+            }
+        }
+    }
+
+    async fn load(schema: &Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+        match schema {
+            Schema::Value(value) => {
+                let file: fs::File<Value> =
+                    if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
+                        file.try_into()?
+                    } else {
+                        let file = dir
+                            .create_file(txn_id, SUBJECT.into(), value.class().into())
+                            .await?;
+
+                        file.try_into()?
+                    };
+
+                if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
+                    debug!("chain writing new subject...");
+                    file.create_block(txn_id, SUBJECT.into(), value.clone())
+                        .await?;
+                } else {
+                    debug!("chain found existing subject");
+                }
+
+                Ok(Subject::Value(file))
             }
         }
     }

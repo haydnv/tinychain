@@ -7,18 +7,17 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use futures::join;
-use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
-use tcgeneric::{label, Instance, Label, TCPathBuf};
+use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
 use crate::txn::Txn;
 
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, SUBJECT};
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN};
 
 const CHAIN_BLOCK: Label = label("sync");
 
@@ -73,30 +72,7 @@ impl Persist for SyncChain {
     }
 
     async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        let subject = match &schema {
-            Schema::Value(value) => {
-                let file: fs::File<Value> =
-                    if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
-                        file.try_into()?
-                    } else {
-                        let file = dir
-                            .create_file(txn_id, SUBJECT.into(), value.class().into())
-                            .await?;
-
-                        file.try_into()?
-                    };
-
-                if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
-                    debug!("sync chain writing new subject...");
-                    file.create_block(txn_id, SUBJECT.into(), value.clone())
-                        .await?;
-                } else {
-                    debug!("sync chain found existing subject");
-                }
-
-                Subject::Value(file)
-            }
-        };
+        let subject = Subject::load(&schema, &dir, txn_id).await?;
 
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             file.try_into()?
