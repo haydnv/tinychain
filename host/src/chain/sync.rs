@@ -17,7 +17,7 @@ use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
 use crate::txn::Txn;
 
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN};
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
 const CHAIN_BLOCK: Label = label("sync");
 
@@ -83,7 +83,7 @@ impl Persist for SyncChain {
 
             let file: fs::File<ChainBlock> = file.try_into()?;
             if !file.contains_block(&txn_id, &CHAIN_BLOCK.into()).await? {
-                file.create_block(txn_id, CHAIN_BLOCK.into(), ChainBlock::new())
+                file.create_block(txn_id, CHAIN_BLOCK.into(), ChainBlock::new(NULL_HASH))
                     .await?;
             }
 
@@ -108,7 +108,7 @@ impl Transact for SyncChain {
                 .await
                 .unwrap();
 
-            *block = ChainBlock::new();
+            *block = ChainBlock::new(NULL_HASH);
         }
 
         join!(self.subject.commit(txn_id), self.file.commit(txn_id));

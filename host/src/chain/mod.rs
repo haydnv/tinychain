@@ -29,6 +29,7 @@ pub use blockchain::*;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
+const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 const SUBJECT: Label = label("subject");
 const ERR_INVALID_SCHEMA: &str = "invalid Chain schema";

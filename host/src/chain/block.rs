@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio_util::io::StreamReader;
 
@@ -28,9 +29,9 @@ pub struct ChainBlock {
 
 impl ChainBlock {
     /// Return a new, empty block.
-    pub fn new() -> Self {
+    pub fn new<H: Into<Bytes>>(hash: H) -> Self {
         Self {
-            hash: Bytes::from(vec![]),
+            hash: hash.into(),
             contents: BTreeMap::new(),
         }
     }
@@ -87,16 +88,28 @@ impl<'en> en::ToStream<'en> for ChainBlock {
 }
 
 #[async_trait]
+// TODO: replace destream_json with tbon
 impl BlockData for ChainBlock {
+    fn ext() -> &'static str {
+        super::EXT
+    }
+
+    async fn hash(&self) -> TCResult<Bytes> {
+        let mut data = destream_json::encode(self.clone()).map_err(TCError::internal)?;
+        let mut hasher = Sha256::default();
+        while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
+            hasher.update(&chunk);
+        }
+
+        let digest = hasher.finalize();
+        Ok(Bytes::from(digest.to_vec()))
+    }
+
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
         destream_json::read_from((), source)
             .map_ok(|(hash, contents)| Self { hash, contents })
             .map_err(|e| TCError::internal(format!("ChainBlock corrupted! {}", e)))
             .await
-    }
-
-    fn ext() -> &'static str {
-        super::EXT
     }
 
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {

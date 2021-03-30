@@ -6,6 +6,7 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{future, TryFutureExt, TryStreamExt};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio_util::io::StreamReader;
 
@@ -21,9 +22,11 @@ pub type BlockId = PathSegment;
 /// The contents of a [`Block`].
 #[async_trait]
 pub trait BlockData: Clone + Send + Sync {
-    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self>;
-
     fn ext() -> &'static str;
+
+    async fn hash(&self) -> TCResult<Bytes>;
+
+    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self>;
 
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64>;
 
@@ -32,14 +35,25 @@ pub trait BlockData: Clone + Send + Sync {
 
 #[async_trait]
 impl BlockData for Value {
+    fn ext() -> &'static str {
+        "value"
+    }
+
+    async fn hash(&self) -> TCResult<Bytes> {
+        let mut data = destream_json::encode(self.clone()).map_err(TCError::internal)?;
+        let mut hasher = Sha256::default();
+        while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
+            hasher.update(&chunk);
+        }
+
+        let digest = hasher.finalize();
+        Ok(Bytes::from(digest.to_vec()))
+    }
+
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
         destream_json::read_from((), source)
             .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
             .await
-    }
-
-    fn ext() -> &'static str {
-        "value"
     }
 
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {

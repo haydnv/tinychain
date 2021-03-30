@@ -78,11 +78,12 @@ impl Transact for BlockChain {
                 let mut latest = latest.upgrade().await.expect("latest block number");
                 (*latest) += 1;
 
+                let hash = block.hash().await.expect("block hash");
+
                 self.file
-                    .create_block(*txn_id, (*latest).into(), ChainBlock::new())
+                    .create_block(*txn_id, (*latest).into(), ChainBlock::new(hash))
                     .await
                     .expect("bump chain block number");
-                // TODO: include the hash of the last block in the new latest block
             }
         }
 
