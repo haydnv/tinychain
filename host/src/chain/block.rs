@@ -95,6 +95,10 @@ impl BlockData for ChainBlock {
             .await
     }
 
+    fn ext() -> &'static str {
+        super::EXT
+    }
+
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
         let encoded = destream_json::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;

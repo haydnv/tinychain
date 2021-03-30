@@ -23,6 +23,8 @@ pub type BlockId = PathSegment;
 pub trait BlockData: Clone + Send + Sync {
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self>;
 
+    fn ext() -> &'static str;
+
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64>;
 
     async fn size(&self) -> TCResult<u64>;
@@ -34,6 +36,10 @@ impl BlockData for Value {
         destream_json::read_from((), source)
             .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
             .await
+    }
+
+    fn ext() -> &'static str {
+        "value"
     }
 
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
@@ -71,10 +77,10 @@ pub trait Block<B: BlockData>: Send + Sync {
     type WriteLock: DerefMut<Target = B>;
 
     /// Get a read lock on this block.
-    async fn read(&self, txn_id: &TxnId) -> TCResult<Self::ReadLock>;
+    async fn read(&self) -> Self::ReadLock;
 
     /// Get a write lock on this block.
-    async fn write(&self, txn_id: &TxnId) -> TCResult<Self::WriteLock>;
+    async fn write(&self) -> Self::WriteLock;
 }
 
 /// A transactional persistent data store.
@@ -94,29 +100,16 @@ pub trait File<B: BlockData>: Store + Sized {
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
 
     /// Create a new [`Self::Block`].
-    async fn create_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-        initial_value: B,
-    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    async fn create_block(&self, txn_id: TxnId, name: BlockId, initial_value: B) -> TCResult<Self::Block>;
 
     /// Delete the block with the given ID.
-    async fn delete_block(&self, txn_id: &TxnId, name: BlockId) -> TCResult<()>;
+    async fn delete_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<()>;
 
-    /// Obtain a read lock on block `name` as of [`TxnId`].
-    async fn get_block(
-        &self,
-        txn_id: &TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    /// Get a read lock on the block at `name` as of [`TxnId`].
+    async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
-    /// Obtain a write lock on block `name` as of [`TxnId`].
-    async fn get_block_mut(
-        &self,
-        txn_id: &TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
+    /// Get a read lock on the block at `name` as of [`TxnId`].
+    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
 }
 
 /// A transactional directory
