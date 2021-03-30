@@ -211,15 +211,59 @@ impl Cache {
         Ok(Some(lock))
     }
 
-    /// Update a block in the cache.
-    pub async fn write<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<CacheLock<B>>
+    /// Remove a block from the cache.
+    pub async fn remove(&self, path: &PathBuf) -> TCResult<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove(path).await
+    }
+
+    /// Remove a block from the cache and delete it from the filesystem.
+    pub async fn remove_and_delete(&self, path: &PathBuf) -> TCResult<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove(path).await?;
+        tokio::fs::remove_file(path)
+            .map_err(|e| io_err(e, path))
+            .await
+    }
+
+    async fn _sync(inner: RwLockReadGuard<Inner>, path: &PathBuf) -> TCResult<bool> {
+        debug!("sync block at {:?} with filesystem", &path);
+
+        if let Some(block) = inner.entries.get(path) {
+            let mut block_file = if path.exists() {
+                debug!("open block file at {:?} for sync", path);
+                write_file(path).await?
+            } else {
+                debug!("create new filesystem block at {:?}", path);
+                create_parent(path).await?;
+                create_file(path).await?
+            };
+
+            block.persist(&mut block_file).await?;
+
+            Ok(true)
+        } else {
+            log::info!("cache sync miss: {:?}", path);
+            Ok(path.exists())
+        }
+    }
+
+    /// Synchronize a cached block with the filesystem.
+    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
+        debug!("sync block at {:?} with filesystem", &path);
+
+        let inner = self.inner.read().await;
+        Self::_sync(inner, path).await
+    }
+
+    async fn _write<B: BlockData>(
+        inner: &mut RwLockWriteGuard<Inner>,
+        path: PathBuf,
+        block: B,
+    ) -> TCResult<CacheLock<B>>
     where
         CacheBlock: From<CacheLock<B>>,
     {
-        debug!("cache insert: {:?}", &path);
-
-        let mut inner = self.inner.write().await;
-
         if let Some(old_block) = inner.entries.remove(&path) {
             inner.size -= old_block.size().await?;
             inner.lfu.bump(&path);
@@ -238,43 +282,26 @@ impl Cache {
         Ok(block)
     }
 
-    /// Remove a block from the cache.
-    pub async fn remove(&self, path: &PathBuf) -> TCResult<()> {
+    /// Update a block in the cache.
+    pub async fn write<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<CacheLock<B>>
+    where
+        CacheBlock: From<CacheLock<B>>,
+    {
+        debug!("cache insert: {:?}", &path);
+
         let mut inner = self.inner.write().await;
-        inner.remove(path).await
+        Self::_write(&mut inner, path, block).await
     }
 
-    /// Remove a block from the cache and delete it from the filesystem.
-    pub async fn remove_and_delete(&self, path: &PathBuf) -> TCResult<()> {
+    /// Update a block in the cache and then sync it with the filesystem.
+    pub async fn write_and_sync<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<bool>
+    where
+        CacheBlock: From<CacheLock<B>>,
+    {
         let mut inner = self.inner.write().await;
-        inner.remove(path).await?;
-        tokio::fs::remove_file(path)
-            .map_err(|e| io_err(e, path))
-            .await
-    }
-
-    /// Synchronize a cached block with the filesystem.
-    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
-        debug!("sync block at {:?} with filesystem", &path);
-
-        let inner = self.inner.read().await;
-        if let Some(block) = inner.entries.get(path) {
-            let mut block_file = if path.exists() {
-                debug!("open block file at {:?} for sync", path);
-                write_file(path).await?
-            } else {
-                debug!("create new filesystem block at {:?}", path);
-                create_parent(path).await?;
-                create_file(path).await?
-            };
-
-            block.persist(&mut block_file).await?;
-
-            Ok(true)
-        } else {
-            log::info!("cache sync miss: {:?}", path);
-            Ok(path.exists())
-        }
+        Self::_write(&mut inner, path.clone(), block).await?;
+        let inner = inner.downgrade().await;
+        Self::_sync(inner, &path).await
     }
 }
 

@@ -93,7 +93,7 @@ impl<B: BlockData + 'static> File<B> {
     }
 
     pub fn new(cache: Cache, mut path: PathBuf, ext: &str) -> Self {
-        path.push(ext);
+        path.set_extension(ext);
         Self::_new(cache, path, HashSet::new())
     }
 
@@ -122,15 +122,16 @@ impl<B: BlockData + 'static> File<B> {
             return Err(TCError::not_found(name));
         }
 
-        let path = fs_path(&version_path(&self.path, txn_id), &name);
-        if let Some(lock) = self.cache.read(&path).await? {
+        let version = fs_path(&version_path(&self.path, txn_id), &name);
+        if let Some(lock) = self.cache.read(&version).await? {
             Ok(Block { lock })
         } else {
-            let block = self.cache.read(&self.path).await?;
+            let canon = fs_path(&self.path, name);
+            let block = self.cache.read(&canon).await?;
             let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
             let data = block.read().await;
             self.cache
-                .write(path, data.deref().clone())
+                .write(version, data.deref().clone())
                 .map_ok(|lock| Block { lock })
                 .await
         }
@@ -226,7 +227,7 @@ where
                         .await
                         .expect("read block");
 
-                    cache.write(block_path, data.deref().clone()).await
+                    cache.write_and_sync(block_path, data.deref().clone()).await
                 });
 
                 try_join_all(commits).await.expect("commit file blocks");
