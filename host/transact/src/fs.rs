@@ -1,5 +1,6 @@
 //! Transactional filesystem traits and data structures. Unstable.
 
+use std::collections::HashSet;
 use std::io;
 use std::ops::{Deref, DerefMut};
 
@@ -109,6 +110,9 @@ pub trait Store: Send + Sync {
 pub trait File<B: BlockData>: Store + Sized {
     /// The type of block which this file is divided into.
     type Block: Block<B>;
+
+    /// Return the IDs of all this file's blocks.
+    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
 
     /// Return true if this file contains the given [`BlockId`] as of the given [`TxnId`].
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;

@@ -156,6 +156,11 @@ where
 {
     type Block = Block<B>;
 
+    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
+        let block_ids = self.contents.read(txn_id).await?;
+        Ok((*block_ids).clone())
+    }
+
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool> {
         self.contents
             .read(txn_id)

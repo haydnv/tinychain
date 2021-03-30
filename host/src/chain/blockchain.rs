@@ -1,8 +1,11 @@
+use std::convert::TryInto;
+use std::str::FromStr;
+
 use async_trait::async_trait;
 use futures::join;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, File, Persist};
+use tc_transact::fs::{BlockData, Dir, File, Persist};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::Transact;
 use tcgeneric::TCPathBuf;
@@ -11,7 +14,7 @@ use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
 use crate::txn::{Txn, TxnId};
 
-use super::{ChainBlock, ChainInstance, Schema, Subject};
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
 const BLOCK_SIZE: u64 = 1_000_000;
 
@@ -57,8 +60,44 @@ impl Persist for BlockChain {
         &self.schema
     }
 
-    async fn load(_schema: Schema, _dir: fs::Dir, _txn_id: TxnId) -> TCResult<Self> {
-        Err(TCError::not_implemented("BlockChain::load"))
+    async fn load(schema: Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+        let subject = Subject::load(&schema, &dir, txn_id).await?;
+        let mut latest = 0;
+
+        let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
+            let file: fs::File<ChainBlock> = file.try_into()?;
+
+            for block_id in file.block_ids(&txn_id).await? {
+                let block_id = u64::from_str(block_id.as_str()).map_err(|e| {
+                    TCError::bad_request("blockchain block ID must be a positive integer", e)
+                })?;
+
+                if block_id > latest {
+                    latest = block_id;
+                }
+            }
+
+            file
+        } else {
+            let file = dir
+                .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
+                .await?;
+
+            let file: fs::File<ChainBlock> = file.try_into()?;
+            if !file.contains_block(&txn_id, &latest.into()).await? {
+                file.create_block(txn_id, latest.into(), ChainBlock::new(NULL_HASH))
+                    .await?;
+            }
+
+            file
+        };
+
+        Ok(BlockChain {
+            schema,
+            subject,
+            file,
+            latest: TxnLock::new("blockchain latest block number", latest.into()),
+        })
     }
 }
 
