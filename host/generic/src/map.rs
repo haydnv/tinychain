@@ -7,6 +7,7 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
+use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -138,6 +139,18 @@ where
     async fn from_stream<D: Decoder>(context: T::Context, d: &mut D) -> Result<Self, D::Error> {
         let inner = HashMap::<Id, T>::from_stream(context, d).await?;
         Ok(Self { inner })
+    }
+}
+
+impl<'en, T: Clone + IntoStream<'en> + 'en> IntoStream<'en> for Map<T> {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.inner.into_stream(encoder)
+    }
+}
+
+impl<'en, T: Clone + ToStream<'en> + 'en> ToStream<'en> for Map<T> {
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.inner.to_stream(encoder)
     }
 }
 
