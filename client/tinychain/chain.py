@@ -19,6 +19,14 @@ class Chain(State, metaclass=Meta):
         return OpRef.Put(uri(self), None, value)
 
 
+class BlockChain(Chain):
+    """
+    A :class:`Chain` which keeps track of the entire update history of its subject.
+    """
+
+    __uri__ = uri(Chain) + "/block"
+
+
 class SyncChain(Chain):
     """
     A :class:`Chain` which keeps track of only the current transaction's operations,
@@ -28,5 +36,6 @@ class SyncChain(Chain):
     __uri__ = uri(Chain) + "/sync"
 
 
+Chain.Block = BlockChain
 Chain.Sync = SyncChain
 

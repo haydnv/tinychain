@@ -5,34 +5,51 @@ import unittest
 from testutils import PORT, TC_PATH, start_host
 
 
-class ExampleCluster(tc.Cluster):
-    __uri__ = tc.URI("/app/example")
+class BlockChainTest(tc.Cluster):
+    __uri__ = tc.URI("/app/example/block")
+
+    def _configure(self):
+        self.rev = tc.Chain.Block(tc.Number(0))
+
+
+class SyncChainTest(tc.Cluster):
+    __uri__ = tc.URI("/app/example/sync")
 
     def _configure(self):
         self.rev = tc.Chain.Sync(tc.Number(0))
 
 
 class ClusterTests(unittest.TestCase):
-    def testUpdate(self):
-        host = start_host("test_update", [ExampleCluster])
+    def setUp(self):
+        self.host = start_host("test_update", [BlockChainTest, SyncChainTest])
 
+    def _test(self, endpoint):
         def expect(n):
-            actual = host.get("/app/example/rev")
+            actual = self.host.get(endpoint)
             self.assertEqual(n, actual)
 
         expect(0)
 
-        host.put("/app/example/rev", None, 2)
+        self.host.put(endpoint, None, 2)
         expect(2)
 
-        host.put("/app/example/rev", None, 4)
+        self.host.put(endpoint, None, 4)
         expect(4)
 
-        host.stop()
-        host.start()
+        self.host.stop()
+        self.host.start()
 
-        actual = host.get("/app/example/rev")
+        actual = self.host.get(endpoint)
         self.assertEqual(4, actual)
+
+    def testBlockChain(self):
+        self._test("/app/example/block/rev")
+
+    def testSyncChain(self):
+        self._test("/app/example/sync/rev")
+
+    def tearDown(self):
+        self.host.stop()
 
 
 if __name__ == "__main__":

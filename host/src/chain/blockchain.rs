@@ -126,10 +126,10 @@ impl Transact for BlockChain {
             }
         }
 
-        join!(self.latest.commit(txn_id), self.file.commit(txn_id));
+        join!(self.latest.commit(txn_id), self.subject.commit(txn_id), self.file.commit(txn_id));
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(self.latest.finalize(txn_id), self.file.finalize(txn_id));
+        join!(self.latest.finalize(txn_id), self.subject.commit(txn_id), self.file.finalize(txn_id));
     }
 }
