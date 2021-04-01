@@ -5,19 +5,19 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use destream::{en, Encoder};
+use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
-use tc_transact::{IntoView, Transact, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
 use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
-use crate::state::State;
+use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 mod block;
@@ -26,6 +26,7 @@ mod sync;
 
 use blockchain::BlockSeq;
 
+use crate::fs::FileEntry;
 pub use block::ChainBlock;
 pub use blockchain::BlockChain;
 pub use sync::SyncChain;
@@ -48,6 +49,15 @@ pub enum Schema {
 impl CastFrom<Value> for Schema {
     fn cast_from(value: Value) -> Self {
         Self::Value(value)
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        Value::from_stream(cxt, decoder).map_ok(Self::Value).await
     }
 }
 
@@ -149,6 +159,28 @@ impl Transact for Subject {
         match self {
             Self::Value(file) => file.finalize(txn_id).await,
         }
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Subject {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let value = Value::from_stream((), decoder).await?;
+
+        let file: FileEntry = txn
+            .context()
+            .create_file(*txn.id(), SUBJECT.into(), value.class().into())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let file: fs::File<Value> = file.try_into().map_err(de::Error::custom)?;
+        file.create_block(*txn.id(), SUBJECT.into(), value)
+            .map_err(de::Error::custom)
+            .await?;
+
+        Ok(Self::Value(file))
     }
 }
 
@@ -284,7 +316,13 @@ impl<'en> IntoView<'en, fs::Dir> for Chain {
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::Block(chain) => chain.into_view(txn).map_ok(ChainView::Block).await,
-            Self::Sync(chain) => chain.into_view(txn).map_ok(ChainView::Sync).await,
+            Self::Sync(chain) => {
+                chain
+                    .into_view(txn)
+                    .map_ok(Box::new)
+                    .map_ok(ChainView::Sync)
+                    .await
+            }
         }
     }
 }
@@ -297,14 +335,11 @@ impl fmt::Display for Chain {
 
 pub enum ChainView {
     Block((Schema, BlockSeq)),
-    Sync((Schema, [ChainBlock; 0])),
+    Sync(Box<(Schema, StateView)>),
 }
 
 impl<'en> en::IntoStream<'en> for ChainView {
-    fn into_stream<E: Encoder<'en>>(
-        self,
-        encoder: E,
-    ) -> Result<<E as Encoder<'en>>::Ok, <E as Encoder<'en>>::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Block(view) => view.into_stream(encoder),
             Self::Sync(view) => view.into_stream(encoder),

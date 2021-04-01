@@ -1,11 +1,11 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
-//!
-//! INCOMPLETE AND UNSTABLE.
 
 use std::convert::TryInto;
 
 use async_trait::async_trait;
+use destream::de;
+use futures::future::TryFutureExt;
 use futures::join;
 
 use tc_error::*;
@@ -15,6 +15,7 @@ use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
+use crate::state::StateView;
 use crate::txn::Txn;
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
@@ -122,9 +123,58 @@ impl Transact for SyncChain {
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for SyncChain {
     type Txn = Txn;
-    type View = (Schema, [ChainBlock; 0]);
+    type View = (Schema, StateView);
 
-    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
-        Ok((self.schema, []))
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let subject = self.subject.at(txn.id()).await?;
+        Ok((self.schema, subject.into_view(txn).await?))
+    }
+}
+
+struct ChainVisitor {
+    txn: Txn,
+}
+
+#[async_trait]
+impl de::Visitor for ChainVisitor {
+    type Value = SyncChain;
+
+    fn expecting() -> &'static str {
+        "a SyncChain"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let file = self
+            .txn
+            .context()
+            .create_file(*self.txn.id(), CHAIN.into(), ChainType::Sync.into())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let schema = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a SyncChain schema"))?;
+
+        let subject = seq
+            .next_element(self.txn)
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(1, "the subject of a SyncChain"))?;
+
+        Ok(SyncChain {
+            schema,
+            subject,
+            file: file.try_into().map_err(de::Error::custom)?,
+        })
+    }
+}
+
+#[async_trait]
+impl de::FromStream for SyncChain {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let visitor = ChainVisitor { txn };
+        decoder.decode_seq(visitor).await
     }
 }
