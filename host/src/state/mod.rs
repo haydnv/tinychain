@@ -7,22 +7,25 @@ use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::de;
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::TryFutureExt;
 use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::{IntoView, Transaction};
+use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::chain::*;
-use crate::fs::Dir;
 use crate::object::{Object, ObjectType};
 use crate::route::Public;
 use crate::scalar::*;
 use crate::txn::Txn;
+
+mod view;
+
+pub use view::StateView;
 
 /// The [`Class`] of a [`State`].
 #[derive(Clone, Eq, PartialEq)]
@@ -221,15 +224,6 @@ impl Instance for State {
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
-    }
-}
-
-impl<'en> IntoView<'en, Dir> for State {
-    type Txn = Txn;
-    type View = StateView;
-
-    fn into_view(self, txn: Txn) -> StateView {
-        StateView { state: self, txn }
     }
 }
 
@@ -775,38 +769,5 @@ impl de::FromStream for State {
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let scalar = ScalarVisitor::default();
         decoder.decode_any(StateVisitor { txn, scalar }).await
-    }
-}
-
-pub struct StateView {
-    state: State,
-    txn: Txn,
-}
-
-impl<'en> en::IntoStream<'en> for StateView {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self.state {
-            State::Chain(_chain) => {
-                Err(en::Error::custom("encoding a Chain is not yet implemented"))
-            }
-            State::Map(map) => {
-                let txn = self.txn.clone();
-                let map = stream::iter(map.into_iter())
-                    .map(move |(id, state)| (id, state.into_view(txn.clone())))
-                    .map(Ok);
-
-                encoder.encode_map_stream(map)
-            }
-            State::Object(object) => object.into_view(self.txn).into_stream(encoder),
-            State::Scalar(scalar) => scalar.into_stream(encoder),
-            State::Tuple(tuple) => {
-                let txn = self.txn.clone();
-                let map = stream::iter(tuple.into_iter())
-                    .map(move |state| state.into_view(txn.clone()))
-                    .map(Ok);
-
-                encoder.encode_seq_stream(map)
-            }
-        }
     }
 }

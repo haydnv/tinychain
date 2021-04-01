@@ -123,6 +123,7 @@ impl fmt::Display for Object {
     }
 }
 
+#[derive(Clone)]
 pub struct ObjectView {
     object: Object,
     txn: Txn,
