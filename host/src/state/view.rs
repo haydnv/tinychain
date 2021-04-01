@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
@@ -7,8 +8,9 @@ use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{Id, Map, Tuple};
+use tcgeneric::Id;
 
+use crate::chain::ChainView;
 use crate::fs;
 use crate::object::ObjectView;
 use crate::scalar::Scalar;
@@ -16,12 +18,12 @@ use crate::txn::Txn;
 
 use super::State;
 
-#[derive(Clone)]
 pub enum StateView {
-    Map(Map<StateView>),
+    Chain(ChainView),
+    Map(HashMap<Id, StateView>),
     Object(Box<ObjectView>),
     Scalar(Scalar),
-    Tuple(Tuple<StateView>),
+    Tuple(Vec<StateView>),
 }
 
 #[async_trait]
@@ -31,14 +33,14 @@ impl<'en> IntoView<'en, fs::Dir> for State {
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
-            Self::Chain(_chain) => unimplemented!(),
+            Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
             Self::Map(map) => {
                 let map_view = stream::iter(map.into_iter())
                     .then(|(key, state)| state.into_view(txn.clone()).map_ok(|view| (key, view)))
                     .try_collect::<Vec<(Id, StateView)>>()
                     .await?;
 
-                Ok(StateView::Map(Map::from_iter(map_view)))
+                Ok(StateView::Map(HashMap::from_iter(map_view)))
             }
             Self::Object(object) => {
                 object
@@ -63,6 +65,7 @@ impl<'en> IntoView<'en, fs::Dir> for State {
 impl<'en> en::IntoStream<'en> for StateView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            StateView::Chain(chain) => chain.into_stream(encoder),
             StateView::Map(map) => map.into_stream(encoder),
             StateView::Object(object) => object.into_stream(encoder),
             StateView::Scalar(scalar) => scalar.into_stream(encoder),

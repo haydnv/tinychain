@@ -115,7 +115,6 @@ impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     }
 }
 
-#[derive(Clone)]
 pub struct InstanceView {
     class: InstanceClass,
     parent: StateView,

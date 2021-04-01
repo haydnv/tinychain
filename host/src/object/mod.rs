@@ -128,7 +128,6 @@ impl fmt::Display for Object {
     }
 }
 
-#[derive(Clone)]
 pub enum ObjectView {
     Class(InstanceClass),
     Instance(InstanceView),

@@ -195,7 +195,12 @@ where
     }
 
     async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<BlockRead<B>> {
-        let block = self.get_block(txn_id, name).await?;
+        let block = self.get_block(txn_id, &name).await?;
+        Ok(fs::Block::read(&block).await)
+    }
+
+    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+        let block = self.get_block(&txn_id, &name).await?;
         Ok(fs::Block::read(&block).await)
     }
 
@@ -228,9 +233,9 @@ where
             if let Some(blocks) = mutated.get(txn_id) {
                 let commits = blocks.iter().map(|block_id| async move {
                     let block_path = fs_path(file_path, block_id);
-                    let data = fs::File::read_block(self, txn_id, block_id)
-                        .await
-                        .expect("read block");
+                    let block = self.get_block(txn_id, block_id).await.expect("get block");
+
+                    let data = fs::Block::read(&block).await;
 
                     cache.write_and_sync(block_path, data.deref().clone()).await
                 });

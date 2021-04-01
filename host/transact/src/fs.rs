@@ -126,6 +126,9 @@ pub trait File<B: BlockData>: Store + Sized {
     /// Get a read lock on the block at `name` as of [`TxnId`].
     async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
+    /// Get a read lock on the block at `name` as of [`TxnId`], without borrowing.
+    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+
     /// Get a read lock on the block at `name` as of [`TxnId`].
     async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
 }

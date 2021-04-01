@@ -1,13 +1,16 @@
 use std::convert::TryInto;
+use std::pin::Pin;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use destream::en;
 use futures::join;
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, Persist};
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::Transact;
+use tc_transact::{IntoView, Transact};
 use tcgeneric::TCPathBuf;
 
 use crate::fs;
@@ -15,6 +18,7 @@ use crate::scalar::{Link, Scalar, Value};
 use crate::txn::{Txn, TxnId};
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
+use crate::transact::Transaction;
 
 const BLOCK_SIZE: u64 = 1_000_000;
 
@@ -139,5 +143,27 @@ impl Transact for BlockChain {
             self.subject.commit(txn_id),
             self.file.finalize(txn_id)
         );
+    }
+}
+
+pub type BlockStream = Pin<Box<dyn Stream<Item = TCResult<ChainBlock>> + Send>>;
+pub type BlockSeq = en::SeqStream<TCError, ChainBlock, BlockStream>;
+
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for BlockChain {
+    type Txn = Txn;
+    type View = (Schema, BlockSeq);
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let txn_id = *txn.id();
+        let file = self.file;
+        let latest = self.latest.read(txn.id()).await?;
+        let blocks = stream::iter(0..(*latest))
+            .then(move |i| file.clone().read_block_owned(txn_id, i.into()))
+            .map_ok(|block| (*block).clone());
+
+        let blocks: BlockStream = Box::pin(blocks);
+        let blocks: BlockSeq = en::SeqStream::from(blocks);
+        Ok((self.schema, blocks))
     }
 }

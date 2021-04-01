@@ -10,7 +10,7 @@ use futures::join;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
@@ -116,5 +116,15 @@ impl Transact for SyncChain {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join!(self.subject.finalize(txn_id), self.file.finalize(txn_id));
+    }
+}
+
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for SyncChain {
+    type Txn = Txn;
+    type View = (Schema, [ChainBlock; 0]);
+
+    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
+        Ok((self.schema, []))
     }
 }

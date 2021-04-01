@@ -1,18 +1,18 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
-//! INCOMPLETE AND UNSTABLE.
 
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
+use destream::{en, Encoder};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
-use tc_transact::{Transact, TxnId};
+use tc_transact::{IntoView, Transact, TxnId};
 use tcgeneric::*;
 
 use crate::fs;
@@ -24,9 +24,11 @@ mod block;
 mod blockchain;
 mod sync;
 
+use blockchain::BlockSeq;
+
 pub use block::ChainBlock;
-pub use blockchain::*;
-pub use sync::*;
+pub use blockchain::BlockChain;
+pub use sync::SyncChain;
 
 const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
@@ -46,6 +48,14 @@ pub enum Schema {
 impl CastFrom<Value> for Schema {
     fn cast_from(value: Value) -> Self {
         Self::Value(value)
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Schema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Value(value) => value.into_stream(encoder),
+        }
     }
 }
 
@@ -266,6 +276,42 @@ impl Transact for Chain {
     }
 }
 
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for Chain {
+    type Txn = Txn;
+    type View = ChainView;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        match self {
+            Self::Block(chain) => chain.into_view(txn).map_ok(ChainView::Block).await,
+            Self::Sync(chain) => chain.into_view(txn).map_ok(ChainView::Sync).await,
+        }
+    }
+}
+
+impl fmt::Display for Chain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "instance of {}", self.class())
+    }
+}
+
+pub enum ChainView {
+    Block((Schema, BlockSeq)),
+    Sync((Schema, [ChainBlock; 0])),
+}
+
+impl<'en> en::IntoStream<'en> for ChainView {
+    fn into_stream<E: Encoder<'en>>(
+        self,
+        encoder: E,
+    ) -> Result<<E as Encoder<'en>>::Ok, <E as Encoder<'en>>::Error> {
+        match self {
+            Self::Block(view) => view.into_stream(encoder),
+            Self::Sync(view) => view.into_stream(encoder),
+        }
+    }
+}
+
 pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) -> TCResult<Chain> {
     let schema = schema.try_cast_into(|v| TCError::bad_request(ERR_INVALID_SCHEMA, v))?;
 
@@ -280,11 +326,5 @@ pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) 
                 .map_ok(Chain::Sync)
                 .await
         }
-    }
-}
-
-impl fmt::Display for Chain {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "instance of {}", self.class())
     }
 }
