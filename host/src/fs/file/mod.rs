@@ -21,6 +21,8 @@ use tc_transact::{Transact, TxnId};
 use super::cache::*;
 use super::{file_name, fs_path, DirContents};
 
+mod destream;
+
 pub struct Block<B> {
     lock: CacheLock<B>,
 }

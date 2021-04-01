@@ -3,7 +3,8 @@ use std::pin::Pin;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::en;
+use destream::{de, en};
+use futures::future::TryFutureExt;
 use futures::join;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
@@ -28,6 +29,17 @@ pub struct BlockChain {
     subject: Subject,
     latest: TxnLock<Mutable<u64>>,
     file: fs::File<ChainBlock>,
+}
+
+impl BlockChain {
+    fn new(schema: Schema, subject: Subject, latest: u64, file: fs::File<ChainBlock>) -> Self {
+        Self {
+            schema,
+            subject,
+            latest: TxnLock::new("latest BlockChain block ordinal", latest.into()),
+            file,
+        }
+    }
 }
 
 #[async_trait]
@@ -69,6 +81,7 @@ impl Persist for BlockChain {
         let mut latest = 0;
 
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
+            // TODO: validate file contents
             let file: fs::File<ChainBlock> = file.try_into()?;
 
             for block_id in file.block_ids(&txn_id).await? {
@@ -96,12 +109,7 @@ impl Persist for BlockChain {
             file
         };
 
-        Ok(BlockChain {
-            schema,
-            subject,
-            file,
-            latest: TxnLock::new("blockchain latest block number", latest.into()),
-        })
+        Ok(BlockChain::new(schema, subject, latest, file))
     }
 }
 
@@ -143,6 +151,53 @@ impl Transact for BlockChain {
             self.subject.commit(txn_id),
             self.file.finalize(txn_id)
         );
+    }
+}
+
+struct ChainVisitor {
+    txn: Txn,
+}
+
+#[async_trait]
+impl de::Visitor for ChainVisitor {
+    type Value = BlockChain;
+
+    fn expecting() -> &'static str {
+        "a BlockChain"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let schema = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
+
+        let file = self
+            .txn
+            .context()
+            .create_file(txn_id, CHAIN.into(), ChainType::Block.into())
+            .map_err(de::Error::custom)
+            .await?;
+        let file: fs::File<ChainBlock> = file.try_into().map_err(de::Error::custom)?;
+        let _file: fs::File<ChainBlock> = seq
+            .next_element((txn_id, file))
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(1, "a BlockChain file"))?;
+
+        BlockChain::load(schema, self.txn.into_context().clone(), txn_id)
+            .map_err(de::Error::custom)
+            .await
+    }
+}
+
+#[async_trait]
+impl de::FromStream for BlockChain {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let visitor = ChainVisitor { txn };
+        decoder.decode_seq(visitor).await
     }
 }
 

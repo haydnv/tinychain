@@ -187,6 +187,10 @@ impl Transaction<fs::Dir> for Txn {
         &self.dir
     }
 
+    fn into_context(self) -> fs::Dir {
+        self.dir
+    }
+
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
         let dir = self.dir.create_dir(*self.request.txn_id(), id).await?;
 

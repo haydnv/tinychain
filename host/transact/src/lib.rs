@@ -39,12 +39,15 @@ pub trait Transaction<D: fs::Dir>: Sized {
     /// The [`TxnId`] of this transaction context.
     fn id(&'_ self) -> &'_ TxnId;
 
-    /// The [`fs::Dir`] of this transaction context.
+    /// Borrow the [`fs::Dir`] of this transaction context.
     fn context(&'_ self) -> &'_ D;
 
-    /// A transaction subcontext with its own [`fs::Dir`].
+    /// Consume this `Txn` and return its [`fs::Dir`].
+    fn into_context(self) -> D;
+
+    /// Return a transaction subcontext with its own [`fs::Dir`].
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
 
-    /// A transaction subcontext with its own unique [`fs::Dir`].
+    /// Return a transaction subcontext with its own unique [`fs::Dir`].
     async fn subcontext_tmp(&self) -> TCResult<Self>;
 }
