@@ -15,14 +15,15 @@ pub mod lock;
 
 pub use id::TxnId;
 
+#[async_trait]
 pub trait IntoView<'en, D: fs::Dir> {
     type Txn: Transaction<D>;
     type View: en::IntoStream<'en> + Sized;
 
-    fn into_view(self, txn: Self::Txn) -> Self::View;
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View>;
 }
 
-/// Transaction lifecycle callbacks. UNSTABLE.
+/// Transaction lifecycle callbacks
 #[async_trait]
 pub trait Transact {
     /// Commit this transaction.

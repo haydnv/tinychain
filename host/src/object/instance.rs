@@ -4,14 +4,16 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
+use async_trait::async_trait;
 use destream::{en, EncodeMap};
 
+use tc_error::*;
 use tc_transact::IntoView;
 use tcgeneric::Map;
 
 use crate::fs::Dir;
 use crate::scalar::Scalar;
-use crate::state::State;
+use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::{InstanceClass, Object};
@@ -82,15 +84,16 @@ impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
     }
 }
 
+#[async_trait]
 impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     type Txn = Txn;
     type View = InstanceView;
 
-    fn into_view(self, txn: Txn) -> InstanceView {
-        InstanceView {
-            instance: self,
-            txn,
-        }
+    async fn into_view(self, txn: Txn) -> TCResult<InstanceView> {
+        Ok(InstanceView {
+            class: self.class,
+            parent: self.parent.into_view(txn).await?,
+        })
     }
 }
 
@@ -112,20 +115,16 @@ impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct InstanceView {
-    instance: InstanceExt<State>,
-    txn: Txn,
+    class: InstanceClass,
+    parent: StateView,
 }
 
 impl<'en> en::IntoStream<'en> for InstanceView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
-
-        map.encode_entry(
-            self.instance.class.extends().to_string(),
-            self.instance.parent.into_view(self.txn),
-        )?;
-
+        map.encode_entry(self.class.extends().to_string(), self.parent)?;
         map.end()
     }
 }

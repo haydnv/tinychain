@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 
+use tc_error::TCResult;
 use tc_transact::IntoView;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
@@ -104,12 +105,16 @@ impl de::FromStream for Object {
     }
 }
 
+#[async_trait]
 impl<'en> IntoView<'en, Dir> for Object {
     type Txn = Txn;
     type View = ObjectView;
 
-    fn into_view(self, txn: Txn) -> ObjectView {
-        ObjectView { object: self, txn }
+    async fn into_view(self, txn: Txn) -> TCResult<ObjectView> {
+        match self {
+            Self::Class(class) => Ok(ObjectView::Class(class)),
+            Self::Instance(instance) => instance.into_view(txn).map_ok(ObjectView::Instance).await,
+        }
     }
 }
 
@@ -124,21 +129,20 @@ impl fmt::Display for Object {
 }
 
 #[derive(Clone)]
-pub struct ObjectView {
-    object: Object,
-    txn: Txn,
+pub enum ObjectView {
+    Class(InstanceClass),
+    Instance(InstanceView),
 }
 
 impl<'en> en::IntoStream<'en> for ObjectView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
 
-        match self.object {
-            Object::Class(class) => map.encode_entry(ObjectType::Class.path().to_string(), class),
-            Object::Instance(instance) => map.encode_entry(
-                ObjectType::Instance.path().to_string(),
-                instance.into_view(self.txn),
-            ),
+        match self {
+            Self::Class(class) => map.encode_entry(ObjectType::Class.path().to_string(), class),
+            Self::Instance(instance) => {
+                map.encode_entry(ObjectType::Instance.path().to_string(), instance)
+            }
         }?;
 
         map.end()

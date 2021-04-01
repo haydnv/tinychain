@@ -102,7 +102,8 @@ impl crate::gateway::Client for Client {
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.to_string());
 
         let txn = txn.subcontext_tmp().await?;
-        let body = tbon::en::encode(value.into_view(txn))
+        let view = value.into_view(txn).await?;
+        let body = tbon::en::encode(view)
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
         let response = self
@@ -133,7 +134,8 @@ impl crate::gateway::Client for Client {
 
         let txn = txn.subcontext_tmp().await?;
         let subcontext = txn.subcontext(label("_params").into()).await?;
-        let body = tbon::en::encode(params.into_view(subcontext))
+        let params = params.into_view(subcontext).await?;
+        let body = tbon::en::encode(params)
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
         let response = self

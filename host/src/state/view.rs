@@ -1,7 +1,13 @@
-use destream::en;
+use std::iter::FromIterator;
 
+use async_trait::async_trait;
+use destream::en;
+use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::TryFutureExt;
+
+use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{Map, Tuple};
+use tcgeneric::{Id, Map, Tuple};
 
 use crate::fs;
 use crate::object::ObjectView;
@@ -13,35 +19,42 @@ use super::State;
 #[derive(Clone)]
 pub enum StateView {
     Map(Map<StateView>),
-    Object(ObjectView),
+    Object(Box<ObjectView>),
     Scalar(Scalar),
     Tuple(Tuple<StateView>),
 }
 
+#[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for State {
     type Txn = Txn;
     type View = StateView;
 
-    fn into_view(self, txn: Self::Txn) -> Self::View {
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::Chain(_chain) => unimplemented!(),
             Self::Map(map) => {
-                let map_view = map
-                    .into_iter()
-                    .map(|(key, state)| (key, state.into_view(txn.clone())))
-                    .collect();
+                let map_view = stream::iter(map.into_iter())
+                    .then(|(key, state)| state.into_view(txn.clone()).map_ok(|view| (key, view)))
+                    .try_collect::<Vec<(Id, StateView)>>()
+                    .await?;
 
-                StateView::Map(map_view)
+                Ok(StateView::Map(Map::from_iter(map_view)))
             }
-            Self::Object(object) => StateView::Object(object.into_view(txn)),
-            Self::Scalar(scalar) => StateView::Scalar(scalar),
+            Self::Object(object) => {
+                object
+                    .into_view(txn)
+                    .map_ok(Box::new)
+                    .map_ok(StateView::Object)
+                    .await
+            }
+            Self::Scalar(scalar) => Ok(StateView::Scalar(scalar)),
             Self::Tuple(tuple) => {
-                let tuple_view = tuple
-                    .into_iter()
-                    .map(|state| state.into_view(txn.clone()))
-                    .collect();
+                let tuple_view = stream::iter(tuple.into_iter())
+                    .then(|state| state.into_view(txn.clone()))
+                    .try_collect::<Vec<StateView>>()
+                    .await?;
 
-                StateView::Tuple(tuple_view)
+                Ok(StateView::Tuple(tuple_view.into()))
             }
         }
     }

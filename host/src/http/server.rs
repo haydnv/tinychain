@@ -47,14 +47,19 @@ impl HTTPServer {
             Err(cause) => return Ok(transform_error(cause)),
         };
 
+        let view = match state.into_view(txn).await {
+            Ok(view) => view,
+            Err(cause) => return Ok(transform_error(cause)),
+        };
+
         let response = match accept_encoding {
-            Encoding::Json => match destream_json::encode(state.into_view(txn)) {
+            Encoding::Json => match destream_json::encode(view) {
                 Ok(response) => Body::wrap_stream(
                     response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n"))))),
                 ),
                 Err(cause) => return Ok(transform_error(TCError::internal(cause))),
             },
-            Encoding::Tbon => match tbon::en::encode(state.into_view(txn)) {
+            Encoding::Tbon => match tbon::en::encode(view) {
                 Ok(response) => Body::wrap_stream(response.map_err(TCError::internal)),
                 Err(cause) => return Ok(transform_error(TCError::internal(cause))),
             },
