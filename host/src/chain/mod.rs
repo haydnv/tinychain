@@ -322,6 +322,16 @@ impl Transact for Chain {
 }
 
 #[async_trait]
+impl de::FromStream for Chain {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let visitor = ChainVisitor { txn };
+        decoder.decode_map(visitor).await
+    }
+}
+
+#[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for Chain {
     type Txn = Txn;
     type View = ChainView;
@@ -373,6 +383,33 @@ pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) 
             SyncChain::load(schema, dir, txn_id)
                 .map_ok(Chain::Sync)
                 .await
+        }
+    }
+}
+
+struct ChainVisitor {
+    txn: Txn,
+}
+
+#[async_trait]
+impl de::Visitor for ChainVisitor {
+    type Value = Chain;
+
+    fn expecting() -> &'static str {
+        "a Chain"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let class = if let Some(path) = map.next_key::<TCPathBuf>(()).await? {
+            ChainType::from_path(&path)
+                .ok_or_else(|| de::Error::invalid_value(path, "a Chain class"))?
+        } else {
+            return Err(de::Error::custom("expected a Chain class"));
+        };
+
+        match class {
+            ChainType::Block => map.next_value(self.txn).map_ok(Chain::Block).await,
+            ChainType::Sync => map.next_value(self.txn).map_ok(Chain::Sync).await,
         }
     }
 }
