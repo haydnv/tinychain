@@ -70,7 +70,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     .await?;
 
                 if self.path.is_empty() {
-                    subject.put(*txn.id(), key, value).await
+                    subject
+                        .put(*txn.id(), self.path.to_vec().into(), key, value)
+                        .await
                 } else {
                     let subject = self.chain.subject().at(txn.id()).await?;
                     subject.put(&txn, self.path, key, value).await

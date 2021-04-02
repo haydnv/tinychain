@@ -47,6 +47,16 @@ impl ChainBlock {
             }
         }
     }
+
+    /// The mutations listed in this `ChainBlock`.
+    pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>> {
+        &self.contents
+    }
+
+    /// The hash of the previous block in the chain.
+    pub fn last_hash(&self) -> &Bytes {
+        &self.hash
+    }
 }
 
 #[async_trait]

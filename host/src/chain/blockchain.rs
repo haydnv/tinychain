@@ -1,15 +1,16 @@
 use std::convert::TryInto;
+use std::num::ParseIntError;
 use std::pin::Pin;
-use std::str::FromStr;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::join;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File, Persist};
+use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact};
 use tcgeneric::TCPathBuf;
@@ -78,24 +79,21 @@ impl Persist for BlockChain {
 
     async fn load(schema: Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         let subject = Subject::load(&schema, &dir, txn_id).await?;
-        let mut latest = 0;
 
-        let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
-            // TODO: validate file contents
+        if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             let file: fs::File<ChainBlock> = file.try_into()?;
 
-            for block_id in file.block_ids(&txn_id).await? {
-                let block_id = u64::from_str(block_id.as_str()).map_err(|e| {
-                    TCError::bad_request("blockchain block ID must be a positive integer", e)
-                })?;
+            let block_ids = file.block_ids(&txn_id).await?;
+            let block_ids = block_ids
+                .into_iter()
+                .map(|id| id.as_str().parse())
+                .collect::<Result<Vec<u64>, ParseIntError>>()
+                .map_err(TCError::internal)?;
 
-                if block_id > latest {
-                    latest = block_id;
-                }
-            }
-
-            file
+            let latest = block_ids.into_iter().fold(0, Ord::max);
+            Ok(BlockChain::new(schema, subject, latest, file))
         } else {
+            let latest = 0u64;
             let file = dir
                 .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
                 .await?;
@@ -106,10 +104,8 @@ impl Persist for BlockChain {
                     .await?;
             }
 
-            file
-        };
-
-        Ok(BlockChain::new(schema, subject, latest, file))
+            Ok(BlockChain::new(schema, subject, 0, file))
+        }
     }
 }
 
@@ -179,13 +175,13 @@ impl de::Visitor for ChainVisitor {
             .create_file(txn_id, CHAIN.into(), ChainType::Block.into())
             .map_err(de::Error::custom)
             .await?;
-        let file: fs::File<ChainBlock> = file.try_into().map_err(de::Error::custom)?;
-        let _file: fs::File<ChainBlock> = seq
-            .next_element((txn_id, file))
+
+        let file = seq
+            .next_element((txn_id, file.try_into().map_err(de::Error::custom)?))
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "a BlockChain file"))?;
 
-        BlockChain::load(schema, self.txn.into_context().clone(), txn_id)
+        validate(self.txn, schema, file)
             .map_err(de::Error::custom)
             .await
     }
@@ -221,4 +217,54 @@ impl<'en> IntoView<'en, fs::Dir> for BlockChain {
         let blocks: BlockSeq = en::SeqStream::from(blocks);
         Ok((self.schema, blocks))
     }
+}
+
+async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCResult<BlockChain> {
+    let txn_id = txn.id();
+
+    if file.is_empty(txn_id).await? {
+        let subject = Subject::create(&schema, txn.context(), *txn_id).await?;
+        return Ok(BlockChain::new(schema, subject, 0, file));
+    }
+
+    let past_txn_id = {
+        let first_block = file.read_block(txn_id, &0u64.into()).await?;
+        first_block
+            .mutations()
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or(*txn_id)
+    };
+    let subject = Subject::create(&schema, txn.context(), past_txn_id).await?;
+
+    let mut latest = 0u64;
+    let mut hash = Bytes::from(NULL_HASH);
+    while file.contains_block(&txn_id, &latest.into()).await? {
+        let block = file.read_block(&txn_id, &latest.into()).await?;
+        if block.last_hash() != &hash {
+            let last_hash = base64::encode(block.last_hash());
+            let hash = base64::encode(hash);
+            return Err(TCError::bad_request(
+                format!("block {} has invalid hash {}, expected", latest, last_hash),
+                hash,
+            ));
+        }
+
+        for (past_txn_id, ops) in block.mutations() {
+            for (path, key, value) in ops.iter().cloned() {
+                subject
+                    .put(*past_txn_id, path, key, value.into())
+                    .map_err(|e| e.consume(format!("error replaying block {}", latest)))
+                    .await?;
+            }
+
+            subject.commit(past_txn_id).await;
+        }
+
+        hash = block.last_hash().clone();
+        latest += 1;
+    }
+
+    Ok(BlockChain::new(schema, subject, latest, file))
 }

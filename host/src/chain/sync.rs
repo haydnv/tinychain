@@ -59,7 +59,9 @@ impl ChainInstance for SyncChain {
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let subject = txn.get(source, Value::None).await?;
-        self.subject.put(*txn.id(), Value::None, subject).await
+        self.subject
+            .put(*txn.id(), TCPathBuf::default(), Value::None, subject)
+            .await
     }
 }
 

@@ -1,12 +1,12 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
@@ -76,6 +76,24 @@ pub enum Subject {
 }
 
 impl Subject {
+    /// Create a new `Subject` with the given `Schema`.
+    pub async fn create(schema: &Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+        match schema {
+            Schema::Value(value) => {
+                let file = dir
+                    .create_file(txn_id, SUBJECT.into(), value.class().into())
+                    .await?;
+
+                let file = fs::File::<Value>::try_from(file)?;
+
+                file.create_block(txn_id, SUBJECT.into(), value.clone())
+                    .await?;
+
+                Ok(Self::Value(file))
+            }
+        }
+    }
+
     /// Return the state of this subject as of the given [`TxnId`].
     pub async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
         debug!("Subject::at {}", txn_id);
@@ -89,11 +107,23 @@ impl Subject {
     }
 
     /// Set the state of this `Subject` to `value` at the given [`TxnId`].
-    pub async fn put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
+    pub async fn put(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         match self {
             Self::Value(file) => {
+                const ERR_NO_SUCH: &str = "Value has no such property";
+
+                if !path.is_empty() {
+                    return Err(TCError::bad_request(ERR_NO_SUCH, path));
+                }
+
                 if key.is_some() {
-                    return Err(TCError::bad_request("Value has no such property", key));
+                    return Err(TCError::bad_request(ERR_NO_SUCH, key));
                 }
 
                 let new_value = Value::try_cast_from(value, |v| {
@@ -114,29 +144,12 @@ impl Subject {
     }
 
     async fn load(schema: &Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        match schema {
-            Schema::Value(value) => {
-                let file: fs::File<Value> =
-                    if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
-                        file.try_into()?
-                    } else {
-                        let file = dir
-                            .create_file(txn_id, SUBJECT.into(), value.class().into())
-                            .await?;
-
-                        file.try_into()?
-                    };
-
-                if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
-                    debug!("chain writing new subject...");
-                    file.create_block(txn_id, SUBJECT.into(), value.clone())
-                        .await?;
-                } else {
-                    debug!("chain found existing subject");
-                }
-
-                Ok(Subject::Value(file))
+        if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
+            match schema {
+                Schema::Value(_) => file.try_into().map(Self::Value),
             }
+        } else {
+            Self::create(schema, dir, txn_id).await
         }
     }
 }
