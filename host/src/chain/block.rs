@@ -1,157 +1,270 @@
-//! A [`ChainBlock`], the block type of a [`super::Chain`]
-
-use std::collections::btree_map::{BTreeMap, Entry};
-use std::fmt;
-use std::io;
+use std::convert::TryInto;
+use std::num::ParseIntError;
+use std::pin::Pin;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
-use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWrite};
-use tokio_util::io::StreamReader;
+use futures::future::TryFutureExt;
+use futures::join;
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use tc_error::*;
-use tc_transact::fs::BlockData;
-use tc_transact::lock::Mutate;
-use tc_transact::TxnId;
+use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
+use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::{IntoView, Transact};
 use tcgeneric::TCPathBuf;
 
-use crate::scalar::{Scalar, Value};
+use crate::fs;
+use crate::scalar::{Link, Scalar, Value};
+use crate::txn::{Txn, TxnId};
 
-/// A single filesystem block belonging to a [`super::Chain`].
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
+use crate::transact::Transaction;
+
+const BLOCK_SIZE: u64 = 1_000_000;
+
 #[derive(Clone)]
-pub struct ChainBlock {
-    hash: Bytes,
-    contents: BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>>,
+pub struct BlockChain {
+    schema: Schema,
+    subject: Subject,
+    latest: TxnLock<Mutable<u64>>,
+    file: fs::File<ChainBlock>,
 }
 
-impl ChainBlock {
-    /// Return a new, empty block.
-    pub fn new<H: Into<Bytes>>(hash: H) -> Self {
+impl BlockChain {
+    fn new(schema: Schema, subject: Subject, latest: u64, file: fs::File<ChainBlock>) -> Self {
         Self {
-            hash: hash.into(),
-            contents: BTreeMap::new(),
+            schema,
+            subject,
+            latest: TxnLock::new("latest BlockChain block ordinal", latest.into()),
+            file,
         }
     }
+}
 
-    /// Append an op to the contents of this `ChainBlock`.
-    pub fn append(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
-        match self.contents.entry(txn_id) {
-            Entry::Vacant(entry) => {
-                entry.insert(vec![(path, key, value)]);
+#[async_trait]
+impl ChainInstance for BlockChain {
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()> {
+        let latest = self.latest.read(&txn_id).await?;
+        let mut block = self.file.write_block(txn_id, (*latest).into()).await?;
+
+        block.append(txn_id, path, key, value);
+        Ok(())
+    }
+
+    fn subject(&self) -> &Subject {
+        &self.subject
+    }
+
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("BlockChain::replicate"))
+    }
+}
+
+#[async_trait]
+impl Persist for BlockChain {
+    type Schema = Schema;
+    type Store = fs::Dir;
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    async fn load(schema: Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+        let subject = Subject::load(&schema, &dir, txn_id).await?;
+
+        if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
+            let file: fs::File<ChainBlock> = file.try_into()?;
+
+            let block_ids = file.block_ids(&txn_id).await?;
+            let block_ids = block_ids
+                .into_iter()
+                .map(|id| id.as_str().parse())
+                .collect::<Result<Vec<u64>, ParseIntError>>()
+                .map_err(TCError::internal)?;
+
+            let latest = block_ids.into_iter().fold(0, Ord::max);
+            Ok(BlockChain::new(schema, subject, latest, file))
+        } else {
+            let latest = 0u64;
+            let file = dir
+                .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
+                .await?;
+
+            let file: fs::File<ChainBlock> = file.try_into()?;
+            if !file.contains_block(&txn_id, &latest.into()).await? {
+                file.create_block(txn_id, latest.into(), ChainBlock::new(NULL_HASH))
+                    .await?;
             }
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().push((path, key, value));
+
+            Ok(BlockChain::new(schema, subject, 0, file))
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for BlockChain {
+    async fn commit(&self, txn_id: &TxnId) {
+        {
+            let latest = self.latest.read(txn_id).await.expect("latest block number");
+
+            let block = self
+                .file
+                .read_block(txn_id, &(*latest).into())
+                .await
+                .expect("read latest chain block");
+
+            if block.size().await.expect("block size") >= BLOCK_SIZE {
+                let mut latest = latest.upgrade().await.expect("latest block number");
+                (*latest) += 1;
+
+                let hash = block.hash().await.expect("block hash");
+
+                self.file
+                    .create_block(*txn_id, (*latest).into(), ChainBlock::new(hash))
+                    .await
+                    .expect("bump chain block number");
             }
         }
-    }
 
-    /// The mutations listed in this `ChainBlock`.
-    pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>> {
-        &self.contents
-    }
-
-    /// The hash of the previous block in the chain.
-    pub fn last_hash(&self) -> &Bytes {
-        &self.hash
-    }
-}
-
-#[async_trait]
-impl Mutate for ChainBlock {
-    type Pending = Self;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
-        self.clone()
-    }
-
-    async fn converge(&mut self, new_value: Self::Pending) {
-        *self = new_value;
-    }
-}
-
-#[async_trait]
-impl de::FromStream for ChainBlock {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(context, decoder)
-            .map_ok(|(hash, contents)| Self { hash, contents })
-            .await
-    }
-}
-
-impl<'en> en::IntoStream<'en> for ChainBlock {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        let hash = base64::encode(self.hash);
-        en::IntoStream::into_stream((hash, self.contents), encoder)
-    }
-}
-
-impl<'en> en::ToStream<'en> for ChainBlock {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        let hash = base64::encode(&self.hash);
-        en::IntoStream::into_stream((hash, &self.contents), encoder)
-    }
-}
-
-#[async_trait]
-// TODO: replace destream_json with tbon
-impl BlockData for ChainBlock {
-    fn ext() -> &'static str {
-        super::EXT
-    }
-
-    async fn hash(&self) -> TCResult<Bytes> {
-        let mut data = destream_json::encode(self.clone()).map_err(TCError::internal)?;
-        let mut hasher = Sha256::default();
-        while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-            hasher.update(&chunk);
-        }
-
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
-    }
-
-    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        destream_json::read_from((), source)
-            .map_ok(|(hash, contents)| Self { hash, contents })
-            .map_err(|e| TCError::internal(format!("ChainBlock corrupted! {}", e)))
-            .await
-    }
-
-    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
-        let encoded = destream_json::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
-
-        let mut reader = StreamReader::new(
-            encoded
-                .map_ok(Bytes::from)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
+        join!(
+            self.latest.commit(txn_id),
+            self.subject.commit(txn_id),
+            self.file.commit(txn_id)
         );
-
-        tokio::io::copy(&mut reader, sink)
-            .map_err(|e| TCError::bad_gateway(e))
-            .await
     }
 
-    async fn size(&self) -> TCResult<u64> {
-        let encoded = destream_json::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(
+            self.latest.finalize(txn_id),
+            self.subject.commit(txn_id),
+            self.file.finalize(txn_id)
+        );
+    }
+}
 
-        encoded
-            .map_err(|e| TCError::bad_request("serialization error", e))
-            .try_fold(0, |size, chunk| {
-                future::ready(Ok(size + chunk.len() as u64))
-            })
+struct ChainVisitor {
+    txn: Txn,
+}
+
+#[async_trait]
+impl de::Visitor for ChainVisitor {
+    type Value = BlockChain;
+
+    fn expecting() -> &'static str {
+        "a BlockChain"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let schema = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
+
+        let file = self
+            .txn
+            .context()
+            .create_file(txn_id, CHAIN.into(), ChainType::Block.into())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let file = seq
+            .next_element((txn_id, file.try_into().map_err(de::Error::custom)?))
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(1, "a BlockChain file"))?;
+
+        validate(self.txn, schema, file)
+            .map_err(de::Error::custom)
             .await
     }
 }
 
-impl fmt::Display for ChainBlock {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("(chain block)")
+#[async_trait]
+impl de::FromStream for BlockChain {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let visitor = ChainVisitor { txn };
+        decoder.decode_seq(visitor).await
     }
+}
+
+pub type BlockStream = Pin<Box<dyn Stream<Item = TCResult<ChainBlock>> + Send>>;
+pub type BlockSeq = en::SeqStream<TCError, ChainBlock, BlockStream>;
+
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for BlockChain {
+    type Txn = Txn;
+    type View = (Schema, BlockSeq);
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let txn_id = *txn.id();
+        let file = self.file;
+        let latest = self.latest.read(txn.id()).await?;
+        let blocks = stream::iter(0..(*latest))
+            .then(move |i| file.clone().read_block_owned(txn_id, i.into()))
+            .map_ok(|block| (*block).clone());
+
+        let blocks: BlockStream = Box::pin(blocks);
+        let blocks: BlockSeq = en::SeqStream::from(blocks);
+        Ok((self.schema, blocks))
+    }
+}
+
+async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCResult<BlockChain> {
+    let txn_id = txn.id();
+
+    if file.is_empty(txn_id).await? {
+        let subject = Subject::create(&schema, txn.context(), *txn_id).await?;
+        return Ok(BlockChain::new(schema, subject, 0, file));
+    }
+
+    let past_txn_id = {
+        let first_block = file.read_block(txn_id, &0u64.into()).await?;
+        first_block
+            .mutations()
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or(*txn_id)
+    };
+    let subject = Subject::create(&schema, txn.context(), past_txn_id).await?;
+
+    let mut latest = 0u64;
+    let mut hash = Bytes::from(NULL_HASH);
+    while file.contains_block(&txn_id, &latest.into()).await? {
+        let block = file.read_block(&txn_id, &latest.into()).await?;
+        if block.last_hash() != &hash {
+            let last_hash = base64::encode(block.last_hash());
+            let hash = base64::encode(hash);
+            return Err(TCError::bad_request(
+                format!("block {} has invalid hash {}, expected", latest, last_hash),
+                hash,
+            ));
+        }
+
+        for (past_txn_id, ops) in block.mutations() {
+            for (path, key, value) in ops.iter().cloned() {
+                subject
+                    .put(*past_txn_id, path, key, value.into())
+                    .map_err(|e| e.consume(format!("error replaying block {}", latest)))
+                    .await?;
+            }
+
+            subject.commit(past_txn_id).await;
+        }
+
+        hash = block.last_hash().clone();
+        latest += 1;
+    }
+
+    Ok(BlockChain::new(schema, subject, latest, file))
 }

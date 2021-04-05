@@ -21,14 +21,14 @@ use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 mod block;
-mod blockchain;
+mod data;
 mod sync;
 
-use blockchain::BlockSeq;
+use block::BlockSeq;
 
 use crate::fs::FileEntry;
-pub use block::ChainBlock;
-pub use blockchain::BlockChain;
+pub use block::BlockChain;
+pub use data::ChainBlock;
 pub use sync::SyncChain;
 
 const CHAIN: Label = label("chain");
@@ -259,7 +259,7 @@ impl fmt::Display for ChainType {
 /// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
 #[derive(Clone)]
 pub enum Chain {
-    Block(blockchain::BlockChain),
+    Block(block::BlockChain),
     Sync(sync::SyncChain),
 }
 
