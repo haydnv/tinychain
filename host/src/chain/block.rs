@@ -18,10 +18,10 @@ use tcgeneric::TCPathBuf;
 use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
 use crate::state::State;
+use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
-use crate::transact::Transaction;
 
 const BLOCK_SIZE: u64 = 1_000_000;
 
@@ -102,9 +102,19 @@ impl ChainInstance for BlockChain {
             }
         }
 
-        // TODO: update self.subject with the remainder of the latest block
+        let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
+        let mut i = if let Some(last_commit) = self.last_commit(txn.id()).await? {
+            for (txn_id, ops) in block.mutations().range(last_commit.next()..) {
+                for (path, key, value) in ops.iter().cloned() {
+                    self.subject.put(*txn_id, path, key, value.into()).await?
+                }
+            }
 
-        let mut i = (*latest) + 1;
+            (*latest) + 1
+        } else {
+            *latest
+        };
+
         while chain.file.contains_block(txn.id(), &i.into()).await? {
             let block = chain.file.read_block(txn.id(), &i.into()).await?;
 

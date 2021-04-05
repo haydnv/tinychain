@@ -1,4 +1,4 @@
-//! [`TxnId`]
+//! A transaction ID
 
 use std::fmt;
 use std::str::FromStr;
@@ -26,10 +26,18 @@ pub struct TxnId {
 
 impl TxnId {
     /// Construct a new `TxnId`.
-    pub fn new(time: NetworkTime) -> TxnId {
-        TxnId {
+    pub fn new(time: NetworkTime) -> Self {
+        Self {
             timestamp: time.as_nanos(),
             nonce: rand::thread_rng().gen(),
+        }
+    }
+
+    /// Return the next TxnId after this one (useful to construct an exclusive range).
+    pub fn next(&self) -> Self {
+        Self {
+            timestamp: self.timestamp,
+            nonce: self.nonce + 1
         }
     }
 
