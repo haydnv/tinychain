@@ -27,17 +27,33 @@ pub struct TxnId {
 impl TxnId {
     /// Construct a new `TxnId`.
     pub fn new(time: NetworkTime) -> Self {
+        let mut rng = rand::thread_rng();
+        let nonce = loop {
+            let nonce = rng.gen();
+            if nonce > 0 && nonce < (u16::MAX - 1) {
+                break nonce;
+            }
+        };
+
         Self {
             timestamp: time.as_nanos(),
-            nonce: rand::thread_rng().gen(),
+            nonce,
         }
     }
 
-    /// Return the next TxnId after this one (useful to construct an exclusive range).
+    /// Return the next valid TxnId after this one (e.g. to construct a range).
     pub fn next(&self) -> Self {
         Self {
             timestamp: self.timestamp,
             nonce: self.nonce + 1
+        }
+    }
+
+    /// Return the last valid TxnId before this one (e.g. to construct a range).
+    pub fn prev(&self) -> Self {
+        Self {
+            timestamp: self.timestamp,
+            nonce: self.nonce - 1
         }
     }
 

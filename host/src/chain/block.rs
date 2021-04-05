@@ -53,6 +53,13 @@ impl ChainInstance for BlockChain {
         key: Value,
         value: Scalar,
     ) -> TCResult<()> {
+        if value.is_ref() {
+            return Err(TCError::bad_request(
+                "cannot update Chain subject with reference: {}",
+                value,
+            ));
+        }
+
         let latest = self.latest.read(&txn_id).await?;
         let mut block = self.file.write_block(txn_id, (*latest).into()).await?;
 
