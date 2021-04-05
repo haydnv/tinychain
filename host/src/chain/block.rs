@@ -17,9 +17,10 @@ use tcgeneric::TCPathBuf;
 
 use crate::fs;
 use crate::scalar::{Link, Scalar, Value};
+use crate::state::State;
 use crate::txn::{Txn, TxnId};
 
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
+use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 use crate::transact::Transaction;
 
 const BLOCK_SIZE: u64 = 1_000_000;
@@ -59,11 +60,71 @@ impl ChainInstance for BlockChain {
         Ok(())
     }
 
+    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>> {
+        let latest = self.latest.read(txn_id).await?;
+        let block = self.file.read_block(txn_id, &(*latest).into()).await?;
+        Ok(block.mutations().keys().last().cloned())
+    }
+
     fn subject(&self) -> &Subject {
         &self.subject
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let chain = match txn.get(source.append(CHAIN.into()), Value::None).await? {
+            State::Chain(Chain::Block(chain)) => chain,
+            other => {
+                return Err(TCError::bad_request(
+                    "cannot replicate with a blockchain",
+                    other,
+                ))
+            }
+        };
+
+        let mut latest = self.latest.write(*txn.id()).await?;
+        if !chain
+            .file
+            .contains_block(txn.id(), &(*latest).into())
+            .await?
+        {
+            return Err(TCError::bad_request(
+                "cannot replicate from blockchain with fewer blocks",
+                *latest,
+            ));
+        }
+
+        const ERR_DIVERGENT: &str = "blockchain to replicate diverges at block";
+        for i in 0..(*latest) {
+            let block = self.file.read_block(txn.id(), &i.into()).await?;
+            let other = chain.file.read_block(txn.id(), &i.into()).await?;
+            if &*block != &*other {
+                return Err(TCError::bad_request(ERR_DIVERGENT, i));
+            }
+        }
+
+        // TODO: update self.subject with the remainder of the latest block
+
+        let mut i = (*latest) + 1;
+        while chain.file.contains_block(txn.id(), &i.into()).await? {
+            let block = chain.file.read_block(txn.id(), &i.into()).await?;
+
+            for (txn_id, ops) in block.mutations() {
+                for (path, key, value) in ops.iter().cloned() {
+                    self.subject.put(*txn_id, path, key, value.into()).await?;
+                }
+
+                self.subject.commit(txn_id).await;
+            }
+
+            self.file
+                .create_block(*txn.id(), i.into(), (*block).clone())
+                .await?;
+
+            i += 1;
+        }
+
+        (*latest) = i;
+
         Err(TCError::not_implemented("BlockChain::replicate"))
     }
 }

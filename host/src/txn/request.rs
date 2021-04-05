@@ -52,6 +52,7 @@ impl Request {
         &self.token
     }
 
+    #[inline]
     pub fn txn_id(&self) -> &TxnId {
         &self.txn_id
     }

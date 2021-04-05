@@ -209,6 +209,8 @@ pub trait ChainInstance {
         value: Scalar,
     ) -> TCResult<()>;
 
+    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>>;
+
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
 
@@ -286,6 +288,13 @@ impl ChainInstance for Chain {
         match self {
             Self::Block(chain) => chain.append(txn_id, path, key, value).await,
             Self::Sync(chain) => chain.append(txn_id, path, key, value).await,
+        }
+    }
+
+    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>> {
+        match self {
+            Self::Block(chain) => chain.last_commit(txn_id).await,
+            Self::Sync(chain) => chain.last_commit(txn_id).await,
         }
     }
 

@@ -179,6 +179,7 @@ impl Txn {
 
 #[async_trait]
 impl Transaction<fs::Dir> for Txn {
+    #[inline]
     fn id(&'_ self) -> &'_ TxnId {
         self.request.txn_id()
     }

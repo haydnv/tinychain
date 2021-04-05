@@ -53,6 +53,10 @@ impl ChainInstance for SyncChain {
         Ok(())
     }
 
+    async fn last_commit(&self, _txn_id: &TxnId) -> TCResult<Option<TxnId>> {
+        todo!()
+    }
+
     fn subject(&self) -> &Subject {
         &self.subject
     }

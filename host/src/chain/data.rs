@@ -21,7 +21,7 @@ use tcgeneric::TCPathBuf;
 use crate::scalar::{Scalar, Value};
 
 /// A single filesystem block belonging to a [`super::Chain`].
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
     hash: Bytes,
     contents: BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>>,
