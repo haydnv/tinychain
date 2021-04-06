@@ -1,9 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
-use futures::{future, stream};
 use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
 use log::debug;
@@ -83,19 +81,8 @@ impl crate::gateway::Client for Client {
             .await?;
 
         if response.status().is_success() {
-            let mut body = response.into_body();
-            let mut buf = Vec::new();
-            while let Some(chunk) = body.next().await {
-                buf.extend(chunk.unwrap().to_vec());
-            }
-
-            let body = String::from_utf8(buf).unwrap();
-            debug!("response: {}", body);
-
-            destream_json::de::decode(txn, stream::once(future::ready(Bytes::from(body.into_bytes()))))
-                .map_err(|e| {
-                    TCError::bad_request(format!("error decoding response from {}", link), e)
-                })
+            destream_json::de::try_decode(txn, response.into_body())
+                .map_err(|e| TCError::bad_request(format!("error decoding response from {}", link), e))
                 .await
         } else {
             let err = transform_error(&link, response).await;
