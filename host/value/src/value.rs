@@ -793,6 +793,10 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         Ok(Value::String(s.to_string()))
     }
 
+    fn visit_byte_buf<E: SerdeError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
+        Ok(Value::Bytes(buf.into()))
+    }
+
     fn visit_borrowed_str<E: SerdeError>(self, s: &'de str) -> Result<Self::Value, E> {
         Ok(Value::String(s.to_string()))
     }
@@ -903,8 +907,8 @@ impl destream::de::Visitor for ValueVisitor {
         Ok(Value::String(s))
     }
 
-    fn visit_byte_buf<E: DestreamError>(self, _buf: Vec<u8>) -> Result<Self::Value, E> {
-        unimplemented!()
+    fn visit_byte_buf<E: DestreamError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
+        Ok(Value::Bytes(buf.into()))
     }
 
     fn visit_unit<E: DestreamError>(self) -> Result<Self::Value, E> {

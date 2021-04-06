@@ -480,6 +480,7 @@ impl fmt::Display for Link {
 mod tests {
     use super::*;
 
+    #[test]
     fn test_eq() {
         let a = LinkHost {
             protocol: LinkProtocol::HTTP,
