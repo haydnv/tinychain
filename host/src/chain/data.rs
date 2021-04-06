@@ -73,29 +73,6 @@ impl Mutate for ChainBlock {
 }
 
 #[async_trait]
-impl de::FromStream for ChainBlock {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(context, decoder)
-            .map_ok(|(hash, contents)| Self { hash, contents })
-            .await
-    }
-}
-
-impl<'en> en::IntoStream<'en> for ChainBlock {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((self.hash, self.contents), encoder)
-    }
-}
-
-impl<'en> en::ToStream<'en> for ChainBlock {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((&self.hash, &self.contents), encoder)
-    }
-}
-
-#[async_trait]
 // TODO: replace destream_json with tbon
 impl BlockData for ChainBlock {
     fn ext() -> &'static str {
@@ -145,6 +122,36 @@ impl BlockData for ChainBlock {
                 future::ready(Ok(size + chunk.len() as u64))
             })
             .await
+    }
+}
+
+#[async_trait]
+impl de::FromStream for ChainBlock {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(context, decoder)
+            .map_ok(|(hash, contents)| Self { hash, contents })
+            .map_err(|e| de::Error::custom(format!("failed to decode ChainBlock: {}", e)))
+            .await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for ChainBlock {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((self.hash, self.contents), encoder)
+    }
+}
+
+impl<'en> en::ToStream<'en> for ChainBlock {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((&self.hash, &self.contents), encoder)
+    }
+}
+
+impl fmt::Debug for ChainBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 

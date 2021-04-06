@@ -253,8 +253,11 @@ impl NativeClass for ChainType {
 }
 
 impl fmt::Display for ChainType {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Self::Block => "type BlockChain",
+            Self::Sync => "type SyncChain",
+        })
     }
 }
 
@@ -424,7 +427,13 @@ impl ChainVisitor {
         access: &mut A,
     ) -> Result<Chain, A::Error> {
         match class {
-            ChainType::Block => access.next_value(self.txn).map_ok(Chain::Block).await,
+            ChainType::Block => {
+                access
+                    .next_value(self.txn)
+                    .map_ok(Chain::Block)
+                    .map_err(|e| de::Error::custom(format!("invalid BlockChain stream: {}", e)))
+                    .await
+            }
             ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
         }
     }

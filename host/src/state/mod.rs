@@ -600,6 +600,7 @@ impl StateVisitor {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
                     .map_ok(State::Chain)
+                    .map_err(|e| de::Error::custom(format!("invalid Chain: {}", e)))
                     .await
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
@@ -696,16 +697,19 @@ impl<'a> de::Visitor for StateVisitor {
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>(()).await? {
-            log::debug!("deserialize: key is {}", key);
+            debug!("deserialize: key is {}", key);
 
             if let Ok(path) = TCPathBuf::from_str(&key) {
+                debug!("is {} a classpath?", path);
                 if let Some(class) = StateType::from_path(&path) {
-                    if let Ok(state) = self.visit_map_value(class, &mut access).await {
-                        return Ok(state);
-                    }
+                    debug!("deserialize instance of {}...", class);
+                    return self.visit_map_value(class, &mut access).await;
+                } else {
+                    debug!("not a classpath: {}", path);
                 }
             }
 
+            debug!("deserialize Op with subject {}", key);
             if let Ok(subject) = reference::Subject::from_str(&key) {
                 let params = access.next_value(()).await?;
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
@@ -729,6 +733,7 @@ impl<'a> de::Visitor for StateVisitor {
                     .subcontext(id.clone())
                     .map_err(de::Error::custom)
                     .await?;
+
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
             }

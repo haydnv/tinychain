@@ -135,8 +135,6 @@ impl ChainInstance for BlockChain {
                 for (path, key, value) in ops.iter().cloned() {
                     self.subject.put(*txn_id, path, key, value.into()).await?;
                 }
-
-                self.subject.commit(txn_id).await;
             }
 
             self.file
@@ -230,7 +228,7 @@ impl Transact for BlockChain {
     async fn finalize(&self, txn_id: &TxnId) {
         join!(
             self.latest.finalize(txn_id),
-            self.subject.commit(txn_id),
+            self.subject.finalize(txn_id),
             self.file.finalize(txn_id)
         );
     }
@@ -344,8 +342,6 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
                     .map_err(|e| e.consume(format!("error replaying block {}", latest)))
                     .await?;
             }
-
-            subject.commit(past_txn_id).await;
         }
 
         hash = block.last_hash().clone();

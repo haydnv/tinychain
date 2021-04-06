@@ -670,9 +670,7 @@ impl ScalarVisitor {
         class: ScalarType,
         access: &mut A,
     ) -> Result<Scalar, A::Error> {
-        debug!("ScalarVisitor::visit_map_value {}", class);
         let scalar = access.next_value::<Scalar>(()).await?;
-        debug!("value {}", scalar);
 
         if let Some(scalar) = scalar.clone().into_type(class) {
             return Ok(scalar);
@@ -701,8 +699,6 @@ impl ScalarVisitor {
     }
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
-        debug!("ScalarVisitor::visit_subject {} {}", subject, params);
-
         if let Scalar::Map(params) = params {
             let op_ref = OpRef::Post((subject, params));
             Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
@@ -843,7 +839,9 @@ impl FromStream for Scalar {
     type Context = ();
 
     async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
-        d.decode_any(ScalarVisitor::default()).await
+        d.decode_any(ScalarVisitor::default())
+            .map_err(|e| de::Error::custom(format!("error parsing Scalar: {}", e)))
+            .await
     }
 }
 

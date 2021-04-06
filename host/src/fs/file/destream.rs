@@ -1,9 +1,9 @@
 use std::convert::TryFrom;
-use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::*;
 use futures::TryFutureExt;
+use log::debug;
 
 use tc_error::*;
 use tc_transact::fs;
@@ -17,7 +17,6 @@ use super::File;
 struct FileVisitor<B> {
     txn_id: TxnId,
     file: File<B>,
-    phantom: PhantomData<B>,
 }
 
 #[async_trait]
@@ -34,11 +33,18 @@ where
 
     async fn visit_seq<A: SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut i = 0u64;
-        while let Some(block) = seq.next_element(()).await? {
+        while let Some(block) = seq
+            .next_element(())
+            .map_err(|e| de::Error::custom(format!("invalid block: {}", e)))
+            .await?
+        {
+            debug!("decoded file block {}", i);
             fs::File::create_block(&self.file, self.txn_id, i.into(), block)
                 .map_err(de::Error::custom)
                 .await?;
+
             i += 1;
+            debug!("checking whether to decode file block {}...", i);
         }
 
         Ok(self.file)
@@ -56,7 +62,6 @@ impl FromStream for File<ChainBlock> {
         let visitor = FileVisitor {
             txn_id: cxt.0,
             file: cxt.1,
-            phantom: PhantomData,
         };
 
         decoder.decode_seq(visitor).await

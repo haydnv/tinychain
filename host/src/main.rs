@@ -51,7 +51,7 @@ struct Config {
     #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
     pub workspace: PathBuf,
 
-    #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
+    #[structopt(long = "cache_size", default_value = "1M", parse(try_from_str = data_size))]
     pub cache_size: u64,
 
     #[structopt(long = "data_dir")]
