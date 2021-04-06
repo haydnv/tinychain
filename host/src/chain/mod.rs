@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::{de, en, EncodeMap};
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
@@ -346,16 +346,20 @@ impl<'en> IntoView<'en, fs::Dir> for Chain {
     type View = ChainView;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        match self {
-            Self::Block(chain) => chain.into_view(txn).map_ok(ChainView::Block).await,
+        let class = self.class();
+
+        let data = match self {
+            Self::Block(chain) => chain.into_view(txn).map_ok(ChainViewData::Block).await,
             Self::Sync(chain) => {
                 chain
                     .into_view(txn)
                     .map_ok(Box::new)
-                    .map_ok(ChainView::Sync)
+                    .map_ok(ChainViewData::Sync)
                     .await
             }
-        }
+        }?;
+
+        Ok(ChainView { class, data })
     }
 }
 
@@ -365,17 +369,27 @@ impl fmt::Display for Chain {
     }
 }
 
-pub enum ChainView {
+pub enum ChainViewData {
     Block((Schema, BlockSeq)),
     Sync(Box<(Schema, StateView)>),
 }
 
+pub struct ChainView {
+    class: ChainType,
+    data: ChainViewData,
+}
+
 impl<'en> en::IntoStream<'en> for ChainView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Self::Block(view) => view.into_stream(encoder),
-            Self::Sync(view) => view.into_stream(encoder),
-        }
+        let mut map = encoder.encode_map(Some(1))?;
+
+        map.encode_key(self.class.path().to_string())?;
+        match self.data {
+            ChainViewData::Block(view) => map.encode_value(view),
+            ChainViewData::Sync(view) => map.encode_value(view),
+        }?;
+
+        map.end()
     }
 }
 
