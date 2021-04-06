@@ -85,15 +85,13 @@ impl de::FromStream for ChainBlock {
 
 impl<'en> en::IntoStream<'en> for ChainBlock {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        let hash = base64::encode(self.hash);
-        en::IntoStream::into_stream((hash, self.contents), encoder)
+        en::IntoStream::into_stream((self.hash, self.contents), encoder)
     }
 }
 
 impl<'en> en::ToStream<'en> for ChainBlock {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        let hash = base64::encode(&self.hash);
-        en::IntoStream::into_stream((hash, &self.contents), encoder)
+        en::IntoStream::into_stream((&self.hash, &self.contents), encoder)
     }
 }
 

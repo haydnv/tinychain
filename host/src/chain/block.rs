@@ -290,7 +290,7 @@ impl<'en> IntoView<'en, fs::Dir> for BlockChain {
         let txn_id = *txn.id();
         let file = self.file;
         let latest = self.latest.read(txn.id()).await?;
-        let blocks = stream::iter(0..(*latest))
+        let blocks = stream::iter(0..(*latest + 1))
             .then(move |i| file.clone().read_block_owned(txn_id, i.into()))
             .map_ok(|block| (*block).clone());
 
