@@ -8,6 +8,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::join;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
@@ -321,6 +322,7 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
             .unwrap_or(*txn_id)
     };
     let subject = Subject::create(&schema, txn.context(), past_txn_id).await?;
+    debug!("created BlockChain subject at {}", past_txn_id);
 
     let mut latest = 0u64;
     let mut hash = Bytes::from(NULL_HASH);
@@ -339,9 +341,13 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
             for (path, key, value) in ops.iter().cloned() {
                 subject
                     .put(*past_txn_id, path, key, value.into())
-                    .map_err(|e| e.consume(format!("error replaying block {}", latest)))
+                    .map_err(|e| {
+                        TCError::bad_request(format!("error replaying block {}", latest), e)
+                    })
                     .await?;
             }
+
+            subject.commit(past_txn_id).await;
         }
 
         hash = block.last_hash().clone();
