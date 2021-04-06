@@ -15,11 +15,9 @@ impl Route for Chain {
         debug!("Chain::route {}", TCPath::from(path));
 
         if path.is_empty() {
-            // TODO: chain methods
             Some(Box::new(SubjectHandler::new(self, path)))
         } else if path[0].as_str() == "chain" {
-            // TODO: chain methods
-            None
+            Some(Box::new(ChainHandler::from(self)))
         } else {
             None
         }
@@ -87,6 +85,30 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                 debug!("Subject::post {}", params);
                 let subject = self.chain.subject().at(txn.id()).await?;
                 subject.post(&txn, self.path, params).await
+            })
+        }))
+    }
+}
+
+struct ChainHandler<'a> {
+    chain: &'a Chain,
+}
+
+impl<'a> From<&'a Chain> for ChainHandler<'a> {
+    fn from(chain: &'a Chain) -> Self {
+        Self { chain }
+    }
+}
+
+impl<'a> Handler<'a> for ChainHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    Ok(self.chain.clone().into())
+                } else {
+                    Err(TCError::bad_request("invalid key for Chain", key))
+                }
             })
         }))
     }

@@ -28,7 +28,7 @@ def cluster_class(chain_class):
 
 
 class ReplicationTests(unittest.TestCase):
-    CHAIN = tc.Chain.Sync
+    CHAIN = tc.Chain.Block
 
     def setUp(self):
         Rev = cluster_class(self.CHAIN)
