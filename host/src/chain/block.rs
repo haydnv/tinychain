@@ -109,13 +109,16 @@ impl ChainInstance for BlockChain {
             }
         }
 
-        let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
         let mut i = if let Some(last_commit) = self.last_commit(txn.id()).await? {
+            let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
+
             for (txn_id, ops) in block.mutations().range(last_commit.next()..) {
                 for (path, key, value) in ops.iter().cloned() {
                     self.subject.put(*txn_id, path, key, value.into()).await?
                 }
             }
+
+            (*self.file.write_block(*txn.id(), (*latest).into()).await?) = (*block).clone();
 
             (*latest) + 1
         } else {
