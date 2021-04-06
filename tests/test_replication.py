@@ -27,8 +27,8 @@ def cluster_class(chain_class):
     return Rev
 
 
-class ReplicationTests(unittest.TestCase):
-    CHAIN = tc.Chain.Block
+class ChainTests(unittest.TestCase):
+    CHAIN = tc.Chain.Sync
 
     def setUp(self):
         Rev = cluster_class(self.CHAIN)
@@ -79,6 +79,7 @@ class ReplicationTests(unittest.TestCase):
 
         # test a distributed write after recovering
         self.hosts[0].post(cluster_path + "/bump")
+
         for host in self.hosts:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 3)
@@ -86,6 +87,10 @@ class ReplicationTests(unittest.TestCase):
     def tearDown(self):
         for host in self.hosts:
             host.stop()
+
+
+class BlockChainTests(ChainTests):
+    CHAIN = tc.Chain.Block
 
 
 def printlines(n):

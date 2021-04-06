@@ -8,7 +8,6 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::join;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
@@ -117,9 +116,9 @@ impl ChainInstance for BlockChain {
             block.mutations().range(..)
         };
 
-        for (txn_id, ops) in mutations {
+        for (_, ops) in mutations {
             for (path, key, value) in ops.iter().cloned() {
-                self.subject.put(*txn_id, path, key, value.into()).await?
+                self.subject.put(*txn.id(), path, key, value.into()).await?
             }
         }
 
@@ -132,9 +131,9 @@ impl ChainInstance for BlockChain {
 
             let block = chain.file.read_block(txn.id(), &i.into()).await?;
 
-            for (txn_id, ops) in block.mutations() {
+            for (_, ops) in block.mutations() {
                 for (path, key, value) in ops.iter().cloned() {
-                    self.subject.put(*txn_id, path, key, value.into()).await?;
+                    self.subject.put(*txn.id(), path, key, value.into()).await?;
                 }
             }
 
@@ -312,17 +311,7 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
         return Ok(BlockChain::new(schema, subject, 0, file));
     }
 
-    let past_txn_id = {
-        let first_block = file.read_block(txn_id, &0u64.into()).await?;
-        first_block
-            .mutations()
-            .keys()
-            .next()
-            .cloned()
-            .unwrap_or(*txn_id)
-    };
-    let subject = Subject::create(&schema, txn.context(), past_txn_id).await?;
-    debug!("created BlockChain subject at {}", past_txn_id);
+    let subject = Subject::create(&schema, txn.context(), *txn.id()).await?;
 
     let mut latest = 0u64;
     let mut hash = Bytes::from(NULL_HASH);
@@ -337,17 +326,15 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
             ));
         }
 
-        for (past_txn_id, ops) in block.mutations() {
+        for (_, ops) in block.mutations() {
             for (path, key, value) in ops.iter().cloned() {
                 subject
-                    .put(*past_txn_id, path, key, value.into())
+                    .put(*txn_id, path, key, value.into())
                     .map_err(|e| {
                         TCError::bad_request(format!("error replaying block {}", latest), e)
                     })
                     .await?;
             }
-
-            subject.commit(past_txn_id).await;
         }
 
         hash = block.last_hash().clone();

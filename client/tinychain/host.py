@@ -171,9 +171,13 @@ class Local(Host):
         """Shut down this host."""
 
         logging.info(f"Shutting down Tinychain host {uri(self)}")
-        self._process.terminate()
-        self._process.wait()
-        logging.info(f"Host {uri(self)} shut down successfully")
+        if self._process:
+            self._process.terminate()
+            self._process.wait()
+            logging.info(f"Host {uri(self)} shut down successfully")
+        else:
+            logging.info(f"{uri(self)} not running")
+
         self._process = None
 
     def __del__(self):
