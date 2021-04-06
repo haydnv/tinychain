@@ -88,7 +88,7 @@ impl ChainInstance for BlockChain {
             }
         };
 
-        let mut latest = self.latest.write(*txn.id()).await?;
+        let latest = self.latest.read(txn.id()).await?;
         if !chain
             .file
             .contains_block(txn.id(), &(*latest).into())
@@ -109,23 +109,26 @@ impl ChainInstance for BlockChain {
             }
         }
 
-        let mut i = if let Some(last_commit) = self.last_commit(txn.id()).await? {
-            let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
-
-            for (txn_id, ops) in block.mutations().range(last_commit.next()..) {
-                for (path, key, value) in ops.iter().cloned() {
-                    self.subject.put(*txn_id, path, key, value.into()).await?
-                }
-            }
-
-            (*self.file.write_block(*txn.id(), (*latest).into()).await?) = (*block).clone();
-
-            (*latest) + 1
+        let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
+        let mutations = if let Some(last_commit) = self.last_commit(txn.id()).await? {
+            block.mutations().range(last_commit.next()..)
         } else {
-            *latest
+            block.mutations().range(..)
         };
 
+        for (txn_id, ops) in mutations {
+            for (path, key, value) in ops.iter().cloned() {
+                self.subject.put(*txn_id, path, key, value.into()).await?
+            }
+        }
+
+        (*self.file.write_block(*txn.id(), (*latest).into()).await?) = (*block).clone();
+
+        let mut new_blocks = false;
+        let mut i = (*latest) + 1;
         while chain.file.contains_block(txn.id(), &i.into()).await? {
+            new_blocks = true;
+
             let block = chain.file.read_block(txn.id(), &i.into()).await?;
 
             for (txn_id, ops) in block.mutations() {
@@ -143,9 +146,11 @@ impl ChainInstance for BlockChain {
             i += 1;
         }
 
-        (*latest) = i;
+        if new_blocks {
+            *latest.upgrade().await? = i;
+        }
 
-        Err(TCError::not_implemented("BlockChain::replicate"))
+        Ok(())
     }
 }
 
