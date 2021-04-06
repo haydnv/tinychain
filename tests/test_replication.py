@@ -8,24 +8,31 @@ from testutils import PORT, start_host
 NUM_HOSTS = 4
 
 
-class Rev(tc.Cluster):
-    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
+def cluster_class(chain_class):
+    class Rev(tc.Cluster):
+        __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
 
-    def _configure(self):
-        self.rev = tc.Chain.Sync(0)
+        def _configure(self):
+            self.rev = chain_class(0)
 
-    @tc.get_method
-    def version(self) -> tc.Number:
-        return self.rev
+        @tc.get_method
+        def version(self) -> tc.Number:
+            return self.rev
 
-    @tc.post_method
-    def bump(self, txn):
-        txn.rev = self.version()
-        return self.rev.set(txn.rev + 1)
+        @tc.post_method
+        def bump(self, txn):
+            txn.rev = self.version()
+            return self.rev.set(txn.rev + 1)
+
+    return Rev
 
 
 class ReplicationTests(unittest.TestCase):
+    CHAIN = tc.Chain.Sync
+
     def setUp(self):
+        Rev = cluster_class(self.CHAIN)
+
         hosts = []
         for i in range(NUM_HOSTS):
             port = PORT + i
@@ -39,7 +46,7 @@ class ReplicationTests(unittest.TestCase):
         time.sleep(1)
 
     def testReplication(self):
-
+        Rev = cluster_class(self.CHAIN)
         cluster_path = tc.uri(Rev).path()
 
         # check that the replica set is correctly updated across the cluster
