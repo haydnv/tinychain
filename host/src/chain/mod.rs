@@ -335,8 +335,7 @@ impl de::FromStream for Chain {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let visitor = ChainVisitor { txn };
-        decoder.decode_map(visitor).await
+        decoder.decode_map(ChainVisitor::new(txn)).await
     }
 }
 
@@ -410,8 +409,25 @@ pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) 
     }
 }
 
-struct ChainVisitor {
+pub struct ChainVisitor {
     txn: Txn,
+}
+
+impl ChainVisitor {
+    pub fn new(txn: Txn) -> Self {
+        Self { txn }
+    }
+
+    pub async fn visit_map_value<A: de::MapAccess>(
+        self,
+        class: ChainType,
+        access: &mut A,
+    ) -> Result<Chain, A::Error> {
+        match class {
+            ChainType::Block => access.next_value(self.txn).map_ok(Chain::Block).await,
+            ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -430,9 +446,6 @@ impl de::Visitor for ChainVisitor {
             return Err(de::Error::custom("expected a Chain class"));
         };
 
-        match class {
-            ChainType::Block => map.next_value(self.txn).map_ok(Chain::Block).await,
-            ChainType::Sync => map.next_value(self.txn).map_ok(Chain::Sync).await,
-        }
+        self.visit_map_value(class, &mut map).await
     }
 }

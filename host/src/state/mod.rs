@@ -596,8 +596,11 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
-            StateType::Chain(_ct) => {
-                Err(de::Error::custom("decoding a Chain is not yet implemented"))
+            StateType::Chain(ct) => {
+                ChainVisitor::new(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(State::Chain)
+                    .await
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
             StateType::Object(ot) => match ot {
@@ -716,6 +719,7 @@ impl<'a> de::Visitor for StateVisitor {
                 .subcontext(id.clone())
                 .map_err(de::Error::custom)
                 .await?;
+
             let value = access.next_value(txn).await?;
             map.insert(id, value);
 
