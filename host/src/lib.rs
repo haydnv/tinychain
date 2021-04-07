@@ -14,6 +14,7 @@ mod route;
 
 pub mod chain;
 pub mod cluster;
+pub mod collection;
 pub mod gateway;
 pub mod kernel;
 pub mod object;

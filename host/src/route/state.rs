@@ -41,6 +41,7 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
+            Self::Collection(collection) => collection.route(path),
             Self::Chain(chain) => chain.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),

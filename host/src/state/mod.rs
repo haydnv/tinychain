@@ -18,6 +18,7 @@ use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::chain::*;
+use crate::collection::*;
 use crate::object::{Object, ObjectType};
 use crate::route::Public;
 use crate::scalar::*;
@@ -30,6 +31,7 @@ pub use view::StateView;
 /// The [`Class`] of a [`State`].
 #[derive(Clone, Eq, PartialEq)]
 pub enum StateType {
+    Collection(CollectionType),
     Chain(ChainType),
     Map,
     Object(ObjectType),
@@ -56,6 +58,7 @@ impl NativeClass for StateType {
                 }
             } else if path.len() > 2 {
                 match path[1].as_str() {
+                    "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "chain" => ChainType::from_path(path).map(Self::Chain),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
@@ -70,12 +73,19 @@ impl NativeClass for StateType {
 
     fn path(&self) -> TCPathBuf {
         match self {
+            Self::Collection(ct) => ct.path(),
             Self::Chain(ct) => ct.path(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
+    }
+}
+
+impl From<CollectionType> for StateType {
+    fn from(ct: CollectionType) -> Self {
+        Self::Collection(ct)
     }
 }
 
@@ -94,6 +104,7 @@ impl From<ValueType> for StateType {
 impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Collection(ct) => fmt::Display::fmt(ct, f),
             Self::Chain(ct) => fmt::Display::fmt(ct, f),
             Self::Map => f.write_str("Map<Id, State>"),
             Self::Object(ot) => fmt::Display::fmt(ot, f),
@@ -106,6 +117,7 @@ impl fmt::Display for StateType {
 /// An addressable state with a discrete value per-transaction.
 #[derive(Clone)]
 pub enum State {
+    Collection(Collection),
     Chain(Chain),
     Map(Map<Self>),
     Object(Object),
@@ -218,6 +230,7 @@ impl Instance for State {
 
     fn class(&self) -> StateType {
         match self {
+            Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Map(_) => StateType::Map,
             Self::Object(object) => StateType::Object(object.class()),
@@ -236,6 +249,12 @@ impl From<()> for State {
 impl From<Chain> for State {
     fn from(chain: Chain) -> Self {
         Self::Chain(chain)
+    }
+}
+
+impl From<Collection> for State {
+    fn from(collection: Collection) -> Self {
+        Self::Collection(collection)
     }
 }
 
@@ -575,6 +594,7 @@ impl TryCastFrom<State> for Value {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Collection(collection) => fmt::Display::fmt(collection, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Map(map) => fmt::Display::fmt(map, f),
             Self::Object(object) => fmt::Display::fmt(object, f),
@@ -596,6 +616,9 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
+            StateType::Collection(_ct) => {
+                unimplemented!()
+            }
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)

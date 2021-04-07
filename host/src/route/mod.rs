@@ -13,6 +13,7 @@ use crate::txn::Txn;
 
 mod chain;
 mod cluster;
+mod collection;
 mod generic;
 mod object;
 mod scalar;

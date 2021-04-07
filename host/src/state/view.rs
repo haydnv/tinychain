@@ -33,6 +33,7 @@ impl<'en> IntoView<'en, fs::Dir> for State {
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
+            Self::Collection(_collection) => todo!(),
             Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
             Self::Map(map) => {
                 let map_view = stream::iter(map.into_iter())
