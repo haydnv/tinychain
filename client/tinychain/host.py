@@ -144,6 +144,7 @@ class Local(Host):
 
         args = [
             path,
+            f"--workspace={workspace}",
             f"--http_port={port}",
             f"--log_level={log_level}",
         ]
