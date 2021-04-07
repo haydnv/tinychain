@@ -37,6 +37,7 @@ serde_json = { version = "1.0" }
 sha2 = "0.9"
 structopt = "0.3"
 tbon = "0.1"
+tc-btree = { path = "btree" }
 tc-error = "0.1"
 tc-transact = "0.3"
 tc-value = ">=0.1.4"
