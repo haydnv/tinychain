@@ -9,6 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use destream::de;
 use futures::future::{try_join_all, FutureExt, TryFutureExt};
 use log::debug;
 use uplock::*;
@@ -20,8 +21,6 @@ use tc_transact::{Transact, TxnId};
 
 use super::cache::*;
 use super::{file_name, fs_path, DirContents};
-
-mod destream;
 
 pub struct Block<B> {
     lock: CacheLock<B>,
@@ -266,6 +265,64 @@ where
 impl<B> fmt::Display for File<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "file at {:?}", &self.path)
+    }
+}
+
+#[async_trait]
+impl<B: BlockData + de::FromStream<Context = ()> + 'static> de::FromStream for File<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
+    type Context = (TxnId, File<B>);
+
+    async fn from_stream<D: de::Decoder>(
+        cxt: Self::Context,
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        let visitor = FileVisitor {
+            txn_id: cxt.0,
+            file: cxt.1,
+        };
+
+        decoder.decode_seq(visitor).await
+    }
+}
+
+struct FileVisitor<B> {
+    txn_id: TxnId,
+    file: File<B>,
+}
+
+#[async_trait]
+impl<B: fs::BlockData + de::FromStream<Context = ()> + 'static> de::Visitor for FileVisitor<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
+    type Value = File<B>;
+
+    fn expecting() -> &'static str {
+        "a File"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut i = 0u64;
+        while let Some(block) = seq
+            .next_element(())
+            .map_err(|e| de::Error::custom(format!("invalid block: {}", e)))
+            .await?
+        {
+            debug!("decoded file block {}", i);
+            fs::File::create_block(&self.file, self.txn_id, i.into(), block)
+                .map_err(de::Error::custom)
+                .await?;
+
+            i += 1;
+            debug!("checking whether to decode file block {}...", i);
+        }
+
+        Ok(self.file)
     }
 }
 
