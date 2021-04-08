@@ -17,7 +17,7 @@ Tinychain is useful in any situation which requires developing and deploying a c
 
 Tinychain is early beta software. Many features are only partially implemented, or not fully tested, or not yet available in the public API. You should not assume that Tinychain is secure, and you should make regular backups of your data.
 
-If you need a feature which is not yet available, or even not yet planned, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
+If you're not sure how to get started, or have a question, or find a bug, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
 
 ## Getting started
 
@@ -33,7 +33,9 @@ $ ./tinychain &
 $ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'key="Hello, world!"'
 ```
 
-You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory.
+There are instructions to set up a Cluster in the [client README]:(https://github.com/haydnv/tinychain/tree/master/client).
+
+You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a series of tutorial videos on YouTube: [https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw)
 
 ## Key features
 
