@@ -6,6 +6,7 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::path::PathBuf;
 
+use destream::IntoStream;
 use futures::{Future, TryFutureExt};
 use log::debug;
 use tokio::fs;
@@ -178,7 +179,10 @@ impl Cache {
     }
 
     /// Read a block from the cache if possible, or else fetch it from the filesystem.
-    pub async fn read<B: BlockData>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
+    pub async fn read<'en, B: BlockData<'en>>(
+        &self,
+        path: &PathBuf,
+    ) -> TCResult<Option<CacheLock<B>>>
     where
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
@@ -256,7 +260,7 @@ impl Cache {
         Self::_sync(inner, path).await
     }
 
-    async fn _write<B: BlockData>(
+    async fn _write<'en, B: BlockData<'en> + IntoStream<'en>>(
         inner: &mut RwLockWriteGuard<Inner>,
         path: PathBuf,
         block: B,
@@ -283,7 +287,11 @@ impl Cache {
     }
 
     /// Update a block in the cache.
-    pub async fn write<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<CacheLock<B>>
+    pub async fn write<'en, B: BlockData<'en> + IntoStream<'en>>(
+        &self,
+        path: PathBuf,
+        block: B,
+    ) -> TCResult<CacheLock<B>>
     where
         CacheBlock: From<CacheLock<B>>,
     {
@@ -294,7 +302,11 @@ impl Cache {
     }
 
     /// Update a block in the cache and then sync it with the filesystem.
-    pub async fn write_and_sync<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<bool>
+    pub async fn write_and_sync<'en, B: BlockData<'en> + IntoStream<'en>>(
+        &self,
+        path: PathBuf,
+        block: B,
+    ) -> TCResult<bool>
     where
         CacheBlock: From<CacheLock<B>>,
     {

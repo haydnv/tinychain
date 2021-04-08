@@ -6,6 +6,7 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWrite};
@@ -22,26 +23,13 @@ pub type BlockId = PathSegment;
 
 /// The contents of a [`Block`].
 #[async_trait]
-pub trait BlockData: Clone + Send + Sync {
+pub trait BlockData<'en>:
+    de::FromStream<Context = ()> + en::ToStream<'en> + Clone + Send + Sync + 'en
+{
     fn ext() -> &'static str;
 
-    async fn hash(&self) -> TCResult<Bytes>;
-
-    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self>;
-
-    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64>;
-
-    async fn size(&self) -> TCResult<u64>;
-}
-
-#[async_trait]
-impl BlockData for Value {
-    fn ext() -> &'static str {
-        "value"
-    }
-
-    async fn hash(&self) -> TCResult<Bytes> {
-        let mut data = destream_json::encode(self.clone()).map_err(TCError::internal)?;
+    async fn hash(&'en self) -> TCResult<Bytes> {
+        let mut data = tbon::en::encode(self).map_err(TCError::internal)?;
         let mut hasher = Sha256::default();
         while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
             hasher.update(&chunk);
@@ -52,13 +40,13 @@ impl BlockData for Value {
     }
 
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        destream_json::read_from((), source)
+        tbon::de::read_from((), source)
             .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
             .await
     }
 
-    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
-        let encoded = destream_json::encode(self.clone())
+    async fn persist<W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64> {
+        let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
 
         let mut reader = StreamReader::new(
@@ -72,9 +60,8 @@ impl BlockData for Value {
             .await
     }
 
-    async fn size(&self) -> TCResult<u64> {
-        let encoded = destream_json::encode(self)
-            .map_err(|e| TCError::bad_request("serialization error", e))?;
+    async fn size(&self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> {
+        let encoded = tbon::en::encode(self.clone()).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -85,9 +72,16 @@ impl BlockData for Value {
     }
 }
 
+#[async_trait]
+impl<'en> BlockData<'en> for Value {
+    fn ext() -> &'static str {
+        "value"
+    }
+}
+
 /// A transactional filesystem block.
 #[async_trait]
-pub trait Block<B: BlockData>: Send + Sync {
+pub trait Block<'en, B: BlockData<'en>>: Send + Sync {
     type ReadLock: Deref<Target = B>;
     type WriteLock: DerefMut<Target = B>;
 
@@ -107,9 +101,9 @@ pub trait Store: Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File<B: BlockData>: Store + Sized {
+pub trait File<'en, B: BlockData<'en>>: Store + Sized {
     /// The type of block which this file is divided into.
-    type Block: Block<B>;
+    type Block: Block<'en, B>;
 
     /// Return the IDs of all this file's blocks.
     async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
@@ -118,19 +112,36 @@ pub trait File<B: BlockData>: Store + Sized {
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
 
     /// Create a new [`Self::Block`].
-    async fn create_block(&self, txn_id: TxnId, name: BlockId, initial_value: B) -> TCResult<Self::Block>;
+    async fn create_block(
+        &self,
+        txn_id: TxnId,
+        name: BlockId,
+        initial_value: B,
+    ) -> TCResult<Self::Block>;
 
     /// Delete the block with the given ID.
     async fn delete_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<()>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`].
-    async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    async fn read_block(
+        &self,
+        txn_id: &TxnId,
+        name: &BlockId,
+    ) -> TCResult<<Self::Block as Block<'en, B>>::ReadLock>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`], without borrowing.
-    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    async fn read_block_owned(
+        self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<<Self::Block as Block<'en, B>>::ReadLock>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`].
-    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<<Self::Block as Block<'en, B>>::WriteLock>;
 }
 
 /// A transactional directory

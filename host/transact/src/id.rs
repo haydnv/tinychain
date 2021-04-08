@@ -45,7 +45,7 @@ impl TxnId {
     pub fn next(&self) -> Self {
         Self {
             timestamp: self.timestamp,
-            nonce: self.nonce + 1
+            nonce: self.nonce + 1,
         }
     }
 
@@ -53,7 +53,7 @@ impl TxnId {
     pub fn prev(&self) -> Self {
         Self {
             timestamp: self.timestamp,
-            nonce: self.nonce - 1
+            nonce: self.nonce - 1,
         }
     }
 

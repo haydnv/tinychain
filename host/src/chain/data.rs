@@ -2,17 +2,12 @@
 
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
-use std::io;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
-use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWrite};
-use tokio_util::io::StreamReader;
+use futures::TryFutureExt;
 
-use tc_error::*;
 use tc_transact::fs::BlockData;
 use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
@@ -73,55 +68,9 @@ impl Mutate for ChainBlock {
 }
 
 #[async_trait]
-// TODO: replace destream_json with tbon
-impl BlockData for ChainBlock {
+impl<'en> BlockData<'en> for ChainBlock {
     fn ext() -> &'static str {
         super::EXT
-    }
-
-    async fn hash(&self) -> TCResult<Bytes> {
-        let mut data = destream_json::encode(self.clone()).map_err(TCError::internal)?;
-        let mut hasher = Sha256::default();
-        while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-            hasher.update(&chunk);
-        }
-
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
-    }
-
-    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        destream_json::read_from((), source)
-            .map_ok(|(hash, contents)| Self { hash, contents })
-            .map_err(|e| TCError::internal(format!("ChainBlock corrupted! {}", e)))
-            .await
-    }
-
-    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
-        let encoded = destream_json::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
-
-        let mut reader = StreamReader::new(
-            encoded
-                .map_ok(Bytes::from)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
-        );
-
-        tokio::io::copy(&mut reader, sink)
-            .map_err(|e| TCError::bad_gateway(e))
-            .await
-    }
-
-    async fn size(&self) -> TCResult<u64> {
-        let encoded = destream_json::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
-
-        encoded
-            .map_err(|e| TCError::bad_request("serialization error", e))
-            .try_fold(0, |size, chunk| {
-                future::ready(Ok(size + chunk.len() as u64))
-            })
-            .await
     }
 }
 

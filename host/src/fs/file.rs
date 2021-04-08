@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en};
 use futures::future::{try_join_all, FutureExt, TryFutureExt};
 use log::debug;
 use uplock::*;
@@ -27,7 +27,7 @@ pub struct Block<B> {
 }
 
 #[async_trait]
-impl<B: BlockData> fs::Block<B> for Block<B> {
+impl<'en, B: BlockData<'en>> fs::Block<'en, B> for Block<B> {
     type ReadLock = BlockRead<B>;
     type WriteLock = BlockWrite<B>;
 
@@ -80,7 +80,7 @@ pub struct File<B> {
     phantom: PhantomData<B>,
 }
 
-impl<B: BlockData + 'static> File<B> {
+impl<'en, B: BlockData<'en> + 'en> File<B> {
     fn _new(cache: Cache, path: PathBuf, block_ids: HashSet<BlockId>) -> Self {
         let lock_name = format!("file contents at {:?}", &path);
 
@@ -116,6 +116,7 @@ impl<B: BlockData + 'static> File<B> {
 
     async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>>
     where
+        B: en::IntoStream<'en>,
         CacheBlock: From<CacheLock<B>>,
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
     {
@@ -140,7 +141,7 @@ impl<B: BlockData + 'static> File<B> {
 }
 
 #[async_trait]
-impl<B: BlockData + 'static> Store for File<B> {
+impl<'en, B: BlockData<'en> + 'en> Store for File<B> {
     async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.contents
             .read(txn_id)
@@ -150,8 +151,9 @@ impl<B: BlockData + 'static> Store for File<B> {
 }
 
 #[async_trait]
-impl<B: BlockData + 'static> fs::File<B> for File<B>
+impl<'en, B: BlockData<'en> + 'en> fs::File<'en, B> for File<B>
 where
+    B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
@@ -219,8 +221,9 @@ where
 }
 
 #[async_trait]
-impl<B: BlockData + 'static> Transact for File<B>
+impl<'en, B: BlockData<'en> + 'en> Transact for File<B>
 where
+    B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
@@ -269,8 +272,9 @@ impl<B> fmt::Display for File<B> {
 }
 
 #[async_trait]
-impl<B: BlockData + de::FromStream<Context = ()> + 'static> de::FromStream for File<B>
+impl<'en, B: BlockData<'en> + de::FromStream<Context = ()> + 'en> de::FromStream for File<B>
 where
+    B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
@@ -295,8 +299,9 @@ struct FileVisitor<B> {
 }
 
 #[async_trait]
-impl<B: fs::BlockData + de::FromStream<Context = ()> + 'static> de::Visitor for FileVisitor<B>
+impl<'en, B: fs::BlockData<'en> + de::FromStream<Context = ()> + 'en> de::Visitor for FileVisitor<B>
 where
+    B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
