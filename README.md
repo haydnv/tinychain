@@ -33,7 +33,7 @@ $ ./tinychain &
 $ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'key="Hello, world!"'
 ```
 
-There are instructions to set up a Cluster in the [client README]:(https://github.com/haydnv/tinychain/tree/master/client).
+There are instructions to set up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
 
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a series of tutorial videos on YouTube: [https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw)
 
