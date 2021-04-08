@@ -275,7 +275,7 @@ impl Cache {
             inner.lfu.insert(path.clone());
         }
 
-        let size = block.size().await?;
+        let size = block.clone().into_size().await?;
         let block = CacheLock::new(block);
         inner.entries.insert(path, block.clone().into());
         inner.size += size;

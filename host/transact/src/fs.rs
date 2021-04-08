@@ -60,8 +60,19 @@ pub trait BlockData<'en>:
             .await
     }
 
-    async fn size(&self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> {
-        let encoded = tbon::en::encode(self.clone()).map_err(|e| TCError::bad_request("serialization error", e))?;
+    async fn size(&'en self) -> TCResult<u64> {
+        let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+
+        encoded
+            .map_err(|e| TCError::bad_request("serialization error", e))
+            .try_fold(0, |size, chunk| {
+                future::ready(Ok(size + chunk.len() as u64))
+            })
+            .await
+    }
+
+    async fn into_size(self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> {
+        let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
