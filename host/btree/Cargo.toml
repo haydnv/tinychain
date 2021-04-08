@@ -12,4 +12,9 @@ keywords = ["tinychain", "key-value", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
+async-trait = "0.1"
+destream = "0.3"
+futures = "0.3"
+tbon = "0.1"
 tcgeneric = "0.1"
+tc-value = "0.1"
