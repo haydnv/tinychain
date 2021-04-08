@@ -4,6 +4,7 @@ use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf,
 };
 
+#[allow(dead_code)]
 mod file;
 mod slice;
 
