@@ -3,10 +3,10 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en};
 use futures::TryFutureExt;
 
-use tc_transact::fs::BlockId;
+use tc_transact::fs::{BlockData, BlockId};
 use tc_value::Value;
 use tcgeneric::Tuple;
 
@@ -46,6 +46,12 @@ impl de::FromStream for NodeKey {
     }
 }
 
+impl<'en> en::ToStream<'en> for NodeKey {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((&self.deleted, &self.value), encoder)
+    }
+}
+
 #[cfg(debug_assertions)]
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -76,6 +82,44 @@ impl Node {
             children: vec![],
             rebalance: false,
         }
+    }
+}
+
+impl<'en> BlockData<'en> for Node {
+    fn ext() -> &'static str {
+        "node"
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Node {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|(leaf, keys, parent, children, rebalance)| Self {
+                leaf,
+                keys,
+                parent,
+                children,
+                rebalance,
+            })
+            .await
+    }
+}
+
+impl<'en> en::ToStream<'en> for Node {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream(
+            (
+                &self.leaf,
+                &self.keys,
+                &self.parent,
+                &self.children,
+                &self.rebalance,
+            ),
+            encoder,
+        )
     }
 }
 

@@ -17,5 +17,5 @@ destream = "0.3"
 futures = "0.3"
 tbon = "0.1"
 tcgeneric = "0.1"
-tc-transact = "0.3"
+tc-transact = { path = "../transact" }
 tc-value = "0.1"
