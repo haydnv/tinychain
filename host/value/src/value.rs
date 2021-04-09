@@ -10,7 +10,7 @@ use bytes::Bytes;
 use destream::de::Error as DestreamError;
 use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use log::debug;
-use safecast::{CastFrom, TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
@@ -215,6 +215,35 @@ impl PartialOrd for ValueType {
     }
 }
 
+impl From<NumberType> for ValueType {
+    fn from(nt: NumberType) -> ValueType {
+        ValueType::Number(nt)
+    }
+}
+
+impl TryCastFrom<Value> for ValueType {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::String(s) => {
+                if let Ok(path) = TCPathBuf::from_str(s) {
+                    Self::from_path(&path).is_some()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        if let Some(path) = TCPathBuf::opt_cast_from(value) {
+            Self::from_path(&path)
+        } else {
+            None
+        }
+    }
+}
+
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -343,7 +372,10 @@ impl Serialize for Value {
     }
 }
 
-impl<T> FromIterator<T> for Value where Value: From<T> {
+impl<T> FromIterator<T> for Value
+where
+    Value: From<T>,
+{
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let tuple = Tuple::<Value>::from_iter(iter.into_iter().map(Value::from));
         Self::Tuple(tuple)
@@ -519,6 +551,26 @@ impl TryCastFrom<Value> for Number {
     }
 }
 
+impl TryCastFrom<Value> for usize {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
+impl TryCastFrom<Value> for u64 {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
 impl TryCastFrom<Value> for TCPathBuf {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::String(s) = value {
@@ -562,7 +614,11 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1,
     }
 
     fn opt_cast_from(value: Value) -> Option<Self> {
-        debug!("cast from {} into {}?", value, std::any::type_name::<Self>());
+        debug!(
+            "cast from {} into {}?",
+            value,
+            std::any::type_name::<Self>()
+        );
 
         match value {
             Value::Tuple(tuple) => Self::opt_cast_from(tuple),
@@ -793,16 +849,16 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         Ok(Value::String(s.to_string()))
     }
 
-    fn visit_byte_buf<E: SerdeError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        Ok(Value::Bytes(buf.into()))
-    }
-
     fn visit_borrowed_str<E: SerdeError>(self, s: &'de str) -> Result<Self::Value, E> {
         Ok(Value::String(s.to_string()))
     }
 
     fn visit_string<E: SerdeError>(self, s: String) -> Result<Self::Value, E> {
         Ok(Value::String(s))
+    }
+
+    fn visit_byte_buf<E: SerdeError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
+        Ok(Value::Bytes(buf.into()))
     }
 
     fn visit_unit<E: SerdeError>(self) -> Result<Self::Value, E> {

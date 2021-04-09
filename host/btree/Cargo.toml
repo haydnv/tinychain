@@ -15,7 +15,9 @@ categories = ["database", "database-implementations", "data-structures"]
 async-trait = "0.1"
 destream = "0.3"
 futures = "0.3"
+log = { version = "0.4", features = ["release_max_level_warn"] }
+safecast = "0.1"
 tbon = "0.1"
-tcgeneric = "0.1"
+tcgeneric = { path = "../generic" }
 tc-transact = { path = "../transact" }
-tc-value = "0.1"
+tc-value = { path = "../value" }

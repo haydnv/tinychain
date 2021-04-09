@@ -22,9 +22,9 @@ rand = "0.7"
 serde = { version = "1.0", features = []}
 sha2 = "0.9"
 tbon = { version = "0.1", features = ["tokio-io"] }
-tcgeneric = ">=0.1.1"
+tcgeneric = { path = "../generic" }
 tc-error = "0.1"
-tc-value = ">=0.1.4"
+tc-value = { path = "../value" }
 tokio = { version = "1.2", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
