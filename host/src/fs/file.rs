@@ -27,7 +27,7 @@ pub struct Block<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData<'en>> fs::Block<'en, B> for Block<B> {
+impl<B: BlockData> fs::Block<B> for Block<B> {
     type ReadLock = BlockRead<B>;
     type WriteLock = BlockWrite<B>;
 
@@ -80,7 +80,7 @@ pub struct File<B> {
     phantom: PhantomData<B>,
 }
 
-impl<'en, B: BlockData<'en> + 'en> File<B> {
+impl<B: BlockData> File<B> {
     fn _new(cache: Cache, path: PathBuf, block_ids: HashSet<BlockId>) -> Self {
         let lock_name = format!("file contents at {:?}", &path);
 
@@ -114,9 +114,9 @@ impl<'en, B: BlockData<'en> + 'en> File<B> {
         }
     }
 
-    async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>>
+    async fn get_block<'en>(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>>
     where
-        B: en::IntoStream<'en>,
+        B: en::IntoStream<'en> + 'en,
         CacheBlock: From<CacheLock<B>>,
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
     {
@@ -141,7 +141,7 @@ impl<'en, B: BlockData<'en> + 'en> File<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData<'en> + 'en> Store for File<B> {
+impl<B: BlockData> Store for File<B> {
     async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.contents
             .read(txn_id)
@@ -151,9 +151,8 @@ impl<'en, B: BlockData<'en> + 'en> Store for File<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData<'en> + 'en> fs::File<'en, B> for File<B>
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::File<B> for File<B>
 where
-    B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
@@ -221,7 +220,7 @@ where
 }
 
 #[async_trait]
-impl<'en, B: BlockData<'en> + 'en> Transact for File<B>
+impl<'en, B: BlockData + 'en> Transact for File<B>
 where
     B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
@@ -272,7 +271,7 @@ impl<B> fmt::Display for File<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData<'en> + de::FromStream<Context = ()> + 'en> de::FromStream for File<B>
+impl<'en, B: BlockData + de::FromStream<Context = ()> + 'en> de::FromStream for File<B>
 where
     B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,
@@ -299,7 +298,7 @@ struct FileVisitor<B> {
 }
 
 #[async_trait]
-impl<'en, B: fs::BlockData<'en> + de::FromStream<Context = ()> + 'en> de::Visitor for FileVisitor<B>
+impl<'en, B: fs::BlockData + de::FromStream<Context = ()> + 'en> de::Visitor for FileVisitor<B>
 where
     B: en::IntoStream<'en>,
     CacheBlock: From<CacheLock<B>>,

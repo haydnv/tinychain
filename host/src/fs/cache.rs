@@ -179,10 +179,7 @@ impl Cache {
     }
 
     /// Read a block from the cache if possible, or else fetch it from the filesystem.
-    pub async fn read<'en, B: BlockData<'en>>(
-        &self,
-        path: &PathBuf,
-    ) -> TCResult<Option<CacheLock<B>>>
+    pub async fn read<B: BlockData>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
     where
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
@@ -260,7 +257,7 @@ impl Cache {
         Self::_sync(inner, path).await
     }
 
-    async fn _write<'en, B: BlockData<'en> + IntoStream<'en>>(
+    async fn _write<'en, B: BlockData + IntoStream<'en> + 'en>(
         inner: &mut RwLockWriteGuard<Inner>,
         path: PathBuf,
         block: B,
@@ -287,7 +284,7 @@ impl Cache {
     }
 
     /// Update a block in the cache.
-    pub async fn write<'en, B: BlockData<'en> + IntoStream<'en>>(
+    pub async fn write<'en, B: BlockData + IntoStream<'en> + 'en>(
         &self,
         path: PathBuf,
         block: B,
@@ -302,7 +299,7 @@ impl Cache {
     }
 
     /// Update a block in the cache and then sync it with the filesystem.
-    pub async fn write_and_sync<'en, B: BlockData<'en> + IntoStream<'en>>(
+    pub async fn write_and_sync<'en, B: BlockData + IntoStream<'en> + 'en>(
         &self,
         path: PathBuf,
         block: B,

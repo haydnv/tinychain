@@ -85,7 +85,7 @@ impl Node {
     }
 }
 
-impl<'en> BlockData<'en> for Node {
+impl BlockData for Node {
     fn ext() -> &'static str {
         "node"
     }

@@ -68,7 +68,7 @@ impl Mutate for ChainBlock {
 }
 
 #[async_trait]
-impl<'en> BlockData<'en> for ChainBlock {
+impl BlockData for ChainBlock {
     fn ext() -> &'static str {
         super::EXT
     }

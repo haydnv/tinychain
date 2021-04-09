@@ -23,12 +23,10 @@ pub type BlockId = PathSegment;
 
 /// The contents of a [`Block`].
 #[async_trait]
-pub trait BlockData<'en>:
-    de::FromStream<Context = ()> + en::ToStream<'en> + Clone + Send + Sync + 'en
-{
+pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     fn ext() -> &'static str;
 
-    async fn hash(&'en self) -> TCResult<Bytes> {
+    async fn hash<'en>(&'en self) -> TCResult<Bytes> where Self: en::ToStream<'en> {
         let mut data = tbon::en::encode(self).map_err(TCError::internal)?;
         let mut hasher = Sha256::default();
         while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
@@ -45,7 +43,7 @@ pub trait BlockData<'en>:
             .await
     }
 
-    async fn persist<W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64> {
+    async fn persist<'en, W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64> where Self: en::ToStream<'en> {
         let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
 
@@ -60,7 +58,7 @@ pub trait BlockData<'en>:
             .await
     }
 
-    async fn size(&'en self) -> TCResult<u64> {
+    async fn size<'en>(&'en self) -> TCResult<u64> where Self: en::ToStream<'en> {
         let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
@@ -71,7 +69,7 @@ pub trait BlockData<'en>:
             .await
     }
 
-    async fn into_size(self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> {
+    async fn into_size<'en>(self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> + 'en {
         let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
@@ -84,7 +82,7 @@ pub trait BlockData<'en>:
 }
 
 #[async_trait]
-impl<'en> BlockData<'en> for Value {
+impl BlockData for Value {
     fn ext() -> &'static str {
         "value"
     }
@@ -92,7 +90,7 @@ impl<'en> BlockData<'en> for Value {
 
 /// A transactional filesystem block.
 #[async_trait]
-pub trait Block<'en, B: BlockData<'en>>: Send + Sync {
+pub trait Block<B: BlockData>: Send + Sync {
     type ReadLock: Deref<Target = B>;
     type WriteLock: DerefMut<Target = B>;
 
@@ -112,9 +110,9 @@ pub trait Store: Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File<'en, B: BlockData<'en>>: Store + Sized {
+pub trait File<B: BlockData>: Store + Sized {
     /// The type of block which this file is divided into.
-    type Block: Block<'en, B>;
+    type Block: Block<B>;
 
     /// Return the IDs of all this file's blocks.
     async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
@@ -138,21 +136,21 @@ pub trait File<'en, B: BlockData<'en>>: Store + Sized {
         &self,
         txn_id: &TxnId,
         name: &BlockId,
-    ) -> TCResult<<Self::Block as Block<'en, B>>::ReadLock>;
+    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`], without borrowing.
     async fn read_block_owned(
         self,
         txn_id: TxnId,
         name: BlockId,
-    ) -> TCResult<<Self::Block as Block<'en, B>>::ReadLock>;
+    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`].
     async fn write_block(
         &self,
         txn_id: TxnId,
         name: BlockId,
-    ) -> TCResult<<Self::Block as Block<'en, B>>::WriteLock>;
+    ) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
 }
 
 /// A transactional directory
