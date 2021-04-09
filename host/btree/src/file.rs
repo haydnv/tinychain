@@ -3,12 +3,16 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 
 use async_trait::async_trait;
+use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
 
 use tc_transact::fs::{BlockData, BlockId};
+use tc_transact::lock::{Mutable, TxnLock};
 use tc_value::Value;
 use tcgeneric::Tuple;
+
+use super::RowSchema;
 
 type NodeId = BlockId;
 
@@ -142,4 +146,10 @@ impl fmt::Display for Node {
 }
 
 #[derive(Clone)]
-pub struct BTreeFile {}
+pub struct BTreeFile<F> {
+    file: F,
+    schema: RowSchema,
+    order: usize,
+    collator: Collator<Value>,
+    root: TxnLock<Mutable<NodeId>>,
+}

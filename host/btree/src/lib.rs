@@ -10,7 +10,7 @@ use tcgeneric::*;
 mod file;
 mod slice;
 
-pub use file::BTreeFile;
+pub use file::{BTreeFile, Node};
 pub use slice::BTreeSlice;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
@@ -122,6 +122,8 @@ impl fmt::Display for Column {
     }
 }
 
+pub type RowSchema = Vec<Column>;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BTreeType {
     File,
@@ -162,12 +164,12 @@ impl fmt::Display for BTreeType {
 }
 
 #[derive(Clone)]
-pub enum BTree {
-    File(BTreeFile),
+pub enum BTree<F> {
+    File(BTreeFile<F>),
     Slice(BTreeSlice),
 }
 
-impl Instance for BTree {
+impl<F: Send + Sync> Instance for BTree<F> {
     type Class = BTreeType;
 
     fn class(&self) -> BTreeType {
@@ -178,7 +180,7 @@ impl Instance for BTree {
     }
 }
 
-impl fmt::Display for BTree {
+impl<F> fmt::Display for BTree<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
             Self::File(_) => "a BTree",
