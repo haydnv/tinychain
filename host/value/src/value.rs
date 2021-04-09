@@ -44,6 +44,26 @@ impl ValueType {
             _ => None,
         }
     }
+
+    pub fn try_cast<V>(&self, value: V) -> TCResult<Value>
+    where
+        Value: From<V>,
+    {
+        let on_err = |v: &Value| TCError::bad_request(format!("cannot cast into {} from", self), v);
+
+        match self {
+            Self::Bytes => Value::from(value).try_cast_into(on_err).map(Value::Bytes),
+            Self::Link => Value::from(value).try_cast_into(on_err).map(Value::String),
+            Self::None => Ok(Value::None),
+            Self::Number(nt) => Value::from(value)
+                .try_cast_into(|v| TCError::bad_request("cannot cast into Number from", v))
+                .map(|n| nt.cast(n))
+                .map(Value::Number),
+            Self::String => Value::from(value).try_cast_into(on_err).map(Value::String),
+            Self::Tuple => Value::from(value).try_cast_into(on_err).map(Value::Tuple),
+            Self::Value => Ok(Value::from(value)),
+        }
+    }
 }
 
 impl Default for ValueType {

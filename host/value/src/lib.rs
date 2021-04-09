@@ -2,18 +2,20 @@
 //!
 //! This library is part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
+use std::cmp::Ordering;
+
 use bytes::Bytes;
 use collate::{Collate, Collator};
 use number_general::NumberCollator;
 
 use tcgeneric::Instance;
 
+mod link;
+mod slice;
 mod value;
 
-pub mod link;
-
 pub use link::*;
-use std::cmp::Ordering;
+pub use slice::*;
 pub use value::*;
 
 #[derive(Default, Clone)]
