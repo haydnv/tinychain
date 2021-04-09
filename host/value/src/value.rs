@@ -41,7 +41,7 @@ impl ValueType {
     pub fn size(&self) -> Option<usize> {
         match self {
             Self::Number(nt) => Some(nt.size()),
-            _ => None
+            _ => None,
         }
     }
 }

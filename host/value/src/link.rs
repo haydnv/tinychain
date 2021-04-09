@@ -17,6 +17,7 @@ use tc_error::*;
 use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
+use std::cmp::Ordering;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
@@ -306,6 +307,18 @@ impl Link {
 impl Extend<PathSegment> for Link {
     fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
         self.path.extend(iter)
+    }
+}
+
+impl Ord for Link {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_string().cmp(&other.to_string())
+    }
+}
+
+impl PartialOrd for Link {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.to_string().partial_cmp(&other.to_string())
     }
 }
 

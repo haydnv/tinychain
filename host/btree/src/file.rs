@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
 use uuid::Uuid;
@@ -13,7 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, Dir, File};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::Transaction;
-use tc_value::Value;
+use tc_value::{Value, ValueCollator};
 use tcgeneric::Tuple;
 
 use super::RowSchema;
@@ -157,7 +156,7 @@ pub struct BTreeFile<F, D, T> {
     file: F,
     schema: RowSchema,
     order: usize,
-    collator: Collator<Value>,
+    collator: ValueCollator,
     root: TxnLock<Mutable<NodeId>>,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
@@ -215,14 +214,14 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T> {
             file,
             schema,
             order,
-            collator: Collator::default(),
+            collator: ValueCollator::default(),
             root: TxnLock::new("BTree root", root.into()),
             dir: PhantomData,
             txn: PhantomData,
         })
     }
 
-    pub fn collator(&'_ self) -> &'_ Collator<Value> {
+    pub fn collator(&'_ self) -> &'_ ValueCollator {
         &self.collator
     }
 }
