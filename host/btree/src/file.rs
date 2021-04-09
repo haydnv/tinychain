@@ -2,20 +2,29 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use collate::Collate;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::future::{self, Future, TryFutureExt};
+use futures::stream::{self, FuturesOrdered, TryStreamExt};
+use log::debug;
 use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, Dir, File};
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::Transaction;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::Tuple;
+use tcgeneric::{TCTryStream, Tuple};
 
-use super::RowSchema;
+use super::{Key, Range, RowSchema};
+
+type Selection = FuturesOrdered<
+    Pin<Box<dyn Future<Output = TCResult<TCTryStream<'static, Key>>> + Send + Unpin>>,
+>;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
@@ -37,10 +46,8 @@ impl NodeKey {
     }
 }
 
-impl Deref for NodeKey {
-    type Target = [Value];
-
-    fn deref(&self) -> &[Value] {
+impl AsRef<[Value]> for NodeKey {
+    fn as_ref(&self) -> &[Value] {
         &self.value
     }
 }
@@ -151,8 +158,7 @@ impl fmt::Display for Node {
     }
 }
 
-#[derive(Clone)]
-pub struct BTreeFile<F, D, T> {
+struct Inner<F, D, T> {
     file: F,
     schema: RowSchema,
     order: usize,
@@ -162,7 +168,15 @@ pub struct BTreeFile<F, D, T> {
     txn: PhantomData<T>,
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T> {
+#[derive(Clone)]
+pub struct BTreeFile<F, D, T> {
+    inner: Arc<Inner<F, D, T>>,
+}
+
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
+where
+    Self: Clone + 'static,
+{
     pub async fn create(txn: T, file: F, schema: RowSchema) -> TCResult<Self> {
         if !file.is_empty(txn.id()).await? {
             return Err(TCError::internal(
@@ -211,17 +225,103 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T> {
             .await?;
 
         Ok(BTreeFile {
-            file,
-            schema,
-            order,
-            collator: ValueCollator::default(),
-            root: TxnLock::new("BTree root", root.into()),
-            dir: PhantomData,
-            txn: PhantomData,
+            inner: Arc::new(Inner {
+                file,
+                schema,
+                order,
+                collator: ValueCollator::default(),
+                root: TxnLock::new("BTree root", root.into()),
+                dir: PhantomData,
+                txn: PhantomData,
+            }),
         })
     }
 
     pub fn collator(&'_ self) -> &'_ ValueCollator {
-        &self.collator
+        &self.inner.collator
+    }
+
+    fn slice<B: Deref<Target = Node> + 'static>(
+        self,
+        txn_id: TxnId,
+        node: B,
+        range: Range,
+    ) -> TCResult<TCTryStream<'static, Key>> {
+        let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
+
+        debug!("_slice {} from {} to {}", node.deref(), l, r);
+
+        if node.leaf {
+            let stream: TCTryStream<Key> = if l == r && l < node.keys.len() {
+                if node.keys[l].deleted {
+                    Box::pin(stream::empty())
+                } else {
+                    let key = TCResult::Ok(node.keys[l].value.to_vec());
+                    Box::pin(stream::once(future::ready(key)))
+                }
+            } else {
+                let keys = node.keys[l..r]
+                    .iter()
+                    .filter(|k| !k.deleted)
+                    .map(|k| k.value.to_vec())
+                    .map(TCResult::Ok)
+                    .collect::<Vec<TCResult<Key>>>();
+
+                Box::pin(stream::iter(keys))
+            };
+
+            Ok(stream)
+        } else {
+            let mut selected: Selection = FuturesOrdered::new();
+            for i in l..r {
+                let child_id = node.children[i].clone();
+                let range_clone = range.clone();
+
+                let this = self.clone();
+                let selection = Box::pin(async move {
+                    let node = this
+                        .inner
+                        .file
+                        .clone()
+                        .read_block_owned(txn_id, child_id)
+                        .await?;
+                    this.clone().slice(txn_id, node, range_clone)
+                });
+                selected.push(Box::pin(selection));
+
+                if !node.keys[i].deleted {
+                    let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
+                    let key_at_i: TCTryStream<Key> =
+                        Box::pin(stream::once(future::ready(key_at_i)));
+
+                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                }
+            }
+
+            let last_child_id = node.children[r].clone();
+
+            let selection = Box::pin(async move {
+                let node = self
+                    .inner
+                    .file
+                    .clone()
+                    .read_block_owned(txn_id, last_child_id)
+                    .await?;
+
+                self.slice(txn_id, node, range)
+            });
+            selected.push(Box::pin(selection));
+
+            Ok(Box::pin(selected.try_flatten()))
+        }
+    }
+
+    fn slice_reverse<B: Deref<Target = Node> + 'static>(
+        self,
+        _txn_id: TxnId,
+        _node: B,
+        _range: Range,
+    ) -> TCResult<TCTryStream<'static, Key>> {
+        unimplemented!()
     }
 }

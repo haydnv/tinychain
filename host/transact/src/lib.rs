@@ -35,7 +35,7 @@ pub trait Transact {
 
 /// Common transaction context properties.
 #[async_trait]
-pub trait Transaction<D: fs::Dir>: Sized {
+pub trait Transaction<D: fs::Dir>: Sized + Send + Sync {
     /// The [`TxnId`] of this transaction context.
     fn id(&'_ self) -> &'_ TxnId;
 

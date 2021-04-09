@@ -3,6 +3,11 @@
 //! This library is a part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 use std::fmt;
+use std::pin::Pin;
+
+use futures::Stream;
+
+use tc_error::TCResult;
 
 pub mod id;
 pub mod map;
@@ -13,6 +18,9 @@ pub use id::*;
 pub use map::*;
 pub use time::*;
 pub use tuple::*;
+
+/// A pinned TryStream with error type TCError
+pub type TCTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
 /// A generic class trait
 pub trait Class: fmt::Display + Sized {}
