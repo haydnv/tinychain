@@ -9,9 +9,8 @@ use destream::{de, en};
 use tcgeneric::{path_label, Id, Map, PathLabel, TCPathBuf};
 
 use crate::scalar::*;
-use crate::state::State;
 
-use super::{InstanceExt, ObjectType};
+use super::ObjectType;
 
 const PATH: PathLabel = path_label(&["state", "class"]);
 
@@ -48,9 +47,7 @@ impl InstanceClass {
     }
 }
 
-impl tcgeneric::Class for InstanceClass {
-    type Instance = InstanceExt<State>;
-}
+impl tcgeneric::Class for InstanceClass {}
 
 impl tcgeneric::Instance for InstanceClass {
     type Class = ObjectType;

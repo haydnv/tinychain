@@ -39,9 +39,7 @@ pub enum StateType {
     Tuple,
 }
 
-impl Class for StateType {
-    type Instance = State;
-}
+impl Class for StateType {}
 
 impl NativeClass for StateType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

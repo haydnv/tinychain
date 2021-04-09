@@ -225,9 +225,7 @@ pub enum ChainType {
     Sync,
 }
 
-impl Class for ChainType {
-    type Instance = Chain;
-}
+impl Class for ChainType {}
 
 impl NativeClass for ChainType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

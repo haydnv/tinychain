@@ -15,10 +15,7 @@ pub use time::*;
 pub use tuple::*;
 
 /// A generic class trait
-pub trait Class: fmt::Display + Sized {
-    /// The [`Instance`] type of this class.
-    type Instance;
-}
+pub trait Class: fmt::Display + Sized {}
 
 /// A generic native (i.e. implemented in Rust) class trait
 pub trait NativeClass: Class {

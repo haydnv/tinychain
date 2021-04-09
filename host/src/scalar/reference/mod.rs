@@ -57,9 +57,7 @@ pub enum RefType {
     Op(OpRefType),
 }
 
-impl Class for RefType {
-    type Instance = TCRef;
-}
+impl Class for RefType {}
 
 impl NativeClass for RefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

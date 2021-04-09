@@ -41,9 +41,7 @@ pub enum ScalarType {
     Value(ValueType),
 }
 
-impl Class for ScalarType {
-    type Instance = Scalar;
-}
+impl Class for ScalarType {}
 
 impl NativeClass for ScalarType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

@@ -40,9 +40,7 @@ pub const REPLICAS: Label = label("replicas");
 /// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
 
-impl Class for ClusterType {
-    type Instance = Cluster;
-}
+impl Class for ClusterType {}
 
 impl fmt::Display for ClusterType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

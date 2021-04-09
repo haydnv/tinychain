@@ -43,9 +43,7 @@ impl Default for ValueType {
     }
 }
 
-impl Class for ValueType {
-    type Instance = Value;
-}
+impl Class for ValueType {}
 
 impl NativeClass for ValueType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

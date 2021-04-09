@@ -10,9 +10,7 @@ pub enum CollectionType {
     BTree(BTreeType),
 }
 
-impl Class for CollectionType {
-    type Instance = Collection;
-}
+impl Class for CollectionType {}
 
 impl NativeClass for CollectionType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

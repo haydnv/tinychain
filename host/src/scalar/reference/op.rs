@@ -33,9 +33,7 @@ pub enum OpRefType {
     Delete,
 }
 
-impl Class for OpRefType {
-    type Instance = OpRef;
-}
+impl Class for OpRefType {}
 
 impl NativeClass for OpRefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

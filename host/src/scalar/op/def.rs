@@ -26,9 +26,7 @@ pub enum OpDefType {
     Delete,
 }
 
-impl Class for OpDefType {
-    type Instance = OpDef;
-}
+impl Class for OpDefType {}
 
 impl NativeClass for OpDefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

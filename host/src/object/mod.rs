@@ -30,9 +30,7 @@ pub enum ObjectType {
     Instance,
 }
 
-impl tcgeneric::Class for ObjectType {
-    type Instance = Object;
-}
+impl tcgeneric::Class for ObjectType {}
 
 impl NativeClass for ObjectType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {

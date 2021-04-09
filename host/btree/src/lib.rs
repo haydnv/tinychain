@@ -128,9 +128,7 @@ pub enum BTreeType {
     Slice,
 }
 
-impl Class for BTreeType {
-    type Instance = BTree;
-}
+impl Class for BTreeType {}
 
 impl NativeClass for BTreeType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
