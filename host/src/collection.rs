@@ -1,11 +1,15 @@
 use std::fmt;
 
-use tc_btree::{BTree, BTreeType};
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs;
+use crate::txn::Txn;
 
 const PREFIX: PathLabel = path_label(&["state", "collection"]);
+
+pub use tc_btree::BTreeType;
+
+pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
@@ -43,7 +47,7 @@ impl fmt::Display for CollectionType {
 
 #[derive(Clone)]
 pub enum Collection {
-    BTree(BTree<fs::File<tc_btree::Node>>),
+    BTree(BTree),
 }
 
 impl Instance for Collection {

@@ -37,6 +37,15 @@ pub enum ValueType {
     Value,
 }
 
+impl ValueType {
+    pub fn size(&self) -> Option<usize> {
+        match self {
+            Self::Number(nt) => Some(nt.size()),
+            _ => None
+        }
+    }
+}
+
 impl Default for ValueType {
     fn default() -> Self {
         Self::Value

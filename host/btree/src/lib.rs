@@ -164,12 +164,12 @@ impl fmt::Display for BTreeType {
 }
 
 #[derive(Clone)]
-pub enum BTree<F> {
-    File(BTreeFile<F>),
+pub enum BTree<F, D, T> {
+    File(BTreeFile<F, D, T>),
     Slice(BTreeSlice),
 }
 
-impl<F: Send + Sync> Instance for BTree<F> {
+impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T> {
     type Class = BTreeType;
 
     fn class(&self) -> BTreeType {
@@ -180,7 +180,7 @@ impl<F: Send + Sync> Instance for BTree<F> {
     }
 }
 
-impl<F> fmt::Display for BTree<F> {
+impl<F, D, T> fmt::Display for BTree<F, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
             Self::File(_) => "a BTree",

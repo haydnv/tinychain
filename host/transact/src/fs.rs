@@ -103,7 +103,7 @@ pub trait Block<B: BlockData>: Send + Sync {
 
 /// A transactional persistent data store.
 #[async_trait]
-pub trait Store: Send + Sync {
+pub trait Store: Clone + Send + Sync {
     /// Return `true` if this store contains no data as of the given [`TxnId`].
     async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool>;
 }
