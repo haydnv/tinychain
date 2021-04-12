@@ -420,11 +420,61 @@ where
 
     fn _slice_reverse<B: Deref<Target = Node> + 'static>(
         self,
-        _txn_id: TxnId,
-        _node: B,
-        _range: Range,
+        txn_id: TxnId,
+        node: B,
+        range: Range,
     ) -> TCResult<TCTryStream<'static, Key>> {
-        unimplemented!()
+        let collator = &self.inner.collator;
+
+        let (l, r) = collator.bisect(&node.keys, &range);
+
+        debug!("_slice_reverse {} from {} to {}", node.deref(), l, r);
+
+        if node.leaf {
+            let keys = node.keys[l..r]
+                .iter()
+                .filter(|k| !k.deleted)
+                .rev()
+                .map(|k| k.value.to_vec())
+                .map(TCResult::Ok)
+                .collect::<Vec<TCResult<Key>>>();
+
+            Ok(Box::pin(stream::iter(keys)))
+        } else {
+            let mut selected: Selection = FuturesOrdered::new();
+
+            let last_child = node.children[r].clone();
+            let range_clone = range.clone();
+            let this = self.clone();
+            let selection = Box::pin(async move {
+                let node = this.inner.file.read_block(txn_id, last_child).await?;
+                this._slice_reverse(txn_id, node, range_clone)
+            });
+            selected.push(Box::pin(selection));
+
+            for i in (l..r).rev() {
+                let child_id = node.children[i].clone();
+                let range_clone = range.clone();
+
+                let this = self.clone();
+                let selection = Box::pin(async move {
+                    let node = this.inner.file.read_block(txn_id, child_id).await?;
+                    this._slice_reverse(txn_id, node, range_clone)
+                });
+
+                if !node.keys[i].deleted {
+                    let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
+                    let key_at_i: TCTryStream<Key> =
+                        Box::pin(stream::once(future::ready(key_at_i)));
+
+                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                }
+
+                selected.push(Box::pin(selection));
+            }
+
+            Ok(Box::pin(selected.try_flatten()))
+        }
     }
 
     pub(super) async fn rows_in_range(
