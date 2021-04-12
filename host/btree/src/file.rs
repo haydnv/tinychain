@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
-use futures::future::{self, Future, TryFutureExt};
+use futures::future::{self, try_join, try_join_all, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, TryStreamExt};
 use log::debug;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
 
-use super::{Key, Range, RowSchema};
+use super::{validate_range, Key, Range, RowSchema};
 
 type Selection = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCTryStream<'static, Key>>> + Send + Unpin>>,
@@ -240,6 +240,65 @@ where
 
     pub fn collator(&'_ self) -> &'_ ValueCollator {
         &self.inner.collator
+    }
+
+    pub fn schema(&'_ self) -> &'_ RowSchema {
+        &self.inner.schema
+    }
+
+    pub async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        let range = validate_range(range, &self.inner.schema)?;
+        let root_id = self.inner.root.read(&txn_id).await?;
+        self._delete(txn_id, (*root_id).clone(), &range).await
+    }
+
+    fn _delete<'a>(
+        &'a self,
+        txn_id: TxnId,
+        node_id: NodeId,
+        range: &'a Range,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let collator = &self.inner.collator;
+            let file = &self.inner.file;
+
+            let node = file.read_block(txn_id, node_id).await?;
+            let (l, r) = collator.bisect(&node.keys, range);
+
+            debug!("delete from {} [{}..{}]", node.deref(), l, r);
+
+            if node.leaf {
+                if l == r {
+                    return Ok(());
+                }
+
+                let mut node = node.upgrade(file).await?;
+                for i in l..r {
+                    node.keys[i].deleted = true;
+                }
+                node.rebalance = true;
+
+                Ok(())
+            } else if r > l {
+                let mut node = node.upgrade(file).await?;
+                let mut deletes = Vec::with_capacity(r - l);
+
+                for i in l..r {
+                    node.keys[i].deleted = true;
+                    deletes.push(self._delete(txn_id, node.children[i].clone(), range));
+                }
+                node.rebalance = true;
+
+                let child_id = node.children[r].clone();
+                let last_delete = self._delete(txn_id, child_id, range);
+                try_join(try_join_all(deletes), last_delete).await?;
+
+                Ok(())
+            } else {
+                let child_id = node.children[r].clone();
+                self._delete(txn_id, child_id, range).await
+            }
+        })
     }
 
     pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {

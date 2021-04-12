@@ -128,6 +128,7 @@ impl fmt::Display for Column {
 
 pub type RowSchema = Vec<Column>;
 
+#[inline]
 pub fn validate_range(_range: Range, _schema: &[Column]) -> TCResult<Range> {
     unimplemented!()
 }
