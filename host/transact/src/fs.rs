@@ -103,13 +103,13 @@ impl BlockData for Value {
 }
 
 #[async_trait]
-pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> {
+pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {
     async fn upgrade(self, file: &F)
         -> TCResult<<<F as File<B>>::Block as Block<B, F>>::WriteLock>;
 }
 
 #[async_trait]
-pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> {
+pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> + Send {
     async fn downgrade(
         self,
         file: &F,

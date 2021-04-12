@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
@@ -18,7 +19,7 @@ use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{TCTryStream, Tuple};
+use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
 
 use super::{Key, Range, RowSchema};
 
@@ -239,6 +240,100 @@ where
 
     pub fn collator(&'_ self) -> &'_ ValueCollator {
         &self.inner.collator
+    }
+
+    pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let file = &self.inner.file;
+        let order = self.inner.order;
+
+        let root_id = self.inner.root.read(&txn_id).await?;
+        let root = file.read_block(txn_id, (*root_id).clone()).await?;
+
+        debug!(
+            "insert into BTree node with {} keys and {} children (order is {})",
+            root.keys.len(),
+            root.children.len(),
+            order
+        );
+
+        if root.keys.len() == (2 * order) - 1 {
+            let mut root_id = root_id.upgrade().await?;
+            let old_root_id = (*root_id).clone();
+
+            (*root_id) = file.unique_id(&txn_id).await?;
+            let mut new_root = Node::new(false, None);
+            new_root.children.push(old_root_id.clone());
+
+            file.create_block(txn_id, (*root_id).clone(), new_root)
+                .await?;
+
+            let new_root = file.write_block(txn_id, root_id.deref().clone()).await?;
+
+            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+            self._insert(txn_id, new_root, key).await
+        } else {
+            self._insert(txn_id, root, key).await
+        }
+    }
+
+    fn _insert(
+        &self,
+        txn_id: TxnId,
+        node: <F::Block as Block<Node, F>>::ReadLock,
+        key: Key,
+    ) -> TCBoxTryFuture<()> {
+        Box::pin(async move {
+            let collator = &self.inner.collator;
+            let file = &self.inner.file;
+            let order = self.inner.order;
+
+            let i = collator.bisect_left(&node.keys, &key);
+            if i < node.keys.len() && collator.compare_slice(&node.keys[i], &key) == Ordering::Equal
+            {
+                if node.keys[i].deleted {
+                    let mut node = node.upgrade(file).await?;
+                    node.keys[i].deleted = false;
+                }
+
+                return Ok(());
+            }
+
+            debug!("insert at index {} into {}", i, node.deref());
+
+            if node.leaf {
+                let mut node = node.upgrade(file).await?;
+                node.keys.insert(i, NodeKey::new(key));
+                Ok(())
+            } else {
+                let child_id = node.children[i].clone();
+                let mut child = file.read_block(txn_id, child_id).await?;
+
+                if child.keys.len() == (2 * order) - 1 {
+                    let child_id = node.children[i].clone();
+                    let node = self
+                        .split_child(txn_id, child_id, node.upgrade(file).await?, i)
+                        .await?;
+
+                    match collator.compare_slice(&key, &node.keys[i]) {
+                        Ordering::Less => {}
+                        Ordering::Equal => {
+                            if node.keys[i].deleted {
+                                let mut node = node.upgrade(file).await?;
+                                node.keys[i].deleted = false;
+                            }
+
+                            return Ok(());
+                        }
+                        Ordering::Greater => {
+                            let child_id = node.children[i + 1].clone();
+                            child = file.read_block(txn_id, child_id).await?;
+                        }
+                    }
+                }
+
+                self._insert(txn_id, child, key).await
+            }
+        })
     }
 
     fn slice<B: Deref<Target = Node> + 'static>(

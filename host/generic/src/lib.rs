@@ -5,7 +5,7 @@
 use std::fmt;
 use std::pin::Pin;
 
-use futures::Stream;
+use futures::{Future, Stream};
 
 use tc_error::TCResult;
 
@@ -19,7 +19,10 @@ pub use map::*;
 pub use time::*;
 pub use tuple::*;
 
-/// A pinned TryStream with error type TCError
+/// A pinned future which returns a [`TCResult`]
+pub type TCBoxTryFuture<'a, T> = Pin<Box<dyn Future<Output = TCResult<T>> + Send + 'a>>;
+
+/// A pinned TryStream with error type [`TCError`]
 pub type TCTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
 /// A generic class trait
