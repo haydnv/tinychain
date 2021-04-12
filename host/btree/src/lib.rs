@@ -1,9 +1,11 @@
 use std::fmt;
 
+use async_trait::async_trait;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::TxnId;
 use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
@@ -19,6 +21,7 @@ pub use slice::BTreeSlice;
 pub type Key = Vec<Value>;
 pub type Range = collate::Range<Value, Key>;
 
+#[async_trait]
 pub trait BTreeInstance: Instance {
     type Slice: BTreeInstance;
 
@@ -27,6 +30,12 @@ pub trait BTreeInstance: Instance {
     fn schema(&self) -> &RowSchema;
 
     fn slice(self, range: Range, reverse: bool) -> Self::Slice;
+
+    async fn delete(&self, txn_id: TxnId) -> TCResult<()>;
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
+
+    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>>;
 }
 
 #[derive(Clone, PartialEq)]

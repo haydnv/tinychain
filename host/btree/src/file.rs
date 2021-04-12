@@ -21,7 +21,7 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
-use super::{validate_range, BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
+use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
 type Selection = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCTryStream<'static, Key>>> + Send + Unpin>>,
@@ -238,13 +238,7 @@ where
         })
     }
 
-    pub async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
-        let range = validate_range(range, &self.inner.schema)?;
-        let root_id = self.inner.root.read(&txn_id).await?;
-        self._delete(txn_id, (*root_id).clone(), &range).await
-    }
-
-    fn _delete<'a>(
+    fn _delete_range<'a>(
         &'a self,
         txn_id: TxnId,
         node_id: NodeId,
@@ -277,54 +271,25 @@ where
 
                 for i in l..r {
                     node.keys[i].deleted = true;
-                    deletes.push(self._delete(txn_id, node.children[i].clone(), range));
+                    deletes.push(self._delete_range(txn_id, node.children[i].clone(), range));
                 }
                 node.rebalance = true;
 
                 let child_id = node.children[r].clone();
-                let last_delete = self._delete(txn_id, child_id, range);
+                let last_delete = self._delete_range(txn_id, child_id, range);
                 try_join(try_join_all(deletes), last_delete).await?;
 
                 Ok(())
             } else {
                 let child_id = node.children[r].clone();
-                self._delete(txn_id, child_id, range).await
+                self._delete_range(txn_id, child_id, range).await
             }
         })
     }
 
-    pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        let file = &self.inner.file;
-        let order = self.inner.order;
-
+    pub(super) async fn delete_range(&self, txn_id: TxnId, range: &Range) -> TCResult<()> {
         let root_id = self.inner.root.read(&txn_id).await?;
-        let root = file.read_block(txn_id, (*root_id).clone()).await?;
-
-        debug!(
-            "insert into BTree node with {} keys and {} children (order is {})",
-            root.keys.len(),
-            root.children.len(),
-            order
-        );
-
-        if root.keys.len() == (2 * order) - 1 {
-            let mut root_id = root_id.upgrade().await?;
-            let old_root_id = (*root_id).clone();
-
-            (*root_id) = file.unique_id(&txn_id).await?;
-            let mut new_root = Node::new(false, None);
-            new_root.children.push(old_root_id.clone());
-
-            file.create_block(txn_id, (*root_id).clone(), new_root)
-                .await?;
-
-            let new_root = file.write_block(txn_id, root_id.deref().clone()).await?;
-
-            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
-            self._insert(txn_id, new_root, key).await
-        } else {
-            self._insert(txn_id, root, key).await
-        }
+        self._delete_range(txn_id, (*root_id).clone(), range).await
     }
 
     fn _insert(
@@ -387,7 +352,7 @@ where
         })
     }
 
-    fn slice<B: Deref<Target = Node> + 'static>(
+    fn _slice<B: Deref<Target = Node> + 'static>(
         self,
         txn_id: TxnId,
         node: B,
@@ -427,7 +392,7 @@ where
                 let selection = Box::pin(async move {
                     let node = this.inner.file.read_block(txn_id, child_id).await?;
 
-                    this.slice(txn_id, node, range_clone)
+                    this._slice(txn_id, node, range_clone)
                 });
                 selected.push(Box::pin(selection));
 
@@ -445,7 +410,7 @@ where
             let selection = Box::pin(async move {
                 let node = self.inner.file.read_block(txn_id, last_child_id).await?;
 
-                self.slice(txn_id, node, range)
+                self._slice(txn_id, node, range)
             });
             selected.push(Box::pin(selection));
 
@@ -453,13 +418,32 @@ where
         }
     }
 
-    fn slice_reverse<B: Deref<Target = Node> + 'static>(
+    fn _slice_reverse<B: Deref<Target = Node> + 'static>(
         self,
         _txn_id: TxnId,
         _node: B,
         _range: Range,
     ) -> TCResult<TCTryStream<'static, Key>> {
         unimplemented!()
+    }
+
+    pub(super) async fn rows_in_range(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        reverse: bool,
+    ) -> TCResult<TCTryStream<'static, Key>> {
+        let root_id = self.inner.root.read(&txn_id).await?;
+        let root = self
+            .inner
+            .file
+            .read_block(txn_id, (*root_id).clone())
+            .await?;
+        if reverse {
+            self._slice_reverse(txn_id, root, range)
+        } else {
+            self._slice(txn_id, root, range)
+        }
     }
 
     async fn split_child(
@@ -512,9 +496,10 @@ where
     }
 }
 
-impl<F, D, T> BTreeInstance for BTreeFile<F, D, T>
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
 where
-    Self: Clone + Send + Sync,
+    Self: Clone + 'static,
 {
     type Slice = BTreeSlice<F, D, T>;
 
@@ -528,5 +513,47 @@ where
 
     fn slice(self, range: Range, reverse: bool) -> Self::Slice {
         BTreeSlice::new(BTree::File(self), range, reverse)
+    }
+
+    async fn delete(&self, _txn_id: TxnId) -> TCResult<()> {
+        todo!()
+    }
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let file = &self.inner.file;
+        let order = self.inner.order;
+
+        let root_id = self.inner.root.read(&txn_id).await?;
+        let root = file.read_block(txn_id, (*root_id).clone()).await?;
+
+        debug!(
+            "insert into BTree node with {} keys and {} children (order is {})",
+            root.keys.len(),
+            root.children.len(),
+            order
+        );
+
+        if root.keys.len() == (2 * order) - 1 {
+            let mut root_id = root_id.upgrade().await?;
+            let old_root_id = (*root_id).clone();
+
+            (*root_id) = file.unique_id(&txn_id).await?;
+            let mut new_root = Node::new(false, None);
+            new_root.children.push(old_root_id.clone());
+
+            file.create_block(txn_id, (*root_id).clone(), new_root)
+                .await?;
+
+            let new_root = file.write_block(txn_id, root_id.deref().clone()).await?;
+
+            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+            self._insert(txn_id, new_root, key).await
+        } else {
+            self._insert(txn_id, root, key).await
+        }
+    }
+
+    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>> {
+        self.rows_in_range(txn_id, Range::default(), false).await
     }
 }

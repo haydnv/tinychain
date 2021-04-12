@@ -1,7 +1,12 @@
-use tc_value::ValueCollator;
-use tcgeneric::Instance;
+use async_trait::async_trait;
 
-use super::{BTree, BTreeFile, BTreeInstance, BTreeType, Range, RowSchema};
+use tc_error::TCResult;
+use tc_transact::fs::{Dir, File};
+use tc_transact::{Transaction, TxnId};
+use tc_value::ValueCollator;
+use tcgeneric::{Instance, TCTryStream};
+
+use super::{BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema};
 
 #[derive(Clone)]
 pub struct BTreeSlice<F, D, T> {
@@ -57,9 +62,10 @@ where
     }
 }
 
-impl<F, D, T> BTreeInstance for BTreeSlice<F, D, T>
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T>
 where
-    BTreeFile<F, D, T>: Clone + Send + Sync,
+    BTreeFile<F, D, T>: Clone + 'static,
 {
     type Slice = Self;
 
@@ -73,5 +79,19 @@ where
 
     fn slice(self, range: Range, reverse: bool) -> Self::Slice {
         Self::new(BTree::Slice(self), range, reverse)
+    }
+
+    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
+        self.source.delete_range(txn_id, &self.range).await
+    }
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        self.source.insert(txn_id, key).await
+    }
+
+    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>> {
+        self.source
+            .rows_in_range(txn_id, self.range, self.reverse)
+            .await
     }
 }
