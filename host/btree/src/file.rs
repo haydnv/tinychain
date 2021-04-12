@@ -14,7 +14,7 @@ use log::debug;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, Dir, File};
+use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
@@ -314,5 +314,43 @@ where
         _range: Range,
     ) -> TCResult<TCTryStream<'static, Key>> {
         unimplemented!()
+    }
+
+    async fn split_child(
+        &self,
+        txn_id: TxnId,
+        node_id: NodeId,
+        mut node: <F::Block as Block<Node, F>>::WriteLock,
+        i: usize,
+    ) -> TCResult<<F::Block as Block<Node, F>>::ReadLock> {
+        let file = &self.inner.file;
+        let order = self.inner.order;
+
+        let child_id = node.children[i].clone(); // needed due to mutable borrow below
+        let mut child = file.write_block(txn_id, child_id).await?;
+
+        debug!(
+            "child to split has {} keys and {} children",
+            child.keys.len(),
+            child.children.len()
+        );
+
+        let new_node_id = file.unique_id(&txn_id).await?;
+
+        node.children.insert(i + 1, new_node_id.clone());
+        node.keys.insert(i, child.keys.remove(order - 1));
+
+        let mut new_node = Node::new(child.leaf, Some(node_id));
+        new_node.keys = child.keys.drain((order - 1)..).collect();
+
+        if child.leaf {
+            debug!("child is a leaf node");
+        } else {
+            new_node.children = child.children.drain(order..).collect();
+        }
+
+        file.create_block(txn_id, new_node_id, new_node).await?;
+
+        node.downgrade(file).await
     }
 }

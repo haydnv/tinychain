@@ -31,7 +31,7 @@ pub struct Block<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::Block<B> for Block<B>
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::Block<B, File<B>> for Block<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
@@ -73,14 +73,12 @@ impl<B> Deref for BlockRead<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockRead<B> for BlockRead<B>
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockRead<B, File<B>> for BlockRead<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    type File = File<B>;
-
-    async fn upgrade(self, file: &Self::File) -> TCResult<BlockWrite<B>> {
+    async fn upgrade(self, file: &File<B>) -> TCResult<BlockWrite<B>> {
         fs::File::write_block(file, self.txn_id, self.name).await
     }
 }
@@ -106,14 +104,12 @@ impl<B> DerefMut for BlockWrite<B> {
 }
 
 #[async_trait]
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockWrite<B> for BlockWrite<B>
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockWrite<B, File<B>> for BlockWrite<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    type File = File<B>;
-
-    async fn downgrade(self, file: &Self::File) -> TCResult<BlockRead<B>> {
+    async fn downgrade(self, file: &File<B>) -> TCResult<BlockRead<B>> {
         fs::File::read_block(file, self.txn_id, self.name).await
     }
 }
