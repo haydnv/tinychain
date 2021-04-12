@@ -4,7 +4,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_value::{NumberType, Value, ValueType};
+use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
 #[allow(dead_code)]
@@ -18,6 +18,16 @@ pub use slice::BTreeSlice;
 
 pub type Key = Vec<Value>;
 pub type Range = collate::Range<Value, Key>;
+
+pub trait BTreeInstance: Instance {
+    type Slice: BTreeInstance;
+
+    fn collator(&self) -> &ValueCollator;
+
+    fn schema(&self) -> &RowSchema;
+
+    fn slice(self, range: Range, reverse: bool) -> Self::Slice;
+}
 
 #[derive(Clone, PartialEq)]
 pub struct Column {
@@ -175,7 +185,7 @@ impl fmt::Display for BTreeType {
 #[derive(Clone)]
 pub enum BTree<F, D, T> {
     File(BTreeFile<F, D, T>),
-    Slice(BTreeSlice),
+    Slice(BTreeSlice<F, D, T>),
 }
 
 impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T> {
@@ -183,8 +193,8 @@ impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T>
 
     fn class(&self) -> BTreeType {
         match self {
-            Self::File(_) => BTreeType::File,
-            Self::Slice(_) => BTreeType::Slice,
+            Self::File(file) => file.class(),
+            Self::Slice(slice) => slice.class(),
         }
     }
 }

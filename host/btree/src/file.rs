@@ -19,9 +19,9 @@ use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
+use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
-use super::{validate_range, Key, Range, RowSchema};
+use super::{validate_range, BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
 type Selection = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCTryStream<'static, Key>>> + Send + Unpin>>,
@@ -236,14 +236,6 @@ where
                 txn: PhantomData,
             }),
         })
-    }
-
-    pub fn collator(&'_ self) -> &'_ ValueCollator {
-        &self.inner.collator
-    }
-
-    pub fn schema(&'_ self) -> &'_ RowSchema {
-        &self.inner.schema
     }
 
     pub async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
@@ -506,5 +498,35 @@ where
         file.create_block(txn_id, new_node_id, new_node).await?;
 
         node.downgrade(file).await
+    }
+}
+
+impl<F, D, T> Instance for BTreeFile<F, D, T>
+where
+    Self: Send + Sync,
+{
+    type Class = BTreeType;
+
+    fn class(&self) -> Self::Class {
+        BTreeType::File
+    }
+}
+
+impl<F, D, T> BTreeInstance for BTreeFile<F, D, T>
+where
+    Self: Clone + Send + Sync,
+{
+    type Slice = BTreeSlice<F, D, T>;
+
+    fn collator(&'_ self) -> &'_ ValueCollator {
+        &self.inner.collator
+    }
+
+    fn schema(&'_ self) -> &'_ RowSchema {
+        &self.inner.schema
+    }
+
+    fn slice(self, range: Range, reverse: bool) -> Self::Slice {
+        BTreeSlice::new(BTree::File(self), range, reverse)
     }
 }
