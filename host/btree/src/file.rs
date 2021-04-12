@@ -14,7 +14,7 @@ use log::debug;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, Dir, File};
+use tc_transact::fs::{Block, BlockData, BlockId, Dir, File};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
@@ -279,13 +279,9 @@ where
 
                 let this = self.clone();
                 let selection = Box::pin(async move {
-                    let node = this
-                        .inner
-                        .file
-                        .clone()
-                        .read_block_owned(txn_id, child_id)
-                        .await?;
-                    this.clone().slice(txn_id, node, range_clone)
+                    let node = this.inner.file.read_block(&txn_id, &child_id).await?;
+
+                    this.slice(txn_id, node, range_clone)
                 });
                 selected.push(Box::pin(selection));
 
@@ -301,12 +297,7 @@ where
             let last_child_id = node.children[r].clone();
 
             let selection = Box::pin(async move {
-                let node = self
-                    .inner
-                    .file
-                    .clone()
-                    .read_block_owned(txn_id, last_child_id)
-                    .await?;
+                let node = self.inner.file.read_block(&txn_id, &last_child_id).await?;
 
                 self.slice(txn_id, node, range)
             });
@@ -323,5 +314,44 @@ where
         _range: Range,
     ) -> TCResult<TCTryStream<'static, Key>> {
         unimplemented!()
+    }
+
+    async fn split_child<'a>(
+        &'a self,
+        txn_id: TxnId,
+        node_id: NodeId,
+        block: &'a F::Block,
+        i: usize,
+    ) -> TCResult<()> {
+        let file = &self.inner.file;
+        let order = self.inner.order;
+
+        let mut node = block.write().await;
+        let child_id = node.children[i].clone();
+        let mut child = file.write_block(txn_id, child_id).await?;
+
+        debug!(
+            "child to split has {} keys and {} children",
+            child.keys.len(),
+            child.children.len()
+        );
+
+        let new_node_id = file.unique_id(&txn_id).await?;
+
+        node.children.insert(i + 1, new_node_id.clone());
+        node.keys.insert(i, child.keys.remove(order - 1));
+
+        let mut new_node = Node::new(child.leaf, Some(node_id));
+        new_node.keys = child.keys.drain((order - 1)..).collect();
+
+        if child.leaf {
+            debug!("child is a leaf node");
+        } else {
+            new_node.children = child.children.drain(order..).collect();
+        }
+
+        file.create_block(txn_id, new_node_id, new_node).await?;
+
+        Ok(())
     }
 }

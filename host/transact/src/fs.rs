@@ -26,7 +26,10 @@ pub type BlockId = PathSegment;
 pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     fn ext() -> &'static str;
 
-    async fn hash<'en>(&'en self) -> TCResult<Bytes> where Self: en::ToStream<'en> {
+    async fn hash<'en>(&'en self) -> TCResult<Bytes>
+    where
+        Self: en::ToStream<'en>,
+    {
         let mut data = tbon::en::encode(self).map_err(TCError::internal)?;
         let mut hasher = Sha256::default();
         while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
@@ -43,7 +46,10 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
             .await
     }
 
-    async fn persist<'en, W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64> where Self: en::ToStream<'en> {
+    async fn persist<'en, W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64>
+    where
+        Self: en::ToStream<'en>,
+    {
         let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
 
@@ -58,8 +64,12 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
             .await
     }
 
-    async fn size<'en>(&'en self) -> TCResult<u64> where Self: en::ToStream<'en> {
-        let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+    async fn size<'en>(&'en self) -> TCResult<u64>
+    where
+        Self: en::ToStream<'en>,
+    {
+        let encoded =
+            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -69,8 +79,12 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
             .await
     }
 
-    async fn into_size<'en>(self) -> TCResult<u64> where Self: Clone + en::IntoStream<'en> + 'en {
-        let encoded = tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+    async fn into_size<'en>(self) -> TCResult<u64>
+    where
+        Self: Clone + en::IntoStream<'en> + 'en,
+    {
+        let encoded =
+            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -117,6 +131,9 @@ pub trait File<B: BlockData>: Store + Sized {
     /// Return the IDs of all this file's blocks.
     async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
 
+    /// Return a new [`BlockId`] which is not used within this `File`.
+    async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId>;
+
     /// Return true if this file contains the given [`BlockId`] as of the given [`TxnId`].
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
 
@@ -131,14 +148,17 @@ pub trait File<B: BlockData>: Store + Sized {
     /// Delete the block with the given ID.
     async fn delete_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<()>;
 
-    /// Get a read lock on the block at `name` as of [`TxnId`].
+    /// Return a lockable owned reference to the block at `name`.
+    async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Self::Block>;
+
+    /// Get a read lock on the block at `name`.
     async fn read_block(
         &self,
         txn_id: &TxnId,
         name: &BlockId,
     ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
-    /// Get a read lock on the block at `name` as of [`TxnId`], without borrowing.
+    /// Get a read lock on the block at `name`, without borrowing.
     async fn read_block_owned(
         self,
         txn_id: TxnId,

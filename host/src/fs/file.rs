@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{try_join_all, FutureExt, TryFutureExt};
 use log::debug;
+use uuid::Uuid;
 use uplock::*;
 
 use tc_error::*;
@@ -113,31 +114,6 @@ impl<B: BlockData> File<B> {
             )))
         }
     }
-
-    async fn get_block<'en>(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>>
-    where
-        B: en::IntoStream<'en> + 'en,
-        CacheBlock: From<CacheLock<B>>,
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-    {
-        if !fs::File::contains_block(self, txn_id, &name).await? {
-            return Err(TCError::not_found(name));
-        }
-
-        let version = fs_path(&version_path(&self.path, txn_id), &name);
-        if let Some(lock) = self.cache.read(&version).await? {
-            Ok(Block { lock })
-        } else {
-            let canon = fs_path(&self.path, name);
-            let block = self.cache.read(&canon).await?;
-            let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
-            let data = block.read().await;
-            self.cache
-                .write(version, data.deref().clone())
-                .map_ok(|lock| Block { lock })
-                .await
-        }
-    }
 }
 
 #[async_trait]
@@ -159,8 +135,20 @@ where
     type Block = Block<B>;
 
     async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
-        let block_ids = self.contents.read(txn_id).await?;
-        Ok((*block_ids).clone())
+        let contents = self.contents.read(txn_id).await?;
+        Ok((*contents).clone())
+    }
+
+    async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId> {
+        let contents = self.contents.read(txn_id).await?;
+        let id = loop {
+            let id: BlockId = Uuid::new_v4().into();
+            if !contents.contains(&id) {
+                break id;
+            }
+        };
+
+        Ok(id)
     }
 
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool> {
@@ -194,6 +182,30 @@ where
 
     async fn delete_block(&self, _txn_id: &TxnId, _name: &BlockId) -> TCResult<()> {
         Err(TCError::not_implemented("File::delete_block"))
+    }
+
+    async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>> {
+        {
+            let contents = self.contents.read(txn_id).await?;
+            if !contents.contains(name) {
+                return Err(TCError::not_found(name));
+            }
+        }
+
+        let version = fs_path(&version_path(&self.path, txn_id), &name);
+        if let Some(lock) = self.cache.read(&version).await? {
+            Ok(Block { lock })
+        } else {
+            let canon = fs_path(&self.path, name);
+            let block = self.cache.read(&canon).await?;
+            let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
+            let data = block.read().await;
+
+            self.cache
+                .write(version, data.deref().clone())
+                .map_ok(|lock| Block { lock })
+                .await
+        }
     }
 
     async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<BlockRead<B>> {
@@ -236,7 +248,7 @@ where
             if let Some(blocks) = mutated.get(txn_id) {
                 let commits = blocks.iter().map(|block_id| async move {
                     let block_path = fs_path(file_path, block_id);
-                    let block = self.get_block(txn_id, block_id).await.expect("get block");
+                    let block = fs::File::get_block(self, txn_id, block_id).await.expect("get block");
 
                     let data = fs::Block::read(&block).await;
 
