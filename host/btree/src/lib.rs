@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Bound;
 
 use async_trait::async_trait;
 use log::debug;
@@ -147,11 +148,6 @@ impl fmt::Display for Column {
 
 pub type RowSchema = Vec<Column>;
 
-#[inline]
-pub fn validate_range(_range: Range, _schema: &[Column]) -> TCResult<Range> {
-    unimplemented!()
-}
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BTreeType {
     File,
@@ -215,4 +211,34 @@ impl<F, D, T> fmt::Display for BTree<F, D, T> {
             Self::Slice(_) => "a BTree slice",
         })
     }
+}
+
+#[inline]
+pub fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
+    if range.len() > schema.len() {
+        return Err(TCError::bad_request(
+            "too many columns in range",
+            range.len(),
+        ));
+    }
+
+    let (input_prefix, start, end) = range.into_inner();
+
+    let mut prefix = Vec::with_capacity(input_prefix.len());
+    for (value, column) in input_prefix.into_iter().zip(schema) {
+        let value = column.dtype.try_cast(value)?;
+        prefix.push(value);
+    }
+
+    let dtype = schema.get(prefix.len()).unwrap().dtype;
+    let validate_bound = |bound| match bound {
+        Bound::Unbounded => Ok(Bound::Unbounded),
+        Bound::Included(value) => dtype.try_cast(value).map(Bound::Included),
+        Bound::Excluded(value) => dtype.try_cast(value).map(Bound::Excluded),
+    };
+
+    let start = validate_bound(start)?;
+    let end = validate_bound(end)?;
+
+    Ok((prefix, start, end).into())
 }
