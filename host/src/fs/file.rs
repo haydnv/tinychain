@@ -10,10 +10,10 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::future::{try_join_all, FutureExt, TryFutureExt};
+use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
-use uuid::Uuid;
 use uplock::*;
+use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{self, BlockData, BlockId, Store};
@@ -23,25 +23,44 @@ use tc_transact::{Transact, TxnId};
 use super::cache::*;
 use super::{file_name, fs_path, DirContents};
 
+#[derive(Clone)]
 pub struct Block<B> {
+    name: BlockId,
+    txn_id: TxnId,
     lock: CacheLock<B>,
 }
 
 #[async_trait]
-impl<B: BlockData> fs::Block<B> for Block<B> {
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::Block<B> for Block<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
     type ReadLock = BlockRead<B>;
     type WriteLock = BlockWrite<B>;
 
-    async fn read(&self) -> Self::ReadLock {
-        self.lock.read().map(|lock| BlockRead { lock }).await
+    async fn read(self) -> Self::ReadLock {
+        let lock = self.lock.read().await;
+        BlockRead {
+            name: self.name,
+            txn_id: self.txn_id,
+            lock,
+        }
     }
 
-    async fn write(&self) -> Self::WriteLock {
-        self.lock.write().map(|lock| BlockWrite { lock }).await
+    async fn write(self) -> Self::WriteLock {
+        let lock = self.lock.write().await;
+        BlockWrite {
+            name: self.name,
+            txn_id: self.txn_id,
+            lock,
+        }
     }
 }
 
 pub struct BlockRead<B> {
+    name: BlockId,
+    txn_id: TxnId,
     lock: RwLockReadGuard<B>,
 }
 
@@ -53,7 +72,22 @@ impl<B> Deref for BlockRead<B> {
     }
 }
 
+#[async_trait]
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockRead<B> for BlockRead<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
+    type File = File<B>;
+
+    async fn upgrade(self, file: &Self::File) -> TCResult<BlockWrite<B>> {
+        fs::File::write_block(file, self.txn_id, self.name).await
+    }
+}
+
 pub struct BlockWrite<B> {
+    name: BlockId,
+    txn_id: TxnId,
     lock: RwLockWriteGuard<B>,
 }
 
@@ -68,6 +102,19 @@ impl<B> Deref for BlockWrite<B> {
 impl<B> DerefMut for BlockWrite<B> {
     fn deref_mut(&mut self) -> &mut B {
         self.lock.deref_mut()
+    }
+}
+
+#[async_trait]
+impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockWrite<B> for BlockWrite<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
+    type File = File<B>;
+
+    async fn downgrade(self, file: &Self::File) -> TCResult<BlockRead<B>> {
+        fs::File::read_block(file, self.txn_id, self.name).await
     }
 }
 
@@ -173,10 +220,11 @@ where
         }
 
         let path = fs_path(&self.path, &name);
-        contents.insert(name);
+        contents.insert(name.clone());
+
         self.cache
             .write(path, initial_value)
-            .map_ok(|lock| Block { lock })
+            .map_ok(|lock| Block { name, txn_id, lock })
             .await
     }
 
@@ -184,50 +232,50 @@ where
         Err(TCError::not_implemented("File::delete_block"))
     }
 
-    async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Block<B>> {
+    async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Block<B>> {
         {
-            let contents = self.contents.read(txn_id).await?;
-            if !contents.contains(name) {
+            let contents = self.contents.read(&txn_id).await?;
+            if !contents.contains(&name) {
                 return Err(TCError::not_found(name));
             }
         }
 
-        let version = fs_path(&version_path(&self.path, txn_id), &name);
+        let version = fs_path(&version_path(&self.path, &txn_id), &name);
         if let Some(lock) = self.cache.read(&version).await? {
-            Ok(Block { lock })
+            Ok(Block { name, txn_id, lock })
         } else {
-            let canon = fs_path(&self.path, name);
+            let canon = fs_path(&self.path, &name);
             let block = self.cache.read(&canon).await?;
             let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
             let data = block.read().await;
 
             self.cache
                 .write(version, data.deref().clone())
-                .map_ok(|lock| Block { lock })
+                .map_ok(|lock| Block { name, txn_id, lock })
                 .await
         }
     }
 
-    async fn read_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<BlockRead<B>> {
-        let block = self.get_block(txn_id, &name).await?;
-        Ok(fs::Block::read(&block).await)
+    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+        let block = self.get_block(txn_id, name).await?;
+        Ok(fs::Block::read(block).await)
     }
 
     async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
-        let block = self.get_block(&txn_id, &name).await?;
-        Ok(fs::Block::read(&block).await)
+        let block = self.get_block(txn_id, name).await?;
+        Ok(fs::Block::read(block).await)
     }
 
     async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>> {
         let mut mutated = self.mutated.write().await;
-        let block = self.get_block(&txn_id, &name).await?;
+        let block = self.get_block(txn_id, name).await?;
 
         match mutated.entry(txn_id) {
-            Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(name.clone()),
-            Entry::Occupied(mut entry) => entry.get_mut().insert(name.clone()),
+            Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block.name.clone()),
+            Entry::Occupied(mut entry) => entry.get_mut().insert(block.name.clone()),
         };
 
-        Ok(fs::Block::write(&block).await)
+        Ok(fs::Block::write(block).await)
     }
 }
 
@@ -248,9 +296,11 @@ where
             if let Some(blocks) = mutated.get(txn_id) {
                 let commits = blocks.iter().map(|block_id| async move {
                     let block_path = fs_path(file_path, block_id);
-                    let block = fs::File::get_block(self, txn_id, block_id).await.expect("get block");
+                    let block = fs::File::get_block(self, *txn_id, block_id.clone())
+                        .await
+                        .expect("get block");
 
-                    let data = fs::Block::read(&block).await;
+                    let data = fs::Block::read(block).await;
 
                     cache.write_and_sync(block_path, data.deref().clone()).await
                 });

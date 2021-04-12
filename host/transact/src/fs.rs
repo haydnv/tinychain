@@ -102,17 +102,37 @@ impl BlockData for Value {
     }
 }
 
+#[async_trait]
+pub trait BlockRead<B: BlockData>: Deref<Target = B> {
+    type File: File<B>;
+
+    async fn upgrade(
+        self,
+        file: &Self::File,
+    ) -> TCResult<<<Self::File as File<B>>::Block as Block<B>>::WriteLock>;
+}
+
+#[async_trait]
+pub trait BlockWrite<B: BlockData>: DerefMut<Target = B> {
+    type File: File<B>;
+
+    async fn downgrade(
+        self,
+        file: &Self::File,
+    ) -> TCResult<<<Self::File as File<B>>::Block as Block<B>>::ReadLock>;
+}
+
 /// A transactional filesystem block.
 #[async_trait]
 pub trait Block<B: BlockData>: Send + Sync {
-    type ReadLock: Deref<Target = B>;
-    type WriteLock: DerefMut<Target = B>;
+    type ReadLock: BlockRead<B>;
+    type WriteLock: BlockWrite<B>;
 
     /// Get a read lock on this block.
-    async fn read(&self) -> Self::ReadLock;
+    async fn read(self) -> Self::ReadLock;
 
     /// Get a write lock on this block.
-    async fn write(&self) -> Self::WriteLock;
+    async fn write(self) -> Self::WriteLock;
 }
 
 /// A transactional persistent data store.
@@ -149,13 +169,13 @@ pub trait File<B: BlockData>: Store + Sized {
     async fn delete_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<()>;
 
     /// Return a lockable owned reference to the block at `name`.
-    async fn get_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<Self::Block>;
+    async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Block>;
 
     /// Get a read lock on the block at `name`.
     async fn read_block(
         &self,
-        txn_id: &TxnId,
-        name: &BlockId,
+        txn_id: TxnId,
+        name: BlockId,
     ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
     /// Get a read lock on the block at `name`, without borrowing.

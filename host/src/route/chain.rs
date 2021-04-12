@@ -41,7 +41,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 debug!("Subject::get {} {}", TCPath::from(self.path), key);
-                let subject = self.chain.subject().at(txn.id()).await?;
+                let subject = self.chain.subject().at(*txn.id()).await?;
                 debug!("Subject is {}", subject);
                 subject.get(&txn, self.path, key).await
             })
@@ -72,7 +72,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                         .put(*txn.id(), self.path.to_vec().into(), key, value)
                         .await
                 } else {
-                    let subject = self.chain.subject().at(txn.id()).await?;
+                    let subject = self.chain.subject().at(*txn.id()).await?;
                     subject.put(&txn, self.path, key, value).await
                 }
             })
@@ -83,7 +83,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
                 debug!("Subject::post {}", params);
-                let subject = self.chain.subject().at(txn.id()).await?;
+                let subject = self.chain.subject().at(*txn.id()).await?;
                 subject.post(&txn, self.path, params).await
             })
         }))

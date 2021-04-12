@@ -67,9 +67,9 @@ impl ChainInstance for BlockChain {
         Ok(())
     }
 
-    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>> {
-        let latest = self.latest.read(txn_id).await?;
-        let block = self.file.read_block(txn_id, &(*latest).into()).await?;
+    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
+        let latest = self.latest.read(&txn_id).await?;
+        let block = self.file.read_block(txn_id, (*latest).into()).await?;
         Ok(block.mutations().keys().last().cloned())
     }
 
@@ -102,15 +102,15 @@ impl ChainInstance for BlockChain {
 
         const ERR_DIVERGENT: &str = "blockchain to replicate diverges at block";
         for i in 0..(*latest) {
-            let block = self.file.read_block(txn.id(), &i.into()).await?;
-            let other = chain.file.read_block(txn.id(), &i.into()).await?;
+            let block = self.file.read_block(*txn.id(), i.into()).await?;
+            let other = chain.file.read_block(*txn.id(), i.into()).await?;
             if &*block != &*other {
                 return Err(TCError::bad_request(ERR_DIVERGENT, i));
             }
         }
 
-        let block = chain.file.read_block(txn.id(), &(*latest).into()).await?;
-        let mutations = if let Some(last_commit) = self.last_commit(txn.id()).await? {
+        let block = chain.file.read_block(*txn.id(), (*latest).into()).await?;
+        let mutations = if let Some(last_commit) = self.last_commit(*txn.id()).await? {
             block.mutations().range(last_commit.next()..)
         } else {
             block.mutations().range(..)
@@ -129,7 +129,7 @@ impl ChainInstance for BlockChain {
         while chain.file.contains_block(txn.id(), &i.into()).await? {
             new_blocks = true;
 
-            let block = chain.file.read_block(txn.id(), &i.into()).await?;
+            let block = chain.file.read_block(*txn.id(), i.into()).await?;
 
             for (_, ops) in block.mutations() {
                 for (path, key, value) in ops.iter().cloned() {
@@ -201,7 +201,7 @@ impl Transact for BlockChain {
 
             let block = self
                 .file
-                .read_block(txn_id, &(*latest).into())
+                .read_block(*txn_id, (*latest).into())
                 .await
                 .expect("read latest chain block");
 
@@ -316,7 +316,7 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
     let mut latest = 0u64;
     let mut hash = Bytes::from(NULL_HASH);
     while file.contains_block(&txn_id, &latest.into()).await? {
-        let block = file.read_block(&txn_id, &latest.into()).await?;
+        let block = file.read_block(*txn_id, latest.into()).await?;
         if block.last_hash() != &hash {
             let last_hash = base64::encode(block.last_hash());
             let hash = base64::encode(hash);

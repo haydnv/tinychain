@@ -95,12 +95,12 @@ impl Subject {
     }
 
     /// Return the state of this subject as of the given [`TxnId`].
-    pub async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
+    pub async fn at(&self, txn_id: TxnId) -> TCResult<State> {
         debug!("Subject::at {}", txn_id);
 
         match self {
             Self::Value(file) => {
-                let value = file.read_block(txn_id, &SUBJECT.into()).await?;
+                let value = file.read_block(txn_id, SUBJECT.into()).await?;
                 Ok(value.deref().clone().into())
             }
         }
@@ -159,7 +159,7 @@ impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
         debug!(
             "commit subject with value {} at {}",
-            self.at(txn_id).await.unwrap(),
+            self.at(*txn_id).await.unwrap(),
             txn_id
         );
 
@@ -209,7 +209,7 @@ pub trait ChainInstance {
         value: Scalar,
     ) -> TCResult<()>;
 
-    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>>;
+    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
@@ -292,7 +292,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>> {
+    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
         match self {
             Self::Block(chain) => chain.last_commit(txn_id).await,
             Self::Sync(chain) => chain.last_commit(txn_id).await,

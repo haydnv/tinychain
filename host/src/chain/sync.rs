@@ -50,8 +50,8 @@ impl ChainInstance for SyncChain {
         Ok(())
     }
 
-    async fn last_commit(&self, txn_id: &TxnId) -> TCResult<Option<TxnId>> {
-        let block = self.file.read_block(txn_id, &BLOCK_ID.into()).await?;
+    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
+        let block = self.file.read_block(txn_id, BLOCK_ID.into()).await?;
 
         if let &Value::String(ref last_commit) = &*block {
             last_commit.parse().map(Some)
@@ -141,7 +141,7 @@ impl<'en> IntoView<'en, fs::Dir> for SyncChain {
     type View = (Schema, StateView);
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        let subject = self.subject.at(txn.id()).await?;
+        let subject = self.subject.at(*txn.id()).await?;
         Ok((self.schema, subject.into_view(txn).await?))
     }
 }
