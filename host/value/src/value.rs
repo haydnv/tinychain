@@ -8,7 +8,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::Error as DestreamError;
-use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
+use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream, Visitor, MapAccess};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -268,6 +268,44 @@ impl TryCastFrom<Value> for ValueType {
         } else {
             None
         }
+    }
+}
+
+struct ValueTypeVisitor;
+
+impl ValueTypeVisitor {
+    fn from_path<E: DestreamError>(path: &[PathSegment]) -> Result<ValueType, E> {
+        ValueType::from_path(path).ok_or_else(|| DestreamError::invalid_value(TCPath::from(path), Self::expecting()))
+    }
+}
+
+#[async_trait]
+impl Visitor for ValueTypeVisitor {
+    type Value = ValueType;
+
+    fn expecting() -> &'static str {
+        "a Value type"
+    }
+
+    fn visit_string<E: DestreamError>(self, v: String) -> Result<Self::Value, E> {
+        let path: TCPathBuf = v.parse().map_err(DestreamError::custom)?;
+        Self::from_path(&path)
+    }
+
+    async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, <A as MapAccess>::Error> {
+        let path = map.next_key::<TCPathBuf>(()).await?.ok_or_else(|| DestreamError::invalid_length(0, Self::expecting()))?;
+        let _ = map.next_value::<()>(()).await?;
+
+        Self::from_path(&path)
+    }
+}
+
+#[async_trait]
+impl FromStream for ValueType {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_any(ValueTypeVisitor).await
     }
 }
 
