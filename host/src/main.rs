@@ -42,25 +42,36 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, StructOpt)]
 struct Config {
-    #[structopt(long = "address", default_value = "127.0.0.1")]
+    #[structopt(
+        long = "address",
+        default_value = "127.0.0.1",
+        about = "The IP address to bind"
+    )]
     pub address: IpAddr,
 
     #[structopt(long = "log_level", default_value = "warn")]
     pub log_level: String,
 
-    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
+    #[structopt(
+        long = "workspace",
+        default_value = "/tmp/tc/tmp",
+        about = "workspace directory"
+    )]
     pub workspace: PathBuf,
 
     #[structopt(long = "cache_size", default_value = "1M", parse(try_from_str = data_size))]
     pub cache_size: u64,
 
-    #[structopt(long = "data_dir")]
+    #[structopt(
+        long = "data_dir",
+        about = "data directory (required to host a Cluster)"
+    )]
     pub data_dir: Option<PathBuf>,
 
-    #[structopt(long = "cluster")]
+    #[structopt(long = "cluster", about = "path(s) to Cluster config files")]
     pub clusters: Vec<PathBuf>,
 
-    #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration))]
+    #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration), about = "maximum allowed request duration")]
     pub request_ttl: Duration,
 
     #[structopt(long = "http_port", default_value = "8702")]
