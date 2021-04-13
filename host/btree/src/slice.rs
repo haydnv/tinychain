@@ -89,7 +89,7 @@ where
         self.source.insert(txn_id, key).await
     }
 
-    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>> {
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
         self.source
             .rows_in_range(txn_id, self.range, self.reverse)
             .await

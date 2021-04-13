@@ -13,8 +13,8 @@ categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
 async-trait = "0.1"
-collate = ">=0.1.5"
-destream = ">=0.3.2"
+collate = "~0.1.5"
+destream = "~0.3.2"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 safecast = "0.1"

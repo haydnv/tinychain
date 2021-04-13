@@ -3,15 +3,15 @@ use std::marker::PhantomData;
 use std::ops::Bound;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::{Transaction, TxnId};
-use tc_value::{NumberType, Value, ValueCollator, ValueType};
+use tc_transact::{IntoView, Transaction, TxnId};
+use tc_value::{Link, NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
 #[allow(dead_code)]
@@ -40,7 +40,9 @@ pub trait BTreeInstance: Instance {
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
 
-    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>>;
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
+    where
+        Self: 'a;
 }
 
 #[derive(Clone, PartialEq)]
@@ -150,6 +152,12 @@ impl de::FromStream for Column {
     }
 }
 
+impl<'en> en::IntoStream<'en> for Column {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        (self.name, Link::from(self.dtype.path()), self.max_len).into_stream(encoder)
+    }
+}
+
 impl<'a> From<&'a Column> for (&'a Id, ValueType) {
     fn from(col: &'a Column) -> (&'a Id, ValueType) {
         (&col.name, col.dtype)
@@ -219,6 +227,59 @@ impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T>
         match self {
             Self::File(file) => file.class(),
             Self::Slice(slice) => slice.class(),
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTree<F, D, T>
+where
+    Self: 'static,
+{
+    type Slice = Self;
+
+    fn collator(&self) -> &ValueCollator {
+        match self {
+            Self::File(file) => file.collator(),
+            Self::Slice(slice) => slice.collator(),
+        }
+    }
+
+    fn schema(&self) -> &RowSchema {
+        match self {
+            Self::File(file) => file.schema(),
+            Self::Slice(slice) => slice.schema(),
+        }
+    }
+
+    fn slice(self, range: Range, reverse: bool) -> Self {
+        match self {
+            Self::File(file) => BTree::Slice(file.slice(range, reverse)),
+            Self::Slice(slice) => BTree::Slice(slice.slice(range, reverse)),
+        }
+    }
+
+    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.delete(txn_id).await,
+            Self::Slice(slice) => slice.delete(txn_id).await,
+        }
+    }
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.insert(txn_id, key).await,
+            Self::Slice(slice) => slice.insert(txn_id, key).await,
+        }
+    }
+
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
+    where
+        Self: 'a,
+    {
+        match self {
+            Self::File(file) => file.keys(txn_id).await,
+            Self::Slice(slice) => slice.keys(txn_id).await,
         }
     }
 }
@@ -332,6 +393,37 @@ impl<F, D, T> fmt::Display for BTree<F, D, T> {
             Self::File(_) => "a BTree",
             Self::Slice(_) => "a BTree slice",
         })
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> IntoView<'en, D> for BTree<F, D, T>
+where
+    Self: 'static,
+{
+    type Txn = T;
+    type View = BTreeView<'en>;
+
+    async fn into_view(self, txn: T) -> TCResult<BTreeView<'en>> {
+        let schema = self.schema().to_vec();
+        let keys = self.keys(*txn.id()).await?;
+        Ok(BTreeView { schema, keys })
+    }
+}
+
+pub struct BTreeView<'en> {
+    schema: Vec<Column>,
+    keys: TCTryStream<'en, Key>,
+}
+
+impl<'en> en::IntoStream<'en> for BTreeView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(
+            BTreeType::File.to_string(),
+            (self.schema, en::SeqStream::from(self.keys)),
+        )?;
+        map.end()
     }
 }
 

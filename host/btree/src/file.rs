@@ -23,8 +23,8 @@ use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
 use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
-type Selection = FuturesOrdered<
-    Pin<Box<dyn Future<Output = TCResult<TCTryStream<'static, Key>>> + Send + Unpin>>,
+type Selection<'a> = FuturesOrdered<
+    Pin<Box<dyn Future<Output = TCResult<TCTryStream<'a, Key>>> + Send + Unpin + 'a>>,
 >;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
@@ -176,7 +176,7 @@ pub struct BTreeFile<F, D, T> {
 
 impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
 where
-    Self: Clone + 'static,
+    Self: Clone,
 {
     pub async fn create(txn: T, file: F, schema: RowSchema) -> TCResult<Self> {
         if !file.is_empty(txn.id()).await? {
@@ -352,18 +352,21 @@ where
         })
     }
 
-    fn _slice<B: Deref<Target = Node> + 'static>(
+    fn _slice<'a, B: Deref<Target = Node>>(
         self,
         txn_id: TxnId,
         node: B,
         range: Range,
-    ) -> TCResult<TCTryStream<'static, Key>> {
+    ) -> TCResult<TCTryStream<'a, Key>>
+    where
+        Self: 'a,
+    {
         let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
 
         debug!("_slice {} from {} to {}", node.deref(), l, r);
 
         if node.leaf {
-            let stream: TCTryStream<Key> = if l == r && l < node.keys.len() {
+            let stream: TCTryStream<'a, Key> = if l == r && l < node.keys.len() {
                 if node.keys[l].deleted {
                     Box::pin(stream::empty())
                 } else {
@@ -383,7 +386,7 @@ where
 
             Ok(stream)
         } else {
-            let mut selected: Selection = FuturesOrdered::new();
+            let mut selected: Selection<'a> = FuturesOrdered::new();
             for i in l..r {
                 let child_id = node.children[i].clone();
                 let range_clone = range.clone();
@@ -418,12 +421,15 @@ where
         }
     }
 
-    fn _slice_reverse<B: Deref<Target = Node> + 'static>(
+    fn _slice_reverse<'a, B: Deref<Target = Node>>(
         self,
         txn_id: TxnId,
         node: B,
         range: Range,
-    ) -> TCResult<TCTryStream<'static, Key>> {
+    ) -> TCResult<TCTryStream<'a, Key>>
+    where
+        Self: 'a,
+    {
         let collator = &self.inner.collator;
 
         let (l, r) = collator.bisect(&node.keys, &range);
@@ -441,7 +447,7 @@ where
 
             Ok(Box::pin(stream::iter(keys)))
         } else {
-            let mut selected: Selection = FuturesOrdered::new();
+            let mut selected: Selection<'a> = FuturesOrdered::new();
 
             let last_child = node.children[r].clone();
             let range_clone = range.clone();
@@ -477,18 +483,23 @@ where
         }
     }
 
-    pub(super) async fn rows_in_range(
+    pub(super) async fn rows_in_range<'a>(
         self,
         txn_id: TxnId,
         range: Range,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'static, Key>> {
+    ) -> TCResult<TCTryStream<'a, Key>>
+    where
+        Self: 'a,
+    {
         let root_id = self.inner.root.read(&txn_id).await?;
+
         let root = self
             .inner
             .file
             .read_block(txn_id, (*root_id).clone())
             .await?;
+
         if reverse {
             self._slice_reverse(txn_id, root, range)
         } else {
@@ -549,7 +560,8 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
 where
-    Self: Clone + 'static,
+    Self: Clone,
+    BTreeSlice<F, D, T>: 'static,
 {
     type Slice = BTreeSlice<F, D, T>;
 
@@ -620,7 +632,7 @@ where
         }
     }
 
-    async fn rows(self, txn_id: TxnId) -> TCResult<TCTryStream<'static, Key>> {
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
         self.rows_in_range(txn_id, Range::default(), false).await
     }
 }
