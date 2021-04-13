@@ -612,8 +612,8 @@ where
                 .await?;
 
             let new_root = file.write_block(txn_id, root_id.deref().clone()).await?;
-
             let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+
             self._insert(txn_id, new_root, key).await
         } else {
             self._insert(txn_id, root, key).await

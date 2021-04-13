@@ -1,12 +1,16 @@
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::Bound;
 
 use async_trait::async_trait;
+use destream::de;
+use futures::TryFutureExt;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::fs::{Dir, File};
+use tc_transact::{Transaction, TxnId};
 use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
@@ -131,6 +135,15 @@ impl TryCastFrom<Value> for Column {
     }
 }
 
+#[async_trait]
+impl de::FromStream for Column {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder).map_ok(|(name, dtype, max_len)| Self { name, dtype, max_len }).await
+    }
+}
+
 impl<'a> From<&'a Column> for (&'a Id, ValueType) {
     fn from(col: &'a Column) -> (&'a Id, ValueType) {
         (&col.name, col.dtype)
@@ -201,6 +214,76 @@ impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T>
             Self::File(file) => file.class(),
             Self::Slice(slice) => slice.class(),
         }
+    }
+}
+
+struct KeyListVisitor<F, D, T> {
+    txn_id: TxnId,
+    btree: BTreeFile<F, D, T>,
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T> where Self: Send + Sync + 'static {
+    type Value = Self;
+
+    fn expecting() -> &'static str {
+        "a sequence of BTree rows"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        while let Some(row) = seq.next_element(()).await? {
+            self.btree.insert(self.txn_id, row).map_err(de::Error::custom).await?;
+        }
+
+        Ok(self)
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T> where Self: Send + Sync + 'static {
+    type Context = (TxnId, BTreeFile<F, D, T>);
+
+    async fn from_stream<De: de::Decoder>(cxt: (TxnId, BTreeFile<F, D, T>), decoder: &mut De) -> Result<Self, De::Error> {
+        let (txn_id, btree) = cxt;
+        decoder.decode_seq(Self { txn_id, btree }).await
+    }
+}
+
+struct BTreeVisitor<F, D, T> {
+    txn: T,
+    file: F,
+    dir: PhantomData<D>,
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T> where Self: Send + Sync + 'static {
+    type Value = BTree<F, D, T>;
+
+    fn expecting() -> &'static str {
+        "a BTree"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let schema = seq.next_element(()).await?.ok_or_else(|| de::Error::custom("expected BTree schema"))?;
+
+        let btree = BTreeFile::create(self.txn.clone(), self.file, schema).map_err(de::Error::custom).await?;
+
+        if let Some(visitor) = seq.next_element::<KeyListVisitor<F, D, T >>((*self.txn.id(), btree.clone())).await? {
+            Ok(BTree::File(visitor.btree))
+        } else {
+            Ok(BTree::File(btree))
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for BTree<F, D, T> where Self: Send + Sync + 'static {
+    type Context = (T, F);
+
+    async fn from_stream<De: de::Decoder>(cxt: (T, F), decoder: &mut De) -> Result<Self, De::Error> {
+        let (txn, file) = cxt;
+        let visitor = BTreeVisitor { txn, file, dir: PhantomData };
+        decoder.decode_seq(visitor).await
     }
 }
 
