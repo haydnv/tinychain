@@ -140,7 +140,13 @@ impl de::FromStream for Column {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(cxt, decoder).map_ok(|(name, dtype, max_len)| Self { name, dtype, max_len }).await
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|(name, dtype, max_len)| Self {
+                name,
+                dtype,
+                max_len,
+            })
+            .await
     }
 }
 
@@ -223,7 +229,10 @@ struct KeyListVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T> where Self: Send + Sync + 'static {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T>
+where
+    Self: Send + Sync + 'static,
+{
     type Value = Self;
 
     fn expecting() -> &'static str {
@@ -232,7 +241,10 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F,
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         while let Some(row) = seq.next_element(()).await? {
-            self.btree.insert(self.txn_id, row).map_err(de::Error::custom).await?;
+            self.btree
+                .insert(self.txn_id, row)
+                .map_err(de::Error::custom)
+                .await?;
         }
 
         Ok(self)
@@ -240,10 +252,16 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T> where Self: Send + Sync + 'static {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T>
+where
+    Self: Send + Sync + 'static,
+{
     type Context = (TxnId, BTreeFile<F, D, T>);
 
-    async fn from_stream<De: de::Decoder>(cxt: (TxnId, BTreeFile<F, D, T>), decoder: &mut De) -> Result<Self, De::Error> {
+    async fn from_stream<De: de::Decoder>(
+        cxt: (TxnId, BTreeFile<F, D, T>),
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
         let (txn_id, btree) = cxt;
         decoder.decode_seq(Self { txn_id, btree }).await
     }
@@ -256,7 +274,10 @@ struct BTreeVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T> where Self: Send + Sync + 'static {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T>
+where
+    Self: Send + Sync + 'static,
+{
     type Value = BTree<F, D, T>;
 
     fn expecting() -> &'static str {
@@ -264,11 +285,19 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let schema = seq.next_element(()).await?.ok_or_else(|| de::Error::custom("expected BTree schema"))?;
+        let schema = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::custom("expected BTree schema"))?;
 
-        let btree = BTreeFile::create(self.txn.clone(), self.file, schema).map_err(de::Error::custom).await?;
+        let btree = BTreeFile::create(self.txn.clone(), self.file, schema)
+            .map_err(de::Error::custom)
+            .await?;
 
-        if let Some(visitor) = seq.next_element::<KeyListVisitor<F, D, T >>((*self.txn.id(), btree.clone())).await? {
+        if let Some(visitor) = seq
+            .next_element::<KeyListVisitor<F, D, T>>((*self.txn.id(), btree.clone()))
+            .await?
+        {
             Ok(BTree::File(visitor.btree))
         } else {
             Ok(BTree::File(btree))
@@ -277,12 +306,22 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for BTree<F, D, T> where Self: Send + Sync + 'static {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for BTree<F, D, T>
+where
+    Self: Send + Sync + 'static,
+{
     type Context = (T, F);
 
-    async fn from_stream<De: de::Decoder>(cxt: (T, F), decoder: &mut De) -> Result<Self, De::Error> {
+    async fn from_stream<De: de::Decoder>(
+        cxt: (T, F),
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
         let (txn, file) = cxt;
-        let visitor = BTreeVisitor { txn, file, dir: PhantomData };
+        let visitor = BTreeVisitor {
+            txn,
+            file,
+            dir: PhantomData,
+        };
         decoder.decode_seq(visitor).await
     }
 }
