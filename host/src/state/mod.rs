@@ -14,7 +14,6 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::*;
 
@@ -621,28 +620,16 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
-            StateType::Collection(ct) => match ct {
-                CollectionType::BTree(_) => {
-                    let file = self
-                        .txn
-                        .context()
-                        .create_file_tmp(*self.txn.id(), BTreeType::default().into())
-                        .map_err(de::Error::custom)
-                        .await?;
-                    let file = file.try_into().map_err(de::Error::custom)?;
-
-                    access
-                        .next_value((self.txn.clone(), file))
-                        .map_ok(Collection::BTree)
-                        .map_ok(State::Collection)
-                        .await
-                }
-            },
+            StateType::Collection(ct) => {
+                CollectionVisitor::new(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(State::Collection)
+                    .await
+            }
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
                     .map_ok(State::Chain)
-                    .map_err(|e| de::Error::custom(format!("invalid Chain: {}", e)))
                     .await
             }
             StateType::Map => access.next_value(self.txn.clone()).await,

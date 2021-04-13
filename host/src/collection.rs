@@ -1,12 +1,14 @@
+use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::en;
+use destream::{de, en};
 use futures::TryFutureExt;
 
 use tc_btree::BTreeView;
 use tc_error::*;
-use tc_transact::IntoView;
+use tc_transact::fs::Dir;
+use tc_transact::{IntoView, Transaction};
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs;
@@ -64,6 +66,68 @@ impl Instance for Collection {
         match self {
             Self::BTree(btree) => CollectionType::BTree(btree.class()),
         }
+    }
+}
+
+pub struct CollectionVisitor {
+    txn: Txn,
+}
+
+impl CollectionVisitor {
+    pub fn new(txn: Txn) -> Self {
+        Self { txn }
+    }
+
+    pub async fn visit_map_value<A: de::MapAccess>(
+        self,
+        class: CollectionType,
+        access: &mut A,
+    ) -> Result<Collection, A::Error> {
+        match class {
+            CollectionType::BTree(_) => {
+                let file = self
+                    .txn
+                    .context()
+                    .create_file_tmp(*self.txn.id(), BTreeType::default().into())
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                let file = file.try_into().map_err(de::Error::custom)?;
+
+                access
+                    .next_value((self.txn.clone(), file))
+                    .map_ok(Collection::BTree)
+                    .await
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl de::Visitor for CollectionVisitor {
+    type Value = Collection;
+
+    fn expecting() -> &'static str {
+        "a Collection"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let classpath = map
+            .next_key::<TCPathBuf>(())
+            .await?
+            .ok_or_else(|| de::Error::custom("expected a Collection type"))?;
+        let class = CollectionType::from_path(&classpath)
+            .ok_or_else(|| de::Error::invalid_value(classpath, "a Collection type"))?;
+        self.visit_map_value(class, &mut map).await
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Collection {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(CollectionVisitor { txn }).await
     }
 }
 
