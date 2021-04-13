@@ -106,9 +106,9 @@ impl de::FromStream for Object {
 #[async_trait]
 impl<'en> IntoView<'en, Dir> for Object {
     type Txn = Txn;
-    type View = ObjectView;
+    type View = ObjectView<'en>;
 
-    async fn into_view(self, txn: Txn) -> TCResult<ObjectView> {
+    async fn into_view(self, txn: Txn) -> TCResult<ObjectView<'en>> {
         match self {
             Self::Class(class) => Ok(ObjectView::Class(class)),
             Self::Instance(instance) => instance.into_view(txn).map_ok(ObjectView::Instance).await,
@@ -126,12 +126,12 @@ impl fmt::Display for Object {
     }
 }
 
-pub enum ObjectView {
+pub enum ObjectView<'en> {
     Class(InstanceClass),
-    Instance(InstanceView),
+    Instance(InstanceView<'en>),
 }
 
-impl<'en> en::IntoStream<'en> for ObjectView {
+impl<'en> en::IntoStream<'en> for ObjectView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
 

@@ -138,7 +138,7 @@ impl Transact for SyncChain {
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for SyncChain {
     type Txn = Txn;
-    type View = (Schema, StateView);
+    type View = (Schema, StateView<'en>);
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         let subject = self.subject.at(*txn.id()).await?;

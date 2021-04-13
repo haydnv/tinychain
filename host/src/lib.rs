@@ -23,6 +23,7 @@ pub mod state;
 pub mod txn;
 
 pub use kernel::*;
+pub use tc_btree as btree;
 pub use tc_error as error;
 pub use tc_transact as transact;
 pub use tc_value as value;

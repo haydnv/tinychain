@@ -87,9 +87,9 @@ impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
 #[async_trait]
 impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     type Txn = Txn;
-    type View = InstanceView;
+    type View = InstanceView<'en>;
 
-    async fn into_view(self, txn: Txn) -> TCResult<InstanceView> {
+    async fn into_view(self, txn: Txn) -> TCResult<InstanceView<'en>> {
         Ok(InstanceView {
             class: self.class,
             parent: self.parent.into_view(txn).await?,
@@ -115,12 +115,12 @@ impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     }
 }
 
-pub struct InstanceView {
+pub struct InstanceView<'en> {
     class: InstanceClass,
-    parent: StateView,
+    parent: StateView<'en>,
 }
 
-impl<'en> en::IntoStream<'en> for InstanceView {
+impl<'en> en::IntoStream<'en> for InstanceView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.class.extends().to_string(), self.parent)?;

@@ -343,7 +343,7 @@ impl de::FromStream for Chain {
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for Chain {
     type Txn = Txn;
-    type View = ChainView;
+    type View = ChainView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         let class = self.class();
@@ -369,17 +369,17 @@ impl fmt::Display for Chain {
     }
 }
 
-pub enum ChainViewData {
+pub enum ChainViewData<'en> {
     Block((Schema, BlockSeq)),
-    Sync(Box<(Schema, StateView)>),
+    Sync(Box<(Schema, StateView<'en>)>),
 }
 
-pub struct ChainView {
+pub struct ChainView<'en> {
     class: ChainType,
-    data: ChainViewData,
+    data: ChainViewData<'en>,
 }
 
-impl<'en> en::IntoStream<'en> for ChainView {
+impl<'en> en::IntoStream<'en> for ChainView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
 
