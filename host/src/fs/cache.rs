@@ -14,6 +14,7 @@ use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::BlockData;
 
@@ -25,6 +26,7 @@ use super::{create_parent, io_err};
 /// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
 pub enum CacheBlock {
+    BTree(CacheLock<Node>),
     Chain(CacheLock<ChainBlock>),
     Value(CacheLock<Value>),
 }
@@ -32,6 +34,10 @@ pub enum CacheBlock {
 impl CacheBlock {
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
         match self {
+            Self::BTree(block) => {
+                let contents = block.read().await;
+                contents.persist(sink).await
+            }
             Self::Chain(block) => {
                 let contents = block.read().await;
                 contents.persist(sink).await
@@ -45,6 +51,7 @@ impl CacheBlock {
 
     fn ref_count(&self) -> usize {
         match self {
+            Self::BTree(block) => block.ref_count(),
             Self::Chain(block) => block.ref_count(),
             Self::Value(block) => block.ref_count(),
         }
@@ -52,6 +59,7 @@ impl CacheBlock {
 
     async fn size(&self) -> TCResult<u64> {
         match self {
+            Self::BTree(block) => block.read().await.deref().size().await,
             Self::Chain(block) => block.read().await.deref().size().await,
             Self::Value(block) => block.read().await.deref().size().await,
         }
@@ -61,6 +69,12 @@ impl CacheBlock {
 impl From<CacheLock<ChainBlock>> for CacheBlock {
     fn from(lock: CacheLock<ChainBlock>) -> CacheBlock {
         Self::Chain(lock)
+    }
+}
+
+impl From<CacheLock<Node>> for CacheBlock {
+    fn from(lock: CacheLock<Node>) -> CacheBlock {
+        Self::BTree(lock)
     }
 }
 
@@ -76,6 +90,17 @@ impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
     fn try_from(block: CacheBlock) -> TCResult<Self> {
         match block {
             CacheBlock::Chain(block) => Ok(block),
+            _ => Err(TCError::unsupported("unexpected block type")),
+        }
+    }
+}
+
+impl TryFrom<CacheBlock> for CacheLock<Node> {
+    type Error = TCError;
+
+    fn try_from(block: CacheBlock) -> TCResult<Self> {
+        match block {
+            CacheBlock::BTree(block) => Ok(block),
             _ => Err(TCError::unsupported("unexpected block type")),
         }
     }

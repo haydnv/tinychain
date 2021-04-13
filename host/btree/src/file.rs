@@ -70,6 +70,12 @@ impl<'en> en::ToStream<'en> for NodeKey {
     }
 }
 
+impl<'en> en::IntoStream<'en> for NodeKey {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((self.deleted, self.value), encoder)
+    }
+}
+
 #[cfg(debug_assertions)]
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -135,6 +141,21 @@ impl<'en> en::ToStream<'en> for Node {
                 &self.parent,
                 &self.children,
                 &self.rebalance,
+            ),
+            encoder,
+        )
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Node {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream(
+            (
+                self.leaf,
+                self.keys,
+                self.parent,
+                self.children,
+                self.rebalance,
             ),
             encoder,
         )

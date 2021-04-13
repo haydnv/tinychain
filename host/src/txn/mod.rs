@@ -204,13 +204,7 @@ impl Transaction<fs::Dir> for Txn {
     }
 
     async fn subcontext_tmp(&self) -> TCResult<Self> {
-        let id = loop {
-            let id = uuid::Uuid::new_v4().to_string().parse()?;
-            if !self.dir.contains(self.id(), &id).await? {
-                break id;
-            }
-        };
-
+        let id = self.dir.unique_id(self.id()).await?;
         self.subcontext(id).await
     }
 }

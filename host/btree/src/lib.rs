@@ -205,6 +205,12 @@ impl NativeClass for BTreeType {
     }
 }
 
+impl Default for BTreeType {
+    fn default() -> Self {
+        Self::File
+    }
+}
+
 impl fmt::Display for BTreeType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

@@ -1,23 +1,21 @@
 //! A server to keep track of active transactions.
 
 use std::collections::hash_map::{Entry, HashMap};
+use std::convert::TryInto;
 use std::sync::Arc;
 
 use futures::TryFutureExt;
 use uplock::RwLock;
-use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transact;
-use tcgeneric::PathSegment;
 
 use crate::fs;
 use crate::gateway::Gateway;
 
 use super::request::*;
 use super::{Active, Txn, TxnId};
-use std::convert::TryInto;
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
@@ -44,7 +42,7 @@ impl TxnServer {
         token: (String, Claims),
     ) -> TCResult<Txn> {
         let expires = token.1.expires().try_into()?;
-        let dir = self.txn_dir(&txn_id).await?;
+        let dir = self.txn_dir(txn_id).await?;
         let request = Request::new(txn_id, token.0, token.1);
         let mut active = self.active.write().await;
 
@@ -78,16 +76,8 @@ impl TxnServer {
         .await?
     }
 
-    async fn txn_dir(&self, txn_id: &TxnId) -> TCResult<fs::Dir> {
-        let existing_ids = self.workspace.entry_ids(txn_id).await?;
-        let id = loop {
-            let id: PathSegment = Uuid::new_v4().into();
-            if !existing_ids.contains(&id) {
-                break id;
-            }
-        };
-
-        self.workspace.create_dir(*txn_id, id).await
+    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<fs::Dir> {
+        self.workspace.create_dir_tmp(txn_id).await
     }
 }
 

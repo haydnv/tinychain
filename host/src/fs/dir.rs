@@ -9,7 +9,9 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::future::{join_all, Future, TryFutureExt};
 use log::debug;
+use uuid::Uuid;
 
+use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{self, BlockData};
 use tc_transact::lock::{Mutable, TxnLock};
@@ -26,6 +28,7 @@ const VALUE_EXT: &'static str = "value";
 
 #[derive(Clone)]
 pub enum FileEntry {
+    BTree(File<Node>),
     Chain(File<ChainBlock>),
     Value(File<Value>),
 }
@@ -83,6 +86,20 @@ impl TryFrom<FileEntry> for File<ChainBlock> {
     }
 }
 
+impl TryFrom<FileEntry> for File<Node> {
+    type Error = TCError;
+
+    fn try_from(entry: FileEntry) -> TCResult<Self> {
+        match entry {
+            FileEntry::BTree(file) => Ok(file),
+            other => Err(TCError::bad_request(
+                "expected a Chain file but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl From<File<Value>> for FileEntry {
     fn from(file: File<Value>) -> Self {
         Self::Value(file)
@@ -106,6 +123,7 @@ impl TryFrom<FileEntry> for File<Value> {
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Value(value) => fmt::Display::fmt(value, f),
         }
@@ -197,6 +215,16 @@ impl Dir {
             fs::Dir::create_dir(self, txn_id, name).await
         }
     }
+
+    pub async fn unique_id(&self, txn_id: &TxnId) -> TCResult<PathSegment> {
+        let existing_ids = self.entry_ids(&txn_id).await?;
+        loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !existing_ids.contains(&id) {
+                break Ok(id);
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -243,6 +271,12 @@ impl fs::Dir for Dir {
         Ok(subdir)
     }
 
+    async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Dir> {
+        self.unique_id(&txn_id)
+            .and_then(|id| self.create_dir(txn_id, id))
+            .await
+    }
+
     async fn create_file(&self, txn_id: TxnId, name: Id, class: StateType) -> TCResult<Self::File> {
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&name) {
@@ -256,6 +290,12 @@ impl fs::Dir for Dir {
         let file = FileEntry::new(self.cache.clone(), path, class)?;
         contents.insert(name, DirEntry::File(file.clone()));
         Ok(file.into())
+    }
+
+    async fn create_file_tmp(&self, txn_id: TxnId, class: Self::FileClass) -> TCResult<Self::File> {
+        self.unique_id(&txn_id)
+            .and_then(|id| self.create_file(txn_id, id, class))
+            .await
     }
 
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
@@ -296,6 +336,7 @@ impl Transact for Dir {
             join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.commit(txn_id),
                     FileEntry::Chain(file) => file.commit(txn_id),
                     FileEntry::Value(file) => file.commit(txn_id),
                 },
@@ -312,6 +353,7 @@ impl Transact for Dir {
             join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
                     FileEntry::Value(file) => file.finalize(txn_id),
                 },

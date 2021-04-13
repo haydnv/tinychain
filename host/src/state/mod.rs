@@ -14,6 +14,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::*;
 
@@ -78,6 +79,12 @@ impl NativeClass for StateType {
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
+    }
+}
+
+impl From<BTreeType> for StateType {
+    fn from(btt: BTreeType) -> Self {
+        CollectionType::BTree(btt).into()
     }
 }
 
@@ -614,9 +621,23 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
-            StateType::Collection(_ct) => {
-                unimplemented!()
-            }
+            StateType::Collection(ct) => match ct {
+                CollectionType::BTree(_) => {
+                    let file = self
+                        .txn
+                        .context()
+                        .create_file_tmp(*self.txn.id(), BTreeType::default().into())
+                        .map_err(de::Error::custom)
+                        .await?;
+                    let file = file.try_into().map_err(de::Error::custom)?;
+
+                    access
+                        .next_value((self.txn.clone(), file))
+                        .map_ok(Collection::BTree)
+                        .map_ok(State::Collection)
+                        .await
+                }
+            },
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
