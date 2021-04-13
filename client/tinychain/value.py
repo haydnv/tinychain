@@ -132,3 +132,9 @@ class Bool(Number):
 
     __uri__ = uri(Number) + "/bool"
 
+
+class UInt(Number):
+    """An unsigned integer."""
+
+    __uri__ = uri(Number) + "/uint"
+
