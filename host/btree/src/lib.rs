@@ -184,24 +184,19 @@ pub enum BTreeType {
 impl Class for BTreeType {}
 
 impl NativeClass for BTreeType {
+    // These functions are only used for serialization,
+    // and there's no way to transmit a BTreeSlice.
+
     fn from_path(path: &[PathSegment]) -> Option<Self> {
-        if path.len() == 4 && &path[0..3] == &PREFIX[..] {
-            match path[3].as_str() {
-                "file" => Some(Self::File),
-                "slice" => Some(Self::Slice),
-                _ => None,
-            }
+        if &path[..] == &PREFIX[..] {
+            Some(Self::File)
         } else {
             None
         }
     }
 
     fn path(&self) -> TCPathBuf {
-        let path = TCPathBuf::from(PREFIX);
-        path.append(label(match self {
-            Self::File => "file",
-            Self::Slice => "slice",
-        }))
+        PREFIX.into()
     }
 }
 

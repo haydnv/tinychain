@@ -11,6 +11,12 @@ class BTreeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = testutils.start_host("test_btree")
 
+    def testCreate(self):
+        cxt = tc.Context()
+        cxt.tree = tc.BTree([])
+
+        self.host.post(ENDPOINT, cxt)
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

@@ -19,6 +19,7 @@ use tc_transact::{Transact, TxnId};
 use tcgeneric::{Id, PathSegment};
 
 use crate::chain::{self, ChainBlock};
+use crate::collection::CollectionType;
 use crate::scalar::{ScalarType, Value};
 use crate::state::StateType;
 
@@ -36,6 +37,9 @@ pub enum FileEntry {
 impl FileEntry {
     fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
         match class {
+            StateType::Collection(ct) => match ct {
+                CollectionType::BTree(_) => Ok(Self::BTree(File::new(cache, path, Node::ext()))),
+            },
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
             StateType::Scalar(st) => match st {
                 ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, Value::ext()))),

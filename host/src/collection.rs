@@ -4,12 +4,15 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
+use log::debug;
 
 use tc_btree::BTreeView;
 use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
-use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{
+    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
+};
 
 use crate::fs;
 use crate::txn::Txn;
@@ -29,6 +32,8 @@ impl Class for CollectionType {}
 
 impl NativeClass for CollectionType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
+        debug!("CollectionType::from_path {}", TCPath::from(path));
+
         if path.len() > 2 && &path[0..2] == &PREFIX[..] {
             match path[2].as_str() {
                 "btree" => BTreeType::from_path(path).map(Self::BTree),
