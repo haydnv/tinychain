@@ -37,7 +37,7 @@ impl Refer for After {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("After::resolve {}", self);
+        debug!("After::resolve {} from context ()", self);
 
         self.when.resolve(context, txn).await?;
         Ok(self.then.into())

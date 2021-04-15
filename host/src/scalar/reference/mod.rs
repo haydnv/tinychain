@@ -148,11 +148,7 @@ impl Refer for TCRef {
             Self::Case(case) => case.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
             Self::If(if_ref) => if_ref.resolve(context, txn).await,
-            Self::Op(op_ref) => {
-                debug!("TCRef::resolve {}", op_ref);
-
-                op_ref.resolve(context, txn).await
-            }
+            Self::Op(op_ref) => op_ref.resolve(context, txn).await,
         }
     }
 }

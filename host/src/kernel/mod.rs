@@ -133,8 +133,9 @@ impl Kernel {
             let txn = txn.clone().claim(&self.actor, TCPathBuf::default()).await?;
             let context = Map::<State>::default();
 
-            if PostOp::can_cast_from(&data) {
-                OpDef::call(data.opt_cast_into().unwrap(), txn, context).await
+            if Vec::<(Id, State)>::can_cast_from(&data) {
+                let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
+                OpDef::call(op_def, txn, context).await
             } else {
                 data.resolve(&ExeScope::new(&State::default(), context), &txn)
                     .await

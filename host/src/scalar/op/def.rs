@@ -109,8 +109,8 @@ impl Instance for OpDef {
 }
 
 impl OpDef {
-    pub async fn call<I: IntoIterator<Item = (Id, State)>>(
-        op_def: Vec<(Id, Scalar)>,
+    pub async fn call<S: Into<State>, I: IntoIterator<Item = (Id, State)>>(
+        op_def: Vec<(Id, S)>,
         txn: Txn,
         context: I,
     ) -> TCResult<State> {
@@ -122,7 +122,7 @@ impl OpDef {
 
         let context = context
             .into_iter()
-            .chain(op_def.into_iter().map(|(id, s)| (id, State::Scalar(s))));
+            .chain(op_def.into_iter().map(|(id, s)| (id, s.into())));
 
         Executor::new(txn, &State::default(), context)
             .capture(capture)

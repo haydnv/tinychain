@@ -920,6 +920,8 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
                 (subject, Scalar::default()),
             ))))))
         } else {
+            debug!("resolve ID {}", id);
+
             self.data
                 .deref()
                 .get(id)
@@ -996,5 +998,15 @@ impl<'a, T> Deref for Scope<'a, T> {
 impl<'a, T> DerefMut for Scope<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
+    }
+}
+
+impl<'a, T> fmt::Debug for Scope<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "execution scope with keys {}",
+            Value::from_iter(self.keys().map(|k| Value::String(k.to_string())))
+        )
     }
 }

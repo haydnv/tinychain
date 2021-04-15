@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
+use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -298,6 +299,8 @@ impl Refer for OpRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
+        debug!("OpRef::resolve {} from context {:?}", self, context);
+
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
