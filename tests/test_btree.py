@@ -4,6 +4,7 @@ import unittest
 
 
 ENDPOINT = "/transact/hypothetical"
+SCHEMA = tc.BTree.Schema(tc.Column("word", tc.String, 100), tc.Column("number", tc.Int))
 
 
 class BTreeTests(unittest.TestCase):
@@ -12,13 +13,12 @@ class BTreeTests(unittest.TestCase):
         cls.host = testutils.start_host("test_btree")
 
     def testCreate(self):
-        schema = tc.BTree.Schema(tc.Column("word", tc.String, 100), tc.Column("number", tc.Int))
-
         cxt = tc.Context()
-        cxt.tree = tc.BTree(schema)
-        print(tc.to_json(cxt))
+        cxt.tree = tc.BTree(SCHEMA)
+        cxt.result = tc.After(cxt.tree.insert(("one", 1)), cxt.tree.count())
 
-        self.host.post(ENDPOINT, cxt)
+        count = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(count, 1)
 
     @classmethod
     def tearDownClass(cls):
