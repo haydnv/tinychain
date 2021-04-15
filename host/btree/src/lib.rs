@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use std::ops::Bound;
 
 use async_trait::async_trait;
-use destream::{de, en, EncodeMap};
+use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
@@ -137,18 +137,43 @@ impl TryCastFrom<Value> for Column {
     }
 }
 
+struct ColumnVisitor;
+
+#[async_trait]
+impl de::Visitor for ColumnVisitor {
+    type Value = Column;
+
+    fn expecting() -> &'static str {
+        "a Column definition"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let name = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a Column name"))?;
+
+        let dtype = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(1, "a Column data type"))?;
+
+        let max_len = seq.next_element(()).await?;
+
+        Ok(Column {
+            name,
+            dtype,
+            max_len,
+        })
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Column {
     type Context = ();
 
-    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(cxt, decoder)
-            .map_ok(|(name, dtype, max_len)| Self {
-                name,
-                dtype,
-                max_len,
-            })
-            .await
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_seq(ColumnVisitor).await
     }
 }
 
@@ -419,6 +444,8 @@ pub struct BTreeView<'en> {
 
 impl<'en> en::IntoStream<'en> for BTreeView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(
             BTreeType::File.to_string(),

@@ -7,6 +7,19 @@ from .util import *
 from .value import UInt, Nil
 
 
+class Column(object):
+    def __init__(self, name, dtype, max_size=None):
+        self.name = str(name)
+        self.dtype = uri(dtype)
+        self.max_size = max_size
+
+    def __json__(self):
+        if self.max_size is None:
+            return to_json((self.name, self.dtype))
+        else:
+            return to_json((self.name, self.dtype, self.max_size))
+
+
 class Collection(State, metaclass=Meta):
     """
     Data structure responsible for storing a collection of :class:`Value`s.
@@ -21,6 +34,13 @@ class BTree(Collection):
     """
 
     __uri__ = uri(Collection) + "/btree"
+
+    class Schema(object):
+        def __init__(self, *columns):
+            self.columns = columns
+
+        def __json__(self):
+            return to_json(self.columns)
 
     def count(self):
         """

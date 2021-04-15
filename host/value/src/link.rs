@@ -1,5 +1,6 @@
 //! [`Link`] and its components
 
+use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
@@ -10,14 +11,13 @@ use async_trait::async_trait;
 use destream::{de, en};
 use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
-use serde::de::{Deserialize, Deserializer, Error};
+use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
 use tc_error::*;
 use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
-use std::cmp::Ordering;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
@@ -446,7 +446,7 @@ impl FromStr for Link {
 impl<'de> Deserialize<'de> for Link {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let link = String::deserialize(deserializer)?;
-        Self::from_str(&link).map_err(D::Error::custom)
+        Self::from_str(&link).map_err(serde::de::Error::custom)
     }
 }
 
@@ -456,26 +456,49 @@ impl Serialize for Link {
     }
 }
 
+struct LinkVisitor;
+
+#[async_trait]
+impl de::Visitor for LinkVisitor {
+    type Value = Link;
+
+    fn expecting() -> &'static str {
+        "a Link"
+    }
+
+    fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
+        s.parse().map_err(de::Error::custom)
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let s = map
+            .next_key(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+
+        let _ = map.next_value::<[Value; 0]>(()).await?;
+        self.visit_string(s)
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Link {
     type Context = ();
 
-    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Link, D::Error> {
-        let s = String::from_stream(context, decoder).await?;
-        s.parse().map_err(|_| de::Error::invalid_value(s, "a Link"))
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Link, D::Error> {
+        decoder.decode_any(LinkVisitor).await
     }
 }
 
 impl<'en> en::ToStream<'en> for Link {
     fn to_stream<E: en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
-        use en::IntoStream;
-        self.to_string().into_stream(e)
+        en::IntoStream::into_stream(self.to_string(), e)
     }
 }
 
 impl<'en> en::IntoStream<'en> for Link {
     fn into_stream<E: en::Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
-        self.to_string().into_stream(e)
+        en::IntoStream::into_stream(self.to_string(), e)
     }
 }
 
