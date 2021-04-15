@@ -323,8 +323,14 @@ impl From<Box<TCRef>> for State {
 }
 
 impl From<Value> for State {
-    fn from(value: Value) -> State {
-        State::Scalar(value.into())
+    fn from(value: Value) -> Self {
+        Self::Scalar(value.into())
+    }
+}
+
+impl From<u64> for State {
+    fn from(n: u64) -> Self {
+        Self::Scalar(n.into())
     }
 }
 

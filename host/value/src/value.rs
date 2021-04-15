@@ -514,6 +514,12 @@ impl From<Tuple<Value>> for Value {
     }
 }
 
+impl From<u64> for Value {
+    fn from(n: u64) -> Self {
+        Self::Number(n.into())
+    }
+}
+
 impl CastFrom<Value> for String {
     fn cast_from(value: Value) -> String {
         value.to_string()

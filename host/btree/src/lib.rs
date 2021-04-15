@@ -4,7 +4,7 @@ use std::ops::Bound;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::{future, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -27,7 +27,7 @@ pub type Key = Vec<Value>;
 pub type Range = collate::Range<Value, Key>;
 
 #[async_trait]
-pub trait BTreeInstance: Instance {
+pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;
 
     fn collator(&self) -> &ValueCollator;
@@ -35,6 +35,13 @@ pub trait BTreeInstance: Instance {
     fn schema(&self) -> &RowSchema;
 
     fn slice(self, range: Range, reverse: bool) -> Self::Slice;
+
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        // TODO: reimplement this more efficiently
+        let keys = self.clone().keys(txn_id).await?;
+        keys.try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+            .await
+    }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()>;
 

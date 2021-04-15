@@ -319,8 +319,14 @@ impl From<Tuple<Value>> for Scalar {
 }
 
 impl From<Value> for Scalar {
-    fn from(value: Value) -> Scalar {
-        Scalar::Value(value)
+    fn from(value: Value) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<u64> for Scalar {
+    fn from(n: u64) -> Self {
+        Self::Value(n.into())
     }
 }
 

@@ -1,3 +1,4 @@
+use futures::TryFutureExt;
 use safecast::TryCastInto;
 
 use tc_btree::BTreeInstance;
@@ -6,7 +7,35 @@ use tc_transact::Transaction;
 use tcgeneric::PathSegment;
 
 use crate::collection::BTree;
-use crate::route::{Handler, PutHandler, Route};
+use crate::route::{GetHandler, Handler, PutHandler, Route};
+use crate::state::State;
+
+struct CountHandler<'a> {
+    btree: &'a BTree,
+}
+
+impl<'a> Handler<'a> for CountHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::count does not accept a key (call BTree::slice first)",
+                        key,
+                    ));
+                }
+
+                self.btree.count(*txn.id()).map_ok(State::from).await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a BTree> for CountHandler<'a> {
+    fn from(btree: &'a BTree) -> Self {
+        Self { btree }
+    }
+}
 
 struct InsertHandler<'a> {
     btree: &'a BTree,
@@ -43,6 +72,7 @@ impl Route for BTree {
         }
 
         match path[0].as_str() {
+            "count" => Some(Box::new(CountHandler::from(self))),
             "insert" => Some(Box::new(InsertHandler::from(self))),
             _ => None,
         }
