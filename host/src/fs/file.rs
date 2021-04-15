@@ -22,6 +22,7 @@ use tc_transact::{Transact, TxnId};
 
 use super::cache::*;
 use super::{file_name, fs_path, DirContents};
+use tcgeneric::TCBoxTryFuture;
 
 #[derive(Clone)]
 pub struct Block<B> {
@@ -72,14 +73,13 @@ impl<B> Deref for BlockRead<B> {
     }
 }
 
-#[async_trait]
 impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockRead<B, File<B>> for BlockRead<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    async fn upgrade(self, file: &File<B>) -> TCResult<BlockWrite<B>> {
-        fs::File::write_block(file, self.txn_id, self.name).await
+    fn upgrade(self, file: &File<B>) -> TCBoxTryFuture<BlockWrite<B>> {
+        Box::pin(fs::File::write_block(file, self.txn_id, self.name))
     }
 }
 
@@ -103,14 +103,13 @@ impl<B> DerefMut for BlockWrite<B> {
     }
 }
 
-#[async_trait]
 impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockWrite<B, File<B>> for BlockWrite<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    async fn downgrade(self, file: &File<B>) -> TCResult<BlockRead<B>> {
-        fs::File::read_block(file, self.txn_id, self.name).await
+    fn downgrade(self, file: &File<B>) -> TCBoxTryFuture<BlockRead<B>> {
+        Box::pin(fs::File::read_block(file, self.txn_id, self.name))
     }
 }
 

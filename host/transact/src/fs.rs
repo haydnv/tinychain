@@ -14,7 +14,7 @@ use tokio_util::io::StreamReader;
 
 use tc_error::*;
 use tc_value::Value;
-use tcgeneric::{Id, PathSegment};
+use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
 use super::TxnId;
 
@@ -102,18 +102,16 @@ impl BlockData for Value {
     }
 }
 
-#[async_trait]
 pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {
-    async fn upgrade(self, file: &F)
-        -> TCResult<<<F as File<B>>::Block as Block<B, F>>::WriteLock>;
+    fn upgrade(self, file: &F)
+        -> TCBoxTryFuture<<<F as File<B>>::Block as Block<B, F>>::WriteLock>;
 }
 
-#[async_trait]
 pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> + Send {
-    async fn downgrade(
+    fn downgrade(
         self,
         file: &F,
-    ) -> TCResult<<<F as File<B>>::Block as Block<B, F>>::ReadLock>;
+    ) -> TCBoxTryFuture<<<F as File<B>>::Block as Block<B, F>>::ReadLock>;
 }
 
 /// A transactional filesystem block.
