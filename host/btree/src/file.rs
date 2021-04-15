@@ -343,16 +343,19 @@ where
                 Ok(())
             } else {
                 let child_id = node.children[i].clone();
-                let mut child = file.read_block(txn_id, child_id).await?;
+                let child = file.read_block(txn_id, child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
+                    // split_child will need a write lock on child, so drop the read lock
+                    std::mem::drop(child);
+
                     let child_id = node.children[i].clone();
                     let node = self
                         .split_child(txn_id, child_id, node.upgrade(file).await?, i)
                         .await?;
 
                     match collator.compare_slice(&key, &node.keys[i]) {
-                        Ordering::Less => {}
+                        Ordering::Less => self._insert(txn_id, node, key).await,
                         Ordering::Equal => {
                             if node.keys[i].deleted {
                                 let mut node = node.upgrade(file).await?;
@@ -363,12 +366,13 @@ where
                         }
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
-                            child = file.read_block(txn_id, child_id).await?;
+                            let child = file.read_block(txn_id, child_id).await?;
+                            self._insert(txn_id, child, key).await
                         }
                     }
+                } else {
+                    self._insert(txn_id, child, key).await
                 }
-
-                self._insert(txn_id, child, key).await
             }
         })
     }
@@ -433,7 +437,6 @@ where
 
             let selection = Box::pin(async move {
                 let node = self.inner.file.read_block(txn_id, last_child_id).await?;
-
                 self._slice(txn_id, node, range)
             });
             selected.push(Box::pin(selection));
@@ -535,6 +538,8 @@ where
         mut node: <F::Block as Block<Node, F>>::WriteLock,
         i: usize,
     ) -> TCResult<<F::Block as Block<Node, F>>::ReadLock> {
+        debug!("btree::split_child");
+
         let file = &self.inner.file;
         let order = self.inner.order;
 
@@ -634,17 +639,25 @@ where
         );
 
         if root.keys.len() == (2 * order) - 1 {
+            // split_child will need a write lock on root, so release the read lock
+            std::mem::drop(root);
+
+            debug!("split root node");
+
             let mut root_id = root_id.upgrade().await?;
             let old_root_id = (*root_id).clone();
 
             (*root_id) = file.unique_id(&txn_id).await?;
+
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
 
-            file.create_block(txn_id, (*root_id).clone(), new_root)
+            let new_root = file
+                .create_block(txn_id, (*root_id).clone(), new_root)
                 .await?;
 
-            let new_root = file.write_block(txn_id, root_id.deref().clone()).await?;
+            let new_root = new_root.write().await;
+
             let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
 
             self._insert(txn_id, new_root, key).await

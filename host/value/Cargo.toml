@@ -15,7 +15,7 @@ categories = ["data-structures"]
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
-collate = "0.1"
+collate = "~0.1.6"
 destream = "0.3"
 log = { version = "0.4", features = [] }
 number-general = "~0.3.2"

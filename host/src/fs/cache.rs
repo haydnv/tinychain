@@ -130,10 +130,20 @@ impl<T> CacheLock<T> {
     }
 
     pub async fn read(&self) -> RwLockReadGuard<T> {
+        debug!(
+            "CacheLock got read lock request on a lock with {} refs...",
+            self.lock.ref_count()
+        );
+
         self.lock.read().await
     }
 
     pub async fn write(&self) -> RwLockWriteGuard<T> {
+        debug!(
+            "CacheLock got write lock request on a lock with {} refs...",
+            self.lock.ref_count()
+        );
+
         self.lock.write().await
     }
 

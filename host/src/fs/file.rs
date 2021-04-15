@@ -262,14 +262,17 @@ where
     }
 
     async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>> {
+        debug!("File::write_block");
         let mut mutated = self.mutated.write().await;
-        let block = self.get_block(txn_id, name).await?;
+        let block = self.get_block(txn_id, name.clone()).await?;
+        debug!("File::write_block got block {}", name);
 
         match mutated.entry(txn_id) {
             Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block.name.clone()),
             Entry::Occupied(mut entry) => entry.get_mut().insert(block.name.clone()),
         };
 
+        debug!("File::write_block getting write lock on {}...", name);
         Ok(fs::Block::write(block).await)
     }
 }
