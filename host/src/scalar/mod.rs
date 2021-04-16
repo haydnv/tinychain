@@ -1,4 +1,4 @@
-//! Immutable values which always reside in memory
+//! Immutable values which always reside entirely in memory
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -8,8 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{self, Decoder, FromStream};
-use destream::en::{Encoder, IntoStream, ToStream};
+use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
@@ -36,6 +35,7 @@ pub const SELF: Label = label("self");
 pub enum ScalarType {
     Map,
     Op(OpDefType),
+    Range,
     Ref(RefType),
     Tuple,
     Value(ValueType),
@@ -46,13 +46,21 @@ impl Class for ScalarType {}
 impl NativeClass for ScalarType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         debug!("ScalarType::from_path {}", TCPath::from(path));
+        if &path[..2] != &PREFIX[..] {
+            return None;
+        }
 
-        if path.len() > 2 && &path[..2] == &PREFIX[..] {
+        if path.len() == 3 {
             match path[2].as_str() {
-                "map" if path.len() == 3 => Some(Self::Map),
+                "map" => Some(Self::Map),
+                "range" => Some(Self::Range),
+                "tuple" => Some(Self::Tuple),
+                _ => None,
+            }
+        } else if path.len() > 2 {
+            match path[2].as_str() {
                 "op" => OpDefType::from_path(path).map(Self::Op),
                 "ref" => RefType::from_path(path).map(Self::Ref),
-                "tuple" if path.len() == 3 => Some(Self::Tuple),
                 "value" => ValueType::from_path(path).map(Self::Value),
                 _ => None,
             }
@@ -67,6 +75,7 @@ impl NativeClass for ScalarType {
         match self {
             Self::Map => prefix.append(label("map")),
             Self::Op(odt) => odt.path(),
+            Self::Range => prefix.append(label("range")),
             Self::Ref(rt) => rt.path(),
             Self::Value(vt) => vt.path(),
             Self::Tuple => prefix.append(label("tuple")),
@@ -85,6 +94,7 @@ impl fmt::Display for ScalarType {
         match self {
             Self::Map => f.write_str("Map<Scalar>"),
             Self::Op(odt) => fmt::Display::fmt(odt, f),
+            Self::Range => f.write_str("Range"),
             Self::Ref(rt) => fmt::Display::fmt(rt, f),
             Self::Value(vt) => fmt::Display::fmt(vt, f),
             Self::Tuple => f.write_str("Tuple<Scalar>"),
@@ -97,6 +107,7 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Map(Map<Self>),
     Op(OpDef),
+    Range(Range),
     Ref(Box<TCRef>),
     Tuple(Tuple<Self>),
     Value(Value),
@@ -147,6 +158,7 @@ impl Scalar {
 
                 ODT::Delete => self.opt_cast_into().map(OpDef::Delete).map(Self::Op),
             },
+            ST::Range => self.opt_cast_into().map(Self::Range),
             ST::Ref(rt) => match rt {
                 RT::After => self
                     .opt_cast_into()
@@ -232,6 +244,7 @@ impl Instance for Scalar {
         match self {
             Self::Map(_) => ST::Map,
             Self::Op(op) => ST::Op(op.class()),
+            Self::Range(_) => ST::Range,
             Self::Ref(tc_ref) => ST::Ref(tc_ref.class()),
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
@@ -300,6 +313,12 @@ impl From<Map<Scalar>> for Scalar {
     }
 }
 
+impl From<Range> for Scalar {
+    fn from(range: Range) -> Self {
+        Self::Range(range)
+    }
+}
+
 impl From<TCRef> for Scalar {
     fn from(tc_ref: TCRef) -> Self {
         Self::Ref(Box::new(tc_ref))
@@ -337,6 +356,17 @@ impl TryFrom<Scalar> for Map<Scalar> {
         match scalar {
             Scalar::Map(map) => Ok(map),
             other => Err(TCError::bad_request("expected a Map but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Scalar> for Range {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Range> {
+        match scalar {
+            Scalar::Range(range) => Ok(range),
+            other => Err(TCError::bad_request("expected a Range but found", other)),
         }
     }
 }
@@ -390,6 +420,60 @@ impl TryCastFrom<Scalar> for OpDef {
             }
             Scalar::Value(Value::Tuple(tuple)) => {
                 Scalar::Tuple(tuple.into_iter().collect()).opt_cast_into()
+            }
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Bound {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Map(map) if map.len() == 1 => {
+                map.contains_key(&IN.into()) || map.contains_key(&EX.into())
+            }
+            Scalar::Value(value) => value.is_none(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Map(map) if HashMap::<Id, Value>::can_cast_from(&map) => {
+                let map = HashMap::<Id, Value>::opt_cast_from(map).unwrap();
+                Map::from(map).opt_cast_into()
+            }
+            Scalar::Value(value) if value.is_none() => Some(Self::Un),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Range {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) if tuple.len() == 2 => {
+                tuple.iter().all(|s| Bound::can_cast_from(s))
+            }
+            Scalar::Value(Value::Tuple(tuple)) => tuple.len() == 2,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple)
+                if tuple.len() == 2 && tuple.iter().all(|s| Bound::can_cast_from(s)) =>
+            {
+                let (start, end) = tuple.opt_cast_into().unwrap();
+                Some(Self { start, end })
+            }
+            Scalar::Value(Value::Tuple(tuple)) if tuple.len() == 2 => {
+                let (start, end) = tuple.opt_cast_into().unwrap();
+                Some(Self {
+                    start: Bound::In(start),
+                    end: Bound::Ex(end),
+                })
             }
             _ => None,
         }
@@ -844,19 +928,20 @@ impl de::Visitor for ScalarVisitor {
 }
 
 #[async_trait]
-impl FromStream for Scalar {
+impl de::FromStream for Scalar {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: de::Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
         d.decode_any(ScalarVisitor::default()).await
     }
 }
 
-impl<'en> ToStream<'en> for Scalar {
-    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+impl<'en> en::ToStream<'en> for Scalar {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         match self {
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
+            Scalar::Range(range) => single_entry(self.class().path(), range, e),
             Scalar::Ref(tc_ref) => tc_ref.to_stream(e),
             Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
@@ -864,11 +949,14 @@ impl<'en> ToStream<'en> for Scalar {
     }
 }
 
-impl<'en> IntoStream<'en> for Scalar {
-    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+impl<'en> en::IntoStream<'en> for Scalar {
+    fn into_stream<E: en::Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        let classpath = self.class().path();
+
         match self {
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
+            Scalar::Range(range) => single_entry(classpath, range, e),
             Scalar::Ref(tc_ref) => tc_ref.into_stream(e),
             Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
             Scalar::Value(value) => value.into_stream(e),
@@ -881,6 +969,7 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::Map(map) => fmt::Display::fmt(map, f),
             Scalar::Op(op) => fmt::Display::fmt(op, f),
+            Scalar::Range(_) => unimplemented!(),
             Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
             Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
             Scalar::Value(value) => fmt::Display::fmt(value, f),
@@ -1018,4 +1107,21 @@ impl<'a, T> fmt::Debug for Scope<'a, T> {
             Value::from_iter(self.keys().map(|k| Value::String(k.to_string())))
         )
     }
+}
+
+fn single_entry<
+    'en,
+    K: en::IntoStream<'en> + 'en,
+    V: en::IntoStream<'en> + 'en,
+    E: en::Encoder<'en>,
+>(
+    key: K,
+    value: V,
+    encoder: E,
+) -> Result<E::Ok, E::Error> {
+    use en::EncodeMap;
+
+    let mut map = encoder.encode_map(Some(1))?;
+    map.encode_entry(key, value)?;
+    map.end()
 }
