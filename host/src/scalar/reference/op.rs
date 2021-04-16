@@ -301,40 +301,41 @@ impl Refer for OpRef {
     ) -> TCResult<State> {
         debug!("OpRef::resolve {} from context {:?}", self, context);
 
+        let invalid_key = |v: &State| TCError::bad_request("invalid key", v);
+
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    txn.get(
-                        link,
-                        key.try_cast_into(|v| {
-                            TCError::bad_request("GET key must be a Value, not", v)
-                        })?,
-                    )
-                    .await
+                    let key = key.try_cast_into(invalid_key)?;
+
+                    txn.get(link, key).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;
-                    context
-                        .resolve_get(txn, id_ref.id(), &path, key.try_into()?)
-                        .await
+                    let key = key.try_cast_into(invalid_key)?;
+
+                    context.resolve_get(txn, id_ref.id(), &path, key).await
                 }
             },
             Self::Put((subject, key, value)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
+                    let key = key.try_cast_into(invalid_key)?;
+
                     let value = value.resolve(context, txn).await?;
-                    txn.put(link, key.try_into()?, value)
-                        .map_ok(State::from)
-                        .await
+
+                    txn.put(link, key, value).map_ok(State::from).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn);
                     let value = value.resolve(context, txn);
                     let (key, value) = try_join!(key, value)?;
 
+                    let key = key.try_cast_into(invalid_key)?;
+
                     context
-                        .resolve_put(txn, id_ref.id(), &path, key.try_into()?, value)
+                        .resolve_put(txn, id_ref.id(), &path, key, value)
                         .map_ok(State::from)
                         .await
                 }

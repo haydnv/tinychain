@@ -4,10 +4,14 @@ from .ref import OpRef
 from .reflect import Meta
 from .state import State
 from .util import *
-from .value import UInt, Nil
+from .value import UInt, Nil, Value
 
 
 class Column(object):
+    """
+    A column in the schema of a :class:`BTree`.
+    """
+
     def __init__(self, name, dtype, max_size=None):
         self.name = str(name)
         self.dtype = uri(dtype)
@@ -30,12 +34,16 @@ class Collection(State, metaclass=Meta):
 
 class BTree(Collection):
     """
-    A :class:`Chain` which keeps track of the entire update history of its subject.
+    A BTree with a schema of named, :class:`Value`-typed :class:`Column`s.
     """
 
     __uri__ = uri(Collection) + "/btree"
 
     class Schema(object):
+        """
+        A BTree schema which comprises a tuple of :class:`Column`s.
+        """
+
         def __init__(self, *columns):
             self.columns = columns
 
@@ -47,7 +55,7 @@ class BTree(Collection):
         Return the number of keys in this BTree.
 
         To count the number of keys beginning with a specific prefix,
-        call `btree.slice(prefix).count()`.
+        call `btree[prefix].count()`.
         """
 
         return UInt(OpRef.Get(uri(self) + "/count"))
@@ -57,7 +65,7 @@ class BTree(Collection):
         Delete the contents of this BTree.
         
         To delete all keys beginning with a specific prefix, call
-        `btree.slice(prefix).delete()`.
+        `btree[prefix].delete()`.
         """
 
         return Nil(OpRef.Delete(uri(self)))
@@ -71,8 +79,10 @@ class BTree(Collection):
 
         return Nil(OpRef.Put(uri(self) + "/insert", None, key))
 
-    def slice(self, prefix):
-        """Return a slice of this BTree in which all keys begin with the given prefix."""
+    def slice(self, prefix, reverse=False):
+        """
+        Return a slice of this BTree containing all keys which begin with the given prefix.
+        """
 
-        return BTree(OpRef.Get(uri(self) + "/slice", prefix))
+        return BTree(OpRef.Get(uri(self) + "/slice", (prefix, reverse)))
 

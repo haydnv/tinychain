@@ -24,7 +24,7 @@ class State(object):
 
     def __json__(self):
         form = form_of(self)
-        if isinstance(form, URI):
+        if isinstance(form, URI) or isinstance(form, OpRef):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}

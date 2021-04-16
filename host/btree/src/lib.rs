@@ -26,6 +26,21 @@ pub use slice::BTreeSlice;
 pub type Key = Vec<Value>;
 pub type Range = collate::Range<Value, Key>;
 
+pub trait RangeExt: Sized {
+    fn try_cast_from(value: Value) -> TCResult<Self>;
+}
+
+impl RangeExt for Range {
+    fn try_cast_from(value: Value) -> TCResult<Self> {
+        if value.matches::<Vec<Value>>() {
+            let prefix: Vec<Value> = value.opt_cast_into().unwrap();
+            Ok(Range::with_prefix(prefix))
+        } else {
+            Err(TCError::bad_request("invalid BTree range", value))
+        }
+    }
+}
+
 #[async_trait]
 pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;
@@ -186,7 +201,13 @@ impl de::FromStream for Column {
 
 impl<'en> en::IntoStream<'en> for Column {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        (self.name, Link::from(self.dtype.path()), self.max_len).into_stream(encoder)
+        let dtype = Value::Link(Link::from(self.dtype.path()));
+
+        if let Some(max_len) = self.max_len {
+            (self.name, dtype, max_len).into_stream(encoder)
+        } else {
+            (self.name, dtype).into_stream(encoder)
+        }
     }
 }
 
@@ -455,7 +476,7 @@ impl<'en> en::IntoStream<'en> for BTreeView<'en> {
 
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(
-            BTreeType::File.to_string(),
+            BTreeType::File.path().to_string(),
             (self.schema, en::SeqStream::from(self.keys)),
         )?;
         map.end()

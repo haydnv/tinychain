@@ -544,6 +544,7 @@ impl TryCastFrom<Scalar> for Value {
                         return None;
                     }
                 }
+
                 Some(Value::Tuple(value.into()))
             }
             Scalar::Value(value) => Some(value),
@@ -734,6 +735,10 @@ impl de::Visitor for ScalarVisitor {
         "a Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}"
     }
 
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        self.value.visit_bool(value).map(Scalar::Value)
+    }
+
     fn visit_i8<E: de::Error>(self, value: i8) -> Result<Self::Value, E> {
         self.value.visit_i8(value).map(Scalar::Value)
     }
@@ -843,9 +848,7 @@ impl FromStream for Scalar {
     type Context = ();
 
     async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
-        d.decode_any(ScalarVisitor::default())
-            .map_err(|e| de::Error::custom(format!("error parsing Scalar: {}", e)))
-            .await
+        d.decode_any(ScalarVisitor::default()).await
     }
 }
 

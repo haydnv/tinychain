@@ -23,15 +23,26 @@ class BTreeTests(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def testInsert(self):
-        x = 100
+        for x in range(0, 100, 10):
+            cxt = tc.Context()
+            cxt.tree = tc.BTree(SCHEMA)
+            cxt.inserts = [cxt.tree.insert((i, num2words(i))) for i in range(x)]
+            cxt.result = tc.After(cxt.inserts, cxt.tree.count())
+
+            result = self.host.post(ENDPOINT, cxt)
+            self.assertEqual(result, x)
+
+    def testSlice(self):
+        keys = [(i, num2words(i)) for i in range(10)]
+        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), [keys[1]]]}
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
-        cxt.inserts = [cxt.tree.insert((i, num2words(i))) for i in range(x)]
-        cxt.result = tc.After(cxt.inserts, cxt.tree.count())
+        cxt.inserts = [cxt.tree.insert(key) for key in keys]
+        cxt.result = tc.After(cxt.inserts, cxt.tree.slice((1,)))
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, x)
+        self.assertEqual(result, tc.to_json(expected))
 
     @classmethod
     def tearDownClass(cls):

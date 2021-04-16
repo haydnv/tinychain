@@ -602,6 +602,16 @@ impl TryCastFrom<Value> for Number {
     }
 }
 
+impl TryCastFrom<Value> for bool {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
 impl TryCastFrom<Value> for usize {
     fn can_cast_from(value: &Value) -> bool {
         Number::can_cast_from(value)
