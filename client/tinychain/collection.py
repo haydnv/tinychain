@@ -1,4 +1,4 @@
-"""Data structures responsible for storing a collection of :class:`Value`s"""
+"""Data structures responsible for storing a collection of :class:`Value`\s"""
 
 from .ref import OpRef
 from .reflect import Meta
@@ -26,7 +26,7 @@ class Column(object):
 
 class Collection(State, metaclass=Meta):
     """
-    Data structure responsible for storing a collection of :class:`Value`s.
+    Data structure responsible for storing a collection of :class:`Value`\s.
     """
 
     __uri__ = uri(State) + "/collection"
@@ -34,14 +34,14 @@ class Collection(State, metaclass=Meta):
 
 class BTree(Collection):
     """
-    A BTree with a schema of named, :class:`Value`-typed :class:`Column`s.
+    A BTree with a schema of named, :class:`Value`-typed :class:`Column`\s.
     """
 
     __uri__ = uri(Collection) + "/btree"
 
     class Schema(object):
         """
-        A BTree schema which comprises a tuple of :class:`Column`s.
+        A BTree schema which comprises a tuple of :class:`Column`\s.
         """
 
         def __init__(self, *columns):
@@ -49,6 +49,13 @@ class BTree(Collection):
 
         def __json__(self):
             return to_json(self.columns)
+
+    def __getitem__(self, prefix):
+        """
+        Return a slice of this BTree containing all keys which begin with the given prefix.
+        """
+
+        return BTree(OpRef.Get(uri(self), prefix))
 
     def count(self):
         """
@@ -79,10 +86,10 @@ class BTree(Collection):
 
         return Nil(OpRef.Put(uri(self) + "/insert", None, key))
 
-    def slice(self, prefix, reverse=False):
+    def reverse(self):
         """
-        Return a slice of this BTree containing all keys which begin with the given prefix.
+        Return a slice of this BTree with the same range with its keys in reverse order.
         """
 
-        return BTree(OpRef.Get(uri(self) + "/slice", (prefix, reverse)))
+        return BTree(OpRef.Get(uri(self), (None, True)))
 

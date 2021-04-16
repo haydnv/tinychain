@@ -32,7 +32,9 @@ pub trait RangeExt: Sized {
 
 impl RangeExt for Range {
     fn try_cast_from(value: Value) -> TCResult<Self> {
-        if value.matches::<Vec<Value>>() {
+        if value.is_none() {
+            Ok(Range::default())
+        } else if value.matches::<Vec<Value>>() {
             let prefix: Vec<Value> = value.opt_cast_into().unwrap();
             Ok(Range::with_prefix(prefix))
         } else {
@@ -307,6 +309,10 @@ where
     }
 
     fn slice(self, range: Range, reverse: bool) -> Self {
+        if range == Range::default() && !reverse {
+            return self;
+        }
+
         match self {
             Self::File(file) => BTree::Slice(file.slice(range, reverse)),
             Self::Slice(slice) => BTree::Slice(slice.slice(range, reverse)),

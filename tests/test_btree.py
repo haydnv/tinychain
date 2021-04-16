@@ -39,7 +39,19 @@ class BTreeTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.result = tc.After(cxt.inserts, cxt.tree.slice((1,)))
+        cxt.result = tc.After(cxt.inserts, cxt.tree[(1,)])
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, tc.to_json(expected))
+
+    def testReverse(self):
+        keys = [(i, num2words(i)) for i in range(10)]
+        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), list(reversed(keys))]}
+
+        cxt = tc.Context()
+        cxt.tree = tc.BTree(SCHEMA)
+        cxt.inserts = [cxt.tree.insert(key) for key in keys]
+        cxt.result = tc.After(cxt.inserts, cxt.tree.reverse())
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, tc.to_json(expected))

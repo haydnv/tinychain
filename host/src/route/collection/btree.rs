@@ -1,5 +1,5 @@
 use futures::TryFutureExt;
-use safecast::TryCastInto;
+use safecast::{Match, TryCastInto};
 
 use tc_btree::{BTreeInstance, Range, RangeExt};
 use tc_error::TCError;
@@ -74,8 +74,14 @@ impl<'a> Handler<'a> for SliceHandler {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, range| {
             Box::pin(async move {
-                let (range, reverse): (Value, bool) = range
-                    .try_cast_into(|v| TCError::bad_request("invalid range for BTree slice", v))?;
+                let invalid_range =
+                    |v: &Value| TCError::bad_request("invalid range for BTree slice", v);
+
+                let (range, reverse): (Value, bool) = if range.matches::<(Value, bool)>() {
+                    range.try_cast_into(invalid_range)?
+                } else {
+                    (range.try_cast_into(invalid_range)?, false)
+                };
 
                 let range = Range::try_cast_from(range)?;
                 let slice = self.btree.slice(range, reverse);
@@ -94,15 +100,16 @@ impl From<BTree> for SliceHandler {
 
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.len() != 1 {
-            return None;
-        }
-
-        match path[0].as_str() {
-            "count" => Some(Box::new(CountHandler::from(self))),
-            "insert" => Some(Box::new(InsertHandler::from(self))),
-            "slice" => Some(Box::new(SliceHandler::from(self.clone()))),
-            _ => None,
+        if path.is_empty() {
+            Some(Box::new(SliceHandler::from(self.clone())))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "count" => Some(Box::new(CountHandler::from(self))),
+                "insert" => Some(Box::new(InsertHandler::from(self))),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 }
