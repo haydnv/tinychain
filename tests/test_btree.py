@@ -33,7 +33,7 @@ class BTreeTests(unittest.TestCase):
             self.assertEqual(result, x)
 
     def testSlice(self):
-        keys = [(i, num2words(i)) for i in range(10)]
+        keys = [(i, num2words(i)) for i in range(50)]
         expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), [keys[1]]]}
 
         cxt = tc.Context()
@@ -45,7 +45,7 @@ class BTreeTests(unittest.TestCase):
         self.assertEqual(result, tc.to_json(expected))
 
     def testReverse(self):
-        keys = [(i, num2words(i)) for i in range(10)]
+        keys = [(i, num2words(i)) for i in range(50)]
         expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), list(reversed(keys))]}
 
         cxt = tc.Context()
@@ -57,16 +57,15 @@ class BTreeTests(unittest.TestCase):
         self.assertEqual(result, tc.to_json(expected))
 
     def testSliceRange(self):
-        keys = [(i, num2words(i)) for i in range(10)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[1:4]]}
+        keys = [(i, num2words(i)) for i in range(50)]
+        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[29:32]]}
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.result = tc.After(cxt.inserts, cxt.tree[1:4])
+        cxt.result = tc.After(cxt.inserts, cxt.tree[29:32])
 
         result = self.host.post(ENDPOINT, cxt)
-        print(result)
         self.assertEqual(result, tc.to_json(expected))
 
     @classmethod
