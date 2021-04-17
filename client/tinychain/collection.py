@@ -7,6 +7,55 @@ from .util import *
 from .value import UInt, Nil, Value
 
 
+class Bound(object):
+    pass
+
+
+class Ex(Bound):
+    def __init__(self, value):
+        self.value = value
+
+    def __json__(self):
+        return to_json({"ex": self.value})
+
+
+class In(Bound):
+    def __init__(self, value):
+        self.value = value
+
+    def __json__(self):
+        return to_json({"in": self.value})
+
+
+class Un(Bound):
+    def __json__(self):
+        return Nil
+
+
+Bound.Ex = Ex
+Bound.In = In
+
+
+class Range(object):
+    @staticmethod
+    def from_slice(s):
+        return Range(Bound.In(s.start), Bound.Ex(s.stop))
+
+    def __init__(self, start=None, end=None):
+        if start is not None and not isinstance(start, Bound):
+            self.start = Bound.In(start)
+        else:
+            self.start = start
+
+        if end is not None and not isinstance(end, Bound):
+            self.end = Bound.In(end)
+        else:
+            self.end = end
+
+    def __json__(self):
+        return to_json((self.start, self.end))
+
+
 class Column(object):
     """
     A column in the schema of a :class:`BTree`.
@@ -55,7 +104,15 @@ class BTree(Collection):
         Return a slice of this BTree containing all keys which begin with the given prefix.
         """
 
-        return BTree(OpRef.Get(uri(self), prefix))
+        if not isinstance(prefix, tuple):
+            prefix = (prefix,)
+
+        prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
+
+        if any(isinstance(k, Range) for k in prefix):
+            return BTree(OpRef.Post(uri(self), **{"range": prefix}))
+        else:
+            return BTree(OpRef.Get(uri(self), prefix))
 
     def count(self):
         """

@@ -186,13 +186,19 @@ where
     }
 }
 
-impl<'en, T: Clone + 'en> IntoStream<'en> for Tuple<T> where T: IntoStream<'en> {
+impl<'en, T: Clone + 'en> IntoStream<'en> for Tuple<T>
+where
+    T: IntoStream<'en>,
+{
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.into_stream(encoder)
     }
 }
 
-impl<'en, T: Clone + 'en> ToStream<'en> for Tuple<T> where T: ToStream<'en> {
+impl<'en, T: Clone + 'en> ToStream<'en> for Tuple<T>
+where
+    T: ToStream<'en>,
+{
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.to_stream(encoder)
     }

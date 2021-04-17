@@ -356,6 +356,22 @@ impl TryFrom<State> for Value {
     }
 }
 
+impl TryCastFrom<State> for bool {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
 impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {

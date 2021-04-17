@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops;
 
 use async_trait::async_trait;
 use collate::Collate;
@@ -57,6 +58,16 @@ impl TryCastFrom<Map<Value>> for Bound {
             }
         } else {
             None
+        }
+    }
+}
+
+impl From<Bound> for ops::Bound<Value> {
+    fn from(bound: Bound) -> Self {
+        match bound {
+            Bound::In(value) => Self::Included(value),
+            Bound::Ex(value) => Self::Excluded(value),
+            Bound::Un => Self::Unbounded,
         }
     }
 }
@@ -240,6 +251,12 @@ impl<'en> en::ToStream<'en> for Range {
             (Bound::In(start), Bound::Un) => (start, ()).into_stream(encoder),
             (start, end) => (start, end).into_stream(encoder),
         }
+    }
+}
+
+impl From<Range> for (ops::Bound<Value>, ops::Bound<Value>) {
+    fn from(range: Range) -> Self {
+        (range.start.into(), range.end.into())
     }
 }
 

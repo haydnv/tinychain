@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -388,7 +388,15 @@ where
     {
         let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
 
-        debug!("_slice {} from {} to {}", node.deref(), l, r);
+        debug!(
+            "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
+            node.deref(),
+            l,
+            r,
+            Value::from_iter(range.prefix().into_iter().cloned()),
+            value_of(range.start()),
+            value_of(range.end())
+        );
 
         if node.leaf {
             let stream: TCTryStream<'a, Key> = if l == r && l < node.keys.len() {
@@ -454,11 +462,17 @@ where
     where
         Self: 'a,
     {
-        let collator = &self.inner.collator;
+        let (l, r) = self.inner.collator.bisect(&node.keys, &range);
 
-        let (l, r) = collator.bisect(&node.keys, &range);
-
-        debug!("_slice_reverse {} from {} to {}", node.deref(), l, r);
+        debug!(
+            "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
+            node.deref(),
+            l,
+            r,
+            Value::from_iter(range.prefix().into_iter().cloned()),
+            value_of(range.start()),
+            value_of(range.end())
+        );
 
         if node.leaf {
             let keys = node.keys[l..r]
@@ -668,5 +682,14 @@ where
 
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
         self.rows_in_range(txn_id, Range::default(), false).await
+    }
+}
+
+#[cfg(debug_assertions)]
+fn value_of(bound: &Bound<Value>) -> Value {
+    match bound {
+        Bound::Included(value) => value.clone(),
+        Bound::Excluded(value) => value.clone(),
+        Bound::Unbounded => Value::None,
     }
 }

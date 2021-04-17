@@ -326,7 +326,7 @@ impl std::borrow::Borrow<[PathSegment]> for TCPathBuf {
 impl Deref for TCPathBuf {
     type Target = [PathSegment];
 
-    fn deref(& self) -> & [PathSegment] {
+    fn deref(&self) -> &[PathSegment] {
         &self.segments[..]
     }
 }

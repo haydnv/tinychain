@@ -9,7 +9,7 @@ readme = "../README.md"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["distributed", "transactional", "host", "platform", "runtime"]
-categories = ["concurrency", "data-structures", "web-programming"]
+categories = ["concurrency", "database-implementations", "data-structures", "web-programming"]
 
 [lib]
 name = "tinychain"

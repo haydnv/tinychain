@@ -22,7 +22,10 @@ pub struct Map<T: Clone> {
 
 impl<T: Clone> Map<T> {
     #[inline]
-    pub fn expect_empty(&self) -> TCResult<()> where T: fmt::Display {
+    pub fn expect_empty(&self) -> TCResult<()>
+    where
+        T: fmt::Display,
+    {
         if self.is_empty() {
             Ok(())
         } else {
@@ -34,7 +37,10 @@ impl<T: Clone> Map<T> {
         self.inner
     }
 
-    pub fn or_default<P: Default + TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P> where T: fmt::Display {
+    pub fn or_default<P: Default + TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P>
+    where
+        T: fmt::Display,
+    {
         if let Some(param) = self.remove(name) {
             P::try_cast_from(param, |p| {
                 TCError::bad_request(format!("invalid value for {}", name), p)
@@ -44,9 +50,16 @@ impl<T: Clone> Map<T> {
         }
     }
 
-    pub fn require<P: TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P> where T: fmt::Display {
-        let param = self.remove(name).ok_or_else(|| TCError::bad_request("missing required parameter", name))?;
-        P::try_cast_from(param, |p| TCError::bad_request(format!("invalid value for {}", name), p))
+    pub fn require<P: TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P>
+    where
+        T: fmt::Display,
+    {
+        let param = self
+            .remove(name)
+            .ok_or_else(|| TCError::bad_request("missing required parameter", name))?;
+        P::try_cast_from(param, |p| {
+            TCError::bad_request(format!("invalid value for {}", name), p)
+        })
     }
 }
 

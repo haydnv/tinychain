@@ -1,14 +1,15 @@
 use futures::TryFutureExt;
-use safecast::{Match, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_btree::{BTreeInstance, Range, RangeExt};
-use tc_error::TCError;
+use tc_btree::{BTreeInstance, Range};
+use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::Value;
-use tcgeneric::PathSegment;
+use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::collection::{BTree, Collection};
-use crate::route::{GetHandler, Handler, PutHandler, Route};
+use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::scalar::Scalar;
 use crate::state::State;
 
 struct CountHandler<'a> {
@@ -83,9 +84,21 @@ impl<'a> Handler<'a> for SliceHandler {
                     (range.try_cast_into(invalid_range)?, false)
                 };
 
-                let range = Range::try_cast_from(range)?;
+                let range = cast_into_range(Scalar::Value(range))?;
                 let slice = self.btree.slice(range, reverse);
 
+                Ok(Collection::BTree(slice).into())
+            })
+        }))
+    }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let reverse = params.or_default(&label("reverse").into())?;
+                let range = params.or_default(&label("range").into())?;
+                let range = cast_into_range(range)?;
+                let slice = self.btree.slice(range, reverse);
                 Ok(Collection::BTree(slice).into())
             })
         }))
@@ -111,5 +124,32 @@ impl Route for BTree {
         } else {
             None
         }
+    }
+}
+
+fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
+    if scalar.is_none() {
+        return Ok(Range::default());
+    } else if let Scalar::Value(value) = scalar {
+        return match value {
+            Value::Tuple(prefix) => Ok(Range::with_prefix(prefix.into_inner())),
+            value => Ok(Range::with_prefix(vec![value])),
+        };
+    };
+
+    let mut prefix: Tuple<Scalar> =
+        scalar.try_cast_into(|s| TCError::bad_request("invalid BTree range", s))?;
+
+    if !prefix.is_empty() && tc_value::Range::can_cast_from(prefix.last().unwrap()) {
+        let range = tc_value::Range::opt_cast_from(prefix.pop().unwrap()).unwrap();
+        let prefix =
+            prefix.try_cast_into(|v| TCError::bad_request("invalid BTree range prefix", v))?;
+
+        Ok((prefix, range.start.into(), range.end.into()).into())
+    } else {
+        let prefix =
+            prefix.try_cast_into(|v| TCError::bad_request("invalid BTree range prefix", v))?;
+
+        Ok(Range::with_prefix(prefix))
     }
 }

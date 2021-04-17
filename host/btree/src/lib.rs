@@ -26,23 +26,6 @@ pub use slice::BTreeSlice;
 pub type Key = Vec<Value>;
 pub type Range = collate::Range<Value, Key>;
 
-pub trait RangeExt: Sized {
-    fn try_cast_from(value: Value) -> TCResult<Self>;
-}
-
-impl RangeExt for Range {
-    fn try_cast_from(value: Value) -> TCResult<Self> {
-        if value.is_none() {
-            Ok(Range::default())
-        } else if value.matches::<Vec<Value>>() {
-            let prefix: Vec<Value> = value.opt_cast_into().unwrap();
-            Ok(Range::with_prefix(prefix))
-        } else {
-            Err(TCError::bad_request("invalid BTree range", value))
-        }
-    }
-}
-
 #[async_trait]
 pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;

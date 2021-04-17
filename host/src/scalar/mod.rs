@@ -46,7 +46,7 @@ impl Class for ScalarType {}
 impl NativeClass for ScalarType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         debug!("ScalarType::from_path {}", TCPath::from(path));
-        if &path[..2] != &PREFIX[..] {
+        if path.len() >= 2 && &path[..2] != &PREFIX[..] {
             return None;
         }
 
@@ -603,6 +603,22 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for bool {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
             _ => None,
         }
     }
