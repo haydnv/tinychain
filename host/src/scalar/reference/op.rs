@@ -352,7 +352,23 @@ impl Refer for OpRef {
                     context.resolve_post(txn, id_ref.id(), &path, params).await
                 }
             },
-            _ => Err(TCError::not_implemented("OpRef::Delete")),
+            Self::Delete((subject, key)) => match subject {
+                Subject::Link(link) => {
+                    let key = key.resolve(context, txn).await?;
+                    let key = key.try_cast_into(invalid_key)?;
+
+                    txn.delete(link, key).map_ok(State::from).await
+                }
+                Subject::Ref(id_ref, path) => {
+                    let key = key.resolve(context, txn).await?;
+                    let key = key.try_cast_into(invalid_key)?;
+
+                    context
+                        .resolve_delete(txn, id_ref.id(), &path, key)
+                        .map_ok(State::from)
+                        .await
+                }
+            },
         }
     }
 }

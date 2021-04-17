@@ -1099,6 +1099,29 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
             Err(TCError::not_found(subject))
         }
     }
+
+    pub async fn resolve_delete(
+        &self,
+        txn: &Txn,
+        subject: &Id,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        if subject == &SELF {
+            debug!(
+                "{} GET {}: {}",
+                self.subject.class(),
+                TCPath::from(path),
+                key
+            );
+
+            self.subject.delete(txn, path, key).await
+        } else if let Some(subject) = self.data.deref().get(subject) {
+            subject.delete(txn, path, key).await
+        } else {
+            Err(TCError::not_found(subject))
+        }
+    }
 }
 
 impl<'a, T> Deref for Scope<'a, T> {
