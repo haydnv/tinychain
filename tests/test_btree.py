@@ -1,3 +1,4 @@
+import random
 import testutils
 import tinychain as tc
 import unittest
@@ -24,9 +25,15 @@ class BTreeTests(unittest.TestCase):
 
     def testInsert(self):
         for x in range(0, 100, 10):
+            keys = list(range(x))
+            random.shuffle(keys)
+
             cxt = tc.Context()
             cxt.tree = tc.BTree(SCHEMA)
-            cxt.inserts = [cxt.tree.insert((i, num2words(i))) for i in range(x)]
+            cxt.inserts = [
+                cxt.tree.insert((i, num2words(i)))
+                for i in keys]
+
             cxt.result = tc.After(cxt.inserts, cxt.tree.count())
 
             result = self.host.post(ENDPOINT, cxt)
@@ -76,6 +83,20 @@ class BTreeTests(unittest.TestCase):
         cxt.tree = tc.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.delete = tc.After(cxt.inserts, cxt.tree.delete())
+        cxt.result = tc.After(cxt.delete, cxt.tree)
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, tc.to_json(expected))
+
+    def testDeleteSlice(self):
+        keys = [(i, num2words(i)) for i in range(50)]
+        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[:25] + keys[35:]]}
+
+        cxt = tc.Context()
+        cxt.tree = tc.BTree(SCHEMA)
+        cxt.inserts = [cxt.tree.insert(key) for key in keys]
+        cxt.slice = cxt.tree[25:35]
+        cxt.delete = tc.After(cxt.inserts, cxt.slice.delete())
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
         result = self.host.post(ENDPOINT, cxt)
