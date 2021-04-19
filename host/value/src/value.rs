@@ -180,6 +180,7 @@ impl NativeClass for ValueType {
                         let prefix = prefix.append(label("int"));
                         use IntType as IT;
                         match it {
+                            IT::I8 => prefix.append(N16),
                             IT::I16 => prefix.append(N16),
                             IT::I32 => prefix.append(N32),
                             IT::I64 => prefix.append(N64),
