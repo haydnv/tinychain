@@ -68,6 +68,19 @@ class BTreeTests(unittest.TestCase):
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, tc.to_json(expected))
 
+    def testDelete(self):
+        keys = [(i, num2words(i)) for i in range(29)]
+        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), []]}
+
+        cxt = tc.Context()
+        cxt.tree = tc.BTree(SCHEMA)
+        cxt.inserts = [cxt.tree.insert(key) for key in keys]
+        cxt.delete = tc.After(cxt.inserts, cxt.tree.delete())
+        cxt.result = tc.After(cxt.delete, cxt.tree)
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, tc.to_json(expected))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

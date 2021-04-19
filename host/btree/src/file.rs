@@ -624,7 +624,7 @@ where
         try_join_all(
             node_ids
                 .iter()
-                .map(|node_id| self.inner.file.delete_block(&txn_id, node_id)),
+                .map(|node_id| self.inner.file.delete_block(txn_id, node_id)),
         )
         .await?;
 

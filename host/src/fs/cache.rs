@@ -171,7 +171,22 @@ struct Inner {
 }
 
 impl Inner {
-    async fn remove(&mut self, path: &PathBuf) -> TCResult<()> {
+    async fn delete(&mut self, path: &PathBuf) -> TCResult<()> {
+        if let Some(block) = self.entries.remove(path) {
+            let new_size = block.size().await?;
+
+            // TODO: keep track of the difference between new_size and old_size
+            if self.size > new_size {
+                self.size -= new_size;
+            }
+
+            self.lfu.remove(&path);
+        }
+
+        Ok(())
+    }
+
+    async fn evict(&mut self, path: &PathBuf) -> TCResult<()> {
         if let Some(block) = self.entries.remove(path) {
             let mut block_file = write_file(path).await?;
             let new_size = block.persist(&mut block_file).await?;
@@ -247,19 +262,30 @@ impl Cache {
         Ok(Some(lock))
     }
 
-    /// Remove a block from the cache.
-    pub async fn remove(&self, path: &PathBuf) -> TCResult<()> {
+    /// Delete a block from the cache.
+    pub async fn delete(&self, path: &PathBuf) -> TCResult<()> {
         let mut inner = self.inner.write().await;
-        inner.remove(path).await
+        inner.delete(path).await
+    }
+
+    /// Evict a block from the cache, after persisting it to disk.
+    pub async fn evict(&self, path: &PathBuf) -> TCResult<()> {
+        let mut inner = self.inner.write().await;
+        inner.evict(path).await
     }
 
     /// Remove a block from the cache and delete it from the filesystem.
-    pub async fn remove_and_delete(&self, path: &PathBuf) -> TCResult<()> {
+    pub async fn delete_and_sync(&self, path: &PathBuf) -> TCResult<()> {
         let mut inner = self.inner.write().await;
-        inner.remove(path).await?;
-        tokio::fs::remove_file(path)
-            .map_err(|e| io_err(e, path))
-            .await
+        inner.evict(path).await?;
+
+        if path.exists() {
+            tokio::fs::remove_file(path)
+                .map_err(|e| io_err(e, path))
+                .await
+        } else {
+            Ok(())
+        }
     }
 
     async fn _sync(inner: RwLockReadGuard<Inner>, path: &PathBuf) -> TCResult<bool> {
@@ -401,7 +427,7 @@ fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::UnboundedReceiver<Evict>) {
                     };
 
                     if evict {
-                        cache.remove(&block_id).await.expect("cache block sync");
+                        cache.evict(&block_id).await.expect("cache block sync");
                     }
                 } else {
                     break;

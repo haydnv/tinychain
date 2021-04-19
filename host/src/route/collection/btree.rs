@@ -8,7 +8,7 @@ use tc_value::Value;
 use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::collection::{BTree, Collection};
-use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 
@@ -67,11 +67,11 @@ impl<'a> From<&'a BTree> for InsertHandler<'a> {
     }
 }
 
-struct SliceHandler {
-    btree: BTree,
+struct SliceHandler<'a> {
+    btree: &'a BTree,
 }
 
-impl<'a> Handler<'a> for SliceHandler {
+impl<'a> Handler<'a> for SliceHandler<'a> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, range| {
             Box::pin(async move {
@@ -85,7 +85,7 @@ impl<'a> Handler<'a> for SliceHandler {
                 };
 
                 let range = cast_into_range(Scalar::Value(range))?;
-                let slice = self.btree.slice(range, reverse);
+                let slice = self.btree.clone().slice(range, reverse);
 
                 Ok(Collection::BTree(slice).into())
             })
@@ -98,15 +98,30 @@ impl<'a> Handler<'a> for SliceHandler {
                 let reverse = params.or_default(&label("reverse").into())?;
                 let range = params.or_default(&label("range").into())?;
                 let range = cast_into_range(range)?;
-                let slice = self.btree.slice(range, reverse);
+                let slice = self.btree.clone().slice(range, reverse);
                 Ok(Collection::BTree(slice).into())
+            })
+        }))
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::delete does not accept a key (call BTree::slice first)",
+                        key,
+                    ));
+                }
+
+                self.btree.delete(*txn.id()).await
             })
         }))
     }
 }
 
-impl From<BTree> for SliceHandler {
-    fn from(btree: BTree) -> Self {
+impl<'a> From<&'a BTree> for SliceHandler<'a> {
+    fn from(btree: &'a BTree) -> Self {
         Self { btree }
     }
 }
@@ -114,7 +129,7 @@ impl From<BTree> for SliceHandler {
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
-            Some(Box::new(SliceHandler::from(self.clone())))
+            Some(Box::new(SliceHandler::from(self)))
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "count" => Some(Box::new(CountHandler::from(self))),

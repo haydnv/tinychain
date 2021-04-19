@@ -19,10 +19,10 @@ use tc_error::*;
 use tc_transact::fs::{self, BlockData, BlockId, Store};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, TxnId};
+use tcgeneric::TCBoxTryFuture;
 
 use super::cache::*;
 use super::{file_name, fs_path, DirContents};
-use tcgeneric::TCBoxTryFuture;
 
 #[derive(Clone)]
 pub struct Block<B> {
@@ -223,8 +223,14 @@ where
             .await
     }
 
-    async fn delete_block(&self, _txn_id: &TxnId, _name: &BlockId) -> TCResult<()> {
-        Err(TCError::not_implemented("File::delete_block"))
+    async fn delete_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<()> {
+        let mut contents = self.contents.write(txn_id).await?;
+        if !contents.remove(&name) {
+            return Err(TCError::not_found(name));
+        }
+
+        let version = block_version(&self.path, &txn_id, name);
+        self.cache.delete(&version).await
     }
 
     async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Block<B>> {
@@ -235,7 +241,7 @@ where
             }
         }
 
-        let version = fs_path(&version_path(&self.path, &txn_id), &name);
+        let version = block_version(&self.path, &txn_id, &name);
         if let Some(lock) = self.cache.read(&version).await? {
             Ok(Block { name, txn_id, lock })
         } else {
@@ -290,18 +296,23 @@ where
         let file_path = &self.path;
         let cache = &self.cache;
         {
+            let contents = self.contents.read(txn_id).await.expect("file block list");
             let mutated = self.mutated.read().await;
             if let Some(blocks) = mutated.get(txn_id) {
-                let commits = blocks.iter().map(|block_id| async move {
-                    let block_path = fs_path(file_path, block_id);
-                    let block = fs::File::get_block(self, *txn_id, block_id.clone())
-                        .await
-                        .expect("get block");
+                let commits = blocks
+                    .iter()
+                    .filter(|block_id| contents.contains(block_id))
+                    .map(|block_id| async move {
+                        let block_path = fs_path(file_path, block_id);
 
-                    let data = fs::Block::read(block).await;
+                        let block = fs::File::get_block(self, *txn_id, block_id.clone())
+                            .await
+                            .expect("get block");
 
-                    cache.write_and_sync(block_path, data.deref().clone()).await
-                });
+                        let data = fs::Block::read(block).await;
+
+                        cache.write_and_sync(block_path, data.deref().clone()).await
+                    });
 
                 try_join_all(commits).await.expect("commit file blocks");
             }
@@ -312,7 +323,27 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let version = version_path(&self.path, txn_id);
+        debug!("finalize file {:?} at {}", &self.path, txn_id);
+
+        let file_path = &self.path;
+        let cache = &self.cache;
+        {
+            let contents = self.contents.read(txn_id).await.expect("file block list");
+            let mutated = self.mutated.read().await;
+            if let Some(blocks) = mutated.get(txn_id) {
+                let commits = blocks
+                    .iter()
+                    .filter(|block_id| !contents.contains(block_id))
+                    .map(|block_id| async move {
+                        let block_path = fs_path(file_path, block_id);
+                        cache.delete_and_sync(&block_path).await
+                    });
+
+                try_join_all(commits).await.expect("commit file blocks");
+            }
+        }
+
+        let version = file_version(&self.path, txn_id);
         if version.exists() {
             tokio::fs::remove_dir_all(version)
                 .await
@@ -391,9 +422,16 @@ where
 }
 
 #[inline]
-fn version_path(file_path: &PathBuf, txn_id: &TxnId) -> PathBuf {
+fn file_version(file_path: &PathBuf, txn_id: &TxnId) -> PathBuf {
     let mut path = file_path.clone();
     path.push(super::VERSION.to_string());
     path.push(txn_id.to_string());
+    path
+}
+
+#[inline]
+fn block_version(file_path: &PathBuf, txn_id: &TxnId, block_id: &BlockId) -> PathBuf {
+    let mut path = file_version(file_path, txn_id);
+    path.push(block_id.to_string());
     path
 }
