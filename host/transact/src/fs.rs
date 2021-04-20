@@ -32,7 +32,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     where
         Self: en::ToStream<'en>,
     {
-        let mut data = tbon::en::encode(self).map_err(TCError::internal)?;
+        let mut data = destream_json::en::encode(self).map_err(TCError::internal)?;
         let mut hasher = Sha256::default();
         while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
             hasher.update(&chunk);
@@ -43,7 +43,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     }
 
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        tbon::de::read_from((), source)
+        destream_json::de::read_from((), source)
             .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
             .await
     }
@@ -52,7 +52,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     where
         Self: en::ToStream<'en>,
     {
-        let encoded = tbon::en::encode(self)
+        let encoded = destream_json::en::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
 
         let mut reader = StreamReader::new(
@@ -71,7 +71,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
         Self: Clone + en::IntoStream<'en> + 'en,
     {
         let encoded =
-            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+            destream_json::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -86,7 +86,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
         Self: en::ToStream<'en>,
     {
         let encoded =
-            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+            destream_json::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
