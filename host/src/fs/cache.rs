@@ -1,13 +1,13 @@
 //! The filesystem cache, with LFU eviction
 
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::hash::Hash;
 use std::path::PathBuf;
 
+use async_trait::async_trait;
 use destream::IntoStream;
+use freqache::Entry;
 use futures::{Future, TryFutureExt};
-use log::debug;
+use log::{debug, error, info, warn};
 use tokio::fs;
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
@@ -21,6 +21,23 @@ use crate::chain::ChainBlock;
 use crate::scalar::Value;
 
 use super::{create_parent, io_err};
+
+struct Policy;
+
+#[async_trait]
+impl freqache::Policy<PathBuf, CacheBlock> for Policy {
+    fn can_evict(&self, block: &CacheBlock) -> bool {
+        block.ref_count() < 2
+    }
+
+    async fn evict(&self, path: PathBuf, block: &CacheBlock) {
+        persist(&path, block)
+            .await
+            .expect("persist cache block to disk")
+    }
+}
+
+type LFU = freqache::LFUCache<PathBuf, CacheBlock, Policy>;
 
 /// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
@@ -55,8 +72,10 @@ impl CacheBlock {
             Self::Value(block) => block.ref_count(),
         }
     }
+}
 
-    fn size(&self) -> u64 {
+impl Entry for CacheBlock {
+    fn weight(&self) -> u64 {
         match self {
             Self::BTree(_) => Node::max_size(),
             Self::Chain(_) => ChainBlock::max_size(),
@@ -161,65 +180,20 @@ impl<T> Clone for CacheLock<T> {
 
 struct Evict;
 
-struct Inner {
-    tx: mpsc::UnboundedSender<Evict>,
-    size: u64,
-    max_size: u64,
-    entries: HashMap<PathBuf, CacheBlock>,
-    lfu: LFU<PathBuf>,
-}
-
-impl Inner {
-    async fn delete(&mut self, path: &PathBuf) -> TCResult<()> {
-        if let Some(block) = self.entries.remove(path) {
-            let size = block.size();
-
-            if self.size > size {
-                self.size -= size;
-            }
-
-            self.lfu.remove(&path);
-        }
-
-        Ok(())
-    }
-
-    async fn evict(&mut self, path: &PathBuf) -> TCResult<()> {
-        if let Some(block) = self.entries.remove(path) {
-            let mut block_file = write_file(path).await?;
-            block.persist(&mut block_file).await?;
-
-            let new_size = block.size();
-            if self.size > new_size {
-                self.size -= new_size;
-            }
-
-            self.lfu.remove(&path);
-        }
-
-        Ok(())
-    }
-}
-
 /// The filesystem cache.
 #[derive(Clone)]
 pub struct Cache {
-    inner: RwLock<Inner>,
+    tx: mpsc::Sender<Evict>,
+    lfu: RwLock<LFU>,
 }
 
 impl Cache {
     /// Construct a new cache with the given size.
     pub fn new(max_size: u64) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-
+        let (tx, rx) = mpsc::channel(1024);
         let cache = Self {
-            inner: RwLock::new(Inner {
-                tx,
-                size: 0,
-                max_size,
-                entries: HashMap::new(),
-                lfu: LFU::new(),
-            }),
+            tx,
+            lfu: RwLock::new(LFU::new(max_size, Policy)),
         };
 
         spawn_cleanup_thread(cache.clone(), rx);
@@ -232,12 +206,12 @@ impl Cache {
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
     {
-        let mut inner = self.inner.write().await;
-        if let Some(lock) = inner.entries.get(path) {
+        let mut cache = self.lfu.write().await;
+
+        if let Some(block) = cache.get(path).await {
             debug!("cache hit: {:?}", path);
-            let lock = lock.clone().try_into()?;
-            inner.lfu.bump(path);
-            return Ok(Some(lock));
+            let block = block.clone().try_into()?;
+            return Ok(Some(block));
         } else if !path.exists() {
             return Ok(None);
         } else {
@@ -245,37 +219,26 @@ impl Cache {
         }
 
         let block_file = read_file(&path).await?;
-        let metadata = block_file.metadata().map_err(|e| io_err(e, &path)).await?;
         let block = B::load(block_file).await?;
 
         debug!("cache insert: {:?}", path);
 
-        let lock = CacheLock::new(block);
-        let cached = CacheBlock::from(lock.clone());
+        let block = CacheLock::new(block);
+        cache.insert(path.clone(), block.clone().into()).await;
 
-        inner.size += metadata.len();
-        inner.lfu.insert(path.clone());
-        inner.entries.insert(path.clone(), cached);
-
-        Ok(Some(lock))
+        Ok(Some(block))
     }
 
     /// Delete a block from the cache.
-    pub async fn delete(&self, path: &PathBuf) -> TCResult<()> {
-        let mut inner = self.inner.write().await;
-        inner.delete(path).await
-    }
-
-    /// Evict a block from the cache, after persisting it to disk.
-    pub async fn evict(&self, path: &PathBuf) -> TCResult<()> {
-        let mut inner = self.inner.write().await;
-        inner.evict(path).await
+    pub async fn delete(&self, path: &PathBuf) -> Option<CacheBlock> {
+        let mut cache = self.lfu.write().await;
+        cache.remove(path).await
     }
 
     /// Remove a block from the cache and delete it from the filesystem.
     pub async fn delete_and_sync(&self, path: &PathBuf) -> TCResult<()> {
-        let mut inner = self.inner.write().await;
-        inner.evict(path).await?;
+        let mut cache = self.lfu.write().await;
+        cache.remove(path).await;
 
         if path.exists() {
             tokio::fs::remove_file(path)
@@ -286,21 +249,11 @@ impl Cache {
         }
     }
 
-    async fn _sync(inner: RwLockReadGuard<Inner>, path: &PathBuf) -> TCResult<bool> {
+    async fn _sync(cache: &mut LFU, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
-        if let Some(block) = inner.entries.get(path) {
-            let mut block_file = if path.exists() {
-                debug!("open block file at {:?} for sync", path);
-                write_file(path).await?
-            } else {
-                debug!("create new filesystem block at {:?}", path);
-                create_parent(path).await?;
-                create_file(path).await?
-            };
-
-            block.persist(&mut block_file).await?;
-
+        if let Some(block) = cache.get(path).await {
+            persist(path, &block).await?;
             Ok(true)
         } else {
             log::info!("cache sync miss: {:?}", path);
@@ -312,32 +265,26 @@ impl Cache {
     pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
-        let inner = self.inner.read().await;
-        Self::_sync(inner, path).await
+        let mut cache = self.lfu.write().await;
+        Self::_sync(&mut cache, path).await
     }
 
     async fn _write<'en, B: BlockData + IntoStream<'en> + 'en>(
-        inner: &mut RwLockWriteGuard<Inner>,
+        cache: &mut LFU,
+        tx: &mpsc::Sender<Evict>,
         path: PathBuf,
-        block: B,
-    ) -> TCResult<CacheLock<B>>
-    where
+        block: CacheLock<B>,
+    ) where
         CacheBlock: From<CacheLock<B>>,
     {
-        if let Some(_) = inner.entries.remove(&path) {
-            inner.lfu.bump(&path);
-        } else {
-            inner.lfu.insert(path.clone());
-            inner.size += B::max_size();
-        }
+        cache.insert(path, block.clone().into()).await;
 
-        let block = CacheLock::new(block);
-        inner.entries.insert(path, block.clone().into());
-        if inner.size > inner.max_size {
-            inner.tx.send(Evict).map_err(TCError::internal)?;
+        if cache.is_full() {
+            debug!("the block cache is full, triggering garbage collection...");
+            if let Err(err) = tx.send(Evict).await {
+                error!("the cache cleanup thread is dead! {}", err);
+            }
         }
-
-        Ok(block)
     }
 
     /// Update a block in the cache.
@@ -350,9 +297,10 @@ impl Cache {
         CacheBlock: From<CacheLock<B>>,
     {
         debug!("cache insert: {:?}", &path);
-
-        let mut inner = self.inner.write().await;
-        Self::_write(&mut inner, path, block).await
+        let block = CacheLock::new(block);
+        let mut cache = self.lfu.write().await;
+        Self::_write(&mut cache, &self.tx, path, block.clone()).await;
+        Ok(block)
     }
 
     /// Update a block in the cache and then sync it with the filesystem.
@@ -364,73 +312,40 @@ impl Cache {
     where
         CacheBlock: From<CacheLock<B>>,
     {
-        let mut inner = self.inner.write().await;
-        Self::_write(&mut inner, path.clone(), block).await?;
-        let inner = inner.downgrade().await;
-        Self::_sync(inner, &path).await
+        debug!("cache insert + sync: {:?}", &path);
+        let block = CacheLock::new(block);
+        let mut cache = self.lfu.write().await;
+        Self::_write(&mut cache, &self.tx, path.clone(), block).await;
+        let exists = Self::_sync(&mut cache, &path).await?;
+        Ok(exists)
     }
 }
 
-struct LFU<T: Hash> {
-    entries: HashMap<T, usize>,
-    priority: Vec<T>,
-}
-
-impl<T: Clone + Eq + Hash> LFU<T> {
-    fn new() -> Self {
-        LFU {
-            entries: HashMap::new(),
-            priority: Vec::new(),
-        }
-    }
-
-    fn bump(&mut self, id: &T) {
-        let (r_id, r) = self.entries.remove_entry(id).unwrap();
-        if r == 0 {
-            self.entries.insert(r_id, r);
-        } else {
-            let (l_id, l) = self.entries.remove_entry(&self.priority[r - 1]).unwrap();
-            self.priority.swap(l, r);
-            self.entries.insert(l_id, r);
-            self.entries.insert(r_id, l);
-        }
-    }
-
-    fn insert(&mut self, id: T) {
-        assert!(!self.entries.contains_key(&id));
-
-        self.entries.insert(id.clone(), self.priority.len());
-        self.priority.push(id.clone());
-    }
-
-    fn remove(&mut self, id: &T) {
-        if let Some(i) = self.entries.remove(id) {
-            self.priority.remove(i);
-        }
-    }
-}
-
-fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::UnboundedReceiver<Evict>) {
+fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::Receiver<Evict>) {
     tokio::spawn(async move {
-        while rx.recv().await.is_some() {
-            let mut cache = cache.inner.write().await;
-            let mut priority = cache.lfu.priority.clone().into_iter();
-            while cache.size > cache.max_size {
-                if let Some(block_id) = priority.next() {
-                    let evict = {
-                        let block = cache.entries.get(&block_id).expect("cache internal");
-                        block.ref_count() == 1
-                    };
+        info!("cache cleanup thread is running...");
 
-                    if evict {
-                        cache.evict(&block_id).await.expect("cache block sync");
-                    }
-                } else {
-                    break;
-                }
-            }
+        while rx.recv().await.is_some() {
+            debug!("got Evict message, running cache eviction...");
+            let mut lfu = cache.lfu.write().await;
+            lfu.evict().await;
         }
+
+        warn!("cache cleanup thread is shutting down...");
     });
+}
+
+async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<()> {
+    let mut block_file = if path.exists() {
+        debug!("open block file at {:?} for sync", path);
+        write_file(path).await?
+    } else {
+        debug!("create new filesystem block at {:?}", path);
+        create_parent(path).await?;
+        create_file(path).await?
+    };
+
+    block.persist(&mut block_file).map_ok(|_size| ()).await
 }
 
 #[inline]

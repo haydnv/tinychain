@@ -230,7 +230,8 @@ where
         }
 
         let version = block_version(&self.path, &txn_id, name);
-        self.cache.delete(&version).await
+        self.cache.delete(&version).await;
+        Ok(())
     }
 
     async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Block<B>> {
