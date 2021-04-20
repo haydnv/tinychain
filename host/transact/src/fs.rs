@@ -26,6 +26,8 @@ pub type BlockId = PathSegment;
 pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     fn ext() -> &'static str;
 
+    fn max_size() -> u64;
+
     async fn hash<'en>(&'en self) -> TCResult<Bytes>
     where
         Self: en::ToStream<'en>,
@@ -64,9 +66,9 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
             .await
     }
 
-    async fn size<'en>(&'en self) -> TCResult<u64>
+    async fn into_size<'en>(self) -> TCResult<u64>
     where
-        Self: en::ToStream<'en>,
+        Self: Clone + en::IntoStream<'en> + 'en,
     {
         let encoded =
             tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
@@ -79,9 +81,9 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
             .await
     }
 
-    async fn into_size<'en>(self) -> TCResult<u64>
+    async fn size<'en>(&'en self) -> TCResult<u64>
     where
-        Self: Clone + en::IntoStream<'en> + 'en,
+        Self: en::ToStream<'en>,
     {
         let encoded =
             tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
@@ -100,6 +102,8 @@ impl BlockData for Value {
     fn ext() -> &'static str {
         "value"
     }
+
+    fn max_size() -> u64 { 4096 }
 }
 
 pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {

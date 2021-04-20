@@ -23,8 +23,6 @@ use crate::txn::{Txn, TxnId};
 
 use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
-const BLOCK_SIZE: u64 = 1_000_000;
-
 #[derive(Clone)]
 pub struct BlockChain {
     schema: Schema,
@@ -205,7 +203,7 @@ impl Transact for BlockChain {
                 .await
                 .expect("read latest chain block");
 
-            if block.size().await.expect("block size") >= BLOCK_SIZE {
+            if block.size().await.expect("block size") >= super::BLOCK_SIZE {
                 let mut latest = latest.upgrade().await.expect("latest block number");
                 (*latest) += 1;
 

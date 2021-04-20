@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
-use std::ops::Deref;
 use std::path::PathBuf;
 
 use destream::IntoStream;
@@ -57,11 +56,11 @@ impl CacheBlock {
         }
     }
 
-    async fn size(&self) -> TCResult<u64> {
+    fn size(&self) -> u64 {
         match self {
-            Self::BTree(block) => block.read().await.deref().size().await,
-            Self::Chain(block) => block.read().await.deref().size().await,
-            Self::Value(block) => block.read().await.deref().size().await,
+            Self::BTree(_) => Node::max_size(),
+            Self::Chain(_) => ChainBlock::max_size(),
+            Self::Value(_) => Value::max_size(),
         }
     }
 }
@@ -173,11 +172,10 @@ struct Inner {
 impl Inner {
     async fn delete(&mut self, path: &PathBuf) -> TCResult<()> {
         if let Some(block) = self.entries.remove(path) {
-            let new_size = block.size().await?;
+            let size = block.size();
 
-            // TODO: keep track of the difference between new_size and old_size
-            if self.size > new_size {
-                self.size -= new_size;
+            if self.size > size {
+                self.size -= size;
             }
 
             self.lfu.remove(&path);
@@ -189,9 +187,9 @@ impl Inner {
     async fn evict(&mut self, path: &PathBuf) -> TCResult<()> {
         if let Some(block) = self.entries.remove(path) {
             let mut block_file = write_file(path).await?;
-            let new_size = block.persist(&mut block_file).await?;
+            block.persist(&mut block_file).await?;
 
-            // TODO: keep track of the difference between new_size and old_size
+            let new_size = block.size();
             if self.size > new_size {
                 self.size -= new_size;
             }
@@ -326,17 +324,15 @@ impl Cache {
     where
         CacheBlock: From<CacheLock<B>>,
     {
-        if let Some(old_block) = inner.entries.remove(&path) {
-            inner.size -= old_block.size().await?;
+        if let Some(_) = inner.entries.remove(&path) {
             inner.lfu.bump(&path);
         } else {
             inner.lfu.insert(path.clone());
+            inner.size += B::max_size();
         }
 
-        let size = block.clone().into_size().await?;
         let block = CacheLock::new(block);
         inner.entries.insert(path, block.clone().into());
-        inner.size += size;
         if inner.size > inner.max_size {
             inner.tx.send(Evict).map_err(TCError::internal)?;
         }

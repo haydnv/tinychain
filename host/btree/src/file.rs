@@ -113,6 +113,8 @@ impl BlockData for Node {
     fn ext() -> &'static str {
         "node"
     }
+
+    fn max_size() -> u64 { 4096 }
 }
 
 #[async_trait]

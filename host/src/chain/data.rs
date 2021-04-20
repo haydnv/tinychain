@@ -72,6 +72,10 @@ impl BlockData for ChainBlock {
     fn ext() -> &'static str {
         super::EXT
     }
+
+    fn max_size() -> u64 {
+        super::BLOCK_SIZE
+    }
 }
 
 #[async_trait]
