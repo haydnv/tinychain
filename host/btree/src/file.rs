@@ -114,7 +114,9 @@ impl BlockData for Node {
         "node"
     }
 
-    fn max_size() -> u64 { 4096 }
+    fn max_size() -> u64 {
+        4096
+    }
 }
 
 #[async_trait]
@@ -693,5 +695,30 @@ fn value_of(bound: &Bound<Value>) -> Value {
         Bound::Included(value) => value.clone(),
         Bound::Excluded(value) => value.clone(),
         Bound::Unbounded => Value::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tcgeneric::label;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_node_serialization() {
+        let mut expected = Node::new(true, Some(label("123").into()));
+        expected
+            .keys
+            .insert(0, NodeKey::new(vec![1.into(), 2.into(), 3.into()]));
+
+        let actual: Node = tbon::de::try_decode((), tbon::en::encode(&expected).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(expected.leaf, actual.leaf);
+        assert_eq!(expected.parent, actual.parent);
+        assert_eq!(expected.keys.len(), actual.keys.len());
+        assert_eq!(expected.children, actual.children);
+        assert_eq!(expected.rebalance, actual.rebalance);
     }
 }
