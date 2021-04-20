@@ -76,7 +76,7 @@ class BTreeTests(unittest.TestCase):
         self.assertEqual(result, tc.to_json(expected))
 
     def testDelete(self):
-        keys = [(i, num2words(i)) for i in range(29)]
+        keys = [(i, num2words(i)) for i in range(100)]
         expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), []]}
 
         cxt = tc.Context()
@@ -91,6 +91,8 @@ class BTreeTests(unittest.TestCase):
     def testDeleteSlice(self):
         keys = [(i, num2words(i)) for i in range(50)]
         expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[:25] + keys[35:]]}
+
+        random.shuffle(keys)
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
