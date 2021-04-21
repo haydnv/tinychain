@@ -189,9 +189,9 @@ impl<'en> en::IntoStream<'en> for Column {
         let dtype = Value::Link(Link::from(self.dtype.path()));
 
         if let Some(max_len) = self.max_len {
-            (self.name, dtype, max_len).into_stream(encoder)
+            (self.name, dtype.to_string(), max_len).into_stream(encoder)
         } else {
-            (self.name, dtype).into_stream(encoder)
+            (self.name, dtype.to_string()).into_stream(encoder)
         }
     }
 }

@@ -109,6 +109,31 @@ class BTreeTests(unittest.TestCase):
         cls.host.stop()
 
 
+class Persistent(tc.Cluster):
+    __uri__ = tc.URI("/test/btree")
+
+    def _configure(self):
+        self.tree = tc.Chain.Block(tc.BTree(SCHEMA))
+
+
+class PersistenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        hosts = []
+        for i in range(1):
+            hosts.append(testutils.start_host(f"test_btree_{i}", [Persistent]))
+
+        cls.hosts = hosts
+
+    def testGet(self):
+        self.assertEqual(self.hosts[0].get("/test/btree/tree/count"), 0)
+
+    @classmethod
+    def tearDownClass(cls):
+        for host in cls.hosts:
+            host.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
 

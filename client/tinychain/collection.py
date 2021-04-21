@@ -68,9 +68,9 @@ class Column(object):
 
     def __json__(self):
         if self.max_size is None:
-            return to_json((self.name, self.dtype))
+            return to_json((self.name, str(self.dtype)))
         else:
-            return to_json((self.name, self.dtype, self.max_size))
+            return to_json((self.name, str(self.dtype), self.max_size))
 
 
 class Collection(State, metaclass=Meta):
