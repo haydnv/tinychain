@@ -60,7 +60,7 @@ where
                 };
 
                 let range = cast_into_range(Scalar::Value(range))?;
-                let slice = self.btree.clone().slice(range, reverse);
+                let slice = self.btree.clone().slice(range, reverse)?;
 
                 Ok(Collection::BTree(slice.into()).into())
             })
@@ -89,7 +89,7 @@ where
                 let reverse = params.or_default(&label("reverse").into())?;
                 let range = params.or_default(&label("range").into())?;
                 let range = cast_into_range(range)?;
-                let slice = self.btree.clone().slice(range, reverse);
+                let slice = self.btree.clone().slice(range, reverse)?;
                 Ok(Collection::BTree(slice.into()).into())
             })
         }))

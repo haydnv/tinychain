@@ -6,7 +6,9 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCTryStream};
 
-use super::{BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema};
+use super::{
+    validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema,
+};
 
 #[derive(Clone)]
 pub struct BTreeSlice<F, D, T> {
@@ -77,8 +79,9 @@ where
         self.source.schema()
     }
 
-    fn slice(self, range: Range, reverse: bool) -> Self::Slice {
-        Self::new(BTree::Slice(self), range, reverse)
+    fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
+        let range = validate_range(range, self.schema())?;
+        Ok(Self::new(BTree::Slice(self), range, reverse))
     }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {

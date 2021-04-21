@@ -36,7 +36,7 @@ pub trait BTreeInstance: Clone + Instance {
 
     fn schema(&self) -> &RowSchema;
 
-    fn slice(self, range: Range, reverse: bool) -> Self::Slice;
+    fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         // TODO: reimplement this more efficiently
@@ -293,14 +293,14 @@ where
         }
     }
 
-    fn slice(self, range: Range, reverse: bool) -> Self {
+    fn slice(self, range: Range, reverse: bool) -> TCResult<Self> {
         if range == Range::default() && !reverse {
-            return self;
+            return Ok(self);
         }
 
         match self {
-            Self::File(file) => BTree::Slice(file.slice(range, reverse)),
-            Self::Slice(slice) => BTree::Slice(slice.slice(range, reverse)),
+            Self::File(file) => file.slice(range, reverse).map(BTree::Slice),
+            Self::Slice(slice) => slice.slice(range, reverse).map(BTree::Slice),
         }
     }
 
@@ -487,7 +487,7 @@ impl<'en> en::IntoStream<'en> for BTreeView<'en> {
 }
 
 #[inline]
-pub fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
+fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
     if range.len() > schema.len() {
         return Err(TCError::bad_request(
             "too many columns in range",

@@ -122,16 +122,16 @@ class PersistenceTests(unittest.TestCase):
         cls.hosts = hosts
 
     def testInsert(self):
-        row = ["one", 1]
+        row = [1, "one"]
 
         self.hosts[0].put("/test/btree/tree", None, row)
-        actual = self.hosts[0].get("/test/btree/tree", ("one"))
+        actual = self.hosts[0].get("/test/btree/tree", (1,))
         self.assertEqual(actual, expected([row]))
 
         self.hosts[0].stop()
         self.hosts[0].start()
 
-        actual = self.hosts[0].get("/test/btree/tree", ("one"))
+        actual = self.hosts[0].get("/test/btree/tree", (1,))
         self.assertEqual(actual, expected([row]))
 
     @classmethod

@@ -22,7 +22,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
-use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
+use super::{validate_range, BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
 type Selection<'a> = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCTryStream<'a, Key>>> + Send + Unpin + 'a>>,
@@ -589,8 +589,9 @@ where
         &self.inner.schema
     }
 
-    fn slice(self, range: Range, reverse: bool) -> Self::Slice {
-        BTreeSlice::new(BTree::File(self), range, reverse)
+    fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
+        let range = validate_range(range, &self.inner.schema)?;
+        Ok(BTreeSlice::new(BTree::File(self), range, reverse))
     }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
@@ -615,6 +616,8 @@ where
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let key = validate_key(key, &self.inner.schema)?;
+
         let file = &self.inner.file;
         let order = self.inner.order;
 
@@ -748,6 +751,21 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
     };
 
     Ok(order)
+}
+
+#[inline]
+fn validate_key(key: Key, schema: &RowSchema) -> TCResult<Key> {
+    if key.len() != schema.len() {
+        return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
+    }
+
+    key.into_iter()
+        .zip(schema)
+        .map(|(val, col)| {
+            val.into_type(col.dtype)
+                .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
+        })
+        .collect()
 }
 
 #[cfg(debug_assertions)]
