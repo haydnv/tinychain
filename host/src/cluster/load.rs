@@ -9,7 +9,7 @@ use tc_error::*;
 use tc_transact::lock::TxnLock;
 use tcgeneric::*;
 
-use crate::chain::{self, Chain, ChainType};
+use crate::chain::{self, Chain, ChainType, Schema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::{Link, LinkHost, OpRef, Scalar, Value};
@@ -40,12 +40,13 @@ pub async fn instantiate(
             Scalar::Ref(tc_ref) => {
                 let op_ref = OpRef::try_from(*tc_ref)?;
                 match op_ref {
-                    OpRef::Get((subject, schema)) => {
-                        let classpath = TCPathBuf::try_from(subject)?;
+                    OpRef::Get((class, schema)) => {
+                        let classpath = TCPathBuf::try_from(class)?;
                         let ct = ChainType::from_path(&classpath)
                             .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
 
-                        let schema: Value = schema.try_into()?;
+                        debug!("an instance of {} with schema {}", ct, schema);
+                        let schema = Schema::from_scalar(schema)?;
                         chain_schema.insert(id, (ct, schema));
                     }
                     OpRef::Post((extends, proto)) => {

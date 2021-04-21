@@ -5,18 +5,20 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use destream::{de, en, EncodeMap};
+use destream::{de, en};
 use futures::future::TryFutureExt;
 use log::debug;
-use safecast::{CastFrom, TryCastFrom, TryCastInto};
+use safecast::{TryCastFrom, TryCastInto};
 
+use tc_btree::BTreeType;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
+use crate::collection::CollectionType;
 use crate::fs;
-use crate::scalar::{Link, Scalar, Value};
+use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -26,7 +28,6 @@ mod sync;
 
 use block::BlockSeq;
 
-use crate::fs::FileEntry;
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
@@ -36,7 +37,6 @@ const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 const SUBJECT: Label = label("subject");
-const ERR_INVALID_SCHEMA: &str = "invalid Chain schema";
 
 /// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
@@ -45,11 +45,40 @@ pub const EXT: &str = "chain";
 #[derive(Clone)]
 pub enum Schema {
     Value(Value),
+    BTree(tc_btree::RowSchema),
 }
 
-impl CastFrom<Value> for Schema {
-    fn cast_from(value: Value) -> Self {
-        Self::Value(value)
+impl Schema {
+    pub fn from_scalar(scalar: Scalar) -> TCResult<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Op(op_ref) => match op_ref {
+                    OpRef::Get((class, schema)) => {
+                        let class = TCPathBuf::try_from(class)?;
+                        let class = CollectionType::from_path(&class).ok_or_else(|| {
+                            TCError::bad_request("invalid Collection type", class)
+                        })?;
+                        match class {
+                            CollectionType::BTree(_) => {
+                                let schema = Value::try_cast_from(schema, |s| {
+                                    TCError::bad_request("invalid BTree schema", s)
+                                })?;
+
+                                let schema = schema.try_cast_into(|s| {
+                                    TCError::bad_request("invalid BTree schema", s)
+                                })?;
+
+                                Ok(Self::BTree(schema))
+                            }
+                        }
+                    }
+                    other => Err(TCError::bad_request("invalid Chain schema", other)),
+                },
+                other => Err(TCError::bad_request("invalid Chain schema", other)),
+            },
+            Scalar::Value(value) => Ok(Self::Value(value)),
+            other => Err(TCError::bad_request("invalid Chain schema", other)),
+        }
     }
 }
 
@@ -58,14 +87,22 @@ impl de::FromStream for Schema {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        Value::from_stream(cxt, decoder).map_ok(Self::Value).await
+        let scalar = Scalar::from_stream(cxt, decoder).await?;
+        Self::from_scalar(scalar).map_err(de::Error::custom)
     }
 }
 
 impl<'en> en::IntoStream<'en> for Schema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use destream::en::EncodeMap;
+
         match self {
             Self::Value(value) => value.into_stream(encoder),
+            Self::BTree(schema) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(BTreeType::default().path(), schema)?;
+                map.end()
+            }
         }
     }
 }
@@ -92,6 +129,7 @@ impl Subject {
 
                 Ok(Self::Value(file))
             }
+            Schema::BTree(_schema) => Err(TCError::not_implemented("Subject::create BTree")),
         }
     }
 
@@ -148,6 +186,7 @@ impl Subject {
         if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
             match schema {
                 Schema::Value(_) => file.try_into().map(Self::Value),
+                Schema::BTree(_) => Err(TCError::not_implemented("Subject::load BTree")),
             }
         } else {
             Self::create(schema, dir, txn_id).await
@@ -183,7 +222,7 @@ impl de::FromStream for Subject {
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let value = Value::from_stream((), decoder).await?;
 
-        let file: FileEntry = txn
+        let file: fs::FileEntry = txn
             .context()
             .create_file(*txn.id(), SUBJECT.into(), value.class().into())
             .map_err(de::Error::custom)
@@ -382,6 +421,8 @@ pub struct ChainView<'en> {
 
 impl<'en> en::IntoStream<'en> for ChainView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use destream::en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(1))?;
 
         map.encode_key(self.class.path().to_string())?;
@@ -394,9 +435,12 @@ impl<'en> en::IntoStream<'en> for ChainView<'en> {
     }
 }
 
-pub async fn load(class: ChainType, schema: Value, dir: fs::Dir, txn_id: TxnId) -> TCResult<Chain> {
-    let schema = schema.try_cast_into(|v| TCError::bad_request(ERR_INVALID_SCHEMA, v))?;
-
+pub async fn load(
+    class: ChainType,
+    schema: Schema,
+    dir: fs::Dir,
+    txn_id: TxnId,
+) -> TCResult<Chain> {
     match class {
         ChainType::Block => {
             BlockChain::load(schema, dir, txn_id)
