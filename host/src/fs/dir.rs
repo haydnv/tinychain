@@ -54,6 +54,10 @@ impl FileEntry {
             .ok_or_else(|| TCError::unsupported(format!("file at {:?} has no extension", &path)))?;
 
         match ext {
+            tc_btree::EXT => {
+                let file = File::load(cache.clone(), path, contents)?;
+                Ok(FileEntry::BTree(file))
+            }
             chain::EXT => {
                 let file = File::load(cache.clone(), path, contents)?;
                 Ok(FileEntry::Chain(file))

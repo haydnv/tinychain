@@ -112,7 +112,7 @@ impl Node {
 
 impl BlockData for Node {
     fn ext() -> &'static str {
-        "node"
+        super::EXT
     }
 
     fn max_size() -> u64 {

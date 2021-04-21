@@ -15,13 +15,13 @@ Tinychain is an all-in-one database + application server with support for blockc
 
 Tinychain is useful in any situation which requires developing and deploying a cloud service. Anytime you consider developing a service with, for example, MySQL or MongoDB or Neo4j and Apache or Nginx or Django, you can probably get the same thing done faster and more scalably with Tinychain. The major advantage of Tinychain is its automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer.
 
-Tinychain is early beta software. Many features are only partially implemented, or not fully tested, or not yet available in the public API. You should not assume that Tinychain is secure, and you should make regular backups of your data.
+Tinychain is early beta software. Many features are not fully tested, or not yet available in the public API. You should not assume that Tinychain is secure, and you should make regular backups of your data.
 
 If you're not sure how to get started, or have a question, or find a bug, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
 
 ## Getting started
 
-The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases. Binary releases are currently only available for 64-bit Intel Linux (you should be able to build from source on other architectures, but this has not been tested).
+The easiest way to get started is to download the latest release from GitHub here: [github.com/haydnv/tinychain/releases](://github.com/haydnv/tinychain/releases). Binary releases are currently only available for 64-bit Intel Linux (you should be able to build from source on other architectures, but this has not been tested).
 
 If you use the Rust programming language, you can install Tinychain on any platform by running `cargo install tinychain`.
 
@@ -33,7 +33,7 @@ $ ./tinychain &
 $ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'key="Hello, world!"'
 ```
 
-There are instructions to set up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
+There are instructions for setting up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
 
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a series of tutorial videos on YouTube: [https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw)
 
@@ -65,15 +65,15 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 ## Data structures
 
  * **Cluster**: a collection of **Chain**s and **Op**s responsible for managing consensus relative to other **Cluster**s on the network
- * **Chain**: A record of mutations applied to a subject **Collection**\*\* or **Value**
+ * **Chain**: A record of mutations applied to a subject **Collection** or **Value**
     * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. if the host crashes)
     * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age, and replaced with a copy of the **Chain**'s subject at that time
-    * **BlockChain**\*: A **Chain** with a record of every mutation in the history of its **Collection**\*\* or **Value**
+    * **BlockChain**: A **Chain** with a record of every mutation in the history of its **Collection** or **Value**
     * **CompliantChain**\*: A **Chain** which retains all history by default, but which allows purging all data owned by a given (anonymous) user ID, for compliance with legal requirements like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act)
     * **ReduceChain**\*: A **Chain** which defines a reduce method to compress old blocks, useful for metrics (e.g. to reduce per-second statistics to per-minute, per-minute to per-hour, etc.)
- * **Collection**\*\*
-    * **BTree**\*\*: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
-    * **Table**\*\*: A database table, which supports one or more **BTree**\*\* indices
+ * **Collection**
+    * **BTree**: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
+    * **Table**\*\*: A database table, which supports one or more **BTree** indices
     * **Tensor**\*\*: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
     * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**\*\*s
  * **Scalar**

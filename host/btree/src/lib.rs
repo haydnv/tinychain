@@ -20,6 +20,8 @@ mod slice;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
+pub const EXT: &str = "node";
+
 pub use file::{BTreeFile, Node};
 pub use slice::BTreeSlice;
 
