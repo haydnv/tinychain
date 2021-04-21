@@ -203,6 +203,18 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
 where
     Self: Clone,
 {
+    fn new(file: F, schema: RowSchema, order: usize, root: NodeId) -> Self {
+        BTreeFile { inner: Arc::new(Inner {
+            file,
+            schema,
+            order,
+            collator: ValueCollator::default(),
+            root: TxnLock::new("BTree root", root.into()),
+            dir: PhantomData,
+            txn: PhantomData,
+        })}
+    }
+
     pub async fn create(txn: T, file: F, schema: RowSchema) -> TCResult<Self> {
         if !file.is_empty(txn.id()).await? {
             return Err(TCError::internal(
@@ -210,57 +222,14 @@ where
             ));
         }
 
-        let mut key_size = 0;
-        for col in &schema {
-            if let Some(size) = col.dtype().size() {
-                key_size += size;
-                if col.max_len().is_some() {
-                    return Err(TCError::bad_request(
-                        "Maximum length is not applicable to",
-                        col.dtype(),
-                    ));
-                }
-            } else if let Some(size) = col.max_len() {
-                key_size += size;
-            } else {
-                return Err(TCError::bad_request(
-                    "Type requires a maximum length",
-                    col.dtype(),
-                ));
-            }
-        }
-        // each individual column requires 1-2 bytes of type data
-        key_size += schema.len() * 2;
-        // the "leaf" and "deleted" booleans each add two bytes to a key as-stored
-        key_size += 4;
-
-        let order = if DEFAULT_BLOCK_SIZE > (key_size * 2) + (BLOCK_ID_SIZE * 3) {
-            // let m := order
-            // maximum block size = (m * key_size) + ((m + 1) * block_id_size)
-            // therefore block_size = (m * (key_size + block_id_size)) + block_id_size
-            // therefore block_size - block_id_size = m * (key_size + block_id_size)
-            // therefore m = floor((block_size - block_id_size) / (key_size + block_id_size))
-            (DEFAULT_BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE)
-        } else {
-            2
-        };
+        let order = validate_schema(&schema)?;
 
         let root: BlockId = Uuid::new_v4().into();
         file.clone()
             .create_block(*txn.id(), root.clone(), Node::new(true, None))
             .await?;
 
-        Ok(BTreeFile {
-            inner: Arc::new(Inner {
-                file,
-                schema,
-                order,
-                collator: ValueCollator::default(),
-                root: TxnLock::new("BTree root", root.into()),
-                dir: PhantomData,
-                txn: PhantomData,
-            }),
-        })
+        Ok(BTreeFile::new(file, schema, order, root))
     }
 
     fn _delete_range<'a>(
@@ -687,6 +656,72 @@ where
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
         self.rows_in_range(txn_id, Range::default(), false).await
     }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist for BTreeFile<F, D, T> {
+    type Schema = RowSchema;
+    type Store = F;
+
+    fn schema(&self) -> &Self::Schema {
+        &self.inner.schema
+    }
+
+    async fn load(schema: RowSchema, file: F, txn_id: TxnId) -> TCResult<Self> {
+        let order = validate_schema(&schema)?;
+
+        let mut root = None;
+        for block_id in file.block_ids(&txn_id).await? {
+            let block = file.read_block(txn_id, block_id.clone()).await?;
+            if block.parent.is_none() {
+                root = Some(block_id);
+                break;
+            }
+        };
+
+        let root = root.ok_or_else(|| TCError::internal("BTree corrupted (missing root block)"))?;
+
+        Ok(BTreeFile::new(file, schema, order, root))
+    }
+}
+
+fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
+    let mut key_size = 0;
+    for col in schema {
+        if let Some(size) = col.dtype().size() {
+            key_size += size;
+            if col.max_len().is_some() {
+                return Err(TCError::bad_request(
+                    "Maximum length is not applicable to",
+                    col.dtype(),
+                ));
+            }
+        } else if let Some(size) = col.max_len() {
+            key_size += size;
+        } else {
+            return Err(TCError::bad_request(
+                "Type requires a maximum length",
+                col.dtype(),
+            ));
+        }
+    }
+    // each individual column requires 1-2 bytes of type data
+    key_size += schema.len() * 2;
+    // the "leaf" and "deleted" booleans each add two bytes to a key as-stored
+    key_size += 4;
+
+    let order = if DEFAULT_BLOCK_SIZE > (key_size * 2) + (BLOCK_ID_SIZE * 3) {
+        // let m := order
+        // maximum block size = (m * key_size) + ((m + 1) * block_id_size)
+        // therefore block_size = (m * (key_size + block_id_size)) + block_id_size
+        // therefore block_size - block_id_size = m * (key_size + block_id_size)
+        // therefore m = floor((block_size - block_id_size) / (key_size + block_id_size))
+        (DEFAULT_BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE)
+    } else {
+        2
+    };
+
+    Ok(order)
 }
 
 #[cfg(debug_assertions)]
