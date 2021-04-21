@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, try_join, try_join_all, Future, TryFutureExt};
+use futures::join;
 use futures::stream::{self, FuturesOrdered, TryStreamExt};
 use log::debug;
 use uuid::Uuid;
@@ -17,7 +18,7 @@ use uuid::Uuid;
 use tc_error::*;
 use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
@@ -204,19 +205,21 @@ where
     Self: Clone,
 {
     fn new(file: F, schema: RowSchema, order: usize, root: NodeId) -> Self {
-        BTreeFile { inner: Arc::new(Inner {
-            file,
-            schema,
-            order,
-            collator: ValueCollator::default(),
-            root: TxnLock::new("BTree root", root.into()),
-            dir: PhantomData,
-            txn: PhantomData,
-        })}
+        BTreeFile {
+            inner: Arc::new(Inner {
+                file,
+                schema,
+                order,
+                collator: ValueCollator::default(),
+                root: TxnLock::new("BTree root", root.into()),
+                dir: PhantomData,
+                txn: PhantomData,
+            }),
+        }
     }
 
-    pub async fn create(txn: T, file: F, schema: RowSchema) -> TCResult<Self> {
-        if !file.is_empty(txn.id()).await? {
+    pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
+        if !file.is_empty(&txn_id).await? {
             return Err(TCError::internal(
                 "Tried to create a new BTree without a new File",
             ));
@@ -226,7 +229,7 @@ where
 
         let root: BlockId = Uuid::new_v4().into();
         file.clone()
-            .create_block(*txn.id(), root.clone(), Node::new(true, None))
+            .create_block(txn_id, root.clone(), Node::new(true, None))
             .await?;
 
         Ok(BTreeFile::new(file, schema, order, root))
@@ -659,6 +662,23 @@ where
 }
 
 #[async_trait]
+impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
+    async fn commit(&self, txn_id: &TxnId) {
+        join!(
+            self.inner.file.commit(txn_id),
+            self.inner.root.commit(txn_id)
+        );
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(
+            self.inner.file.finalize(txn_id),
+            self.inner.root.finalize(txn_id)
+        );
+    }
+}
+
+#[async_trait]
 impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist for BTreeFile<F, D, T> {
     type Schema = RowSchema;
     type Store = F;
@@ -677,11 +697,17 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist for BTreeFile<F, D, T> {
                 root = Some(block_id);
                 break;
             }
-        };
+        }
 
         let root = root.ok_or_else(|| TCError::internal("BTree corrupted (missing root block)"))?;
 
         Ok(BTreeFile::new(file, schema, order, root))
+    }
+}
+
+impl<F, D, T> fmt::Display for BTreeFile<F, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a BTree")
     }
 }
 

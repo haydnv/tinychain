@@ -327,6 +327,18 @@ where
     }
 }
 
+impl<F, D, T> From<BTreeFile<F, D, T>> for BTree<F, D, T> {
+    fn from(btree: BTreeFile<F, D, T>) -> Self {
+        Self::File(btree)
+    }
+}
+
+impl<F, D, T> From<BTreeSlice<F, D, T>> for BTree<F, D, T> {
+    fn from(btree: BTreeSlice<F, D, T>) -> Self {
+        Self::Slice(btree)
+    }
+}
+
 struct KeyListVisitor<F, D, T> {
     txn_id: TxnId,
     btree: BTreeFile<F, D, T>,
@@ -394,7 +406,7 @@ where
             .await?
             .ok_or_else(|| de::Error::custom("expected BTree schema"))?;
 
-        let btree = BTreeFile::create(self.txn.clone(), self.file, schema)
+        let btree = BTreeFile::create(self.file, schema, *self.txn.id())
             .map_err(de::Error::custom)
             .await?;
 

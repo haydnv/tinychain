@@ -22,6 +22,7 @@ const PREFIX: PathLabel = path_label(&["state", "collection"]);
 pub use tc_btree::BTreeType;
 
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
@@ -71,6 +72,12 @@ impl Instance for Collection {
         match self {
             Self::BTree(btree) => CollectionType::BTree(btree.class()),
         }
+    }
+}
+
+impl From<BTree> for Collection {
+    fn from(btree: BTree) -> Self {
+        Self::BTree(btree)
     }
 }
 

@@ -2,23 +2,21 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
-use tc_btree::BTreeType;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
-use crate::collection::CollectionType;
+use crate::collection::{BTree, BTreeFile, CollectionType};
 use crate::fs;
-use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
+use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -36,7 +34,9 @@ const BLOCK_SIZE: u64 = 1_000_000;
 const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
-const SUBJECT: Label = label("subject");
+
+/// The name of the file containing a [`Chain`]'s [`Subject`]'s data.
+pub const SUBJECT: Label = label("subject");
 
 /// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
@@ -44,8 +44,8 @@ pub const EXT: &str = "chain";
 /// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
 #[derive(Clone)]
 pub enum Schema {
-    Value(Value),
     BTree(tc_btree::RowSchema),
+    Value(Value),
 }
 
 impl Schema {
@@ -97,12 +97,12 @@ impl<'en> en::IntoStream<'en> for Schema {
         use destream::en::EncodeMap;
 
         match self {
-            Self::Value(value) => value.into_stream(encoder),
             Self::BTree(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(BTreeType::default().path(), schema)?;
                 map.end()
             }
+            Self::Value(value) => value.into_stream(encoder),
         }
     }
 }
@@ -110,12 +110,13 @@ impl<'en> en::IntoStream<'en> for Schema {
 /// The state whose transactional integrity is protected by a [`Chain`].
 #[derive(Clone)]
 pub enum Subject {
+    BTree(BTreeFile),
     Value(fs::File<Value>),
 }
 
 impl Subject {
     /// Create a new `Subject` with the given `Schema`.
-    pub async fn create(schema: &Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+    pub async fn create(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         match schema {
             Schema::Value(value) => {
                 let file = dir
@@ -129,64 +130,29 @@ impl Subject {
 
                 Ok(Self::Value(file))
             }
-            Schema::BTree(_schema) => Err(TCError::not_implemented("Subject::create BTree")),
-        }
-    }
+            Schema::BTree(schema) => {
+                let file = dir
+                    .create_file(txn_id, SUBJECT.into(), BTreeType::default().into())
+                    .await?;
 
-    /// Return the state of this subject as of the given [`TxnId`].
-    pub async fn at(&self, txn_id: TxnId) -> TCResult<State> {
-        debug!("Subject::at {}", txn_id);
+                let file = fs::File::<Node>::try_from(file)?;
 
-        match self {
-            Self::Value(file) => {
-                let value = file.read_block(txn_id, SUBJECT.into()).await?;
-                Ok(value.deref().clone().into())
+                BTreeFile::create(file, schema, txn_id)
+                    .map_ok(Self::BTree)
+                    .await
             }
         }
     }
 
-    /// Set the state of this `Subject` to `value` at the given [`TxnId`].
-    pub async fn put(
-        &self,
-        txn_id: TxnId,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Value(file) => {
-                const ERR_NO_SUCH: &str = "Value has no such property";
-
-                if !path.is_empty() {
-                    return Err(TCError::bad_request(ERR_NO_SUCH, path));
-                }
-
-                if key.is_some() {
-                    return Err(TCError::bad_request(ERR_NO_SUCH, key));
-                }
-
-                let new_value = Value::try_cast_from(value, |v| {
-                    TCError::bad_request("cannot update a Value to", v)
-                })?;
-
-                let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
-
-                debug!(
-                    "set new Value of chain subject to {} at {}",
-                    new_value, txn_id
-                );
-                *block = new_value;
-
-                Ok(())
-            }
-        }
-    }
-
-    async fn load(schema: &Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+    async fn load(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
             match schema {
                 Schema::Value(_) => file.try_into().map(Self::Value),
-                Schema::BTree(_) => Err(TCError::not_implemented("Subject::load BTree")),
+                Schema::BTree(schema) => {
+                    BTreeFile::load(schema, file.try_into()?, txn_id)
+                        .map_ok(Self::BTree)
+                        .await
+                }
             }
         } else {
             Self::create(schema, dir, txn_id).await
@@ -197,19 +163,15 @@ impl Subject {
 #[async_trait]
 impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!(
-            "commit subject with value {} at {}",
-            self.at(*txn_id).await.unwrap(),
-            txn_id
-        );
-
         match self {
+            Self::BTree(btree) => btree.commit(txn_id).await,
             Self::Value(file) => file.commit(txn_id).await,
         }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
+            Self::BTree(btree) => btree.finalize(txn_id).await,
             Self::Value(file) => file.finalize(txn_id).await,
         }
     }
@@ -234,6 +196,31 @@ impl de::FromStream for Subject {
             .await?;
 
         Ok(Self::Value(file))
+    }
+}
+
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for Subject {
+    type Txn = Txn;
+    type View = StateView<'en>;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        match self {
+            Self::Value(file) => {
+                let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
+                State::from(value.clone()).into_view(txn).await
+            }
+            Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
+        }
+    }
+}
+
+impl fmt::Display for Subject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(btree) => write!(f, "chain Subject, {}", btree.class()),
+            Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
+        }
     }
 }
 

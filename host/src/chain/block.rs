@@ -16,6 +16,7 @@ use tc_transact::{IntoView, Transact};
 use tcgeneric::TCPathBuf;
 
 use crate::fs;
+use crate::route::Public;
 use crate::scalar::{Link, Scalar, Value};
 use crate::state::State;
 use crate::transact::Transaction;
@@ -116,7 +117,7 @@ impl ChainInstance for BlockChain {
 
         for (_, ops) in mutations {
             for (path, key, value) in ops.iter().cloned() {
-                self.subject.put(*txn.id(), path, key, value.into()).await?
+                self.subject.put(txn, &path, key, value.into()).await?
             }
         }
 
@@ -131,7 +132,7 @@ impl ChainInstance for BlockChain {
 
             for (_, ops) in block.mutations() {
                 for (path, key, value) in ops.iter().cloned() {
-                    self.subject.put(*txn.id(), path, key, value.into()).await?;
+                    self.subject.put(txn, &path, key, value.into()).await?
                 }
             }
 
@@ -160,7 +161,7 @@ impl Persist for BlockChain {
     }
 
     async fn load(schema: Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        let subject = Subject::load(&schema, &dir, txn_id).await?;
+        let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
 
         if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             let file: fs::File<ChainBlock> = file.try_into()?;
@@ -305,11 +306,11 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
     let txn_id = txn.id();
 
     if file.is_empty(txn_id).await? {
-        let subject = Subject::create(&schema, txn.context(), *txn_id).await?;
+        let subject = Subject::create(schema.clone(), txn.context(), *txn_id).await?;
         return Ok(BlockChain::new(schema, subject, 0, file));
     }
 
-    let subject = Subject::create(&schema, txn.context(), *txn.id()).await?;
+    let subject = Subject::create(schema.clone(), txn.context(), *txn.id()).await?;
 
     let mut latest = 0u64;
     let mut hash = Bytes::from(NULL_HASH);
@@ -327,7 +328,7 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
         for (_, ops) in block.mutations() {
             for (path, key, value) in ops.iter().cloned() {
                 subject
-                    .put(*txn_id, path, key, value.into())
+                    .put(&txn, &path, key, value.into())
                     .map_err(|e| {
                         TCError::bad_request(format!("error replaying block {}", latest), e)
                     })

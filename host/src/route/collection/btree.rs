@@ -7,16 +7,16 @@ use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{label, PathSegment, Tuple};
 
-use crate::collection::{BTree, Collection};
+use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 
-struct CountHandler<'a> {
-    btree: &'a BTree,
+struct CountHandler<'a, T> {
+    btree: &'a T,
 }
 
-impl<'a> Handler<'a> for CountHandler<'a> {
+impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
@@ -33,17 +33,17 @@ impl<'a> Handler<'a> for CountHandler<'a> {
     }
 }
 
-impl<'a> From<&'a BTree> for CountHandler<'a> {
-    fn from(btree: &'a BTree) -> Self {
+impl<'a, T> From<&'a T> for CountHandler<'a, T> {
+    fn from(btree: &'a T) -> Self {
         Self { btree }
     }
 }
 
-struct InsertHandler<'a> {
-    btree: &'a BTree,
+struct InsertHandler<'a, T> {
+    btree: &'a T,
 }
 
-impl<'a> Handler<'a> for InsertHandler<'a> {
+impl<'a, T: BTreeInstance> Handler<'a> for InsertHandler<'a, T> {
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
@@ -61,17 +61,20 @@ impl<'a> Handler<'a> for InsertHandler<'a> {
     }
 }
 
-impl<'a> From<&'a BTree> for InsertHandler<'a> {
-    fn from(btree: &'a BTree) -> Self {
+impl<'a, T> From<&'a T> for InsertHandler<'a, T> {
+    fn from(btree: &'a T) -> Self {
         Self { btree }
     }
 }
 
-struct SliceHandler<'a> {
-    btree: &'a BTree,
+struct SliceHandler<'a, T> {
+    btree: &'a T,
 }
 
-impl<'a> Handler<'a> for SliceHandler<'a> {
+impl<'a, T: BTreeInstance> Handler<'a> for SliceHandler<'a, T>
+where
+    BTree: From<T::Slice>,
+{
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, range| {
             Box::pin(async move {
@@ -87,7 +90,7 @@ impl<'a> Handler<'a> for SliceHandler<'a> {
                 let range = cast_into_range(Scalar::Value(range))?;
                 let slice = self.btree.clone().slice(range, reverse);
 
-                Ok(Collection::BTree(slice).into())
+                Ok(Collection::BTree(slice.into()).into())
             })
         }))
     }
@@ -99,7 +102,7 @@ impl<'a> Handler<'a> for SliceHandler<'a> {
                 let range = params.or_default(&label("range").into())?;
                 let range = cast_into_range(range)?;
                 let slice = self.btree.clone().slice(range, reverse);
-                Ok(Collection::BTree(slice).into())
+                Ok(Collection::BTree(slice.into()).into())
             })
         }))
     }
@@ -120,25 +123,42 @@ impl<'a> Handler<'a> for SliceHandler<'a> {
     }
 }
 
-impl<'a> From<&'a BTree> for SliceHandler<'a> {
-    fn from(btree: &'a BTree) -> Self {
+impl<'a, T> From<&'a T> for SliceHandler<'a, T> {
+    fn from(btree: &'a T) -> Self {
         Self { btree }
     }
 }
 
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(SliceHandler::from(self)))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "count" => Some(Box::new(CountHandler::from(self))),
-                "insert" => Some(Box::new(InsertHandler::from(self))),
-                _ => None,
-            }
-        } else {
-            None
+        route(self, path)
+    }
+}
+
+impl Route for BTreeFile {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        route(self, path)
+    }
+}
+
+#[inline]
+fn route<'a, T: BTreeInstance>(
+    btree: &'a T,
+    path: &'a [PathSegment],
+) -> Option<Box<dyn Handler<'a> + 'a>>
+where
+    BTree: From<T::Slice>,
+{
+    if path.is_empty() {
+        Some(Box::new(SliceHandler::from(btree)))
+    } else if path.len() == 1 {
+        match path[0].as_str() {
+            "count" => Some(Box::new(CountHandler::from(btree))),
+            "insert" => Some(Box::new(InsertHandler::from(btree))),
+            _ => None,
         }
+    } else {
+        None
     }
 }
 

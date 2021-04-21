@@ -14,6 +14,7 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
+use crate::route::Public;
 use crate::scalar::{Link, Scalar, Value, ValueType};
 use crate::state::StateView;
 use crate::txn::Txn;
@@ -67,9 +68,7 @@ impl ChainInstance for SyncChain {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let subject = txn.get(source, Value::None).await?;
 
-        self.subject
-            .put(*txn.id(), TCPathBuf::default(), Value::None, subject)
-            .await?;
+        self.subject.put(txn, &[], Value::None, subject).await?;
 
         let mut block = self.file.write_block(*txn.id(), BLOCK_ID.into()).await?;
         *block = Value::String(txn.id().to_string());
@@ -88,7 +87,7 @@ impl Persist for SyncChain {
     }
 
     async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        let subject = Subject::load(&schema, &dir, txn_id).await?;
+        let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
 
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             file.try_into()?
@@ -141,8 +140,7 @@ impl<'en> IntoView<'en, fs::Dir> for SyncChain {
     type View = (Schema, StateView<'en>);
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        let subject = self.subject.at(*txn.id()).await?;
-        Ok((self.schema, subject.into_view(txn).await?))
+        Ok((self.schema, self.subject.into_view(txn).await?))
     }
 }
 

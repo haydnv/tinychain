@@ -256,6 +256,12 @@ impl From<Chain> for State {
     }
 }
 
+impl From<BTree> for State {
+    fn from(btree: BTree) -> Self {
+        Self::Collection(btree.into())
+    }
+}
+
 impl From<Collection> for State {
     fn from(collection: Collection) -> Self {
         Self::Collection(collection)
