@@ -40,8 +40,7 @@ class BTreeTests(unittest.TestCase):
             self.assertEqual(result, x)
 
     def testSlice(self):
-        keys = [(i, num2words(i)) for i in range(50)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), [keys[1]]]}
+        keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
@@ -49,11 +48,10 @@ class BTreeTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.tree[(1,)])
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json(expected))
+        self.assertEqual(result, expected([keys[1]]))
 
     def testReverse(self):
-        keys = [(i, num2words(i)) for i in range(50)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), list(reversed(keys))]}
+        keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
@@ -61,11 +59,10 @@ class BTreeTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.tree.reverse())
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json(expected))
+        self.assertEqual(result, expected(list(reversed(keys))))
 
     def testSliceRange(self):
-        keys = [(i, num2words(i)) for i in range(50)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[29:32]]}
+        keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
@@ -73,11 +70,10 @@ class BTreeTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.tree[29:32])
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json(expected))
+        self.assertEqual(result, expected(keys[29:32]))
 
     def testDelete(self):
         keys = [(i, num2words(i)) for i in range(100)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), []]}
 
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
@@ -86,11 +82,11 @@ class BTreeTests(unittest.TestCase):
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json(expected))
+        self.assertEqual(result, expected([]))
 
     def testDeleteSlice(self):
-        keys = [(i, num2words(i)) for i in range(50)]
-        expected = {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), keys[:25] + keys[35:]]}
+        keys = [[i, num2words(i)] for i in range(100)]
+        ordered = expected(keys[:25] + keys[35:])
 
         random.shuffle(keys)
 
@@ -102,7 +98,7 @@ class BTreeTests(unittest.TestCase):
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json(expected))
+        self.assertEqual(result, ordered)
 
     @classmethod
     def tearDownClass(cls):
@@ -125,13 +121,20 @@ class PersistenceTests(unittest.TestCase):
 
         cls.hosts = hosts
 
-    def testGet(self):
-        self.assertEqual(self.hosts[0].get("/test/btree/tree/count"), 0)
+    def testInsert(self):
+        row = ["one", 1]
+
+        self.hosts[0].put("/test/btree/tree", None, row)
+        actual = self.hosts[0].get("/test/btree/tree", ("one"))
+        self.assertEqual(actual, expected([row]))
 
     @classmethod
     def tearDownClass(cls):
         for host in cls.hosts:
             host.stop()
+
+def expected(rows):
+    return {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), rows]}
 
 
 if __name__ == "__main__":

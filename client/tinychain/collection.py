@@ -141,7 +141,7 @@ class BTree(Collection):
         If the key is already present, this is a no-op.
         """
 
-        return Nil(OpRef.Put(uri(self) + "/insert", None, key))
+        return Nil(OpRef.Put(uri(self), None, key))
 
     def reverse(self):
         """

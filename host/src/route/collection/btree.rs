@@ -39,34 +39,6 @@ impl<'a, T> From<&'a T> for CountHandler<'a, T> {
     }
 }
 
-struct InsertHandler<'a, T> {
-    btree: &'a T,
-}
-
-impl<'a, T: BTreeInstance> Handler<'a> for InsertHandler<'a, T> {
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
-        Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::insert does not support an explicit key",
-                        key,
-                    ));
-                }
-
-                let key = value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
-                self.btree.insert(*txn.id(), key).await
-            })
-        }))
-    }
-}
-
-impl<'a, T> From<&'a T> for InsertHandler<'a, T> {
-    fn from(btree: &'a T) -> Self {
-        Self { btree }
-    }
-}
-
 struct SliceHandler<'a, T> {
     btree: &'a T,
 }
@@ -91,6 +63,22 @@ where
                 let slice = self.btree.clone().slice(range, reverse);
 
                 Ok(Collection::BTree(slice.into()).into())
+            })
+        }))
+    }
+
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::insert does not support an explicit key",
+                        key,
+                    ));
+                }
+
+                let key = value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
+                self.btree.insert(*txn.id(), key).await
             })
         }))
     }
@@ -154,7 +142,6 @@ where
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
-            "insert" => Some(Box::new(InsertHandler::from(btree))),
             _ => None,
         }
     } else {
