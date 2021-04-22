@@ -1,9 +1,9 @@
 import random
-import testutils
 import tinychain as tc
 import unittest
 
 from num2words import num2words
+from testutils import start_host, PORT
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -13,7 +13,7 @@ SCHEMA = tc.BTree.Schema(tc.Column("number", tc.Int), tc.Column("word", tc.Strin
 class BTreeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_host("test_btree")
+        cls.host = start_host("test_btree")
 
     def testCreate(self):
         cxt = tc.Context()
@@ -106,7 +106,7 @@ class BTreeTests(unittest.TestCase):
 
 
 class Persistent(tc.Cluster):
-    __uri__ = tc.URI("/test/btree")
+    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/btree")
 
     def _configure(self):
         self.tree = tc.Chain.Block(tc.BTree(SCHEMA))
@@ -116,28 +116,41 @@ class PersistenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         hosts = []
-        for i in range(1):
-            hosts.append(testutils.start_host(f"test_btree_{i}", [Persistent]))
+        for i in range(3):
+            port = PORT + i
+            host_uri = f"http://127.0.0.1:{port}" + tc.uri(Persistent).path()
+            host = start_host(f"test_replication_{i}", [Persistent], host_uri=tc.URI(host_uri))
+            hosts.append(host)
 
         cls.hosts = hosts
 
     def testInsert(self):
-        row = [1, "one"]
+        row1 = [1, "one"]
+        row2 = [2, "two"]
 
-        self.hosts[0].put("/test/btree/tree", None, row)
-        actual = self.hosts[0].get("/test/btree/tree", (1,))
-        self.assertEqual(actual, expected([row]))
+        self.hosts[0].put("/test/btree/tree", None, row1)
+        for host in self.hosts:
+            actual = host.get("/test/btree/tree", (1,))
+            self.assertEqual(actual, expected([row1]))
 
-        self.hosts[0].stop()
-        self.hosts[0].start()
+        self.hosts[1].stop()
 
-        actual = self.hosts[0].get("/test/btree/tree", (1,))
-        self.assertEqual(actual, expected([row]))
+        self.hosts[2].put("/test/btree/tree", None, row2)
+
+        self.hosts[1].start()
+
+        for host in self.hosts:
+            actual = host.get("/test/btree/tree", (1,))
+            self.assertEqual(actual, expected([row1]))
+
+            actual = host.get("/test/btree/tree", (2,))
+            self.assertEqual(actual, expected([row2]))
 
     @classmethod
     def tearDownClass(cls):
         for host in cls.hosts:
             host.stop()
+
 
 def expected(rows):
     return {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), rows]}

@@ -8,6 +8,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::join;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
@@ -327,6 +328,8 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
 
         for (_, ops) in block.mutations() {
             for (path, key, value) in ops.iter().cloned() {
+                debug!("replay PUT op: {} <- {}", key, value);
+
                 subject
                     .put(&txn, &path, key, value.into())
                     .map_err(|e| {

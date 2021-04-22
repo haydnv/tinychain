@@ -81,6 +81,7 @@ where
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
         let range = validate_range(range, self.schema())?;
+
         if self.range.contains(&range, self.collator()) {
             Ok(Self::new(BTree::Slice(self), range, reverse))
         } else {

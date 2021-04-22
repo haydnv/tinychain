@@ -77,7 +77,10 @@ where
                     ));
                 }
 
-                let key = value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
+                let key =
+                    Value::try_cast_from(value, |s| TCError::bad_request("invalid BTree key", s))?;
+                let key = key.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
+
                 self.btree.insert(*txn.id(), key).await
             })
         }))
