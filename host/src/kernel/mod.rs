@@ -167,8 +167,18 @@ impl Kernel {
     /// Route a DELETE request.
     pub async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
         if path.is_empty() || StateType::from_path(path).is_some() {
-            Err(TCError::method_not_allowed(TCPath::from(path)))
+            if key.is_none() {
+                // it's a rollback message for a hypothetical transaction
+                Ok(())
+            } else {
+                Err(TCError::method_not_allowed(TCPath::from(path)))
+            }
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            if suffix.is_empty() && key.is_none() {
+                // it's a rollback message
+                return cluster.delete(&txn, suffix, key).await;
+            }
+
             debug!(
                 "DELETE {}: {} from cluster {}",
                 TCPath::from(suffix),
@@ -176,7 +186,10 @@ impl Kernel {
                 cluster
             );
 
-            cluster.delete(&txn, suffix, key).await
+            execute(txn, cluster, |txn, cluster| async move {
+                cluster.delete(&txn, suffix, key).await
+            })
+            .await
         } else if &path[0] == "error" && path.len() == 2 {
             if error_type(&path[1]).is_some() {
                 Err(TCError::method_not_allowed(TCPath::from(path)))
