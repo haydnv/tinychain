@@ -99,7 +99,7 @@ impl<'en> en::IntoStream<'en> for Schema {
         match self {
             Self::BTree(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(BTreeType::default().path(), schema)?;
+                map.encode_entry(BTreeType::default().path(), (schema,))?;
                 map.end()
             }
             Self::Value(value) => value.into_stream(encoder),
