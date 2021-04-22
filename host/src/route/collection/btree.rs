@@ -99,16 +99,14 @@ where
     }
 
     fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
-        Some(Box::new(|txn, key| {
+        Some(Box::new(|txn, range| {
             Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::delete does not accept a key (call BTree::slice first)",
-                        key,
-                    ));
-                }
-
-                self.btree.delete(*txn.id()).await
+                let range = cast_into_range(Scalar::Value(range))?;
+                self.btree
+                    .clone()
+                    .slice(range, false)?
+                    .delete(*txn.id())
+                    .await
             })
         }))
     }

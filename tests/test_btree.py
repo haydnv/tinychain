@@ -134,9 +134,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(actual, expected([row1]))
 
         self.hosts[1].stop()
-
         self.hosts[2].put("/test/btree/tree", None, row2)
-
         self.hosts[1].start()
 
         for host in self.hosts:
@@ -145,6 +143,15 @@ class PersistenceTests(unittest.TestCase):
 
             actual = host.get("/test/btree/tree", (2,))
             self.assertEqual(actual, expected([row2]))
+
+        self.hosts[2].stop()
+        self.hosts[1].delete("/test/btree/tree", (1,))
+        self.hosts[2].start()
+
+        for host in self.hosts:
+            actual = host.get("/test/btree/tree")
+            self.assertEqual(actual, expected([row2]))
+
 
     @classmethod
     def tearDownClass(cls):

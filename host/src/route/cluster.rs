@@ -291,7 +291,7 @@ impl<'a> ReplicateHandler<'a> {
                         failed.insert(replica);
                     }
                     Ok(()) => {
-                        debug!("replica at {} succeded", replica);
+                        debug!("replica at {} succeeded", replica);
                         succeeded.insert(replica);
                     }
                 };
@@ -384,12 +384,19 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
     fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
         let handler = self.handler()?.delete()?;
+        debug!("ReplicateHandler wrapped DELETE request");
 
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 handler(txn.clone(), key.clone()).await?;
 
                 if !txn.is_owner(self.cluster.path()) {
+                    debug!(
+                        "{} will not replicate DELETE {} since it's not the owner",
+                        self.cluster,
+                        TCPath::from(self.path)
+                    );
+
                     return Ok(());
                 } else if self.path.is_empty() {
                     // it's a synchronization message
