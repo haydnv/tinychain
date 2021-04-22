@@ -23,6 +23,7 @@ use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
+use super::data::Mutation;
 use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
 #[derive(Clone)]
@@ -46,7 +47,14 @@ impl BlockChain {
 
 #[async_trait]
 impl ChainInstance for BlockChain {
-    async fn append(
+    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+        let latest = self.latest.read(&txn_id).await?;
+        let mut block = self.file.write_block(txn_id, (*latest).into()).await?;
+        block.append_delete(txn_id, path, key);
+        Ok(())
+    }
+
+    async fn append_put(
         &self,
         txn_id: TxnId,
         path: TCPathBuf,
@@ -62,8 +70,7 @@ impl ChainInstance for BlockChain {
 
         let latest = self.latest.read(&txn_id).await?;
         let mut block = self.file.write_block(txn_id, (*latest).into()).await?;
-
-        block.append(txn_id, path, key, value);
+        block.append_put(txn_id, path, key, value);
         Ok(())
     }
 
@@ -117,8 +124,17 @@ impl ChainInstance for BlockChain {
         };
 
         for (_, ops) in mutations {
-            for (path, key, value) in ops.iter().cloned() {
-                self.subject.put(txn, &path, key, value.into()).await?
+            for mutation in ops.iter() {
+                match mutation {
+                    Mutation::Delete(path, key) => {
+                        self.subject.delete(txn, &path, key.clone()).await?
+                    }
+                    Mutation::Put(path, key, value) => {
+                        self.subject
+                            .put(txn, &path, key.clone(), value.clone().into())
+                            .await?
+                    }
+                }
             }
         }
 
@@ -132,8 +148,17 @@ impl ChainInstance for BlockChain {
             let block = chain.file.read_block(*txn.id(), i.into()).await?;
 
             for (_, ops) in block.mutations() {
-                for (path, key, value) in ops.iter().cloned() {
-                    self.subject.put(txn, &path, key, value.into()).await?
+                for mutation in ops.iter() {
+                    match mutation {
+                        Mutation::Delete(path, key) => {
+                            self.subject.delete(txn, path, key.clone()).await?
+                        }
+                        Mutation::Put(path, key, value) => {
+                            self.subject
+                                .put(txn, path, key.clone(), value.clone().into())
+                                .await?
+                        }
+                    }
                 }
             }
 
@@ -313,6 +338,9 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
 
     let subject = Subject::create(schema.clone(), txn.context(), *txn.id()).await?;
 
+    let on_err =
+        |latest| move |e| TCError::bad_request(format!("error replaying block {}", latest), e);
+
     let mut latest = 0u64;
     let mut hash = Bytes::from(NULL_HASH);
     while file.contains_block(&txn_id, &latest.into()).await? {
@@ -327,15 +355,23 @@ async fn validate(txn: Txn, schema: Schema, file: fs::File<ChainBlock>) -> TCRes
         }
 
         for (_, ops) in block.mutations() {
-            for (path, key, value) in ops.iter().cloned() {
-                debug!("replay PUT op: {} <- {}", key, value);
-
-                subject
-                    .put(&txn, &path, key, value.into())
-                    .map_err(|e| {
-                        TCError::bad_request(format!("error replaying block {}", latest), e)
-                    })
-                    .await?;
+            for mutation in ops.iter().cloned() {
+                match mutation {
+                    Mutation::Delete(path, key) => {
+                        debug!("replay DELETE op: {}: {}", path, key);
+                        subject
+                            .delete(&txn, &path, key)
+                            .map_err(on_err(latest))
+                            .await?
+                    }
+                    Mutation::Put(path, key, value) => {
+                        debug!("replay PUT op: {}: {} <- {}", path, key, value);
+                        subject
+                            .put(&txn, &path, key, value.into())
+                            .map_err(on_err(latest))
+                            .await?
+                    }
+                }
             }
         }
 

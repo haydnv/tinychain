@@ -94,7 +94,22 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
     }
 
     fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
-        unimplemented!()
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                match self.subject {
+                    Subject::BTree(btree) => btree.delete(&txn, self.path, key).await,
+                    Subject::Value(file) if self.path.is_empty() => {
+                        let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
+                        *subject = Value::None;
+                        Ok(())
+                    }
+                    Subject::Value(file) => {
+                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
+                        subject.delete(&txn, self.path, key).await
+                    }
+                }
+            })
+        }))
     }
 }
 
@@ -138,9 +153,9 @@ impl<'a> Handler<'a> for AppendHandler<'a> {
                             TCError::not_implemented(format!("update Chain with value {}", v))
                         })?;
 
-                        debug!("Subject::put {} <- {}", key, value);
+                        debug!("Chain::put {} <- {}", key, value);
                         self.chain
-                            .append(
+                            .append_put(
                                 *txn.id(),
                                 self.path.to_vec().into(),
                                 key.clone(),
@@ -166,7 +181,20 @@ impl<'a> Handler<'a> for AppendHandler<'a> {
 
     fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
         match self.chain.subject().route(self.path) {
-            Some(handler) => handler.delete(),
+            Some(handler) => match handler.delete() {
+                Some(delete_handler) => Some(Box::new(|txn, key| {
+                    Box::pin(async move {
+                        debug!("Chain::delete {}", key);
+
+                        self.chain
+                            .append_delete(*txn.id(), self.path.to_vec().into(), key.clone())
+                            .await?;
+
+                        delete_handler(txn, key).await
+                    })
+                })),
+                None => None,
+            },
             None => None,
         }
     }

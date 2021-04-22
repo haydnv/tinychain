@@ -15,11 +15,74 @@ use tcgeneric::TCPathBuf;
 
 use crate::scalar::{Scalar, Value};
 
+#[derive(Clone, Eq, PartialEq)]
+pub enum Mutation {
+    Delete(TCPathBuf, Value),
+    Put(TCPathBuf, Value, Scalar),
+}
+
+#[async_trait]
+impl de::FromStream for Mutation {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_seq(MutationVisitor).await
+    }
+}
+
+impl<'en> en::ToStream<'en> for Mutation {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::IntoStream;
+
+        match self {
+            Self::Delete(path, key) => (path, key).into_stream(encoder),
+            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+        }
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Mutation {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Delete(path, key) => (path, key).into_stream(encoder),
+            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+        }
+    }
+}
+
+struct MutationVisitor;
+
+#[async_trait]
+impl de::Visitor for MutationVisitor {
+    type Value = Mutation;
+
+    fn expecting() -> &'static str {
+        "a mutation record"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let path = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+        let key = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+
+        if let Some(value) = seq.next_element(()).await? {
+            Ok(Mutation::Put(path, key, value))
+        } else {
+            Ok(Mutation::Delete(path, key))
+        }
+    }
+}
+
 /// A single filesystem block belonging to a [`super::Chain`].
 #[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
     hash: Bytes,
-    contents: BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>>,
+    contents: BTreeMap<TxnId, Vec<Mutation>>,
 }
 
 impl ChainBlock {
@@ -31,20 +94,29 @@ impl ChainBlock {
         }
     }
 
-    /// Append an op to the contents of this `ChainBlock`.
-    pub fn append(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
+    pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
         match self.contents.entry(txn_id) {
             Entry::Vacant(entry) => {
-                entry.insert(vec![(path, key, value)]);
+                entry.insert(vec![mutation]);
             }
             Entry::Occupied(mut entry) => {
-                entry.get_mut().push((path, key, value));
+                entry.get_mut().push(mutation);
             }
         }
     }
 
+    /// Append a DELETE op to the contents of this `ChainBlock`.
+    pub fn append_delete(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value) {
+        self.append(txn_id, Mutation::Delete(path, key))
+    }
+
+    /// Append a PUT op to the contents of this `ChainBlock`.
+    pub fn append_put(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
+        self.append(txn_id, Mutation::Put(path, key, value))
+    }
+
     /// The mutations listed in this `ChainBlock`.
-    pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>> {
+    pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<Mutation>> {
         &self.contents
     }
 

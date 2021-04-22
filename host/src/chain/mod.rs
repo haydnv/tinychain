@@ -227,8 +227,11 @@ impl fmt::Display for Subject {
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance {
+    /// Append the given DELETE op to the latest block in this `Chain`.
+    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
+
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append(
+    async fn append_put(
         &self,
         txn_id: TxnId,
         path: TCPathBuf,
@@ -306,7 +309,14 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn append(
+    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+        match self {
+            Self::Block(chain) => chain.append_delete(txn_id, path, key).await,
+            Self::Sync(chain) => chain.append_delete(txn_id, path, key).await,
+        }
+    }
+
+    async fn append_put(
         &self,
         txn_id: TxnId,
         path: TCPathBuf,
@@ -314,8 +324,8 @@ impl ChainInstance for Chain {
         value: Scalar,
     ) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append(txn_id, path, key, value).await,
-            Self::Sync(chain) => chain.append(txn_id, path, key, value).await,
+            Self::Block(chain) => chain.append_put(txn_id, path, key, value).await,
+            Self::Sync(chain) => chain.append_put(txn_id, path, key, value).await,
         }
     }
 

@@ -34,20 +34,17 @@ pub struct SyncChain {
 
 #[async_trait]
 impl ChainInstance for SyncChain {
-    async fn append(
+    async fn append_delete(&self, _txn_id: TxnId, _path: TCPathBuf, _key: Value) -> TCResult<()> {
+        Ok(())
+    }
+
+    async fn append_put(
         &self,
         _txn_id: TxnId,
         _path: TCPathBuf,
         _key: Value,
-        value: Scalar,
+        _value: Scalar,
     ) -> TCResult<()> {
-        if value.is_ref() {
-            return Err(TCError::bad_request(
-                "cannot update Chain subject with reference: {}",
-                value,
-            ));
-        }
-
         Ok(())
     }
 
