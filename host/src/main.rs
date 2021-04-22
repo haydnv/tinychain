@@ -17,27 +17,28 @@ use tinychain::object::InstanceClass;
 use tinychain::*;
 
 fn data_size(flag: &str) -> TCResult<u64> {
-    if flag.is_empty() {
-        return Err(TCError::bad_request("Invalid size specified", flag));
+    const ERR: &str = "unable to parse data size";
+
+    if flag.is_empty() || flag == "0" {
+        return Ok(0);
     }
 
-    let msg = "Unable to parse value";
     let size = u64::from_str_radix(&flag[0..flag.len() - 1], 10)
-        .map_err(|_| TCError::bad_request(msg, flag))?;
+        .map_err(|_| TCError::bad_request(ERR, flag))?;
 
     if flag.ends_with('K') {
         Ok(size * 1000)
     } else if flag.ends_with('M') {
         Ok(size * 1_000_000)
     } else {
-        Err(TCError::bad_request("Unable to parse request_limit", flag))
+        Err(TCError::bad_request(ERR, flag))
     }
 }
 
 fn duration(flag: &str) -> TCResult<Duration> {
     u64::from_str(flag)
         .map(Duration::from_secs)
-        .map_err(|_| TCError::bad_request("Invalid duration", flag))
+        .map_err(|_| TCError::bad_request("invalid duration", flag))
 }
 
 #[derive(Clone, StructOpt)]
@@ -71,7 +72,12 @@ struct Config {
     #[structopt(long = "cluster", about = "path(s) to Cluster config files")]
     pub clusters: Vec<PathBuf>,
 
-    #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration), about = "maximum allowed request duration")]
+    #[structopt(
+        long = "request_ttl",
+        default_value = "30",
+        parse(try_from_str = duration),
+        about = "maximum allowed request duration"
+    )]
     pub request_ttl: Duration,
 
     #[structopt(long = "http_port", default_value = "8702")]
