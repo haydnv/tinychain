@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use tc_error::TCResult;
+use tc_error::{TCResult, TCError};
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
@@ -81,7 +81,11 @@ where
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
         let range = validate_range(range, self.schema())?;
-        Ok(Self::new(BTree::Slice(self), range, reverse))
+        if self.range.contains(&range, self.collator()) {
+            Ok(Self::new(BTree::Slice(self), range, reverse))
+        } else {
+            Err(TCError::unsupported("BTreeSlice does not contain the requested range"))
+        }
     }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
