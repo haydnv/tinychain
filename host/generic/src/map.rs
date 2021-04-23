@@ -21,6 +21,12 @@ pub struct Map<T: Clone> {
 }
 
 impl<T: Clone> Map<T> {
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
     #[inline]
     pub fn expect_empty(&self) -> TCResult<()>
     where

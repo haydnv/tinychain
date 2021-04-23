@@ -12,4 +12,8 @@ keywords = ["tinychain", "table", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
-tcgeneric = "~0.1.3"
+safecast = "0.1"
+tc-btree = { path = "../btree" }
+tc-error = "0.1"
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

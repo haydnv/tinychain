@@ -56,9 +56,9 @@ pub trait BTreeInstance: Clone + Instance {
 
 #[derive(Clone, PartialEq)]
 pub struct Column {
-    name: Id,
-    dtype: ValueType,
-    max_len: Option<usize>,
+    pub name: Id,
+    pub dtype: ValueType,
+    pub max_len: Option<usize>,
 }
 
 impl Column {

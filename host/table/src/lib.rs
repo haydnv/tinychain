@@ -2,6 +2,10 @@ use std::fmt;
 
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
+mod schema;
+
+pub use schema::*;
+
 const PATH: PathLabel = path_label(&["state", "collection", "table"]);
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -12,8 +16,9 @@ pub enum TableType {
 impl Class for TableType {}
 
 impl NativeClass for TableType {
+    // these functions are only used for serialization, and only a base table can be deserialized
+
     fn from_path(path: &[PathSegment]) -> Option<Self> {
-        // This path is only used for serialization, and only a base table can be deserialized
         if path.len() == 3 && &path[..] == &PATH[..] {
             Some(Self::Table)
         } else {
