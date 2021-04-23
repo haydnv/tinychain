@@ -1,0 +1,14 @@
+[package]
+name = "tc-table"
+version = "0.1.0"
+authors = ["haydnv"]
+edition = "2018"
+description = "Tinychain's Table collection type. Unstable."
+license = "Apache-2.0"
+readme = "README.md"
+repository = "http://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "table", "collection"]
+categories = ["database", "database-implementations", "data-structures"]
+
+[dependencies]
