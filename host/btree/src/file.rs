@@ -33,7 +33,7 @@ const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
 
 type NodeId = BlockId;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 struct NodeKey {
     deleted: bool,
     value: Vec<Value>,
@@ -89,7 +89,7 @@ impl fmt::Display for NodeKey {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Node {
     leaf: bool,
     keys: Vec<NodeKey>,
@@ -168,6 +168,13 @@ impl<'en> en::IntoStream<'en> for Node {
 }
 
 #[cfg(debug_assertions)]
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+#[cfg(debug_assertions)]
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.leaf {
@@ -181,6 +188,7 @@ impl fmt::Display for Node {
             "\tkeys: {}",
             Tuple::<NodeKey>::from_iter(self.keys.iter().cloned())
         )?;
+
         write!(f, "\t {} children", self.children.len())
     }
 }
@@ -311,7 +319,7 @@ where
                 return Ok(());
             }
 
-            debug!("insert at index {} into {}", i, node.deref());
+            debug!("insert at index {} into {}", i, *node);
 
             if node.leaf {
                 let mut node = node.upgrade(file).await?;
@@ -392,7 +400,6 @@ where
                 let this = self.clone();
                 let selection = Box::pin(async move {
                     let node = this.inner.file.read_block(txn_id, child_id).await?;
-
                     this._slice(txn_id, node, range_clone)
                 });
                 selected.push(Box::pin(selection));
@@ -523,7 +530,7 @@ where
         let order = self.inner.order;
 
         let child_id = node.children[i].clone(); // needed due to mutable borrow below
-        let mut child = file.write_block(txn_id, child_id).await?;
+        let mut child = file.write_block(txn_id, child_id.clone()).await?;
 
         debug!(
             "child to split has {} keys and {} children",
@@ -610,15 +617,29 @@ where
         let file = &self.inner.file;
         let order = self.inner.order;
 
-        let root_id = self.inner.root.read(&txn_id).await?;
+        // get a write lock on the root_id while we check if a split_child is needed,
+        // to avoid getting out of sync in the case of a concurrent insert in the same txn
+        let mut root_id = self.inner.root.write(txn_id).await?;
+        debug!("insert into BTree with root node ID {}", *root_id);
+
         let root = file.read_block(txn_id, (*root_id).clone()).await?;
 
         debug!(
-            "insert into BTree node with {} keys and {} children (order is {})",
+            "insert {} into BTree, root node {} has {} keys and {} children (order is {})",
+            Tuple::<Value>::from_iter(key.to_vec()),
+            *root_id,
             root.keys.len(),
             root.children.len(),
             order
         );
+
+        debug!("root node {} is {}", *root_id, *root);
+
+        if root.leaf {
+            assert!(root.children.is_empty());
+        } else {
+            assert!(!root.children.is_empty());
+        }
 
         if root.keys.len() == (2 * order) - 1 {
             // split_child will need a write lock on root, so release the read lock
@@ -626,7 +647,6 @@ where
 
             debug!("split root node");
 
-            let mut root_id = root_id.upgrade().await?;
             let old_root_id = (*root_id).clone();
 
             (*root_id) = file.unique_id(&txn_id).await?;
@@ -639,11 +659,11 @@ where
                 .await?;
 
             let new_root = new_root.write().await;
-
             let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
-
             self._insert(txn_id, new_root, key).await
         } else {
+            // no need to keep this write lock since we're not splitting the root node
+            std::mem::drop(root_id);
             self._insert(txn_id, root, key).await
         }
     }
@@ -742,6 +762,15 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
     Ok(order)
 }
 
+#[cfg(debug_assertions)]
+fn value_of(bound: &Bound<Value>) -> Value {
+    match bound {
+        Bound::Included(value) => value.clone(),
+        Bound::Excluded(value) => value.clone(),
+        Bound::Unbounded => Value::None,
+    }
+}
+
 #[inline]
 fn validate_key(key: Key, schema: &RowSchema) -> TCResult<Key> {
     if key.len() != schema.len() {
@@ -755,38 +784,4 @@ fn validate_key(key: Key, schema: &RowSchema) -> TCResult<Key> {
                 .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
         })
         .collect()
-}
-
-#[cfg(debug_assertions)]
-fn value_of(bound: &Bound<Value>) -> Value {
-    match bound {
-        Bound::Included(value) => value.clone(),
-        Bound::Excluded(value) => value.clone(),
-        Bound::Unbounded => Value::None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tcgeneric::label;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_node_serialization() {
-        let mut expected = Node::new(true, Some(label("123").into()));
-        expected
-            .keys
-            .insert(0, NodeKey::new(vec![1.into(), 2.into(), 3.into()]));
-
-        let actual: Node = tbon::de::try_decode((), tbon::en::encode(&expected).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(expected.leaf, actual.leaf);
-        assert_eq!(expected.parent, actual.parent);
-        assert_eq!(expected.keys.len(), actual.keys.len());
-        assert_eq!(expected.children, actual.children);
-        assert_eq!(expected.rebalance, actual.rebalance);
-    }
 }

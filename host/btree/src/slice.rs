@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use tc_error::{TCResult, TCError};
+use tc_error::{TCError, TCResult};
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
@@ -85,7 +85,9 @@ where
         if self.range.contains(&range, self.collator()) {
             Ok(Self::new(BTree::Slice(self), range, reverse))
         } else {
-            Err(TCError::unsupported("BTreeSlice does not contain the requested range"))
+            Err(TCError::unsupported(
+                "BTreeSlice does not contain the requested range",
+            ))
         }
     }
 

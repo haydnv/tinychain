@@ -27,10 +27,12 @@ struct Policy;
 #[async_trait]
 impl freqache::Policy<PathBuf, CacheBlock> for Policy {
     fn can_evict(&self, block: &CacheBlock) -> bool {
-        block.ref_count() < 2
+        block.ref_count() <= 1
     }
 
     async fn evict(&self, path: PathBuf, block: &CacheBlock) {
+        debug!("evict block at {:?} from cache", path);
+
         persist(&path, block)
             .await
             .expect("persist cache block to disk")
@@ -196,7 +198,7 @@ impl Cache {
             lfu: RwLock::new(LFU::new(max_size, Policy)),
         };
 
-        spawn_cleanup_thread(cache.clone(), rx);
+        spawn_cleanup_thread(cache.lfu.clone(), rx);
         cache
     }
 
@@ -206,6 +208,8 @@ impl Cache {
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
     {
+        debug!("Cache::read {:?}", path);
+
         let mut cache = self.lfu.write().await;
 
         if let Some(block) = cache.get(path).await {
@@ -231,12 +235,16 @@ impl Cache {
 
     /// Delete a block from the cache.
     pub async fn delete(&self, path: &PathBuf) -> Option<CacheBlock> {
+        debug!("Cache::delete {:?}", path);
+
         let mut cache = self.lfu.write().await;
         cache.remove(path).await
     }
 
     /// Remove a block from the cache and delete it from the filesystem.
     pub async fn delete_and_sync(&self, path: &PathBuf) -> TCResult<()> {
+        debug!("Cache::delete_and_sync {:?}", path);
+
         let mut cache = self.lfu.write().await;
         cache.remove(path).await;
 
@@ -277,7 +285,7 @@ impl Cache {
     ) where
         CacheBlock: From<CacheLock<B>>,
     {
-        cache.insert(path, block.clone().into()).await;
+        cache.insert(path, block.into()).await;
 
         if cache.is_full() {
             debug!("the block cache is full, triggering garbage collection...");
@@ -321,17 +329,19 @@ impl Cache {
     }
 }
 
-fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::Receiver<Evict>) {
+fn spawn_cleanup_thread(cache: RwLock<LFU>, mut rx: mpsc::Receiver<Evict>) {
     tokio::spawn(async move {
         info!("cache cleanup thread is running...");
 
         while rx.recv().await.is_some() {
-            debug!("got Evict message, running cache eviction...");
-            let mut lfu = cache.lfu.write().await;
+            debug!("got Evict message");
+            let mut lfu = cache.write().await;
+            debug!("running cache eviction with {} entries...", lfu.len());
             lfu.evict().await;
+            debug!("cache eviction complete, {} entries remain", lfu.len());
         }
 
-        warn!("cache cleanup thread is shutting down...");
+        warn!("cache cleanup thread shutting down");
     });
 }
 
@@ -363,6 +373,7 @@ fn read_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ {
 
 async fn write_file(path: &PathBuf) -> TCResult<fs::File> {
     fs::OpenOptions::new()
+        .truncate(true)
         .write(true)
         .open(path)
         .map_err(move |e| {

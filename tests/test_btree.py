@@ -152,6 +152,11 @@ class PersistenceTests(unittest.TestCase):
             actual = host.get("/test/btree/tree")
             self.assertEqual(actual, expected([row2]))
 
+        n = 100
+        for i in range(n):
+            self.hosts[0].put("/test/btree/tree", None, (i, num2words(i)))
+
+        self.assertEqual(self.hosts[1].get("/test/btree/tree/count"), n)
 
     @classmethod
     def tearDownClass(cls):

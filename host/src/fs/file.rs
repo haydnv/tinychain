@@ -235,6 +235,8 @@ where
     }
 
     async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Block<B>> {
+        debug!("File::get_block {}", name);
+
         {
             let contents = self.contents.read(&txn_id).await?;
             if !contents.contains(&name) {
@@ -259,11 +261,15 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+        debug!("File::read_block {}", name);
+
         let block = self.get_block(txn_id, name).await?;
         Ok(fs::Block::read(block).await)
     }
 
     async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+        debug!("File::read_block_owned {}", name);
+
         let block = self.get_block(txn_id, name).await?;
         Ok(fs::Block::read(block).await)
     }
@@ -272,7 +278,6 @@ where
         debug!("File::write_block");
         let mut mutated = self.mutated.write().await;
         let block = self.get_block(txn_id, name.clone()).await?;
-        debug!("File::write_block got block {}", name);
 
         match mutated.entry(txn_id) {
             Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block.name.clone()),
