@@ -247,6 +247,7 @@ impl<T: Mutate> TxnLock<T> {
                 &self.name,
                 lock.state.reserved.as_ref().unwrap()
             );
+
             // If a writer can mutate the locked value at the requested time, wait it out.
             Ok(None)
         } else {
@@ -293,6 +294,7 @@ impl<T: Mutate> TxnLock<T> {
                     "TxnLock {} at {} blocked on {}",
                     &self.name, txn_id, current_txn
                 );
+
                 Ok(None)
             }
             // If there's already a writer for the current transaction, wait for it to complete.
@@ -301,6 +303,13 @@ impl<T: Mutate> TxnLock<T> {
                 Ok(None)
             }
             _ => {
+                if let Some(readers) = lock.state.readers.get(txn_id) {
+                    if readers > &0 {
+                        // There's already a reader for the current transaction, wait for it.
+                        return Ok(None);
+                    }
+                }
+
                 // Otherwise, copy the value to be mutated in this transaction.
                 lock.state.reserved = Some(*txn_id);
                 if !lock.value_at.contains_key(txn_id) {

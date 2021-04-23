@@ -70,8 +70,8 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     where
         Self: Clone + en::IntoStream<'en> + 'en,
     {
-        let encoded =
-            destream_json::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+        let encoded = destream_json::en::encode(self)
+            .map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -85,8 +85,8 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
     where
         Self: en::ToStream<'en>,
     {
-        let encoded =
-            destream_json::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
+        let encoded = destream_json::en::encode(self)
+            .map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -103,7 +103,9 @@ impl BlockData for Value {
         "value"
     }
 
-    fn max_size() -> u64 { 4096 }
+    fn max_size() -> u64 {
+        4096
+    }
 }
 
 pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {
