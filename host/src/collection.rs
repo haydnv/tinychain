@@ -8,6 +8,7 @@ use log::debug;
 
 use tc_btree::BTreeView;
 use tc_error::*;
+use tc_table::{Table, TableType};
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -27,6 +28,7 @@ pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
     BTree(BTreeType),
+    Table(TableType),
 }
 
 impl Class for CollectionType {}
@@ -38,6 +40,7 @@ impl NativeClass for CollectionType {
         if path.len() > 2 && &path[0..2] == &PREFIX[..] {
             match path[2].as_str() {
                 "btree" => BTreeType::from_path(path).map(Self::BTree),
+                "table" => TableType::from_path(path).map(Self::Table),
                 _ => None,
             }
         } else {
@@ -48,6 +51,7 @@ impl NativeClass for CollectionType {
     fn path(&self) -> TCPathBuf {
         match self {
             Self::BTree(btree) => btree.path(),
+            Self::Table(table) => table.path(),
         }
     }
 }
@@ -56,6 +60,7 @@ impl fmt::Display for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(btt) => fmt::Display::fmt(btt, f),
+            Self::Table(tt) => fmt::Display::fmt(tt, f),
         }
     }
 }
@@ -63,6 +68,7 @@ impl fmt::Display for CollectionType {
 #[derive(Clone)]
 pub enum Collection {
     BTree(BTree),
+    Table(Table),
 }
 
 impl Instance for Collection {
@@ -71,6 +77,7 @@ impl Instance for Collection {
     fn class(&self) -> Self::Class {
         match self {
             Self::BTree(btree) => CollectionType::BTree(btree.class()),
+            Self::Table(table) => CollectionType::Table(table.class()),
         }
     }
 }
@@ -110,6 +117,9 @@ impl CollectionVisitor {
                     .next_value((self.txn.clone(), file))
                     .map_ok(Collection::BTree)
                     .await
+            }
+            CollectionType::Table(_) => {
+                unimplemented!()
             }
         }
     }
@@ -151,6 +161,7 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
+            Self::Table(_table) => unimplemented!(),
         }
     }
 }
@@ -159,6 +170,7 @@ impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
+            Self::Table(table) => fmt::Display::fmt(table, f),
         }
     }
 }

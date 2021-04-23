@@ -35,12 +35,20 @@ impl fmt::Display for TableType {
 }
 
 #[derive(Clone)]
-pub struct Table;
+pub enum Table {}
 
 impl Instance for Table {
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
+        // TODO: match self
         TableType::Table
+    }
+}
+
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // TODO: match self
+        f.write_str("a Table")
     }
 }

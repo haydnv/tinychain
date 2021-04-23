@@ -70,6 +70,7 @@ impl Schema {
 
                                 Ok(Self::BTree(schema))
                             }
+                            CollectionType::Table(_) => unimplemented!(),
                         }
                     }
                     other => Err(TCError::bad_request("invalid Chain schema", other)),

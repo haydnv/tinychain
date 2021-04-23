@@ -36,16 +36,21 @@ pub enum FileEntry {
 
 impl FileEntry {
     fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
+        fn err<T: fmt::Display>(class: T) -> TCError {
+            TCError::bad_request("cannot create file for", class)
+        }
+
         match class {
             StateType::Collection(ct) => match ct {
                 CollectionType::BTree(_) => Ok(Self::BTree(File::new(cache, path, Node::ext()))),
+                CollectionType::Table(tt) => Err(err(tt)),
             },
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
             StateType::Scalar(st) => match st {
                 ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, Value::ext()))),
-                other => Err(TCError::bad_request("cannot create file for", other)),
+                other => Err(err(other)),
             },
-            other => Err(TCError::bad_request("cannot create file for", other)),
+            other => Err(err(other)),
         }
     }
 
