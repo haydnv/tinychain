@@ -1,8 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::iter::FromIterator;
 use std::marker::PhantomData;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -80,6 +79,8 @@ impl<'en> en::IntoStream<'en> for NodeKey {
 #[cfg(debug_assertions)]
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::iter::FromIterator;
+
         write!(
             f,
             "BTree node key: {}{}",
@@ -177,6 +178,8 @@ impl fmt::Debug for Node {
 #[cfg(debug_assertions)]
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::iter::FromIterator;
+
         if self.leaf {
             writeln!(f, "leaf node:")?;
         } else {
@@ -256,6 +259,7 @@ where
             let node = file.read_block(txn_id, node_id).await?;
             let (l, r) = collator.bisect(&node.keys, range);
 
+            #[cfg(debug_assertions)]
             debug!("delete from {} [{}..{}]", node.deref(), l, r);
 
             if node.leaf {
@@ -319,6 +323,7 @@ where
                 return Ok(());
             }
 
+            #[cfg(debug_assertions)]
             debug!("insert at index {} into {}", i, *node);
 
             if node.leaf {
@@ -372,12 +377,15 @@ where
     {
         let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
 
+        #[cfg(debug_assertions)]
         debug!(
             "_slice {} from {} to {} (prefix {}, start {}, end {})",
             node.deref(),
             l,
             r,
-            Value::from_iter(range.prefix().into_iter().cloned()),
+            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(
+                range.prefix().into_iter().cloned()
+            ),
             value_of(range.start()),
             value_of(range.end())
         );
@@ -436,12 +444,15 @@ where
     {
         let (l, r) = self.inner.collator.bisect(&node.keys, &range);
 
+        #[cfg(debug_assertions)]
         debug!(
             "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
             node.deref(),
             r,
             l,
-            Value::from_iter(range.prefix().into_iter().cloned()),
+            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(
+                range.prefix().into_iter().cloned()
+            ),
             value_of(range.start()),
             value_of(range.end())
         );
@@ -624,15 +635,17 @@ where
 
         let root = file.read_block(txn_id, (*root_id).clone()).await?;
 
+        #[cfg(debug_assertions)]
         debug!(
             "insert {} into BTree, root node {} has {} keys and {} children (order is {})",
-            Tuple::<Value>::from_iter(key.to_vec()),
+            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(key.to_vec()),
             *root_id,
             root.keys.len(),
             root.children.len(),
             order
         );
 
+        #[cfg(debug_assertions)]
         debug!("root node {} is {}", *root_id, *root);
 
         if root.leaf {
@@ -763,7 +776,9 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
 }
 
 #[cfg(debug_assertions)]
-fn value_of(bound: &Bound<Value>) -> Value {
+fn value_of(bound: &std::ops::Bound<Value>) -> Value {
+    use std::ops::Bound;
+
     match bound {
         Bound::Included(value) => value.clone(),
         Bound::Excluded(value) => value.clone(),
