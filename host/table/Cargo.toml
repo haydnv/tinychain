@@ -12,3 +12,4 @@ keywords = ["tinychain", "table", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
+tcgeneric = "~0.1.3"
