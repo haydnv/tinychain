@@ -365,7 +365,7 @@ where
         let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
 
         debug!(
-            "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
+            "_slice {} from {} to {} (prefix {}, start {}, end {})",
             node.deref(),
             l,
             r,
@@ -375,25 +375,14 @@ where
         );
 
         if node.leaf {
-            let stream: TCTryStream<'a, Key> = if l == r && l < node.keys.len() {
-                if node.keys[l].deleted {
-                    Box::pin(stream::empty())
-                } else {
-                    let key = TCResult::Ok(node.keys[l].value.to_vec());
-                    Box::pin(stream::once(future::ready(key)))
-                }
-            } else {
-                let keys = node.keys[l..r]
-                    .iter()
-                    .filter(|k| !k.deleted)
-                    .map(|k| k.value.to_vec())
-                    .map(TCResult::Ok)
-                    .collect::<Vec<TCResult<Key>>>();
+            let keys = node.keys[l..r]
+                .iter()
+                .filter(|k| !k.deleted)
+                .map(|k| k.value.to_vec())
+                .map(TCResult::Ok)
+                .collect::<Vec<TCResult<Key>>>();
 
-                Box::pin(stream::iter(keys))
-            };
-
-            Ok(stream)
+            Ok(Box::pin(stream::iter(keys)))
         } else {
             let mut selected: Selection<'a> = FuturesOrdered::new();
             for i in l..r {
@@ -443,8 +432,8 @@ where
         debug!(
             "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
             node.deref(),
-            l,
             r,
+            l,
             Value::from_iter(range.prefix().into_iter().cloned()),
             value_of(range.start()),
             value_of(range.end())
