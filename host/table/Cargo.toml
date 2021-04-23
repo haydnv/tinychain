@@ -12,6 +12,8 @@ keywords = ["tinychain", "table", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
+collate = "0.1"
+log = { version = "0.4", features = ["release_max_level_warn"] }
 safecast = "0.1"
 tc-btree = { path = "../btree" }
 tc-error = "0.1"

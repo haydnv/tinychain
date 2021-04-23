@@ -2,8 +2,10 @@ use std::fmt;
 
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
+mod bounds;
 mod schema;
 
+pub use bounds::*;
 pub use schema::*;
 
 const PATH: PathLabel = path_label(&["state", "collection", "table"]);
