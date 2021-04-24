@@ -784,6 +784,12 @@ impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Tuple<T> {
     }
 }
 
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
