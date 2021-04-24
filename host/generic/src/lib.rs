@@ -11,11 +11,13 @@ use tc_error::TCResult;
 
 pub mod id;
 pub mod map;
+pub mod stream;
 pub mod time;
 pub mod tuple;
 
 pub use id::*;
 pub use map::*;
+pub use stream::*;
 pub use time::*;
 pub use tuple::*;
 
