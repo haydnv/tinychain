@@ -366,6 +366,7 @@ impl TryCastFrom<Value> for Link {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Bytes(_) => false,
+            Value::Id(_) => true,
             Value::Link(_) => true,
             Value::None => true,
             Value::Number(n) => match n {
@@ -380,6 +381,7 @@ impl TryCastFrom<Value> for Link {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Bytes(_) => None,
+            Value::Id(id) => Some(TCPathBuf::from(id).into()),
             Value::Link(l) => Some(l),
             Value::None => Some(TCPathBuf::default().into()),
             Value::Number(n) => match n {
