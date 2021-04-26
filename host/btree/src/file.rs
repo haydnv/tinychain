@@ -601,6 +601,16 @@ where
         Ok(BTreeSlice::new(BTree::File(self), range, reverse))
     }
 
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        let root_id = self.inner.root.read(&txn_id).await?;
+        let root = self
+            .inner
+            .file
+            .read_block(txn_id, (*root_id).clone())
+            .await?;
+        Ok(root.keys.is_empty())
+    }
+
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
         let mut root = self.inner.root.write(txn_id).await?;
 

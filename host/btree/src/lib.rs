@@ -4,7 +4,7 @@ use std::ops::Bound;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
+use futures::{future, Stream, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -45,6 +45,8 @@ pub trait BTreeInstance: Clone + Instance {
             .await
     }
 
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
+
     async fn delete(&self, txn_id: TxnId) -> TCResult<()>;
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
@@ -52,6 +54,18 @@ pub trait BTreeInstance: Clone + Instance {
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
     where
         Self: 'a;
+
+    async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send + Unpin>(
+        &self,
+        txn_id: TxnId,
+        mut keys: S,
+    ) -> TCResult<()> {
+        while let Some(key) = keys.try_next().await? {
+            self.insert(txn_id, key).await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -301,6 +315,13 @@ where
         match self {
             Self::File(file) => file.slice(range, reverse).map(BTree::Slice),
             Self::Slice(slice) => slice.slice(range, reverse).map(BTree::Slice),
+        }
+    }
+
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::File(file) => file.is_empty(txn_id).await,
+            Self::Slice(slice) => slice.is_empty(txn_id).await,
         }
     }
 

@@ -9,6 +9,7 @@ use tcgeneric::{Instance, TCTryStream};
 use super::{
     validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema,
 };
+use futures::{TryFutureExt, TryStreamExt};
 
 #[derive(Clone)]
 pub struct BTreeSlice<F, D, T> {
@@ -89,6 +90,16 @@ where
                 "BTreeSlice does not contain the requested range",
             ))
         }
+    }
+
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        let mut rows = self
+            .source
+            .clone()
+            .rows_in_range(txn_id, self.range.clone(), self.reverse)
+            .await?;
+
+        rows.try_next().map_ok(|row| row.is_none()).await
     }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
