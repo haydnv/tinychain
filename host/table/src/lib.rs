@@ -199,76 +199,250 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
     type Reverse = Self;
     type Slice = Self;
 
-    async fn count(&self, _txn_id: TxnId) -> TCResult<u64> {
-        todo!()
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        match self {
+            Self::Index(index) => index.count(txn_id).await,
+            Self::ROIndex(index) => index.count(txn_id).await,
+            Self::Table(table) => table.count(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.count(txn_id).await,
+            Self::IndexSlice(slice) => slice.count(txn_id).await,
+            Self::Limit(limit) => limit.count(txn_id).await,
+            Self::Merge(merge) => merge.count(txn_id).await,
+            Self::Selection(selection) => selection.count(txn_id).await,
+            Self::TableSlice(slice) => slice.count(txn_id).await,
+        }
     }
 
-    async fn delete(&self, _txn_id: TxnId) -> TCResult<()> {
-        todo!()
+    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.delete(txn_id).await,
+            Self::ROIndex(index) => index.delete(txn_id).await,
+            Self::Table(table) => table.delete(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.delete(txn_id).await,
+            Self::IndexSlice(slice) => slice.delete(txn_id).await,
+            Self::Limit(limit) => limit.delete(txn_id).await,
+            Self::Merge(merge) => merge.delete(txn_id).await,
+            Self::Selection(selection) => selection.delete(txn_id).await,
+            Self::TableSlice(slice) => slice.delete(txn_id).await,
+        }
     }
 
-    async fn delete_row(&self, _txn_id: TxnId, _row: Row) -> TCResult<()> {
-        todo!()
+    async fn delete_row(&self, txn_id: TxnId, row: Row) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.delete_row(txn_id, row).await,
+            Self::ROIndex(index) => index.delete_row(txn_id, row).await,
+            Self::Table(table) => table.delete_row(txn_id, row).await,
+            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row).await,
+            Self::IndexSlice(slice) => slice.delete_row(txn_id, row).await,
+            Self::Limit(limit) => limit.delete_row(txn_id, row).await,
+            Self::Merge(merge) => merge.delete_row(txn_id, row).await,
+            Self::Selection(selection) => selection.delete_row(txn_id, row).await,
+            Self::TableSlice(slice) => slice.delete_row(txn_id, row).await,
+        }
     }
 
-    async fn index(
-        self,
-        _txn: Txn,
-        _columns: Option<Vec<Id>>,
-    ) -> TCResult<index::ReadOnly<F, D, Txn>> {
-        todo!()
+    async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly<F, D, Txn>>
+    where
+        F: TryFrom<D::File, Error = TCError>,
+        D::FileClass: From<BTreeType>,
+    {
+        match self {
+            Self::Index(index) => index.index(txn, columns).await,
+            Self::ROIndex(index) => index.index(txn, columns).await,
+            Self::Table(table) => table.index(txn, columns).await,
+            Self::Aggregate(aggregate) => aggregate.index(txn, columns).await,
+            Self::IndexSlice(slice) => slice.index(txn, columns).await,
+            Self::Limit(limit) => limit.index(txn, columns).await,
+            Self::Merge(merge) => merge.index(txn, columns).await,
+            Self::Selection(selection) => selection.index(txn, columns).await,
+            Self::TableSlice(slice) => slice.index(txn, columns).await,
+        }
     }
 
-    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
-        todo!()
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.insert(txn_id, key, values).await,
+            Self::ROIndex(index) => index.insert(txn_id, key, values).await,
+            Self::Table(table) => table.insert(txn_id, key, values).await,
+            Self::Aggregate(aggregate) => aggregate.insert(txn_id, key, values).await,
+            Self::IndexSlice(slice) => slice.insert(txn_id, key, values).await,
+            Self::Limit(limit) => limit.insert(txn_id, key, values).await,
+            Self::Merge(merge) => merge.insert(txn_id, key, values).await,
+            Self::Selection(selection) => selection.insert(txn_id, key, values).await,
+            Self::TableSlice(slice) => slice.insert(txn_id, key, values).await,
+        }
     }
 
     fn key(&'_ self) -> &'_ [Column] {
-        todo!()
+        match self {
+            Self::Index(index) => index.key(),
+            Self::ROIndex(index) => index.key(),
+            Self::Table(table) => table.key(),
+            Self::Aggregate(aggregate) => aggregate.key(),
+            Self::IndexSlice(slice) => slice.key(),
+            Self::Limit(limit) => limit.key(),
+            Self::Merge(merge) => merge.key(),
+            Self::Selection(selection) => selection.key(),
+            Self::TableSlice(slice) => slice.key(),
+        }
     }
 
     fn values(&'_ self) -> &'_ [Column] {
-        todo!()
+        match self {
+            Self::Index(index) => index.values(),
+            Self::ROIndex(index) => index.values(),
+            Self::Table(table) => table.values(),
+            Self::Aggregate(aggregate) => aggregate.values(),
+            Self::IndexSlice(slice) => slice.values(),
+            Self::Limit(limit) => limit.values(),
+            Self::Merge(merge) => merge.values(),
+            Self::Selection(selection) => selection.values(),
+            Self::TableSlice(slice) => slice.values(),
+        }
     }
 
-    fn limit(self, _limit: u64) -> view::Limited<F, D, Txn> {
-        todo!()
+    fn limit(self, limit: u64) -> view::Limited<F, D, Txn> {
+        match self {
+            Self::Index(index) => index.limit(limit),
+            Self::ROIndex(index) => index.limit(limit),
+            Self::Table(table) => table.limit(limit),
+            Self::Aggregate(aggregate) => aggregate.limit(limit),
+            Self::IndexSlice(slice) => slice.limit(limit),
+            Self::Limit(limited) => limited.limit(limit),
+            Self::Merge(merge) => merge.limit(limit),
+            Self::Selection(selection) => selection.limit(limit),
+            Self::TableSlice(slice) => slice.limit(limit),
+        }
     }
 
-    fn order_by(self, _order: Vec<Id>, _reverse: bool) -> TCResult<Self::OrderBy> {
-        todo!()
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+        match self {
+            Self::Index(index) => index.order_by(order, reverse).map(Self::from),
+            Self::ROIndex(index) => index.order_by(order, reverse).map(Self::from),
+            Self::Table(table) => table.order_by(order, reverse).map(Self::from),
+            Self::Aggregate(aggregate) => aggregate.order_by(order, reverse).map(Self::from),
+            Self::IndexSlice(slice) => slice.order_by(order, reverse).map(Self::from),
+            Self::Limit(limited) => limited.order_by(order, reverse).map(Self::from),
+            Self::Merge(merge) => merge.order_by(order, reverse).map(Self::from),
+            Self::Selection(selection) => selection.order_by(order, reverse).map(Self::from),
+            Self::TableSlice(slice) => slice.order_by(order, reverse).map(Self::from),
+        }
     }
 
     fn reversed(self) -> TCResult<Self::Reverse> {
-        todo!()
+        match self {
+            Self::Index(index) => index.reversed().map(Self::from),
+            Self::ROIndex(index) => index.reversed().map(Self::from),
+            Self::Table(table) => table.reversed().map(Self::from),
+            Self::Aggregate(aggregate) => aggregate.reversed().map(Self::from),
+            Self::IndexSlice(slice) => slice.reversed().map(Self::from),
+            Self::Limit(limited) => limited.reversed().map(Self::from),
+            Self::Merge(merge) => merge.reversed().map(Self::from),
+            Self::Selection(selection) => selection.reversed().map(Self::from),
+            Self::TableSlice(slice) => slice.reversed().map(Self::from),
+        }
     }
 
-    fn slice(self, _bounds: Bounds) -> TCResult<Table<F, D, Txn>> {
-        todo!()
+    fn slice(self, bounds: Bounds) -> TCResult<Table<F, D, Txn>> {
+        match self {
+            Self::Index(index) => index.slice(bounds).map(Self::from),
+            Self::ROIndex(index) => index.slice(bounds).map(Self::from),
+            Self::Table(table) => table.slice(bounds).map(Self::from),
+            Self::Aggregate(aggregate) => aggregate.slice(bounds).map(Self::from),
+            Self::IndexSlice(slice) => slice.slice(bounds).map(Self::from),
+            Self::Limit(limited) => limited.slice(bounds).map(Self::from),
+            Self::Merge(merge) => merge.slice(bounds).map(Self::from),
+            Self::Selection(selection) => selection.slice(bounds).map(Self::from),
+            Self::TableSlice(slice) => slice.slice(bounds).map(Self::from),
+        }
     }
 
-    async fn rows(&self, _txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
-        todo!()
+    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
+        match self {
+            Self::Index(index) => index.rows(txn_id).await,
+            Self::ROIndex(index) => index.rows(txn_id).await,
+            Self::Table(table) => table.rows(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.rows(txn_id).await,
+            Self::IndexSlice(slice) => slice.rows(txn_id).await,
+            Self::Limit(limited) => limited.rows(txn_id).await,
+            Self::Merge(merge) => merge.rows(txn_id).await,
+            Self::Selection(selection) => selection.rows(txn_id).await,
+            Self::TableSlice(slice) => slice.rows(txn_id).await,
+        }
     }
 
-    fn validate_bounds(&self, _bounds: &Bounds) -> TCResult<()> {
-        todo!()
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_bounds(bounds),
+            Self::ROIndex(index) => index.validate_bounds(bounds),
+            Self::Table(table) => table.validate_bounds(bounds),
+            Self::Aggregate(aggregate) => aggregate.validate_bounds(bounds),
+            Self::IndexSlice(slice) => slice.validate_bounds(bounds),
+            Self::Limit(limited) => limited.validate_bounds(bounds),
+            Self::Merge(merge) => merge.validate_bounds(bounds),
+            Self::Selection(selection) => selection.validate_bounds(bounds),
+            Self::TableSlice(slice) => slice.validate_bounds(bounds),
+        }
     }
 
-    fn validate_order(&self, _order: &[Id]) -> TCResult<()> {
-        todo!()
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_order(order),
+            Self::ROIndex(index) => index.validate_order(order),
+            Self::Table(table) => table.validate_order(order),
+            Self::Aggregate(aggregate) => aggregate.validate_order(order),
+            Self::IndexSlice(slice) => slice.validate_order(order),
+            Self::Limit(limited) => limited.validate_order(order),
+            Self::Merge(merge) => merge.validate_order(order),
+            Self::Selection(selection) => selection.validate_order(order),
+            Self::TableSlice(slice) => slice.validate_order(order),
+        }
     }
 
-    async fn update(&self, _txn: &Txn, _value: Row) -> TCResult<()> {
-        todo!()
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()>
+    where
+        F: TryFrom<D::File, Error = TCError>,
+        D::FileClass: From<BTreeType>,
+    {
+        match self {
+            Self::Index(index) => index.update(txn, value).await,
+            Self::ROIndex(index) => index.update(txn, value).await,
+            Self::Table(table) => table.update(txn, value).await,
+            Self::Aggregate(aggregate) => aggregate.update(txn, value).await,
+            Self::IndexSlice(slice) => slice.update(txn, value).await,
+            Self::Limit(limited) => limited.update(txn, value).await,
+            Self::Merge(merge) => merge.update(txn, value).await,
+            Self::Selection(selection) => selection.update(txn, value).await,
+            Self::TableSlice(slice) => slice.update(txn, value).await,
+        }
     }
 
-    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
-        todo!()
+    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.update_row(txn_id, row, value).await,
+            Self::ROIndex(index) => index.update_row(txn_id, row, value).await,
+            Self::Table(table) => table.update_row(txn_id, row, value).await,
+            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value).await,
+            Self::IndexSlice(slice) => slice.update_row(txn_id, row, value).await,
+            Self::Limit(limited) => limited.update_row(txn_id, row, value).await,
+            Self::Merge(merge) => merge.update_row(txn_id, row, value).await,
+            Self::Selection(selection) => selection.update_row(txn_id, row, value).await,
+            Self::TableSlice(slice) => slice.update_row(txn_id, row, value).await,
+        }
     }
 
-    async fn upsert(&self, _txn_id: TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
-        todo!()
+    async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.upsert(txn_id, key, values).await,
+            Self::ROIndex(index) => index.upsert(txn_id, key, values).await,
+            Self::Table(table) => table.upsert(txn_id, key, values).await,
+            Self::Aggregate(aggregate) => aggregate.upsert(txn_id, key, values).await,
+            Self::IndexSlice(slice) => slice.upsert(txn_id, key, values).await,
+            Self::Limit(limited) => limited.upsert(txn_id, key, values).await,
+            Self::Merge(merge) => merge.upsert(txn_id, key, values).await,
+            Self::Selection(selection) => selection.upsert(txn_id, key, values).await,
+            Self::TableSlice(slice) => slice.upsert(txn_id, key, values).await,
+        }
     }
 }
 
