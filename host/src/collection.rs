@@ -8,7 +8,6 @@ use log::debug;
 
 use tc_btree::BTreeView;
 use tc_error::*;
-use tc_table::{Table, TableType};
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -21,9 +20,11 @@ use crate::txn::Txn;
 const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
 pub use tc_btree::BTreeType;
+pub use tc_table::TableType;
 
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
