@@ -90,7 +90,7 @@ impl Persist for SyncChain {
             file.try_into()?
         } else {
             let file = dir
-                .create_file(txn_id, CHAIN.into(), ValueType::String.into())
+                .create_file(txn_id, CHAIN.into(), ValueType::String)
                 .await?;
 
             let file: fs::File<Value> = file.try_into()?;
@@ -157,7 +157,7 @@ impl de::Visitor for ChainVisitor {
         let file = self
             .txn
             .context()
-            .create_file(*self.txn.id(), CHAIN.into(), ChainType::Sync.into())
+            .create_file(*self.txn.id(), CHAIN.into(), ChainType::Sync)
             .map_err(de::Error::custom)
             .await?;
 

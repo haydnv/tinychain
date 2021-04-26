@@ -121,7 +121,7 @@ impl Subject {
         match schema {
             Schema::Value(value) => {
                 let file = dir
-                    .create_file(txn_id, SUBJECT.into(), value.class().into())
+                    .create_file(txn_id, SUBJECT.into(), value.class())
                     .await?;
 
                 let file = fs::File::<Value>::try_from(file)?;
@@ -133,7 +133,7 @@ impl Subject {
             }
             Schema::BTree(schema) => {
                 let file = dir
-                    .create_file(txn_id, SUBJECT.into(), BTreeType::default().into())
+                    .create_file(txn_id, SUBJECT.into(), BTreeType::default())
                     .await?;
 
                 let file = fs::File::<Node>::try_from(file)?;
@@ -187,7 +187,7 @@ impl de::FromStream for Subject {
 
         let file: fs::FileEntry = txn
             .context()
-            .create_file(*txn.id(), SUBJECT.into(), value.class().into())
+            .create_file(*txn.id(), SUBJECT.into(), value.class())
             .map_err(de::Error::custom)
             .await?;
 

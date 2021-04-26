@@ -1,10 +1,11 @@
+use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
 use futures::future;
 use futures::TryStreamExt;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
@@ -40,17 +41,17 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
     type Reverse: TableInstance<F, D, Txn>;
     type Slice: TableInstance<F, D, Txn>;
 
-    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
-        let rows = self.stream(&txn_id).await?;
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let rows = self.rows(txn_id).await?;
         rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
             .await
     }
 
-    async fn delete(&self, _txn_id: &TxnId) -> TCResult<()> {
+    async fn delete(&self, _txn_id: TxnId) -> TCResult<()> {
         Err(TCError::bad_request(ERR_DELETE, self.class()))
     }
 
-    async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+    async fn delete_row(&self, _txn_id: TxnId, _row: Row) -> TCResult<()> {
         Err(TCError::bad_request(ERR_DELETE, self.class()))
     }
 
@@ -58,11 +59,15 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         group_by(self, columns)
     }
 
-    async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
+    async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly<F, D, Txn>>
+    where
+        F: TryFrom<D::File, Error = TCError>,
+        D::FileClass: From<BTreeType>,
+    {
         index::ReadOnly::copy_from(self, txn, columns).await
     }
 
-    async fn insert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(TCError::bad_request(ERR_INSERT, self.class()))
     }
 
@@ -87,21 +92,25 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         Err(TCError::bad_request(ERR_SLICE, self.class()))
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>>;
+    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>>;
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
-    async fn update(&self, _txn: &Txn, _value: Row) -> TCResult<()> {
+    async fn update(&self, _txn: &Txn, _value: Row) -> TCResult<()>
+    where
+        F: TryFrom<D::File, Error = TCError>,
+        D::FileClass: From<BTreeType>,
+    {
         Err(TCError::bad_request(ERR_UPDATE, self.class()))
     }
 
-    async fn update_row(&self, _txn_id: &TxnId, _row: Row, _value: Row) -> TCResult<()> {
+    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
         Err(TCError::bad_request(ERR_UPDATE, self.class()))
     }
 
-    async fn upsert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
+    async fn upsert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(TCError::bad_request(ERR_INSERT, self.class()))
     }
 }
@@ -155,15 +164,15 @@ impl fmt::Display for TableType {
 
 #[derive(Clone)]
 pub enum Table<F: File<Node>, D: Dir, Txn: Transaction<D>> {
-    Index(Index),
-    ROIndex(ReadOnly),
+    Index(Index<F, D, Txn>),
+    ROIndex(ReadOnly<F, D, Txn>),
     Table(TableIndex<F, D, Txn>),
     Aggregate(Box<Aggregate<F, D, Txn, Table<F, D, Txn>>>),
-    IndexSlice(IndexSlice),
+    IndexSlice(IndexSlice<F, D, Txn>),
     Limit(Box<Limited<F, D, Txn>>),
-    Merge(Merged),
+    Merge(Merged<F, D, Txn>),
     Selection(Box<Selection<F, D, Txn, Table<F, D, Txn>>>),
-    TableSlice(TableSlice),
+    TableSlice(TableSlice<F, D, Txn>),
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Table<F, D, Txn> {
@@ -190,23 +199,27 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
     type Reverse = Self;
     type Slice = Self;
 
-    async fn count(&self, _txn_id: &TxnId) -> TCResult<u64> {
+    async fn count(&self, _txn_id: TxnId) -> TCResult<u64> {
         todo!()
     }
 
-    async fn delete(&self, _txn_id: &TxnId) -> TCResult<()> {
+    async fn delete(&self, _txn_id: TxnId) -> TCResult<()> {
         todo!()
     }
 
-    async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+    async fn delete_row(&self, _txn_id: TxnId, _row: Row) -> TCResult<()> {
         todo!()
     }
 
-    async fn index(self, _txn: Txn, _columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
+    async fn index(
+        self,
+        _txn: Txn,
+        _columns: Option<Vec<Id>>,
+    ) -> TCResult<index::ReadOnly<F, D, Txn>> {
         todo!()
     }
 
-    async fn insert(&self, _txn_id: &TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
         todo!()
     }
 
@@ -234,7 +247,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
         todo!()
     }
 
-    async fn stream<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows(&self, _txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
         todo!()
     }
 
@@ -250,11 +263,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
         todo!()
     }
 
-    async fn update_row(&self, _txn_id: &TxnId, _row: Row, _value: Row) -> TCResult<()> {
+    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
         todo!()
     }
 
-    async fn upsert(&self, _txn_id: &TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
+    async fn upsert(&self, _txn_id: TxnId, _key: Vec<Value>, _values: Vec<Value>) -> TCResult<()> {
         todo!()
     }
 }

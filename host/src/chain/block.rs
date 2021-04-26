@@ -204,7 +204,7 @@ impl Persist for BlockChain {
         } else {
             let latest = 0u64;
             let file = dir
-                .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
+                .create_file(txn_id, CHAIN.into(), ChainType::Sync)
                 .await?;
 
             let file: fs::File<ChainBlock> = file.try_into()?;
@@ -281,7 +281,7 @@ impl de::Visitor for ChainVisitor {
         let file = self
             .txn
             .context()
-            .create_file(txn_id, CHAIN.into(), ChainType::Block.into())
+            .create_file(txn_id, CHAIN.into(), ChainType::Block)
             .map_err(de::Error::custom)
             .await?;
 

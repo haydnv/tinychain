@@ -23,7 +23,7 @@ pub type BlockId = PathSegment;
 
 /// The contents of a [`Block`].
 #[async_trait]
-pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync {
+pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'static {
     fn ext() -> &'static str;
 
     fn max_size() -> u64;
@@ -142,7 +142,7 @@ pub trait Store: Clone + Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File<B: BlockData>: Store + Sized {
+pub trait File<B: BlockData>: Store + Sized + 'static {
     /// The type of block which this file is divided into.
     type Block: Block<B, Self>;
 
@@ -193,9 +193,9 @@ pub trait File<B: BlockData>: Store + Sized {
 
 /// A transactional directory
 #[async_trait]
-pub trait Dir: Store + Sized {
+pub trait Dir: Store + Sized + 'static {
     /// The type of a file entry in this `Dir`
-    type File;
+    type File: Send;
 
     /// The `Class` of a file stored in this `Dir`
     type FileClass;
@@ -210,15 +210,15 @@ pub trait Dir: Store + Sized {
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file(
+    async fn create_file<C: Send>(
         &self,
         txn_id: TxnId,
         name: Id,
-        class: Self::FileClass,
-    ) -> TCResult<Self::File>;
+        class: C,
+    ) -> TCResult<Self::File> where Self::FileClass: From<C>;
 
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp(&self, txn_id: TxnId, class: Self::FileClass) -> TCResult<Self::File>;
+    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File> where Self::FileClass: From<C>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;

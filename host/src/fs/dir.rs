@@ -35,12 +35,15 @@ pub enum FileEntry {
 }
 
 impl FileEntry {
-    fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
+    fn new<C>(cache: Cache, path: PathBuf, class: C) -> TCResult<Self>
+    where
+        StateType: From<C>,
+    {
         fn err<T: fmt::Display>(class: T) -> TCError {
             TCError::bad_request("cannot create file for", class)
         }
 
-        match class {
+        match StateType::from(class) {
             StateType::Collection(ct) => match ct {
                 CollectionType::BTree(_) => Ok(Self::BTree(File::new(cache, path, Node::ext()))),
                 CollectionType::Table(tt) => Err(err(tt)),
@@ -290,7 +293,10 @@ impl fs::Dir for Dir {
             .await
     }
 
-    async fn create_file(&self, txn_id: TxnId, name: Id, class: StateType) -> TCResult<Self::File> {
+    async fn create_file<C: Send>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<Self::File>
+    where
+        StateType: From<C>,
+    {
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&name) {
             return Err(TCError::bad_request(
@@ -305,7 +311,10 @@ impl fs::Dir for Dir {
         Ok(file.into())
     }
 
-    async fn create_file_tmp(&self, txn_id: TxnId, class: Self::FileClass) -> TCResult<Self::File> {
+    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File>
+    where
+        StateType: From<C>,
+    {
         self.unique_id(&txn_id)
             .and_then(|id| self.create_file(txn_id, id, class))
             .await
