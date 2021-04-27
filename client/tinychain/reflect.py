@@ -143,7 +143,7 @@ class PutMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) not in [1, 2, 4]:
-            raise ValueError("{self.dtype()} has one, two, or four arguments: "
+            raise ValueError(f"{self.dtype()} has one, two, or four arguments: "
                 + "(self, cxt, key, value)")
 
         args = [self.header]
@@ -183,7 +183,7 @@ class PostMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) == 0:
-            raise ValueError("{self.dtype()} has at least one argment: "
+            raise ValueError(f"{self.dtype()} has at least one argment: "
                 + "(self, cxt, name1=val1, ...)")
 
         args = [self.header]
@@ -271,7 +271,7 @@ class PutOp(Op):
         parameters = list(sig.parameters.items())
 
         if len(parameters) not in [0, 1, 3]:
-            raise ValueError("{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)")
+            raise ValueError(f"{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)")
 
         args = [self.header]
 
