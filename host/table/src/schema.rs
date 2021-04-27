@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
-use destream::en;
+use async_trait::async_trait;
+use destream::{de, en};
+use futures::TryFutureExt;
 use safecast::*;
 
 use tc_error::*;
@@ -270,6 +272,17 @@ impl From<IndexSchema> for RowSchema {
     }
 }
 
+#[async_trait]
+impl de::FromStream for IndexSchema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|(key, values)| Self { key, values })
+            .await
+    }
+}
+
 impl<'en> en::IntoStream<'en> for IndexSchema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         (self.key, self.values).into_stream(encoder)
@@ -340,6 +353,17 @@ impl TryCastFrom<Value> for TableSchema {
         } else {
             None
         }
+    }
+}
+
+#[async_trait]
+impl de::FromStream for TableSchema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|(primary, indices)| Self { primary, indices })
+            .await
     }
 }
 

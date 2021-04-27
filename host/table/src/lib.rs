@@ -1,10 +1,11 @@
 use std::convert::TryFrom;
 use std::fmt;
+use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use destream::en;
-use futures::future;
-use futures::TryStreamExt;
+use destream::{de, en};
+use futures::future::{self, TryFutureExt};
+use futures::stream::TryStreamExt;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -470,6 +471,25 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
 }
 
 #[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
+where
+    F: TryFrom<D::File, Error = TCError>,
+    D::FileClass: From<BTreeType>,
+{
+    type Context = Txn;
+
+    async fn from_stream<De: de::Decoder>(txn: Txn, decoder: &mut De) -> Result<Self, De::Error> {
+        decoder
+            .decode_seq(TableVisitor {
+                txn,
+                phantom_dir: PhantomData,
+                phantom_file: PhantomData,
+            })
+            .await
+    }
+}
+
+#[async_trait]
 impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn> {
     type Txn = Txn;
     type View = TableView<'en>;
@@ -484,6 +504,87 @@ impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> fmt::Display for Table<F, D, Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "an instance of {}", self.class())
+    }
+}
+
+struct TableVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+    txn: Txn,
+    phantom_file: PhantomData<F>,
+    phantom_dir: PhantomData<D>,
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
+where
+    F: TryFrom<D::File, Error = TCError>,
+    D::FileClass: From<BTreeType>,
+{
+    type Value = Table<F, D, Txn>;
+
+    fn expecting() -> &'static str {
+        "a Table"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let schema = seq
+            .next_element(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a Table schema"))?;
+        let table = TableIndex::create(&self.txn, schema)
+            .map_err(de::Error::custom)
+            .await?;
+
+        if let Some(visitor) = seq
+            .next_element::<RowVisitor<F, D, Txn>>((txn_id, table.clone()))
+            .await?
+        {
+            Ok(visitor.table.into())
+        } else {
+            Ok(table.into())
+        }
+    }
+}
+
+struct RowVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+    table: TableIndex<F, D, Txn>,
+    txn_id: TxnId,
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn> {
+    type Value = Self;
+
+    fn expecting() -> &'static str {
+        "a sequence of table rows"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let schema = self.table.primary().schema();
+
+        while let Some(row) = seq.next_element(()).await? {
+            let row = schema.row_from_values(row).map_err(de::Error::custom)?;
+            let (key, values) = schema.key_values_from_row(row).map_err(de::Error::custom)?;
+            self.table
+                .insert(self.txn_id, key, values)
+                .map_err(de::Error::custom)
+                .await?;
+        }
+
+        Ok(self)
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn> {
+    type Context = (TxnId, TableIndex<F, D, Txn>);
+
+    async fn from_stream<De: de::Decoder>(
+        cxt: Self::Context,
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
+        let (txn_id, table) = cxt;
+        decoder.decode_seq(Self { txn_id, table }).await
     }
 }
 

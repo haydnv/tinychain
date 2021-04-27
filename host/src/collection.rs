@@ -120,9 +120,7 @@ impl CollectionVisitor {
                     .map_ok(Collection::BTree)
                     .await
             }
-            CollectionType::Table(_) => {
-                unimplemented!()
-            }
+            CollectionType::Table(_) => access.next_value(self.txn).map_ok(Collection::Table).await,
         }
     }
 }
@@ -140,8 +138,10 @@ impl de::Visitor for CollectionVisitor {
             .next_key::<TCPathBuf>(())
             .await?
             .ok_or_else(|| de::Error::custom("expected a Collection type"))?;
+
         let class = CollectionType::from_path(&classpath)
             .ok_or_else(|| de::Error::invalid_value(classpath, "a Collection type"))?;
+
         self.visit_map_value(class, &mut map).await
     }
 }
