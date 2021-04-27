@@ -250,7 +250,7 @@ impl<'a> ReplicateHandler<'a> {
             Tuple::<&Id>::from_iter(self.cluster.ns())
         );
 
-        if self.path.is_empty() {
+        let handler: Option<Box<dyn Handler<'a>>> = if self.path.is_empty() {
             Some(Box::new(ClusterHandler::from(self.cluster)))
         } else if let Some(chain) = self.cluster.chain(&self.path[0]) {
             debug!("Cluster has a Chain at {}", &self.path[0]);
@@ -264,8 +264,14 @@ impl<'a> ReplicateHandler<'a> {
                 "grant" => Some(Box::new(GrantHandler::from(self.cluster))),
                 "install" => Some(Box::new(InstallHandler::from(self.cluster))),
                 "replicas" => Some(Box::new(ReplicaHandler::from(self.cluster))),
-                _ => Some(self.not_found()),
+                _ => None,
             }
+        } else {
+            None
+        };
+
+        if let Some(handler) = handler {
+            Some(handler)
         } else {
             debug!("Cluster has no handler for {}", TCPath::from(self.path));
             Some(self.not_found())
