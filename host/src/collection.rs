@@ -8,6 +8,7 @@ use log::debug;
 
 use tc_btree::BTreeView;
 use tc_error::*;
+use tc_table::TableView;
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -162,7 +163,7 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
-            Self::Table(_table) => unimplemented!(),
+            Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
         }
     }
 }
@@ -178,12 +179,14 @@ impl fmt::Display for Collection {
 
 pub enum CollectionView<'en> {
     BTree(BTreeView<'en>),
+    Table(TableView<'en>),
 }
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::BTree(btree) => btree.into_stream(encoder),
+            Self::Table(table) => table.into_stream(encoder),
         }
     }
 }

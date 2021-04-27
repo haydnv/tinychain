@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
+use destream::en;
 use safecast::*;
 
 use tc_error::*;
@@ -21,6 +22,13 @@ pub struct IndexSchema {
 impl IndexSchema {
     pub fn columns(&self) -> Vec<Column> {
         [&self.key[..], &self.values[..]].concat()
+    }
+
+    pub fn column_names(&self) -> impl Iterator<Item = &Id> {
+        self.key
+            .iter()
+            .map(|col| &col.name)
+            .chain(self.values.iter().map(|col| &col.name))
     }
 
     pub fn key(&'_ self) -> &'_ [Column] {
@@ -262,6 +270,12 @@ impl From<IndexSchema> for RowSchema {
     }
 }
 
+impl<'en> en::IntoStream<'en> for IndexSchema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        (self.key, self.values).into_stream(encoder)
+    }
+}
+
 impl fmt::Display for IndexSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -283,6 +297,13 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
+    pub fn new<I: IntoIterator<Item = (Id, Vec<Id>)>>(primary: IndexSchema, indices: I) -> Self {
+        Self {
+            primary,
+            indices: indices.into_iter().collect(),
+        }
+    }
+
     pub fn indices(&'_ self) -> &'_ BTreeMap<Id, Vec<Id>> {
         &self.indices
     }
@@ -297,15 +318,6 @@ impl From<IndexSchema> for TableSchema {
         TableSchema {
             primary: schema,
             indices: BTreeMap::new(),
-        }
-    }
-}
-
-impl<I: Iterator<Item = (Id, Vec<Id>)>> From<(IndexSchema, I)> for TableSchema {
-    fn from(schema: (IndexSchema, I)) -> TableSchema {
-        TableSchema {
-            primary: schema.0,
-            indices: schema.1.collect(),
         }
     }
 }
@@ -328,5 +340,11 @@ impl TryCastFrom<Value> for TableSchema {
         } else {
             None
         }
+    }
+}
+
+impl<'en> en::IntoStream<'en> for TableSchema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        (self.primary, self.indices).into_stream(encoder)
     }
 }

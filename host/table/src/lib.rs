@@ -2,13 +2,14 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::en;
 use futures::future;
 use futures::TryStreamExt;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
     path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, TCTryStream,
@@ -41,7 +42,7 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
     type Reverse: TableInstance<F, D, Txn>;
     type Slice: TableInstance<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         let rows = self.rows(txn_id).await?;
         rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
             .await
@@ -71,9 +72,11 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         Err(TCError::bad_request(ERR_INSERT, self.class()))
     }
 
-    fn key(&'_ self) -> &'_ [Column];
+    fn key(&self) -> &[Column];
 
-    fn values(&'_ self) -> &'_ [Column];
+    fn values(&self) -> &[Column];
+
+    fn schema(&self) -> TableSchema;
 
     fn limit(self, limit: u64) -> view::Limited<F, D, Txn> {
         view::Limited::new(self.into(), limit)
@@ -92,7 +95,7 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         Err(TCError::bad_request(ERR_SLICE, self.class()))
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>>;
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>>;
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
@@ -199,7 +202,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
     type Reverse = Self;
     type Slice = Self;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         match self {
             Self::Index(index) => index.count(txn_id).await,
             Self::ROIndex(index) => index.count(txn_id).await,
@@ -273,7 +276,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
         }
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         match self {
             Self::Index(index) => index.key(),
             Self::ROIndex(index) => index.key(),
@@ -287,7 +290,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
         }
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         match self {
             Self::Index(index) => index.values(),
             Self::ROIndex(index) => index.values(),
@@ -298,6 +301,20 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
             Self::Merge(merge) => merge.values(),
             Self::Selection(selection) => selection.values(),
             Self::TableSlice(slice) => slice.values(),
+        }
+    }
+
+    fn schema(&self) -> TableSchema {
+        match self {
+            Self::Index(index) => TableInstance::schema(index),
+            Self::ROIndex(index) => index.schema(),
+            Self::Table(table) => table.schema(),
+            Self::Aggregate(aggregate) => aggregate.schema(),
+            Self::IndexSlice(slice) => TableInstance::schema(slice),
+            Self::Limit(limit) => limit.schema(),
+            Self::Merge(merge) => merge.schema(),
+            Self::Selection(selection) => selection.schema(),
+            Self::TableSlice(slice) => slice.schema(),
         }
     }
 
@@ -357,7 +374,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
         }
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         match self {
             Self::Index(index) => index.rows(txn_id).await,
             Self::ROIndex(index) => index.rows(txn_id).await,
@@ -446,8 +463,35 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
     }
 }
 
+#[async_trait]
+impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn> {
+    type Txn = Txn;
+    type View = TableView<'en>;
+
+    async fn into_view(self, txn: Txn) -> TCResult<TableView<'en>> {
+        let schema = self.schema().clone();
+        let rows = self.rows(*txn.id()).await?;
+        Ok(TableView { schema, rows })
+    }
+}
+
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> fmt::Display for Table<F, D, Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "an instance of {}", self.class())
+    }
+}
+
+pub struct TableView<'en> {
+    schema: TableSchema,
+    rows: TCTryStream<'en, Vec<Value>>,
+}
+
+impl<'en> en::IntoStream<'en> for TableView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(TableType::Table.path(), (self.schema, en::SeqStream::from(self.rows)))?;
+        map.end()
     }
 }

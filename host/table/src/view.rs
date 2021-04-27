@@ -16,6 +16,7 @@ use tcgeneric::{GroupStream, Id, Instance, TCTryStream};
 
 use super::index::TableIndex;
 use super::{Bounds, Column, IndexSchema, Row, Table, TableInstance, TableType};
+use crate::TableSchema;
 
 const ERR_AGGREGATE_SLICE: &str = "Table aggregate does not support slicing. \
 Consider aggregating a slice of the source table.";
@@ -55,12 +56,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         Err(TCError::unsupported(ERR_AGGREGATE_NESTED))
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.source.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &'_ [Column] {
         self.source.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        self.source.schema()
     }
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -79,7 +84,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         })
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let grouped = self.source.rows(txn_id).map_ok(GroupStream::from).await?;
         let grouped: TCTryStream<Vec<Value>> = Box::pin(grouped);
         Ok(grouped)
@@ -169,8 +174,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.rows(*txn.id()).await?;
-        Ok(rows.next().await.is_none())
+        self.source
+            .clone()
+            .slice(self.range.clone(), self.reverse)?
+            .is_empty(*txn.id())
+            .await
     }
 
     pub fn slice_index(self, bounds: Bounds) -> TCResult<Self> {
@@ -218,9 +226,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     type Reverse = Self;
     type Slice = Table<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.source
-            .clone()
             .slice(self.range.clone(), false)?
             .count(txn_id)
             .await
@@ -234,12 +241,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
             .await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.schema.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.schema.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        self.schema.clone().into()
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -256,9 +267,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         Ok(self.into_reversed())
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.source
-            .clone()
             .slice(self.range.clone(), self.reverse)?
             .keys(txn_id)
             .await
@@ -327,7 +337,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
     type Reverse = Table<F, D, Txn>;
     type Slice = Table<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         let source_count = self.source.count(txn_id).await?;
         Ok(u64::min(source_count, self.limit as u64))
     }
@@ -336,7 +346,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
         let source = &self.source;
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        let rows = self.rows(txn_id).await?;
+        let rows = self.clone().rows(txn_id).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.delete_row(txn_id, row))
@@ -345,12 +355,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
             .await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.source.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.source.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        self.source.schema()
     }
 
     fn order_by(self, _order: Vec<Id>, _reverse: bool) -> TCResult<Table<F, D, Txn>> {
@@ -361,7 +375,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
         Err(TCError::unsupported(ERR_LIMITED_REVERSE))
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let rows = self.source.rows(txn_id).await?;
         let rows: TCTryStream<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
@@ -379,7 +393,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
         let source = &self.source;
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        let rows = self.rows(*txn.id()).await?;
+        let rows = self.clone().rows(*txn.id()).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.update_row(*txn.id(), row, value.clone()))
@@ -549,7 +563,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        let rows = self.rows(txn_id).await?;
+        let rows = self.clone().rows(txn_id).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(txn_id, row))
@@ -576,6 +590,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
         }
     }
 
+    fn schema(&self) -> TableSchema {
+        todo!()
+    }
+
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         match self.left {
             MergeSource::Merge(merged) => merged.order_by(columns, reverse),
@@ -595,15 +613,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
         self.left.into_source().slice(bounds)
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
-        let key_columns = &self.key_columns;
-        let keys = self.keys.rows(txn_id).await?;
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        let left = self.left;
+        let left_clone = left.clone();
+        let key_columns = self.key_columns;
+        let keys = self.keys.clone().rows(txn_id).await?;
 
-        let left = &self.left;
         let rows = keys
-            .map_ok(move |key| Bounds::from_key(key, key_columns))
+            .map_ok(move |key| Bounds::from_key(key, &key_columns))
             .try_filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
-            .and_then(move |bounds| Box::pin(left.clone().slice_rows(txn_id, bounds, false)))
+            .and_then(move |bounds| Box::pin(left_clone.clone().slice_rows(txn_id, bounds, false)))
             .try_flatten();
 
         let rows: TCTryStream<Vec<Value>> = Box::pin(rows);
@@ -628,7 +647,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
     async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        let rows = self.rows(*txn.id()).await?;
+        let rows = self.clone().rows(*txn.id()).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(*txn.id(), row, value.clone()))
@@ -720,16 +739,20 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
     type Reverse = Selection<F, D, Txn, <T as TableInstance<F, D, Txn>>::Reverse>;
     type Slice = Selection<F, D, Txn, <T as TableInstance<F, D, Txn>>::Slice>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.source.count(txn_id).await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.schema.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.schema.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        todo!()
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -750,7 +773,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         self.source.reversed()?.select(self.columns.to_vec())
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let indices = self.indices.to_vec();
         let selected = self.source.rows(txn_id).await?.map_ok(move |row| {
             let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
@@ -886,14 +909,14 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     type Reverse = TableSlice<F, D, Txn>;
     type Slice = Merged<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.slice.count(txn_id).await
     }
 
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        let rows = self.rows(txn_id).await?;
+        let rows = self.clone().rows(txn_id).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(txn_id, row))
@@ -906,12 +929,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         self.source().delete_row(txn_id, row).await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.source().key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.source().values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        self.source().schema()
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -937,7 +964,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         self.into_source().slice(bounds)
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<'_, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.slice.rows(txn_id).await
     }
 
@@ -958,7 +985,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         let txn_id = *txn.id();
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        let rows = self.rows(txn_id).await?;
+        let rows = self.clone().rows(txn_id).await?;
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(txn_id, row, value.clone()))

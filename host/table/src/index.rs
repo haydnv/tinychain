@@ -106,7 +106,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
     type Reverse = IndexSlice<F, D, Txn>;
     type Slice = IndexSlice<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.btree.count(txn_id).await
     }
 
@@ -120,12 +120,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
         self.btree.clone().slice(range, false)?.delete(txn_id).await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.schema.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.schema.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        self.schema.clone().into()
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -147,9 +151,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
         self.index_slice(bounds).map(|is| is.into())
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("Index::rows");
-        self.btree.clone().keys(txn_id).await
+        self.btree.keys(txn_id).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -294,16 +298,20 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Re
     type Reverse = Self;
     type Slice = Self;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.index.count(txn_id).await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.index.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.index.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        TableInstance::schema(&self.index)
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -327,7 +335,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Re
             .map(|index| ReadOnly { index })
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.index.rows(txn_id).await
     }
 
@@ -364,6 +372,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         let primary_file = context
             .create_file(txn_id, PRIMARY_INDEX.into(), BTreeType::default())
             .await?;
+
         let primary_file = primary_file.try_into()?;
         let primary = Index::create(primary_file, schema.primary().clone(), txn_id).await?;
 
@@ -384,6 +393,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
                     let file = context
                         .create_file(txn_id, name.clone(), BTreeType::default())
                         .await?;
+
                     let file = file.try_into()?;
 
                     Self::create_index(file, primary_schema, column_names, txn_id)
@@ -537,7 +547,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     type Reverse = Merged<F, D, Txn>;
     type Slice = Merged<F, D, Txn>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         self.primary.count(txn_id).await
     }
 
@@ -569,12 +579,23 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         TableIndex::insert(self, txn_id, key, values).await
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.primary.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         self.primary.values()
+    }
+
+    fn schema(&self) -> TableSchema {
+        let indices = self.auxiliary.iter().map(|(name, index)| {
+            (
+                name.clone(),
+                index.schema().column_names().cloned().collect(),
+            )
+        });
+
+        TableSchema::new(self.primary.schema.clone(), indices)
     }
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -742,7 +763,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         }
     }
 
-    async fn rows(&self, txn_id: TxnId) -> TCResult<TCTryStream<Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.primary.rows(txn_id).await
     }
 
