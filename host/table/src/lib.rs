@@ -149,6 +149,12 @@ impl NativeClass for TableType {
     }
 }
 
+impl Default for TableType {
+    fn default() -> Self {
+        Self::Table
+    }
+}
+
 impl fmt::Display for TableType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -488,10 +494,6 @@ pub struct TableView<'en> {
 
 impl<'en> en::IntoStream<'en> for TableView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::EncodeMap;
-
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(TableType::Table.path(), (self.schema, en::SeqStream::from(self.rows)))?;
-        map.end()
+        (self.schema, en::SeqStream::from(self.rows)).into_stream(encoder)
     }
 }

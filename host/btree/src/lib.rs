@@ -496,14 +496,7 @@ pub struct BTreeView<'en> {
 
 impl<'en> en::IntoStream<'en> for BTreeView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::EncodeMap;
-
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(
-            BTreeType::File.path().to_string(),
-            (self.schema, en::SeqStream::from(self.keys)),
-        )?;
-        map.end()
+        (self.schema, en::SeqStream::from(self.keys)).into_stream(encoder)
     }
 }
 

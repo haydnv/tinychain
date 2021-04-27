@@ -2,7 +2,7 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 use log::debug;
 
@@ -184,9 +184,11 @@ pub enum CollectionView<'en> {
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
         match self {
-            Self::BTree(btree) => btree.into_stream(encoder),
-            Self::Table(table) => table.into_stream(encoder),
-        }
+            Self::BTree(btree) => map.encode_entry(BTreeType::default().path(), btree),
+            Self::Table(table) => map.encode_entry(TableType::default().path(), table),
+        }?;
+        map.end()
     }
 }
