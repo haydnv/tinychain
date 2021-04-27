@@ -239,12 +239,24 @@ impl<'a> ReplicateHandler<'a> {
         Self { cluster, path }
     }
 
+    fn not_found(&self) -> Box<dyn Handler<'a> + 'a> {
+        Box::new(NotFoundHandler::from(TCPath::from(self.path)))
+    }
+
     fn handler(&self) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!(
+            "routing {} through Cluster namespace {}",
+            TCPath::from(self.path),
+            Tuple::<&Id>::from_iter(self.cluster.ns())
+        );
+
         if self.path.is_empty() {
             Some(Box::new(ClusterHandler::from(self.cluster)))
         } else if let Some(chain) = self.cluster.chain(&self.path[0]) {
+            debug!("Cluster has a Chain at {}", &self.path[0]);
             chain.route(&self.path[1..])
         } else if let Some(class) = self.cluster.class(&self.path[0]) {
+            debug!("Cluster has a Class at {}", &self.path[0]);
             class.route(&self.path[1..])
         } else if self.path.len() == 1 {
             match self.path[0].as_str() {
@@ -252,10 +264,11 @@ impl<'a> ReplicateHandler<'a> {
                 "grant" => Some(Box::new(GrantHandler::from(self.cluster))),
                 "install" => Some(Box::new(InstallHandler::from(self.cluster))),
                 "replicas" => Some(Box::new(ReplicaHandler::from(self.cluster))),
-                _ => None,
+                _ => Some(self.not_found()),
             }
         } else {
-            None
+            debug!("Cluster has no handler for {}", TCPath::from(self.path));
+            Some(self.not_found())
         }
     }
 
@@ -422,5 +435,44 @@ impl Route for Cluster {
         debug!("Cluster::route {}", TCPath::from(path));
 
         Some(Box::new(ReplicateHandler::new(self, path)))
+    }
+}
+
+struct NotFoundHandler<T> {
+    id: T,
+}
+
+impl<'a, T: fmt::Display + Send> Handler<'a> for NotFoundHandler<T>
+where
+    T: 'a,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, _key| {
+            Box::pin(future::ready(Err(TCError::not_found(self.id))))
+        }))
+    }
+
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(|_txn, _key, _value| {
+            Box::pin(future::ready(Err(TCError::not_found(self.id))))
+        }))
+    }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|_txn, _params| {
+            Box::pin(future::ready(Err(TCError::not_found(self.id))))
+        }))
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(|_txn, _key| {
+            Box::pin(future::ready(Err(TCError::not_found(self.id))))
+        }))
+    }
+}
+
+impl<T> From<T> for NotFoundHandler<T> {
+    fn from(id: T) -> Self {
+        Self { id }
     }
 }

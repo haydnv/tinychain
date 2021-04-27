@@ -86,6 +86,11 @@ impl Cluster {
         self.link.path()
     }
 
+    /// Return the names of the members of this cluster.
+    pub fn ns(&self) -> impl Iterator<Item = &Id> {
+        self.chains.keys().chain(self.classes.keys())
+    }
+
     /// Iterate over a list of replicas of this cluster.
     pub async fn replicas(&self, txn_id: &TxnId) -> TCResult<HashSet<Link>> {
         let replicas = self.replicas.read(txn_id).await?;
