@@ -4,7 +4,7 @@ import tinychain as tc
 from testutils import start_host
 
 
-IN_STOCK = 100
+IN_STOCK = tc.Int(100)
 SCOPE = "/buy"
 
 

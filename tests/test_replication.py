@@ -13,7 +13,7 @@ def cluster_class(chain_class):
         __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
 
         def _configure(self):
-            self.rev = chain_class(0)
+            self.rev = chain_class(tc.UInt(0))
 
         @tc.get_method
         def version(self) -> tc.Number:

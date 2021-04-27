@@ -1,6 +1,6 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value`"""
 
-from .ref import OpRef
+from .ref import Ref, OpRef
 from .reflect import Meta
 from .state import Scalar, State
 from .util import *
@@ -12,6 +12,21 @@ class Chain(State, metaclass=Meta):
     """
 
     __uri__ = uri(State) + "/chain"
+
+    def __new__(cls, spec):
+        if isinstance(spec, Ref) or isinstance(spec, URI):
+            return State.__new__(cls)
+
+        elif isinstance(spec, State):
+
+            class _Chain(cls, type(spec)):
+                def __json__(self):
+                    return cls.__json__(self)
+
+            return State.__new__(_Chain)
+
+        else:
+            raise ValueError(f"Chain subject must be a State, not {spec}")
 
     def set(self, value):
         """Update the value of this `Chain`."""

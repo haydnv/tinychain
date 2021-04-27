@@ -49,7 +49,7 @@ class Meta(type):
             if name.startswith('_'):
                 continue
             elif name in parent_members:
-                if attr is parent_members[name] or attr == parent_members[name]:
+                if attr is parent_members[name]:
                     continue
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
