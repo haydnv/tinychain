@@ -184,10 +184,20 @@ class Table(Collection):
 
     def insert(self, key, values=[]):
         """
-        Insert the given row into this Table.
+        Insert the given row into this `Table`.
 
         If the key is already present, this will raise a :class:`tc.error.BadRequest` error.
         """
 
         return Nil(OpRef.Put(uri(self), key, values))
+
+    def where(self, **cond):
+        """
+        Return a slice of this `Table` whose column values fall within the specified range.
+
+        If there is no index which supports the given range, this will raise 
+        a :class:`tc.error.BadRequest` error.
+        """
+
+        return Table(OpRef.Post(uri(self), **cond))
 

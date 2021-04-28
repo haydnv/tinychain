@@ -41,7 +41,25 @@ class TableTests(unittest.TestCase):
             result = self.host.post(ENDPOINT, cxt)
             self.assertEqual(result, x)
 
+    def testSlice(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.where(name="one"))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected([["one", 1]]))
+
+
+def expected(rows):
+    return {str(tc.uri(tc.Table)): [tc.to_json(SCHEMA), rows]}
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
