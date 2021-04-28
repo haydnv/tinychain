@@ -184,6 +184,12 @@ impl From<HashMap<Id, ColumnBound>> for Bounds {
     }
 }
 
+impl FromIterator<(Id, ColumnBound)> for Bounds {
+    fn from_iter<I: IntoIterator<Item = (Id, ColumnBound)>>(iter: I) -> Self {
+        Self { inner: iter.into_iter().collect() }
+    }
+}
+
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&Map::from_iter(self.inner.clone()), f)

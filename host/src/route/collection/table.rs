@@ -1,15 +1,18 @@
+use std::convert::TryFrom;
+
 use futures::TryFutureExt;
-use safecast::TryCastInto;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_table::TableInstance;
+use tc_table::{Bounds, ColumnBound, TableInstance};
 use tc_transact::Transaction;
-use tcgeneric::PathSegment;
+use tcgeneric::{Map, PathSegment};
 
-use crate::collection::Table;
+use crate::collection::{Collection, Table};
 use crate::fs::{Dir, File};
-use crate::route::{GetHandler, Handler, PutHandler, Route};
+use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -58,6 +61,21 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
             })
         }))
     }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|_txn, params| {
+            Box::pin(async move {
+                let bounds = Scalar::try_cast_from(State::Map(params), |s| {
+                    TCError::bad_request("invalid Table bounds", s)
+                })?;
+
+                let bounds = cast_into_bounds(bounds)?;
+
+                let table = self.table.clone().slice(bounds).map(|slice| slice.into())?;
+                Ok(Collection::Table(table).into())
+            })
+        }))
+    }
 }
 
 impl<'a, T> From<&'a T> for TableHandler<'a, T> {
@@ -79,4 +97,20 @@ impl Route for Table {
             None
         }
     }
+}
+
+#[inline]
+fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
+    let scalar = Map::<Scalar>::try_from(scalar)?;
+    scalar
+        .into_iter()
+        .map(|(col_name, bound)| {
+            match bound {
+                Scalar::Range(range) => Ok(ColumnBound::In(range)),
+                Scalar::Value(value) => Ok(ColumnBound::Is(value)),
+                other => Err(TCError::bad_request("invalid column bound", other)),
+            }
+            .map(|bound| (col_name, bound))
+        })
+        .collect()
 }

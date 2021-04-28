@@ -150,6 +150,7 @@ where
     }
 }
 
+#[inline]
 fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
     if scalar.is_none() {
         return Ok(Range::default());

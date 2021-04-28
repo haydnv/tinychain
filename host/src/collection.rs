@@ -90,6 +90,12 @@ impl From<BTree> for Collection {
     }
 }
 
+impl From<Table> for Collection {
+    fn from(table: Table) -> Self {
+        Self::Table(table)
+    }
+}
+
 pub struct CollectionVisitor {
     txn: Txn,
 }
