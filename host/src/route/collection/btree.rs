@@ -39,11 +39,11 @@ impl<'a, T> From<&'a T> for CountHandler<'a, T> {
     }
 }
 
-struct SliceHandler<'a, T> {
+struct BTreeHandler<'a, T> {
     btree: &'a T,
 }
 
-impl<'a, T: BTreeInstance> Handler<'a> for SliceHandler<'a, T>
+impl<'a, T: BTreeInstance> Handler<'a> for BTreeHandler<'a, T>
 where
     BTree: From<T::Slice>,
 {
@@ -112,7 +112,7 @@ where
     }
 }
 
-impl<'a, T> From<&'a T> for SliceHandler<'a, T> {
+impl<'a, T> From<&'a T> for BTreeHandler<'a, T> {
     fn from(btree: &'a T) -> Self {
         Self { btree }
     }
@@ -139,7 +139,7 @@ where
     BTree: From<T::Slice>,
 {
     if path.is_empty() {
-        Some(Box::new(SliceHandler::from(btree)))
+        Some(Box::new(BTreeHandler::from(btree)))
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
