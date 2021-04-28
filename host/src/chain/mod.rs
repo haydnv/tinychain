@@ -10,25 +10,23 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist};
+use tc_transact::fs::{Dir, File, Persist, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
-use crate::collection::{BTree, BTreeFile, CollectionType};
+use crate::collection::{BTree, BTreeFile, CollectionType, Table, TableIndex, TableType};
 use crate::fs;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-mod block;
-mod data;
-mod sync;
-
-use block::BlockSeq;
-
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
+
+mod block;
+mod data;
+mod sync;
 
 const BLOCK_SIZE: u64 = 1_000_000;
 const CHAIN: Label = label("chain");
@@ -45,6 +43,7 @@ pub const EXT: &str = "chain";
 #[derive(Clone)]
 pub enum Schema {
     BTree(tc_btree::RowSchema),
+    Table(tc_table::TableSchema),
     Value(Value),
 }
 
@@ -58,6 +57,7 @@ impl Schema {
                         let class = CollectionType::from_path(&class).ok_or_else(|| {
                             TCError::bad_request("invalid Collection type", class)
                         })?;
+
                         match class {
                             CollectionType::BTree(_) => {
                                 let schema = Value::try_cast_from(schema, |s| {
@@ -70,7 +70,15 @@ impl Schema {
 
                                 Ok(Self::BTree(schema))
                             }
-                            CollectionType::Table(_) => unimplemented!(),
+                            CollectionType::Table(_) => {
+                                let schema = Value::try_cast_from(schema, |s| {
+                                    TCError::bad_request("invalid Table schema", s)
+                                })?;
+                                let schema = schema.try_cast_into(|s| {
+                                    TCError::bad_request("invalid Table schema", s)
+                                })?;
+                                Ok(Self::Table(schema))
+                            }
                         }
                     }
                     other => Err(TCError::bad_request("invalid Chain schema", other)),
@@ -103,6 +111,11 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.encode_entry(BTreeType::default().path(), (schema,))?;
                 map.end()
             }
+            Self::Table(schema) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(TableType::default().path(), (schema,))?;
+                map.end()
+            }
             Self::Value(value) => value.into_stream(encoder),
         }
     }
@@ -112,6 +125,7 @@ impl<'en> en::IntoStream<'en> for Schema {
 #[derive(Clone)]
 pub enum Subject {
     BTree(BTreeFile),
+    Table(TableIndex),
     Value(fs::File<Value>),
 }
 
@@ -119,6 +133,22 @@ impl Subject {
     /// Create a new `Subject` with the given `Schema`.
     pub async fn create(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         match schema {
+            Schema::BTree(schema) => {
+                let file = dir
+                    .create_file(txn_id, SUBJECT.into(), BTreeType::default())
+                    .await?;
+
+                let file = fs::File::<Node>::try_from(file)?;
+
+                BTreeFile::create(file, schema, txn_id)
+                    .map_ok(Self::BTree)
+                    .await
+            }
+            Schema::Table(schema) => {
+                TableIndex::create(schema, dir, txn_id)
+                    .map_ok(Self::Table)
+                    .await
+            }
             Schema::Value(value) => {
                 let file = dir
                     .create_file(txn_id, SUBJECT.into(), value.class())
@@ -131,32 +161,36 @@ impl Subject {
 
                 Ok(Self::Value(file))
             }
-            Schema::BTree(schema) => {
-                let file = dir
-                    .create_file(txn_id, SUBJECT.into(), BTreeType::default())
-                    .await?;
-
-                let file = fs::File::<Node>::try_from(file)?;
-
-                BTreeFile::create(file, schema, txn_id)
-                    .map_ok(Self::BTree)
-                    .await
-            }
         }
     }
 
     async fn load(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
-            match schema {
-                Schema::Value(_) => file.try_into().map(Self::Value),
-                Schema::BTree(schema) => {
+        match schema {
+            Schema::BTree(schema) => {
+                if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
                     BTreeFile::load(schema, file.try_into()?, txn_id)
                         .map_ok(Self::BTree)
                         .await
+                } else {
+                    Self::create(Schema::BTree(schema), dir, txn_id).await
                 }
             }
-        } else {
-            Self::create(schema, dir, txn_id).await
+            Schema::Table(schema) => {
+                if dir.is_empty(&txn_id).await? {
+                    Self::create(Schema::Table(schema), dir, txn_id).await
+                } else {
+                    TableIndex::load(schema, dir.clone(), txn_id)
+                        .map_ok(Self::Table)
+                        .await
+                }
+            }
+            Schema::Value(value) => {
+                if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
+                    file.try_into().map(Self::Value)
+                } else {
+                    Self::create(Schema::Value(value), dir, txn_id).await
+                }
+            }
         }
     }
 }
@@ -166,6 +200,7 @@ impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
             Self::Value(file) => file.commit(txn_id).await,
         }
     }
@@ -173,6 +208,7 @@ impl Transact for Subject {
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
             Self::Value(file) => file.finalize(txn_id).await,
         }
     }
@@ -211,6 +247,7 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
                 let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
                 State::from(value.clone()).into_view(txn).await
             }
+            Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,
             Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
         }
     }
@@ -220,6 +257,7 @@ impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(btree) => write!(f, "chain Subject, {}", btree.class()),
+            Self::Table(table) => write!(f, "chain Subject, {}", table.class()),
             Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
         }
     }
@@ -408,7 +446,7 @@ impl fmt::Display for Chain {
 }
 
 pub enum ChainViewData<'en> {
-    Block((Schema, BlockSeq)),
+    Block((Schema, block::BlockSeq)),
     Sync(Box<(Schema, StateView<'en>)>),
 }
 

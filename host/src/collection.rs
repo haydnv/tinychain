@@ -26,6 +26,7 @@ pub use tc_table::TableType;
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
@@ -55,6 +56,18 @@ impl NativeClass for CollectionType {
             Self::BTree(btree) => btree.path(),
             Self::Table(table) => table.path(),
         }
+    }
+}
+
+impl From<BTreeType> for CollectionType {
+    fn from(btt: BTreeType) -> Self {
+        Self::BTree(btt)
+    }
+}
+
+impl From<TableType> for CollectionType {
+    fn from(tt: TableType) -> Self {
+        Self::Table(tt)
     }
 }
 

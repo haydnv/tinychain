@@ -99,6 +99,12 @@ impl From<ChainType> for StateType {
     }
 }
 
+impl From<TableType> for StateType {
+    fn from(tt: TableType) -> Self {
+        Self::Collection(tt.into())
+    }
+}
+
 impl From<ValueType> for StateType {
     fn from(vt: ValueType) -> Self {
         Self::Scalar(vt.into())
@@ -275,13 +281,13 @@ impl From<Link> for State {
 }
 
 impl From<Map<State>> for State {
-    fn from(map: Map<State>) -> State {
+    fn from(map: Map<State>) -> Self {
         State::Map(map)
     }
 }
 
 impl From<Map<Scalar>> for State {
-    fn from(map: Map<Scalar>) -> State {
+    fn from(map: Map<Scalar>) -> Self {
         State::Scalar(map.into())
     }
 }
@@ -293,8 +299,14 @@ impl From<OpRef> for State {
 }
 
 impl From<Scalar> for State {
-    fn from(scalar: Scalar) -> State {
+    fn from(scalar: Scalar) -> Self {
         State::Scalar(scalar)
+    }
+}
+
+impl From<Table> for State {
+    fn from(table: Table) -> Self {
+        Self::Collection(table.into())
     }
 }
 

@@ -11,7 +11,7 @@ use tc_transact::Transaction;
 use tc_value::{Range, Value};
 use tcgeneric::{Map, PathSegment};
 
-use crate::collection::{Collection, Table};
+use crate::collection::{Collection, Table, TableIndex};
 use crate::fs::{Dir, File};
 use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
@@ -89,16 +89,30 @@ impl<'a, T> From<&'a T> for TableHandler<'a, T> {
 
 impl Route for Table {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(TableHandler::from(self)))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "count" => Some(Box::new(CountHandler::from(self.clone()))),
-                _ => None,
-            }
-        } else {
-            None
+        route(self, path)
+    }
+}
+
+impl Route for TableIndex {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        route(self, path)
+    }
+}
+
+#[inline]
+fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
+    table: &'a T,
+    path: &[PathSegment],
+) -> Option<Box<dyn Handler<'a> + 'a>> {
+    if path.is_empty() {
+        Some(Box::new(TableHandler::from(table)))
+    } else if path.len() == 1 {
+        match path[0].as_str() {
+            "count" => Some(Box::new(CountHandler::from(table.clone()))),
+            _ => None,
         }
+    } else {
+        None
     }
 }
 

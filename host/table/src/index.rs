@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
@@ -9,7 +10,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCTryStream};
@@ -356,19 +357,21 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<ReadOnly<F, D, Txn>> for T
 
 #[derive(Clone)]
 pub struct TableIndex<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+    schema: TableSchema,
     primary: Index<F, D, Txn>,
     auxiliary: BTreeMap<Id, Index<F, D, Txn>>,
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
-    pub async fn create(txn: &Txn, schema: TableSchema) -> TCResult<TableIndex<F, D, Txn>>
+    pub async fn create(
+        schema: TableSchema,
+        context: &D,
+        txn_id: TxnId,
+    ) -> TCResult<TableIndex<F, D, Txn>>
     where
         F: TryFrom<D::File, Error = TCError>,
         D::FileClass: From<BTreeType>,
     {
-        let context = txn.context();
-        let txn_id = *txn.id();
-
         let primary_file = context
             .create_file(txn_id, PRIMARY_INDEX.into(), BTreeType::default())
             .await?;
@@ -405,7 +408,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         .into_iter()
         .collect();
 
-        Ok(TableIndex { primary, auxiliary })
+        Ok(TableIndex {
+            schema,
+            primary,
+            auxiliary,
+        })
     }
 
     async fn create_index(
@@ -588,14 +595,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     }
 
     fn schema(&self) -> TableSchema {
-        let indices = self.auxiliary.iter().map(|(name, index)| {
-            (
-                name.clone(),
-                index.schema().column_names().cloned().collect(),
-            )
-        });
-
-        TableSchema::new(self.primary.schema.clone(), indices)
+        self.schema.clone()
     }
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
@@ -929,8 +929,28 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
     }
 }
 
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for TableIndex<F, D, Txn> {
+    type Schema = TableSchema;
+    type Store = D;
+
+    fn schema(&self) -> &Self::Schema {
+        &self.schema
+    }
+
+    async fn load(_schema: Self::Schema, _store: Self::Store, _txn_id: TxnId) -> TCResult<Self> {
+        todo!()
+    }
+}
+
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<TableIndex<F, D, Txn>> for Table<F, D, Txn> {
     fn from(table: TableIndex<F, D, Txn>) -> Self {
         Self::Table(table)
+    }
+}
+
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> fmt::Display for TableIndex<F, D, Txn> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Table")
     }
 }
