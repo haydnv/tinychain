@@ -116,7 +116,7 @@ class BTree(Collection):
 
     def count(self):
         """
-        Return the number of keys in this BTree.
+        Return the number of keys in this `BTree`.
 
         To count the number of keys beginning with a specific prefix,
         call `btree[prefix].count()`.
@@ -149,4 +149,45 @@ class BTree(Collection):
         """
 
         return BTree(OpRef.Get(uri(self), (None, True)))
+
+
+
+class Table(Collection):
+    """
+    A Table which supports a multi-column primary key, multi-column value, and optional indices.
+    """
+
+    __uri__ = uri(Collection) + "/table"
+
+    class Schema(object):
+        """
+        A Table schema which comprises a primary key and value :class:`Column`\s.
+        """
+
+        def __init__(self, key, values=[], indices={}):
+            self.key = key
+            self.values = values
+            self.indices = indices
+
+        def __json__(self):
+            return to_json([[self.key, self.values], self.indices])
+
+    def count(self):
+        """
+        Return the number of rows in this `Table`.
+
+        To count the number of keys beginning with a specific prefix,
+        call `btree[prefix].count()`.
+        """
+
+        return UInt(OpRef.Get(uri(self) + "/count"))
+
+    def insert(self, key, values=[]):
+        """
+        Insert the given row into this Table.
+
+        If the key is already present, this will raise a :class:`tc.error.BadRequest` error.
+        """
+
+        return Nil(OpRef.Put(uri(self), key, values))
 
