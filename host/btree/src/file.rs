@@ -259,8 +259,7 @@ where
             let node = file.read_block(txn_id, node_id).await?;
             let (l, r) = collator.bisect(&node.keys, range);
 
-            #[cfg(debug_assertions)]
-            debug!("delete from {} [{}..{}]", node.deref(), l, r);
+            debug!("delete from {} [{}..{}] ({:?})", *node, l, r, range);
 
             if node.leaf {
                 if l == r {
@@ -378,17 +377,7 @@ where
         let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
 
         #[cfg(debug_assertions)]
-        debug!(
-            "_slice {} from {} to {} (prefix {}, start {}, end {})",
-            node.deref(),
-            l,
-            r,
-            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(
-                range.prefix().into_iter().cloned()
-            ),
-            value_of(range.start()),
-            value_of(range.end())
-        );
+        debug!("_slice {} from {} to {} ({:?})", *node, l, r, range);
 
         if node.leaf {
             let keys = node.keys[l..r]
@@ -445,17 +434,7 @@ where
         let (l, r) = self.inner.collator.bisect(&node.keys, &range);
 
         #[cfg(debug_assertions)]
-        debug!(
-            "_slice_reverse {} from {} to {} (prefix {}, start {}, end {})",
-            node.deref(),
-            r,
-            l,
-            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(
-                range.prefix().into_iter().cloned()
-            ),
-            value_of(range.start()),
-            value_of(range.end())
-        );
+        debug!("_slice_reverse {} from {} to {} ({:?})", *node, r, l, range);
 
         if node.leaf {
             let keys = node.keys[l..r]
@@ -655,7 +634,6 @@ where
             order
         );
 
-        #[cfg(debug_assertions)]
         debug!("root node {} is {}", *root_id, *root);
 
         if root.leaf {
@@ -783,17 +761,6 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
     };
 
     Ok(order)
-}
-
-#[cfg(debug_assertions)]
-fn value_of(bound: &std::ops::Bound<Value>) -> Value {
-    use std::ops::Bound;
-
-    match bound {
-        Bound::Included(value) => value.clone(),
-        Bound::Excluded(value) => value.clone(),
-        Bound::Unbounded => Value::None,
-    }
 }
 
 #[inline]

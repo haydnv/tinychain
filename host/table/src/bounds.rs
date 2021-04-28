@@ -112,40 +112,34 @@ impl Bounds {
     }
 
     pub fn into_btree_range(mut self, columns: &[Column]) -> TCResult<tc_btree::Range> {
+        let on_err = |bounds: &HashMap<Id, ColumnBound>| {
+            TCError::bad_request(
+                "extra columns in Table bounds",
+                Tuple::<&Id>::from_iter(bounds.keys()),
+            )
+        };
+
         let mut prefix = Vec::with_capacity(self.len());
 
         let mut i = 0;
-        while let Some(ColumnBound::Is(value)) = self.inner.remove(columns[i].name()) {
-            prefix.push(value);
+        let range = loop {
+            let column = columns.get(i).ok_or_else(|| on_err(&self.inner))?;
+
+            match self.remove(column.name()) {
+                None => break tc_btree::Range::with_prefix(prefix),
+                Some(ColumnBound::In(Range { start, end })) => {
+                    break (prefix, start.into(), end.into()).into()
+                }
+                Some(ColumnBound::Is(value)) => prefix.push(value),
+            }
 
             i += 1;
-            if i == columns.len() {
-                break;
-            }
-        }
-
-        let range = if i < columns.len() {
-            match self.inner.remove(columns[i].name()) {
-                Some(ColumnBound::Is(value)) => {
-                    prefix.push(value);
-                    tc_btree::Range::with_prefix(prefix)
-                }
-                Some(ColumnBound::In(Range { start, end })) => {
-                    (prefix, start.into(), end.into()).into()
-                }
-                None => tc_btree::Range::with_prefix(prefix),
-            }
-        } else {
-            tc_btree::Range::with_prefix(prefix)
         };
 
-        if self.inner.is_empty() {
+        if self.is_empty() {
             Ok(range)
         } else {
-            Err(TCError::bad_request(
-                "Table bounds contain columns not in index",
-                Tuple::<&Id>::from_iter(self.inner.keys()),
-            ))
+            Err(on_err(&self.inner))
         }
     }
 

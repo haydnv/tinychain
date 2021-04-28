@@ -1,12 +1,14 @@
 use std::convert::TryFrom;
 
 use futures::TryFutureExt;
-use safecast::{TryCastFrom, TryCastInto};
+use log::debug;
+use safecast::*;
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_table::{Bounds, ColumnBound, TableInstance};
 use tc_transact::Transaction;
+use tc_value::{Range, Value};
 use tcgeneric::{Map, PathSegment};
 
 use crate::collection::{Collection, Table};
@@ -70,6 +72,7 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
                 })?;
 
                 let bounds = cast_into_bounds(bounds)?;
+                debug!("slice Table with bounds {}", bounds);
 
                 let table = self.table.clone().slice(bounds).map(|slice| slice.into())?;
                 Ok(Collection::Table(table).into())
@@ -105,10 +108,12 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
     scalar
         .into_iter()
         .map(|(col_name, bound)| {
-            match bound {
-                Scalar::Range(range) => Ok(ColumnBound::In(range)),
-                Scalar::Value(value) => Ok(ColumnBound::Is(value)),
-                other => Err(TCError::bad_request("invalid column bound", other)),
+            if bound.matches::<Range>() {
+                Ok(ColumnBound::In(bound.opt_cast_into().unwrap()))
+            } else if bound.matches::<Value>() {
+                Ok(ColumnBound::Is(bound.opt_cast_into().unwrap()))
+            } else {
+                Err(TCError::bad_request("invalid column bound", bound))
             }
             .map(|bound| (col_name, bound))
         })

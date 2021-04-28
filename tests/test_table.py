@@ -9,7 +9,8 @@ from testutils import start_host, PORT
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.Table.Schema(
     [tc.Column("name", tc.String, 512)],
-    [tc.Column("views", tc.UInt)])
+    [tc.Column("views", tc.UInt)],
+    {"views": ["views", "name"]})
 
 
 class TableTests(unittest.TestCase):
@@ -53,6 +54,19 @@ class TableTests(unittest.TestCase):
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected([["one", 1]]))
+
+    def testSliceAuxiliaryIndex(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.where(views=slice(10, 20)))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(list([[num2words(i), i] for i in range(10, 20)])))
 
 
 def expected(rows):

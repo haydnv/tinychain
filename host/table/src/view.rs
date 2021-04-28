@@ -151,6 +151,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
         let bounds = bounds.validate(&columns)?;
         let range = bounds.clone().into_btree_range(&columns)?;
 
+        debug!("bounds {} == range {:?}", bounds, range);
+        assert_eq!(bounds.len(), range.len());
+
         Ok(IndexSlice {
             source,
             schema,

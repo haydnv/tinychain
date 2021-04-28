@@ -199,5 +199,9 @@ class Table(Collection):
         a :class:`tc.error.BadRequest` error.
         """
 
+        cond = {
+            col: Range.from_slice(val) if isinstance(val, slice) else val
+            for col, val in cond.items()}
+
         return Table(OpRef.Post(uri(self), **cond))
 

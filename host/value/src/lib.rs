@@ -10,13 +10,13 @@ use number_general::NumberCollator;
 
 use tcgeneric::Instance;
 
-mod link;
-mod slice;
-mod value;
-
 pub use link::*;
 pub use slice::*;
 pub use value::*;
+
+mod link;
+mod slice;
+mod value;
 
 #[derive(Default, Clone)]
 pub struct ValueCollator {
