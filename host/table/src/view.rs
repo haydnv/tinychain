@@ -579,11 +579,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
         }
     }
 
-    fn key(&'_ self) -> &'_ [Column] {
+    fn key(&self) -> &[Column] {
         self.left.key()
     }
 
-    fn values(&'_ self) -> &'_ [Column] {
+    fn values(&self) -> &[Column] {
         match &self.left {
             MergeSource::Table(table) => table.values(),
             MergeSource::Merge(merged) => merged.values(),
@@ -591,7 +591,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
     }
 
     fn schema(&self) -> TableSchema {
-        todo!()
+        match &self.left {
+            MergeSource::Table(table) => table.schema(),
+            MergeSource::Merge(merged) => merged.schema(),
+        }
     }
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {

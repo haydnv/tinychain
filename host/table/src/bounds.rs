@@ -9,7 +9,7 @@ use log::debug;
 
 use tc_error::*;
 use tc_value::{Bound, Range, Value, ValueCollator, ValueType};
-use tcgeneric::{Id, Map};
+use tcgeneric::{Id, Map, Tuple};
 
 use super::Column;
 
@@ -111,8 +111,42 @@ impl Bounds {
         Self { inner }
     }
 
-    pub fn into_btree_range(self, _columns: &[Column]) -> TCResult<tc_btree::Range> {
-        Err(TCError::not_implemented("Bounds::into_btree_range"))
+    pub fn into_btree_range(mut self, columns: &[Column]) -> TCResult<tc_btree::Range> {
+        let mut prefix = Vec::with_capacity(self.len());
+
+        let mut i = 0;
+        while let Some(ColumnBound::Is(value)) = self.inner.remove(columns[i].name()) {
+            prefix.push(value);
+
+            i += 1;
+            if i == columns.len() {
+                break;
+            }
+        }
+
+        let range = if i < columns.len() {
+            match self.inner.remove(columns[i].name()) {
+                Some(ColumnBound::Is(value)) => {
+                    prefix.push(value);
+                    tc_btree::Range::with_prefix(prefix)
+                }
+                Some(ColumnBound::In(Range { start, end })) => {
+                    (prefix, start.into(), end.into()).into()
+                }
+                None => tc_btree::Range::with_prefix(prefix),
+            }
+        } else {
+            tc_btree::Range::with_prefix(prefix)
+        };
+
+        if self.inner.is_empty() {
+            Ok(range)
+        } else {
+            Err(TCError::bad_request(
+                "Table bounds contain columns not in index",
+                Tuple::<&Id>::from_iter(self.inner.keys()),
+            ))
+        }
     }
 
     pub fn into_inner(self) -> HashMap<Id, ColumnBound> {
@@ -186,7 +220,9 @@ impl From<HashMap<Id, ColumnBound>> for Bounds {
 
 impl FromIterator<(Id, ColumnBound)> for Bounds {
     fn from_iter<I: IntoIterator<Item = (Id, ColumnBound)>>(iter: I) -> Self {
-        Self { inner: iter.into_iter().collect() }
+        Self {
+            inner: iter.into_iter().collect(),
+        }
     }
 }
 
