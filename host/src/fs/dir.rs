@@ -23,7 +23,7 @@ use crate::collection::CollectionType;
 use crate::scalar::{ScalarType, Value};
 use crate::state::StateType;
 
-use super::{dir_contents, file_ext, file_name, fs_path, io_err, Cache, DirContents, File};
+use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
 
 const VALUE_EXT: &'static str = "value";
 
@@ -345,12 +345,17 @@ impl Transact for Dir {
         debug!("commit dir {:?} at {}", &self.path, txn_id);
 
         if !self.path.exists() {
-            tokio::fs::create_dir(&self.path)
-                .map_err(|e| io_err(e, &self.path))
-                .await
-                .expect("create filesystem dir");
+            let dir_create = tokio::fs::create_dir(&self.path).await;
 
-            debug!("created filesystem dir {:?}", &self.path);
+            match dir_create {
+                Ok(_) => {
+                    debug!("created filesystem dir {:?}", &self.path);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    debug!("another thread created filesystem dir {:?}", &self.path);
+                }
+                Err(err) => panic!("error creating dir {:?}: {}", &self.path, err),
+            }
         }
 
         {
