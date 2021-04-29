@@ -54,24 +54,8 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let key: Vec<Value> =
-                        key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
-
-                    let bounds = if key.len() == self.table.key().len() {
-                        self.table
-                            .key()
-                            .iter()
-                            .map(|col| col.name.clone())
-                            .zip(key)
-                            .collect()
-                    } else {
-                        return Err(TCError::bad_request(
-                            "invalid primary key",
-                            Tuple::from(key),
-                        ));
-                    };
-
-                    let slice = self.table.clone().slice(bounds)?;
+                    let key = primary_key(key, self.table)?;
+                    let slice = self.table.clone().slice(key)?;
                     let mut rows = slice.rows(*txn.id()).await?;
                     if let Some(row) = rows.try_next().await? {
                         Ok(Value::from(row).into())
@@ -90,6 +74,10 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
             Box::pin(async move {
                 let key =
                     key.try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
+
+                let values = Value::try_cast_from(values, |s| {
+                    TCError::bad_request("invalid values for Table row", s)
+                })?;
 
                 let values = values
                     .try_cast_into(|v| TCError::bad_request("invalid values for Table row", v))?;
@@ -119,10 +107,8 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let key =
-                        key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
-
-                    self.table.delete_row(*txn.id(), key).await
+                    let key = primary_key(key, self.table)?;
+                    self.table.clone().slice(key)?.delete(*txn.id()).await
                 } else {
                     self.table.delete(*txn.id()).await
                 }
@@ -182,4 +168,25 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
             .map(|bound| (col_name, bound))
         })
         .collect()
+}
+
+#[inline]
+fn primary_key<T: TableInstance<File<Node>, Dir, Txn>>(key: Value, table: &T) -> TCResult<Bounds> {
+    let key: Vec<Value> = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+
+    if key.len() == table.key().len() {
+        let bounds = table
+            .key()
+            .iter()
+            .map(|col| col.name.clone())
+            .zip(key)
+            .collect();
+
+        Ok(bounds)
+    } else {
+        Err(TCError::bad_request(
+            "invalid primary key",
+            Tuple::from(key),
+        ))
+    }
 }
