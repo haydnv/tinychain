@@ -114,7 +114,7 @@ class Local(Host):
     """A local Tinychain host."""
 
     ADDRESS = "127.0.0.1"
-    STARTUP_TIME = 0.5
+    STARTUP_TIME = 1.0
 
     def __init__(self,
             path,
@@ -156,12 +156,12 @@ class Local(Host):
 
         self._args = args
 
-    def start(self):
+    def start(self, wait_time=STARTUP_TIME):
         if self._process:
             raise RuntimeError("tried to start a host that's already running")
 
         self._process = subprocess.Popen(self._args)        
-        time.sleep(self.STARTUP_TIME)
+        time.sleep(wait_time)
 
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError(f"Tinychain process at {uri(self)} crashed on startup")
