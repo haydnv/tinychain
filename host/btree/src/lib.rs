@@ -76,14 +76,17 @@ pub struct Column {
 }
 
 impl Column {
+    #[inline]
     pub fn name(&'_ self) -> &'_ Id {
         &self.name
     }
 
+    #[inline]
     pub fn dtype(&self) -> ValueType {
         self.dtype
     }
 
+    #[inline]
     pub fn max_len(&'_ self) -> &'_ Option<usize> {
         &self.max_len
     }

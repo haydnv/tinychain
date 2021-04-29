@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
@@ -75,7 +75,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn> {
             Ok(())
         } else {
             Err(TCError::unsupported(
-                "Slice does not contain requested bounds",
+                "slice does not contain requested bounds",
             ))
         }
     }
@@ -197,7 +197,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
         if !self.schema.starts_with(&order) {
             let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
             Err(TCError::bad_request(
-                &format!("Cannot order index with schema {} by", self.schema),
+                &format!("cannot order index with schema {} by", self.schema),
                 order.join(", "),
             ))
         } else {
@@ -218,6 +218,25 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.btree.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for Index<F, D, Txn>
+where
+    F: TryFrom<D::File>,
+{
+    type Schema = IndexSchema;
+    type Store = F;
+
+    fn schema(&self) -> &IndexSchema {
+        &self.schema
+    }
+
+    async fn load(schema: IndexSchema, file: F, txn_id: TxnId) -> TCResult<Self> {
+        BTreeFile::load(schema.clone().into(), file, txn_id)
+            .map_ok(|btree| Self { schema, btree })
+            .await
     }
 }
 
@@ -251,8 +270,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> ReadOnly<F, D, Txn> {
         let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
         let (schema, btree) = if let Some(columns) = key_columns {
-            let column_names: HashSet<&Id> = columns.iter().collect();
-            let schema = source_schema.subset(column_names)?;
+            let schema = source_schema.auxiliary(&columns)?;
             let btree = BTreeFile::create(file, schema.clone().into(), *txn.id()).await?;
 
             let source = source.select(columns)?;
@@ -421,40 +439,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         key: Vec<Id>,
         txn_id: TxnId,
     ) -> TCResult<Index<F, D, Txn>> {
-        let index_key_set: HashSet<&Id> = key.iter().collect();
-        if index_key_set.len() != key.len() {
-            return Err(TCError::bad_request(
-                "duplicate column in index",
-                key.iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            ));
-        }
-
-        let mut columns: HashMap<Id, Column> = primary
-            .columns()
-            .iter()
-            .cloned()
-            .map(|c| (c.name().clone(), c))
-            .collect();
-
-        let key: Vec<Column> = key
-            .iter()
-            .map(|c| columns.remove(&c).ok_or_else(|| TCError::not_found(c)))
-            .collect::<TCResult<Vec<Column>>>()?;
-
-        let values: Vec<Column> = primary
-            .key()
-            .iter()
-            .filter(|c| !index_key_set.contains(c.name()))
-            .cloned()
-            .collect();
-
-        let schema: IndexSchema = (key, values).into();
-
+        let schema = primary.auxiliary(&key)?;
         let btree = BTreeFile::create(file, schema.clone().into(), txn_id).await?;
-
         Ok(Index { btree, schema })
     }
 
@@ -489,7 +475,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         }
 
         Err(TCError::bad_request(
-            "This table has no index which supports bounds",
+            "this table has no index which supports bounds",
             bounds,
         ))
     }
@@ -502,7 +488,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         if self.get(txn_id, key.to_vec()).await?.is_some() {
             let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
             Err(TCError::bad_request(
-                "Tried to insert but this key already exists",
+                "tried to insert but this key already exists",
                 format!("[{}]", key.join(", ")),
             ))
         } else {
@@ -930,7 +916,10 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for TableIndex<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for TableIndex<F, D, Txn>
+where
+    F: TryFrom<D::File, Error = TCError>,
+{
     type Schema = TableSchema;
     type Store = D;
 
@@ -938,8 +927,31 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for TableIndex<F, D, Tx
         &self.schema
     }
 
-    async fn load(_schema: Self::Schema, _store: Self::Store, _txn_id: TxnId) -> TCResult<Self> {
-        todo!()
+    async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self> {
+        let file = store
+            .get_file(&txn_id, &PRIMARY_INDEX.into())
+            .await?
+            .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
+
+        let primary = Index::load(schema.primary().clone(), file.try_into()?, txn_id).await?;
+
+        let mut auxiliary = BTreeMap::new();
+        for (name, columns) in schema.indices() {
+            let file = store.get_file(&txn_id, name).await?.ok_or_else(|| {
+                TCError::internal(format!("cannot load Table: missing index {}", name))
+            })?;
+
+            let index_schema = schema.primary().auxiliary(columns)?;
+
+            let index = Index::load(index_schema, file.try_into()?, txn_id).await?;
+            auxiliary.insert(name.clone(), index);
+        }
+
+        Ok(Self {
+            schema,
+            primary,
+            auxiliary,
+        })
     }
 }
 

@@ -105,22 +105,33 @@ impl IndexSchema {
         true
     }
 
-    pub fn subset(&self, key_columns: HashSet<&Id>) -> TCResult<IndexSchema> {
-        let key: Vec<Column> = self
-            .key
-            .iter()
-            .filter(|c| key_columns.contains(&c.name))
-            .cloned()
-            .collect();
+    pub fn auxiliary(&self, subset: &[Id]) -> TCResult<IndexSchema> {
+        let subset: HashSet<&Id> = subset.iter().collect();
 
-        let value: Vec<Column> = self
+        let mut columns: HashMap<Id, Column> = self
             .columns()
             .iter()
-            .filter(|c| !key_columns.contains(&c.name))
+            .cloned()
+            .map(|c| (c.name().clone(), c))
+            .collect();
+
+        let key: Vec<Column> = subset
+            .iter()
+            .map(|col_name| {
+                columns
+                    .remove(col_name)
+                    .ok_or_else(|| TCError::not_found(col_name))
+            })
+            .collect::<TCResult<Vec<Column>>>()?;
+
+        let values: Vec<Column> = self
+            .key()
+            .iter()
+            .filter(|c| !subset.contains(c.name()))
             .cloned()
             .collect();
 
-        Ok((key, value).into())
+        Ok((key, values).into())
     }
 
     pub fn validate_columns(&self, columns: &[Id]) -> TCResult<()> {
