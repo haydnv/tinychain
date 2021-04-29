@@ -170,7 +170,7 @@ class Table(Collection):
             self.indices = indices
 
         def __json__(self):
-            return to_json([[self.key, self.values], self.indices])
+            return to_json([[self.key, self.values], list(self.indices.items())])
 
     def count(self):
         """

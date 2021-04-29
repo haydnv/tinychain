@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use async_trait::async_trait;
@@ -317,7 +317,7 @@ impl fmt::Display for IndexSchema {
 #[derive(Clone)]
 pub struct TableSchema {
     primary: IndexSchema,
-    indices: BTreeMap<Id, Vec<Id>>,
+    indices: Vec<(Id, Vec<Id>)>,
 }
 
 impl TableSchema {
@@ -328,11 +328,11 @@ impl TableSchema {
         }
     }
 
-    pub fn indices(&'_ self) -> &'_ BTreeMap<Id, Vec<Id>> {
+    pub fn indices(&self) -> &[(Id, Vec<Id>)] {
         &self.indices
     }
 
-    pub fn primary(&'_ self) -> &'_ IndexSchema {
+    pub fn primary(&self) -> &IndexSchema {
         &self.primary
     }
 }
@@ -341,7 +341,7 @@ impl From<IndexSchema> for TableSchema {
     fn from(schema: IndexSchema) -> TableSchema {
         TableSchema {
             primary: schema,
-            indices: BTreeMap::new(),
+            indices: vec![],
         }
     }
 }
@@ -359,7 +359,7 @@ impl TryCastFrom<Value> for TableSchema {
             Some(TableSchema { primary, indices })
         } else if value.matches::<IndexSchema>() {
             let primary = value.opt_cast_into().unwrap();
-            let indices = BTreeMap::new();
+            let indices = vec![];
             Some(TableSchema { primary, indices })
         } else {
             None
