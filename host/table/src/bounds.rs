@@ -212,10 +212,13 @@ impl From<HashMap<Id, ColumnBound>> for Bounds {
     }
 }
 
-impl FromIterator<(Id, ColumnBound)> for Bounds {
-    fn from_iter<I: IntoIterator<Item = (Id, ColumnBound)>>(iter: I) -> Self {
+impl<V: Into<ColumnBound>> FromIterator<(Id, V)> for Bounds {
+    fn from_iter<I: IntoIterator<Item = (Id, V)>>(iter: I) -> Self {
         Self {
-            inner: iter.into_iter().collect(),
+            inner: iter
+                .into_iter()
+                .map(|(id, bound)| (id, bound.into()))
+                .collect(),
         }
     }
 }

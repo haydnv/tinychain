@@ -547,6 +547,12 @@ impl From<Tuple<Value>> for Value {
     }
 }
 
+impl From<Vec<Value>> for Value {
+    fn from(tuple: Vec<Value>) -> Self {
+        Self::Tuple(tuple.into())
+    }
+}
+
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Self::Number(n.into())

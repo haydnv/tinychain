@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use futures::TryFutureExt;
+use futures::{TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
@@ -9,11 +9,11 @@ use tc_error::*;
 use tc_table::{Bounds, ColumnBound, TableInstance};
 use tc_transact::Transaction;
 use tc_value::{Range, Value};
-use tcgeneric::{Map, PathSegment};
+use tcgeneric::{Map, PathSegment, Tuple};
 
 use crate::collection::{Collection, Table, TableIndex};
 use crate::fs::{Dir, File};
-use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
@@ -50,6 +50,41 @@ struct TableHandler<'a, T> {
 }
 
 impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a, T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    let key: Vec<Value> =
+                        key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+
+                    let bounds = if key.len() == self.table.key().len() {
+                        self.table
+                            .key()
+                            .iter()
+                            .map(|col| col.name.clone())
+                            .zip(key)
+                            .collect()
+                    } else {
+                        return Err(TCError::bad_request(
+                            "invalid primary key",
+                            Tuple::from(key),
+                        ));
+                    };
+
+                    let slice = self.table.clone().slice(bounds)?;
+                    let mut rows = slice.rows(*txn.id()).await?;
+                    if let Some(row) = rows.try_next().await? {
+                        Ok(Value::from(row).into())
+                    } else {
+                        Ok(Value::None.into())
+                    }
+                } else {
+                    Ok(Collection::Table(self.table.clone().into()).into())
+                }
+            })
+        }))
+    }
+
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, values| {
             Box::pin(async move {
@@ -76,6 +111,21 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
 
                 let table = self.table.clone().slice(bounds).map(|slice| slice.into())?;
                 Ok(Collection::Table(table).into())
+            })
+        }))
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    let key =
+                        key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+
+                    self.table.delete_row(*txn.id(), key).await
+                } else {
+                    self.table.delete(*txn.id()).await
+                }
             })
         }))
     }
