@@ -23,7 +23,7 @@ serde = { version = "1.0", features = []}
 sha2 = "0.9"
 destream_json = { version = "0.5", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
-tc-error = "0.1"
+tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tokio = { version = "1.5", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }

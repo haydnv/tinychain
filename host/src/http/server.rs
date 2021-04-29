@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -166,7 +167,7 @@ impl HTTPServer {
                     .await
             }
 
-            other => Err(TCError::method_not_allowed(other)),
+            other => Err(TCError::method_not_allowed(other, self, path)),
         }
     }
 }
@@ -193,6 +194,12 @@ impl crate::gateway::Server for HTTPServer {
             .serve(new_service)
             .with_graceful_shutdown(shutdown_signal())
             .await
+    }
+}
+
+impl fmt::Display for HTTPServer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("HTTP server")
     }
 }
 

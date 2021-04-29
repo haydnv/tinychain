@@ -100,10 +100,10 @@ impl TCError {
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
-    pub fn method_not_allowed<I: fmt::Display>(info: I) -> Self {
+    pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(method: M, subject: S, path: P) -> Self {
         Self {
             code: ErrorType::MethodNotAllowed,
-            message: info.to_string(),
+            message: format!("{} endpoint {} does not support {}", subject, path, method),
         }
     }
 

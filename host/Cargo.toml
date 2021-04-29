@@ -39,7 +39,7 @@ sha2 = "0.9"
 structopt = "0.3"
 tbon = "0.1"
 tc-btree = { path = "btree" }
-tc-error = "0.1"
+tc-error = { path = "error" }
 tc-table = { path = "table" }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }

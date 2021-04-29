@@ -1,6 +1,7 @@
 //! The host kernel, responsible for dispatching requests to the local host
 
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::pin::Pin;
 
 use bytes::Bytes;
@@ -52,7 +53,11 @@ impl Kernel {
             if key.is_none() {
                 Ok(Value::from(Bytes::copy_from_slice(self.actor.public_key().as_bytes())).into())
             } else {
-                Err(TCError::method_not_allowed(TCPath::from(path)))
+                Err(TCError::method_not_allowed(
+                    OpRefType::Get,
+                    self,
+                    TCPath::from(path),
+                ))
             }
         } else if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);
@@ -99,9 +104,17 @@ impl Kernel {
                 }
             }
 
-            Err(TCError::method_not_allowed(TCPath::from(path)))
+            Err(TCError::method_not_allowed(
+                OpRefType::Put,
+                self,
+                TCPath::from(path),
+            ))
         } else if let Some(class) = StateType::from_path(path) {
-            Err(TCError::method_not_allowed(class))
+            Err(TCError::method_not_allowed(
+                OpRefType::Put,
+                class,
+                TCPath::from(path),
+            ))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "PUT {}: {} <- {} to cluster {}",
@@ -127,7 +140,11 @@ impl Kernel {
                 // it's a "commit" instruction for a hypothetical transaction
                 Ok(State::default())
             } else {
-                Err(TCError::method_not_allowed(TCPath::from(path)))
+                Err(TCError::method_not_allowed(
+                    OpRefType::Post,
+                    self,
+                    TCPath::from(path),
+                ))
             }
         } else if path == &HYPOTHETICAL[..] {
             let txn = txn.clone().claim(&self.actor, TCPathBuf::default()).await?;
@@ -171,7 +188,11 @@ impl Kernel {
                 // it's a rollback message for a hypothetical transaction
                 Ok(())
             } else {
-                Err(TCError::method_not_allowed(TCPath::from(path)))
+                Err(TCError::method_not_allowed(
+                    OpRefType::Delete,
+                    self,
+                    TCPath::from(path),
+                ))
             }
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             if suffix.is_empty() && key.is_none() {
@@ -191,14 +212,24 @@ impl Kernel {
             })
             .await
         } else if &path[0] == "error" && path.len() == 2 {
-            if error_type(&path[1]).is_some() {
-                Err(TCError::method_not_allowed(TCPath::from(path)))
+            if let Some(class) = error_type(&path[1]) {
+                Err(TCError::method_not_allowed(
+                    OpRefType::Delete,
+                    class,
+                    TCPath::from(path),
+                ))
             } else {
                 Err(TCError::not_found(TCPath::from(path)))
             }
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
+    }
+}
+
+impl fmt::Display for Kernel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("host kernel")
     }
 }
 

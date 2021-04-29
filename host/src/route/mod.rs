@@ -7,7 +7,7 @@ use futures::Future;
 use tc_error::*;
 use tcgeneric::{Map, PathSegment, TCPath};
 
-use crate::scalar::Value;
+use crate::scalar::{OpRefType as ORT, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -74,11 +74,11 @@ impl<T: Route + fmt::Display> Public for T {
         if let Some(get_handler) = handler.get() {
             get_handler(txn.clone(), key).await
         } else {
-            Err(TCError::method_not_allowed(format!(
-                "{} {}",
+            Err(TCError::method_not_allowed(
+                ORT::Get,
                 self,
-                TCPath::from(path)
-            )))
+                TCPath::from(path),
+            ))
         }
     }
 
@@ -90,11 +90,11 @@ impl<T: Route + fmt::Display> Public for T {
         if let Some(put_handler) = handler.put() {
             put_handler(txn.clone(), key, value).await
         } else {
-            Err(TCError::method_not_allowed(format!(
-                "{} {}",
+            Err(TCError::method_not_allowed(
+                ORT::Put,
                 self,
-                TCPath::from(path)
-            )))
+                TCPath::from(path),
+            ))
         }
     }
 
@@ -106,11 +106,11 @@ impl<T: Route + fmt::Display> Public for T {
         if let Some(post_handler) = handler.post() {
             post_handler(txn.clone(), params).await
         } else {
-            Err(TCError::method_not_allowed(format!(
-                "{} {}",
+            Err(TCError::method_not_allowed(
+                ORT::Post,
                 self,
-                TCPath::from(path)
-            )))
+                TCPath::from(path),
+            ))
         }
     }
 
@@ -122,11 +122,11 @@ impl<T: Route + fmt::Display> Public for T {
         if let Some(delete_handler) = handler.delete() {
             delete_handler(txn.clone(), key).await
         } else {
-            Err(TCError::method_not_allowed(format!(
-                "{} {}",
+            Err(TCError::method_not_allowed(
+                ORT::Delete,
                 self,
-                TCPath::from(path)
-            )))
+                TCPath::from(path),
+            ))
         }
     }
 }
