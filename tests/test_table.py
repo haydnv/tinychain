@@ -69,11 +69,45 @@ class TableTests(unittest.TestCase):
         self.assertEqual(result, expected(list([[num2words(i), i] for i in range(10, 20)])))
 
 
+class Persistent(tc.Cluster):
+    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
+
+    def _configure(self):
+        self.table = tc.Chain.Block(tc.Table(SCHEMA))
+
+
+class PersistenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        hosts = []
+        for i in range(3):
+            port = PORT + i
+            host_uri = f"http://127.0.0.1:{port}" + tc.uri(Persistent).path()
+            host = start_host(f"test_replication_{i}", [Persistent], host_uri=tc.URI(host_uri))
+            hosts.append(host)
+
+        cls.hosts = hosts
+
+    def testInsert(self):
+        row1 = ["one", 1]
+        row2 = ["two", 2]
+
+        self.hosts[0].put("/test/table/table", ["one"], [1])
+
+        for host in self.hosts:
+            actual = host.get("/test/table/table", ["one"])
+            self.assertEqual(actual, row1)
+
+    @classmethod
+    def tearDownClass(cls):
+        for host in cls.hosts:
+            host.stop()
+
+
 def expected(rows):
     return {str(tc.uri(tc.Table)): [tc.to_json(SCHEMA), rows]}
 
 
 if __name__ == "__main__":
     unittest.main()
-
 
