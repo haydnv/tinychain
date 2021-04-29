@@ -520,15 +520,19 @@ fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
         prefix.push(value);
     }
 
-    let dtype = schema.get(prefix.len()).unwrap().dtype;
-    let validate_bound = |bound| match bound {
-        Bound::Unbounded => Ok(Bound::Unbounded),
-        Bound::Included(value) => dtype.try_cast(value).map(Bound::Included),
-        Bound::Excluded(value) => dtype.try_cast(value).map(Bound::Excluded),
-    };
+    if prefix.len() < schema.len() {
+        let dtype = schema.get(prefix.len()).unwrap().dtype;
+        let validate_bound = |bound| match bound {
+            Bound::Unbounded => Ok(Bound::Unbounded),
+            Bound::Included(value) => dtype.try_cast(value).map(Bound::Included),
+            Bound::Excluded(value) => dtype.try_cast(value).map(Bound::Excluded),
+        };
 
-    let start = validate_bound(start)?;
-    let end = validate_bound(end)?;
+        let start = validate_bound(start)?;
+        let end = validate_bound(end)?;
 
-    Ok((prefix, start, end).into())
+        Ok((prefix, start, end).into())
+    } else {
+        Ok(Range::with_prefix(prefix))
+    }
 }

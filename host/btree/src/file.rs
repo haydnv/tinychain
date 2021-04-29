@@ -21,7 +21,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
 
-use super::{validate_range, BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
+use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
 type Selection<'a> = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCTryStream<'a, Key>>> + Send + Unpin + 'a>>,
@@ -107,6 +107,13 @@ impl Node {
             parent,
             children: vec![],
             rebalance: false,
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn validate(&self, schema: &[super::Column]) {
+        for key in &self.keys {
+            assert_eq!(key.value.len(), schema.len());
         }
     }
 }
@@ -252,11 +259,17 @@ where
         node_id: NodeId,
         range: &'a Range,
     ) -> TCBoxTryFuture<'a, ()> {
+        debug_assert!(range.len() <= self.inner.schema.len());
+
         Box::pin(async move {
             let collator = &self.inner.collator;
             let file = &self.inner.file;
 
             let node = file.read_block(txn_id, node_id).await?;
+
+            #[cfg(debug_assertions)]
+            node.validate(&self.inner.schema);
+
             let (l, r) = collator.bisect(&node.keys, range);
 
             debug!("delete from {} [{}..{}] ({:?})", *node, l, r, range);
@@ -576,8 +589,7 @@ where
     }
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
-        let range = validate_range(range, &self.inner.schema)?;
-        Ok(BTreeSlice::new(BTree::File(self), range, reverse))
+        BTreeSlice::new(BTree::File(self), range, reverse)
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {

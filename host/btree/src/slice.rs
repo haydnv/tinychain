@@ -18,36 +18,41 @@ pub struct BTreeSlice<F, D, T> {
     reverse: bool,
 }
 
-impl<F, D, T> BTreeSlice<F, D, T>
-where
-    BTreeFile<F, D, T>: Clone + Send + Sync,
-{
-    pub fn new(source: BTree<F, D, T>, range: Range, reverse: bool) -> BTreeSlice<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeSlice<F, D, T> {
+    pub fn new(
+        source: BTree<F, D, T>,
+        range: Range,
+        reverse: bool,
+    ) -> TCResult<BTreeSlice<F, D, T>> {
+        let range = validate_range(range, source.schema())?;
+
         match source {
-            BTree::File(tree) => Self {
+            BTree::File(tree) => Ok(Self {
                 source: tree,
                 range,
                 reverse,
-            },
+            }),
 
             BTree::Slice(view) => {
                 let source = view.source.clone();
                 let reverse = view.reverse ^ reverse;
 
                 if range == Range::default() {
-                    Self {
+                    Ok(Self {
                         source,
                         range: view.range,
                         reverse,
-                    }
-                } else {
-                    // TODO: validate that the current range contains the requested range
-
-                    Self {
+                    })
+                } else if view.range.contains(&range, view.source.collator()) {
+                    Ok(Self {
                         source,
                         range,
                         reverse,
-                    }
+                    })
+                } else {
+                    Err(TCError::unsupported(
+                        "BTreeSlice does not contain requested range",
+                    ))
                 }
             }
         }
@@ -84,7 +89,7 @@ where
         let range = validate_range(range, self.schema())?;
 
         if self.range.contains(&range, self.collator()) {
-            Ok(Self::new(BTree::Slice(self), range, reverse))
+            Self::new(BTree::Slice(self), range, reverse)
         } else {
             Err(TCError::unsupported(
                 "BTreeSlice does not contain the requested range",
