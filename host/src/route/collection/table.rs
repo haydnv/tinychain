@@ -9,7 +9,7 @@ use tc_error::*;
 use tc_table::{Bounds, ColumnBound, TableInstance};
 use tc_transact::Transaction;
 use tc_value::{Range, Value};
-use tcgeneric::{Map, PathSegment, Tuple};
+use tcgeneric::{Id, Map, PathSegment, Tuple};
 
 use crate::collection::{Collection, Table, TableIndex};
 use crate::fs::{Dir, File};
@@ -40,6 +40,36 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for CountHandl
 }
 
 impl<T> From<T> for CountHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
+struct OrderHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for OrderHandler<T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let ordered = if key.matches::<(Vec<Id>, bool)>() {
+                    let (order, reverse) = key.opt_cast_into().unwrap();
+                    self.table.order_by(order, reverse)?
+                } else if key.matches::<Vec<Id>>() {
+                    let order = key.opt_cast_into().unwrap();
+                    self.table.order_by(order, false)?
+                } else {
+                    return Err(TCError::bad_request("invalid column list to order by", key));
+                };
+
+                Ok(Collection::Table(ordered.into()).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for OrderHandler<T> {
     fn from(table: T) -> Self {
         Self { table }
     }
@@ -154,6 +184,7 @@ fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
+            "order" => Some(Box::new(OrderHandler::from(table.clone()))),
             _ => None,
         }
     } else {

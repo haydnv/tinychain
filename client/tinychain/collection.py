@@ -191,6 +191,16 @@ class Table(Collection):
 
         return Nil(OpRef.Put(uri(self), key, values))
 
+    def order_by(self, columns, reverse=False):
+        """
+        Set the order in which this `Table`'s rows will be iterated over.
+
+        If no index supports the given order, this will raise a
+        :class:`tc.error.BadRequest` error.
+        """
+
+        return Table(OpRef.Get(uri(self) + "/order", (columns, reverse)))
+
     def where(self, **cond):
         """
         Return a slice of this `Table` whose column values fall within the specified range.

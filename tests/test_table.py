@@ -46,7 +46,7 @@ class TableTests(unittest.TestCase):
         count = 50
         values = [(v,) for v in range(count)]
         keys = [(num2words(i),) for i in range(count)]
-        rows = list(reversed([k + v for k, v in zip(keys, values)]))
+        rows = list(reversed([list(k + v) for k, v in zip(keys, values)]))
 
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)

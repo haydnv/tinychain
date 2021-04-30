@@ -541,6 +541,15 @@ impl From<Number> for Value {
     }
 }
 
+impl From<Option<Value>> for Value {
+    fn from(opt: Option<Value>) -> Self {
+        match opt {
+            Some(value) => value,
+            None => Self::None,
+        }
+    }
+}
+
 impl From<Tuple<Value>> for Value {
     fn from(tuple: Tuple<Value>) -> Self {
         Self::Tuple(tuple)
