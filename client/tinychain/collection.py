@@ -182,6 +182,13 @@ class Table(Collection):
 
         return UInt(OpRef.Get(uri(self) + "/count"))
 
+    def group_by(self, columns):
+        """
+        Aggregate this `Table` according to the values of the specified columns.
+        """
+
+        return Table(OpRef.Get(uri(self) + "/group", columns))
+
     def insert(self, key, values=[]):
         """
         Insert the given row into this `Table`.

@@ -42,6 +42,27 @@ class TableTests(unittest.TestCase):
             result = self.host.post(ENDPOINT, cxt)
             self.assertEqual(result, x)
 
+    def testGroupBy(self):
+        count = 50
+        values = [(v % 2,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+        rows = list(reversed([list(k + v) for k, v in zip(keys, values)]))
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
+
+        result = self.host.post(ENDPOINT, cxt)
+        print(result)
+        self.assertEqual(result, {
+            str(tc.uri(tc.Table)): [
+                [[[], [['views', str(tc.uri(tc.UInt))]]], []],
+                [[0], [1]]
+            ]
+        })
+
+
     def testOrderBy(self):
         count = 50
         values = [(v,) for v in range(count)]

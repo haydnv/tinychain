@@ -15,8 +15,7 @@ use tc_value::Value;
 use tcgeneric::{GroupStream, Id, Instance, TCTryStream};
 
 use super::index::TableIndex;
-use super::{Bounds, Column, IndexSchema, Row, Table, TableInstance, TableType};
-use crate::TableSchema;
+use super::{Bounds, Column, IndexSchema, Row, Table, TableInstance, TableSchema, TableType};
 
 const ERR_AGGREGATE_SLICE: &str = "Table aggregate does not support slicing. \
 Consider aggregating a slice of the source table.";
@@ -758,7 +757,20 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
     }
 
     fn schema(&self) -> TableSchema {
-        todo!()
+        let source = self.source.schema();
+        let source = source.primary();
+
+        let select = |columns: &[Column]| {
+            columns
+                .iter()
+                .filter(|col| self.columns.contains(&col.name))
+                .cloned()
+                .collect()
+        };
+
+        let key = select(source.key());
+        let values = select(source.values());
+        IndexSchema::from((key, values)).into()
     }
 
     fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {

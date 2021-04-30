@@ -45,6 +45,31 @@ impl<T> From<T> for CountHandler<T> {
     }
 }
 
+struct GroupHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for GroupHandler<T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let columns = key.try_cast_into(|v| {
+                    TCError::bad_request("invalid column list to group by", v)
+                })?;
+
+                let grouped = self.table.group_by(columns)?;
+                Ok(Collection::Table(grouped.into()).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for GroupHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
 struct OrderHandler<T> {
     table: T,
 }
@@ -184,6 +209,7 @@ fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
+            "group" => Some(Box::new(GroupHandler::from(table.clone()))),
             "order" => Some(Box::new(OrderHandler::from(table.clone()))),
             _ => None,
         }
