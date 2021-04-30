@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
@@ -14,7 +14,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Id, Instance, Label, TCTryStream};
+use tcgeneric::{label, Id, Instance, Label, TCTryStream, Tuple};
 
 use super::view::{MergeSource, Merged, TableSlice};
 use super::{
@@ -182,6 +182,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
             ));
         }
 
+        debug!(
+            "ordered bounds: {}",
+            Tuple::<&ColumnBound>::from_iter(&ordered_bounds)
+        );
         if ordered_bounds[..ordered_bounds.len() - 1]
             .iter()
             .any(ColumnBound::is_range)
@@ -351,6 +355,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Re
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.validate_bounds(&bounds)?;
+
         self.index
             .slice_index(bounds)
             .map(|index| ReadOnly { index })
@@ -378,7 +383,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<ReadOnly<F, D, Txn>> for T
 struct Inner<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     schema: TableSchema,
     primary: Index<F, D, Txn>,
-    auxiliary: BTreeMap<Id, Index<F, D, Txn>>,
+    auxiliary: Vec<(Id, Index<F, D, Txn>)>,
 }
 
 #[derive(Clone)]
@@ -476,7 +481,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
             return Ok(self.inner.primary.clone());
         }
 
-        for index in self.inner.auxiliary.values() {
+        for (_, index) in &self.inner.auxiliary {
             if index.validate_bounds(bounds).is_ok() {
                 return Ok(index.clone());
             }
@@ -513,14 +518,15 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         }
 
         let row = primary.schema().row_from_key_values(key, values)?;
-
-        let mut inserts = Vec::with_capacity(self.inner.auxiliary.len() + 1);
+        let mut inserts = FuturesUnordered::new();
         inserts.push(primary.insert(txn_id, row.clone(), true));
-        for index in self.inner.auxiliary.values() {
+
+        for (_, index) in &self.inner.auxiliary {
             inserts.push(index.insert(txn_id, row.clone(), false));
         }
 
-        try_join_all(inserts).await?;
+        while let Some(()) = inserts.try_next().await? {}
+
         Ok(())
     }
 
@@ -563,7 +569,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
 
         let mut deletes = Vec::with_capacity(aux.len() + 1);
         deletes.push(self.inner.primary.delete(txn_id));
-        for index in aux.values() {
+        for (_, index) in aux {
             deletes.push(index.delete(txn_id));
         }
 
@@ -576,7 +582,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         let row = self.inner.primary.schema().validate_row(row)?;
 
         let mut deletes = Vec::with_capacity(aux.len() + 1);
-        for index in aux.values() {
+        for (_, index) in aux {
             deletes.push(index.delete_row(txn_id, row.clone()));
         }
         deletes.push(self.inner.primary.delete_row(txn_id, row));
@@ -700,6 +706,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Merged<F, D, Txn>> {
+        debug!("TableIndex::slice {}", bounds);
+
         let columns: Vec<Id> = self
             .inner
             .primary
@@ -740,18 +748,25 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                     merge_source = MergeSource::Merge(Box::new(merged));
                 } else {
                     for (name, index) in self.inner.auxiliary.iter() {
-                        if index.validate_bounds(&subset).is_ok() {
-                            debug!("index {} can slice {}", name, subset);
-                            let index_slice = index.clone().index_slice(subset)?;
-                            let merged = Merged::new(merge_source, index_slice)?;
+                        debug!("checking index {} with schema {}", name, index.schema());
 
-                            bounds = &bounds[i..];
-                            if bounds.is_empty() {
-                                return Ok(merged);
+                        match index.validate_bounds(&subset) {
+                            Ok(()) => {
+                                debug!("index {} can slice {}", name, subset);
+                                let index_slice = index.clone().index_slice(subset)?;
+                                let merged = Merged::new(merge_source, index_slice)?;
+
+                                bounds = &bounds[i..];
+                                if bounds.is_empty() {
+                                    return Ok(merged);
+                                }
+
+                                merge_source = MergeSource::Merge(Box::new(merged));
+                                break;
                             }
-
-                            merge_source = MergeSource::Merge(Box::new(merged));
-                            break;
+                            Err(cause) => {
+                                debug!("index {} cannot slice {}: {}", name, subset, cause);
+                            }
                         }
                     }
                 };
@@ -761,7 +776,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
 
             if bounds.len() == initial {
                 return Err(TCError::unsupported(
-                    "This table has no index to support the requested selection bounds",
+                    "this Table has no Index to support the requested selection bounds",
                 ));
             }
         }
@@ -803,7 +818,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                     break;
                 }
 
-                for index in self.inner.auxiliary.values() {
+                for (_, index) in &self.inner.auxiliary {
                     if index.validate_bounds(&subset).is_ok() {
                         bounds = &bounds[i..];
                         break;
@@ -820,8 +835,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
             if bounds.len() == initial {
                 let order: Vec<String> = bounds.iter().map(|(name, _)| name.to_string()).collect();
                 return Err(TCError::bad_request(
-                    format!("This table has no index to support selection bounds on {}--available indices are", order.join(", ")),
-                    Value::from_iter(self.inner.auxiliary.keys().cloned()),
+                    format!("this table has no index to support selection bounds on {}--available indices are", order.join(", ")),
+                    self.inner.auxiliary.iter().map(|(id, _)| id).collect::<Tuple<&Id>>(),
                 ));
             }
         }
@@ -841,7 +856,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                     break;
                 }
 
-                for index in self.inner.auxiliary.values() {
+                for (_, index) in &self.inner.auxiliary {
                     if index.validate_order(subset).is_ok() {
                         order = &order[i..];
                         break;
@@ -917,7 +932,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
     async fn commit(&self, txn_id: &TxnId) {
         let mut commits = Vec::with_capacity(self.inner.auxiliary.len() + 1);
         commits.push(self.inner.primary.commit(txn_id));
-        for index in self.inner.auxiliary.values() {
+        for (_, index) in &self.inner.auxiliary {
             commits.push(index.commit(txn_id));
         }
 
@@ -927,7 +942,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
     async fn finalize(&self, txn_id: &TxnId) {
         let mut cleanups = Vec::with_capacity(self.inner.auxiliary.len() + 1);
         cleanups.push(self.inner.primary.finalize(txn_id));
-        for index in self.inner.auxiliary.values() {
+        for (_, index) in &self.inner.auxiliary {
             cleanups.push(index.finalize(txn_id));
         }
 
@@ -955,7 +970,7 @@ where
 
         let primary = Index::load(schema.primary().clone(), file.try_into()?, txn_id).await?;
 
-        let mut auxiliary = BTreeMap::new();
+        let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
             let file = store.get_file(&txn_id, name).await?.ok_or_else(|| {
                 TCError::internal(format!("cannot load Table: missing index {}", name))
@@ -964,7 +979,7 @@ where
             let index_schema = schema.primary().auxiliary(columns)?;
 
             let index = Index::load(index_schema, file.try_into()?, txn_id).await?;
-            auxiliary.insert(name.clone(), index);
+            auxiliary.push((name.clone(), index));
         }
 
         Ok(Self {

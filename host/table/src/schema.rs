@@ -105,8 +105,8 @@ impl IndexSchema {
         true
     }
 
-    pub fn auxiliary(&self, subset: &[Id]) -> TCResult<IndexSchema> {
-        let subset: HashSet<&Id> = subset.iter().collect();
+    pub fn auxiliary(&self, key: &[Id]) -> TCResult<IndexSchema> {
+        let subset: HashSet<&Id> = key.iter().collect();
 
         let mut columns: HashMap<Id, Column> = self
             .columns()
@@ -115,7 +115,7 @@ impl IndexSchema {
             .map(|c| (c.name().clone(), c))
             .collect();
 
-        let key: Vec<Column> = subset
+        let key: Vec<Column> = key
             .iter()
             .map(|col_name| {
                 columns
