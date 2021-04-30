@@ -72,17 +72,26 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, values| {
             Box::pin(async move {
-                let key =
-                    key.try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
+                if values.matches::<Map<Value>>() {
+                    let values = values.opt_cast_into().unwrap();
+                    let bounds = cast_into_bounds(Scalar::Value(key))?;
+                    self.table.clone().slice(bounds)?.update(&txn, values).await
+                } else if values.matches::<Value>() {
+                    let key = key
+                        .try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
 
-                let values = Value::try_cast_from(values, |s| {
-                    TCError::bad_request("invalid values for Table row", s)
-                })?;
+                    let values = Value::try_cast_from(values, |s| {
+                        TCError::bad_request("invalid values for Table row", s)
+                    })?;
 
-                let values = values
-                    .try_cast_into(|v| TCError::bad_request("invalid values for Table row", v))?;
+                    let values = values.try_cast_into(|v| {
+                        TCError::bad_request("invalid values for Table row", v)
+                    })?;
 
-                self.table.insert(*txn.id(), key, values).await
+                    self.table.upsert(*txn.id(), key, values).await
+                } else {
+                    Err(TCError::bad_request("invalid row value", values))
+                }
             })
         }))
     }
