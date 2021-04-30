@@ -111,9 +111,15 @@ impl Node {
     }
 
     #[cfg(debug_assertions)]
-    fn validate(&self, schema: &[super::Column]) {
+    fn validate(&self, schema: &[super::Column], range: &Range) {
+        debug!("validate {}", self);
+
+        debug!("range: {:?}", range);
         for key in &self.keys {
+            debug!("key: {}", key);
             assert_eq!(key.value.len(), schema.len());
+            assert!(range.prefix().len() <= key.value.len());
+            assert!(range.len() <= key.value.len());
         }
     }
 }
@@ -268,7 +274,7 @@ where
             let node = file.read_block(txn_id, node_id).await?;
 
             #[cfg(debug_assertions)]
-            node.validate(&self.inner.schema);
+            node.validate(&self.inner.schema, range);
 
             let (l, r) = collator.bisect(&node.keys, range);
 
