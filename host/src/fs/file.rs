@@ -22,7 +22,7 @@ use tc_transact::{Transact, TxnId};
 use tcgeneric::TCBoxTryFuture;
 
 use super::cache::*;
-use super::{file_name, fs_path, DirContents};
+use super::{file_name, fs_path, DirContents, TMP};
 
 #[derive(Clone)]
 pub struct Block<B> {
@@ -145,6 +145,9 @@ impl<B: BlockData> File<B> {
         if contents.iter().all(|(_, meta)| meta.is_file()) {
             let contents = contents
                 .into_iter()
+                .filter(|(handle, _)| {
+                    handle.path().extension().and_then(|e| e.to_str()) != Some(TMP)
+                })
                 .map(|(handle, _)| file_name(&handle))
                 .collect::<TCResult<HashSet<BlockId>>>()?;
 
@@ -308,16 +311,10 @@ where
                 let commits = blocks
                     .iter()
                     .filter(|block_id| contents.contains(block_id))
-                    .map(|block_id| async move {
+                    .map(|block_id| {
+                        let version_path = block_version(file_path, txn_id, block_id);
                         let block_path = fs_path(file_path, block_id);
-
-                        let block = fs::File::get_block(self, *txn_id, block_id.clone())
-                            .await
-                            .expect("get block");
-
-                        let data = fs::Block::read(block).await;
-
-                        cache.write_and_sync(block_path, data.deref().clone()).await
+                        cache.sync_and_copy(version_path, block_path)
                     });
 
                 try_join_all(commits).await.expect("commit file blocks");
@@ -340,9 +337,9 @@ where
                 let commits = blocks
                     .iter()
                     .filter(|block_id| !contents.contains(block_id))
-                    .map(|block_id| async move {
+                    .map(|block_id| {
                         let block_path = fs_path(file_path, block_id);
-                        cache.delete_and_sync(&block_path).await
+                        cache.delete_and_sync(block_path)
                     });
 
                 try_join_all(commits).await.expect("commit file blocks");

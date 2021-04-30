@@ -21,6 +21,7 @@ pub use dir::*;
 pub use file::*;
 
 const VERSION: Label = label(".version");
+const TMP: &'static str = "tmp";
 
 type DirContents = Vec<(fs::DirEntry, Metadata)>;
 

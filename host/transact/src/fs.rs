@@ -44,7 +44,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
 
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
         destream_json::de::read_from((), source)
-            .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
+            .map_err(|e| TCError::internal(format!("unable to parse saved block: {}", e)))
             .await
     }
 
@@ -61,9 +61,19 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
         );
 
-        tokio::io::copy(&mut reader, sink)
+        let size = tokio::io::copy(&mut reader, sink)
             .map_err(|e| TCError::bad_gateway(e))
-            .await
+            .await?;
+
+        if size > Self::max_size() {
+            log::warn!(
+                "{} block exceeds maximum size of {}",
+                Self::ext(),
+                Self::max_size()
+            )
+        }
+
+        Ok(size)
     }
 
     async fn into_size<'en>(self) -> TCResult<u64>
@@ -210,15 +220,14 @@ pub trait Dir: Store + Sized + 'static {
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<C: Send>(
-        &self,
-        txn_id: TxnId,
-        name: Id,
-        class: C,
-    ) -> TCResult<Self::File> where Self::FileClass: From<C>;
+    async fn create_file<C: Send>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<Self::File>
+    where
+        Self::FileClass: From<C>;
 
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File> where Self::FileClass: From<C>;
+    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File>
+    where
+        Self::FileClass: From<C>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;

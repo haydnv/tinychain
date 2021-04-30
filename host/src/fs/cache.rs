@@ -20,7 +20,7 @@ use tc_transact::fs::BlockData;
 use crate::chain::ChainBlock;
 use crate::scalar::Value;
 
-use super::{create_parent, io_err};
+use super::{create_parent, io_err, TMP};
 
 struct Policy;
 
@@ -33,9 +33,11 @@ impl freqache::Policy<PathBuf, CacheBlock> for Policy {
     async fn evict(&self, path: PathBuf, block: &CacheBlock) {
         debug!("evict block at {:?} from cache", path);
 
-        persist(&path, block)
+        let size = persist(&path, block)
             .await
-            .expect("persist cache block to disk")
+            .expect("persist cache block to disk");
+
+        debug!("block at {:?} evicted, wrote {} bytes to disk", path, size);
     }
 }
 
@@ -202,6 +204,25 @@ impl Cache {
         cache
     }
 
+    async fn _read_and_insert<B: BlockData>(
+        mut cache: RwLockWriteGuard<LFU>,
+        path: PathBuf,
+    ) -> TCResult<CacheLock<B>>
+    where
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+        CacheBlock: From<CacheLock<B>>,
+    {
+        let block_file = read_file(&path).await?;
+        let block = B::load(block_file).await?;
+
+        debug!("cache insert: {:?}", path);
+
+        let block = CacheLock::new(block);
+        cache.insert(path, block.clone().into()).await;
+
+        Ok(block)
+    }
+
     /// Read a block from the cache if possible, or else fetch it from the filesystem.
     pub async fn read<B: BlockData>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
     where
@@ -222,15 +243,9 @@ impl Cache {
             log::info!("cache miss: {:?}", path);
         }
 
-        let block_file = read_file(&path).await?;
-        let block = B::load(block_file).await?;
-
-        debug!("cache insert: {:?}", path);
-
-        let block = CacheLock::new(block);
-        cache.insert(path.clone(), block.clone().into()).await;
-
-        Ok(Some(block))
+        Self::_read_and_insert(cache, path.clone())
+            .map_ok(Some)
+            .await
     }
 
     /// Delete a block from the cache.
@@ -242,26 +257,34 @@ impl Cache {
     }
 
     /// Remove a block from the cache and delete it from the filesystem.
-    pub async fn delete_and_sync(&self, path: &PathBuf) -> TCResult<()> {
+    pub async fn delete_and_sync(&self, path: PathBuf) -> TCResult<()> {
         debug!("Cache::delete_and_sync {:?}", path);
 
         let mut cache = self.lfu.write().await;
-        cache.remove(path).await;
+        cache.remove(&path).await;
+
+        let tmp = path.with_extension(TMP);
+        if tmp.exists() {
+            tokio::fs::remove_file(&tmp)
+                .map_err(|e| io_err(e, &tmp))
+                .await?;
+        }
 
         if path.exists() {
-            tokio::fs::remove_file(path)
-                .map_err(|e| io_err(e, path))
-                .await
-        } else {
-            Ok(())
+            tokio::fs::remove_file(&path)
+                .map_err(|e| io_err(e, &path))
+                .await?;
         }
+
+        Ok(())
     }
 
     async fn _sync(cache: &mut LFU, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
         if let Some(block) = cache.get(path).await {
-            persist(path, &block).await?;
+            let size = persist(path, &block).await?;
+            debug!("sync'd block at {:?}, wrote {} bytes", path, size);
             Ok(true)
         } else {
             log::info!("cache sync miss: {:?}", path);
@@ -275,6 +298,27 @@ impl Cache {
 
         let mut cache = self.lfu.write().await;
         Self::_sync(&mut cache, path).await
+    }
+
+    /// Sync the source block with the filesystem and then copy it to the destination.
+    pub async fn sync_and_copy<'en, B: BlockData + IntoStream<'en> + 'en>(
+        &self,
+        source: PathBuf,
+        dest: PathBuf,
+    ) -> TCResult<CacheLock<B>>
+    where
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+        CacheBlock: From<CacheLock<B>>,
+    {
+        debug!("cache sync + copy from {:?} to {:?}", source, dest);
+        let mut cache = self.lfu.write().await;
+        Self::_sync(&mut cache, &source).await?;
+
+        tokio::fs::copy(&source, &dest)
+            .map_err(|e| io_err(e, format!("copy from {:?} to {:?}", source, dest)))
+            .await?;
+
+        Self::_read_and_insert(cache, dest).await
     }
 
     async fn _write<'en, B: BlockData + IntoStream<'en> + 'en>(
@@ -310,23 +354,6 @@ impl Cache {
         Self::_write(&mut cache, &self.tx, path, block.clone()).await;
         Ok(block)
     }
-
-    /// Update a block in the cache and then sync it with the filesystem.
-    pub async fn write_and_sync<'en, B: BlockData + IntoStream<'en> + 'en>(
-        &self,
-        path: PathBuf,
-        block: B,
-    ) -> TCResult<bool>
-    where
-        CacheBlock: From<CacheLock<B>>,
-    {
-        debug!("cache insert + sync: {:?}", &path);
-        let block = CacheLock::new(block);
-        let mut cache = self.lfu.write().await;
-        Self::_write(&mut cache, &self.tx, path.clone(), block).await;
-        let exists = Self::_sync(&mut cache, &path).await?;
-        Ok(exists)
-    }
 }
 
 fn spawn_cleanup_thread(cache: RwLock<LFU>, mut rx: mpsc::Receiver<Evict>) {
@@ -345,17 +372,23 @@ fn spawn_cleanup_thread(cache: RwLock<LFU>, mut rx: mpsc::Receiver<Evict>) {
     });
 }
 
-async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<()> {
-    let mut block_file = if path.exists() {
-        debug!("open block file at {:?} for sync", path);
-        write_file(path).await?
+async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<u64> {
+    let tmp = path.with_extension(TMP);
+
+    let mut tmp_file = if tmp.exists() {
+        write_file(&tmp).await?
     } else {
-        debug!("create new filesystem block at {:?}", path);
-        create_parent(path).await?;
-        create_file(path).await?
+        create_parent(&tmp).await?;
+        create_file(&tmp).await?
     };
 
-    block.persist(&mut block_file).map_ok(|_size| ()).await
+    let size = block.persist(&mut tmp_file).await?;
+
+    tokio::fs::rename(&tmp, path)
+        .map_err(|e| io_err(e, format!("rename {:?} to {:?}", tmp, path)))
+        .await?;
+
+    Ok(size)
 }
 
 #[inline]
