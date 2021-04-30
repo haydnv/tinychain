@@ -42,6 +42,20 @@ class TableTests(unittest.TestCase):
             result = self.host.post(ENDPOINT, cxt)
             self.assertEqual(result, x)
 
+    def testOrderBy(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+        rows = list(reversed([k + v for k, v in zip(keys, values)]))
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.order_by(["views"], True))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(rows))
+
     def testSlice(self):
         count = 50
         values = [(v,) for v in range(count)]
@@ -83,7 +97,7 @@ class PersistenceTests(unittest.TestCase):
         for i in range(3):
             port = PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.uri(Persistent).path()
-            host = start_host(f"test_replication_{i}", [Persistent], host_uri=tc.URI(host_uri))
+            host = start_host(f"test_table_{i}", [Persistent], host_uri=tc.URI(host_uri))
             hosts.append(host)
 
         cls.hosts = hosts
@@ -97,6 +111,31 @@ class PersistenceTests(unittest.TestCase):
         for host in self.hosts:
             actual = host.get("/test/table/table", ["one"])
             self.assertEqual(actual, row1)
+
+        self.hosts[1].stop()
+        self.hosts[2].put("/test/table/table", ["two"], [2])
+        self.hosts[1].start()
+
+        for host in self.hosts:
+            actual = host.get("/test/table/table", ["one"])
+            self.assertEqual(actual, row1)
+
+            actual = host.get("/test/table/table", ["two"])
+            self.assertEqual(actual, row2)
+
+        self.hosts[2].stop()
+        self.hosts[1].delete("/test/table/table", ["one"])
+        self.hosts[2].start()
+
+        for host in self.hosts:
+            actual = host.get("/test/table/table")
+            self.assertEqual(actual, expected([row2]))
+
+        n = 100
+        for i in range(n):
+            self.hosts[0].put("/test/table/table", [num2words(i)], [i])
+
+        self.assertEqual(self.hosts[1].get("/test/table/table/count"), n)
 
     @classmethod
     def tearDownClass(cls):
