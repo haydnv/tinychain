@@ -110,6 +110,23 @@ class ClientDocTests(unittest.TestCase):
     def testClientService(self):
         self.assertEqual(self.host.get("/app/clientservice/room_area", (5, 10)), 50)
 
+    def testTable(self):
+        @tc.post_op
+        def num_rows(txn):
+            max_len = 100
+            schema = tc.Table.Schema(
+                [tc.Column("user_id", tc.Number)],
+                [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
+
+            txn.table = tc.Table(schema)
+            return tc.After(
+                txn.table.insert((123,), ("Bob", "bob.roberts@example.com")),
+                txn.table.count())
+
+        actual = self.host.post(ENDPOINT, tc.form_of(num_rows))
+        expected = 1
+        self.assertEqual(actual, expected)
+
     def tearDown(self):
         self.host.stop()
 

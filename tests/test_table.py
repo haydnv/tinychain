@@ -62,7 +62,6 @@ class TableTests(unittest.TestCase):
             ]
         })
 
-
     def testOrderBy(self):
         count = 50
         values = [(v,) for v in range(count)]

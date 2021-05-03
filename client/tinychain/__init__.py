@@ -3,7 +3,7 @@ import tinychain.host
 
 from tinychain.chain import Chain
 from tinychain.cluster import Cluster, write_cluster
-from tinychain.collection import *
+from tinychain.collection import Bound, BTree, Collection, Column, Table
 from tinychain.decorators import *
 from tinychain.ref import *
 from tinychain.reflect import Meta

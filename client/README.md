@@ -63,12 +63,12 @@ For the same reason, it's important to use type annotations in your Tinychain Py
 It's also important to keep in mind that Tinychain by default resolves all dependencies concurrently, and does not resolve unused dependencies. Consider this function:
 
 ```python
-# note: the `Table` structure used in this example is not yet available in the public API
-
 @tc.post_op
 def num_rows(txn):
-    key = [("user_id", tc.Number)]
-    value = [("name", tc.String), ("email", tc.String)]
+    max_len = 100
+    schema = tc.Table.Schema(
+        [tc.Column("user_id", tc.Number)],
+        [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
     txn.table = tc.Table((key, value))
     txn.table.insert((123,), ("Bob", "bob.roberts@example.com"))
@@ -78,16 +78,16 @@ def num_rows(txn):
 This Op will *always* resolve to *zero*. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its result is unused. To handle situations like this, use the `After` flow control:
 
 ```python
-# note: the `Table` structure used in this example is not yet available in the public API
-
 @tc.post_op
 def num_rows(txn):
-    key = [("user_id", tc.Number)]
-    value = [("name", tc.String), ("email", tc.String)]
+    max_len = 100
+    schema = tc.Table.Schema(
+        [tc.Column("user_id", tc.Number)],
+        [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
-    txn.table = tc.Table(key + value)
+    txn.table = tc.Table(schema)
     return tc.After(
-        txn.table.insert((123, "Bob", "bob.roberts@example.com")),
+        txn.table.insert((123,), ("Bob", "bob.roberts@example.com")),
         txn.table.count())
 ```
 

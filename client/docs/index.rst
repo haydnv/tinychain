@@ -9,6 +9,7 @@ Modules
 
    chain
    cluster
+   collection
    decorators
    state
    util

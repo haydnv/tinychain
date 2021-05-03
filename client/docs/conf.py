@@ -22,7 +22,7 @@ copyright = '2021, Haydn Vestal'
 author = 'Haydn Vestal'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.5'
+release = '0.2'
 
 
 # -- General configuration ---------------------------------------------------

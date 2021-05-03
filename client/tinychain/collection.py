@@ -8,10 +8,18 @@ from .value import UInt, Nil, Value
 
 
 class Bound(object):
+    """
+    An upper or lower bound on a :class:`Range`.
+    """
+
     pass
 
 
 class Ex(Bound):
+    """
+    An exclusive `Bound`.
+    """
+
     def __init__(self, value):
         self.value = value
 
@@ -20,6 +28,10 @@ class Ex(Bound):
 
 
 class In(Bound):
+    """
+    An inclusive `Bound`.
+    """
+
     def __init__(self, value):
         self.value = value
 
@@ -28,6 +40,9 @@ class In(Bound):
 
 
 class Un(Bound):
+    """
+    An unbounded side of a :class:`Range`.
+    """
     def __json__(self):
         return Nil
 
@@ -37,6 +52,10 @@ Bound.In = In
 
 
 class Range(object):
+    """
+    A selection range of one or two :class:`Bound`\s.
+    """
+
     @staticmethod
     def from_slice(s):
         return Range(Bound.In(s.start), Bound.Ex(s.stop))
@@ -83,14 +102,14 @@ class Collection(State, metaclass=Meta):
 
 class BTree(Collection):
     """
-    A BTree with a schema of named, :class:`Value`-typed :class:`Column`\s.
+    A `BTree` with a schema of named, :class:`Value`-typed :class:`Column`\s.
     """
 
     __uri__ = uri(Collection) + "/btree"
 
     class Schema(object):
         """
-        A BTree schema which comprises a tuple of :class:`Column`\s.
+        A `BTree` schema which comprises a tuple of :class:`Column`\s.
         """
 
         def __init__(self, *columns):
@@ -101,7 +120,7 @@ class BTree(Collection):
 
     def __getitem__(self, prefix):
         """
-        Return a slice of this BTree containing all keys which begin with the given prefix.
+        Return a slice of this `BTree` containing all keys which begin with the given prefix.
         """
 
         if not isinstance(prefix, tuple):
@@ -126,8 +145,8 @@ class BTree(Collection):
 
     def delete(self):
         """
-        Delete the contents of this BTree.
-        
+        Delete the contents of this `BTree`.
+
         To delete all keys beginning with a specific prefix, call
         `btree[prefix].delete()`.
         """
@@ -136,7 +155,7 @@ class BTree(Collection):
 
     def insert(self, key):
         """
-        Insert the given key into this BTree.
+        Insert the given key into this `BTree`.
 
         If the key is already present, this is a no-op.
         """
@@ -145,7 +164,7 @@ class BTree(Collection):
 
     def reverse(self):
         """
-        Return a slice of this BTree with the same range with its keys in reverse order.
+        Return a slice of this `BTree` with the same range with its keys in reverse order.
         """
 
         return BTree(OpRef.Get(uri(self), (None, True)))
@@ -154,14 +173,14 @@ class BTree(Collection):
 
 class Table(Collection):
     """
-    A Table which supports a multi-column primary key, multi-column value, and optional indices.
+    A `Table` which supports a multi-column primary key, multi-column value, and optional indices.
     """
 
     __uri__ = uri(Collection) + "/table"
 
     class Schema(object):
         """
-        A Table schema which comprises a primary key and value :class:`Column`\s.
+        A `Table` schema which comprises a primary key and value :class:`Column`\s.
         """
 
         def __init__(self, key, values=[], indices={}):
