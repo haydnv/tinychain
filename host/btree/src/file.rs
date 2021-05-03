@@ -611,13 +611,7 @@ where
     async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
         let mut root = self.inner.root.write(txn_id).await?;
 
-        let node_ids = self.inner.file.block_ids(&txn_id).await?;
-        try_join_all(
-            node_ids
-                .iter()
-                .map(|node_id| self.inner.file.delete_block(txn_id, node_id)),
-        )
-        .await?;
+        self.inner.file.truncate(txn_id).await?;
 
         *root = self.inner.file.unique_id(&txn_id).await?;
 

@@ -4,6 +4,7 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
+use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::debug;
 use uplock::*;
 use uuid::Uuid;
@@ -136,6 +138,14 @@ impl<B: BlockData> File<B> {
         }
     }
 
+    async fn mutate(&self, txn_id: TxnId, block_id: BlockId) {
+        let mut mutated = self.mutated.write().await;
+        match mutated.entry(txn_id) {
+            Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block_id),
+            Entry::Occupied(mut entry) => entry.get_mut().insert(block_id),
+        };
+    }
+
     pub fn new(cache: Cache, mut path: PathBuf, ext: &str) -> Self {
         path.set_extension(ext);
         Self::_new(cache, path, HashSet::new())
@@ -226,13 +236,14 @@ where
             .await
     }
 
-    async fn delete_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<()> {
+    async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()> {
         let mut contents = self.contents.write(txn_id).await?;
         if !contents.remove(&name) {
             return Err(TCError::not_found(name));
         }
 
-        let version = block_version(&self.path, &txn_id, name);
+        let version = block_version(&self.path, &txn_id, &name);
+        self.mutate(txn_id, name).await;
         self.cache.delete(&version).await;
         Ok(())
     }
@@ -279,16 +290,22 @@ where
 
     async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>> {
         debug!("File::write_block");
-        let mut mutated = self.mutated.write().await;
         let block = self.get_block(txn_id, name.clone()).await?;
-
-        match mutated.entry(txn_id) {
-            Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block.name.clone()),
-            Entry::Occupied(mut entry) => entry.get_mut().insert(block.name.clone()),
-        };
-
-        debug!("File::write_block getting write lock on {}...", name);
+        self.mutate(txn_id, name).await;
         Ok(fs::Block::write(block).await)
+    }
+
+    async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
+        let mut contents = self.contents.write(txn_id).await?;
+        let deletes = FuturesUnordered::from_iter(contents.drain().map(|block_id| async move {
+            let path = block_version(&self.path, &txn_id, &block_id);
+            self.cache.delete(&path).await;
+            block_id
+        }));
+
+        let mut mutated = self.mutated.write().await;
+        mutated.insert(txn_id, deletes.collect().await);
+        Ok(())
     }
 }
 

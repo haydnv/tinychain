@@ -174,7 +174,7 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
     ) -> TCResult<Self::Block>;
 
     /// Delete the block with the given ID.
-    async fn delete_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<()>;
+    async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()>;
 
     /// Return a lockable owned reference to the block at `name`.
     async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Block>;
@@ -199,6 +199,9 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
         txn_id: TxnId,
         name: BlockId,
     ) -> TCResult<<Self::Block as Block<B, Self>>::WriteLock>;
+
+    /// Delete all of this `File`'s blocks.
+    async fn truncate(&self, txn_id: TxnId) -> TCResult<()>;
 }
 
 /// A transactional directory
