@@ -193,6 +193,19 @@ impl Subject {
             }
         }
     }
+
+    async fn restore(&self, txn_id: TxnId, backup: State) -> TCResult<()> {
+        match self {
+            Self::BTree(_btree) => Err(TCError::not_implemented("restore a BTree from backup")),
+            Self::Table(_table) => Err(TCError::not_implemented("restore a Table from backup")),
+            Self::Value(file) => {
+                let backup = backup.try_into()?;
+                let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
+                *block = backup;
+                Ok(())
+            }
+        }
+    }
 }
 
 #[async_trait]

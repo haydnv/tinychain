@@ -94,6 +94,17 @@ impl ChainBlock {
         }
     }
 
+    /// Return a new, empty block with an empty mutation list for the given `TxnId`.
+    pub fn with_txn<H: Into<Bytes>>(hash: H, txn_id: TxnId) -> Self {
+        let mut contents = BTreeMap::new();
+        contents.insert(txn_id, Vec::new());
+
+        Self {
+            hash: hash.into(),
+            contents,
+        }
+    }
+
     pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
         match self.contents.entry(txn_id) {
             Entry::Vacant(entry) => {

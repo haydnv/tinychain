@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::num::ParseIntError;
 use std::pin::Pin;
 
@@ -190,7 +190,7 @@ impl Persist for BlockChain {
         let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
 
         if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
-            let file: fs::File<ChainBlock> = file.try_into()?;
+            let file = fs::File::<ChainBlock>::try_from(file)?;
 
             let block_ids = file.block_ids(&txn_id).await?;
             let block_ids = block_ids
@@ -200,6 +200,7 @@ impl Persist for BlockChain {
                 .map_err(TCError::internal)?;
 
             let latest = block_ids.into_iter().fold(0, Ord::max);
+            // TODO: replay last transaction's mutations for crash recovery
             Ok(BlockChain::new(schema, subject, latest, file))
         } else {
             let latest = 0u64;
@@ -207,7 +208,7 @@ impl Persist for BlockChain {
                 .create_file(txn_id, CHAIN.into(), ChainType::Sync)
                 .await?;
 
-            let file: fs::File<ChainBlock> = file.try_into()?;
+            let file = fs::File::<ChainBlock>::try_from(file)?;
             if !file.contains_block(&txn_id, &latest.into()).await? {
                 file.create_block(txn_id, latest.into(), ChainBlock::new(NULL_HASH))
                     .await?;

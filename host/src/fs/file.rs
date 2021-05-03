@@ -169,6 +169,20 @@ impl<B: BlockData> File<B> {
             )))
         }
     }
+
+    pub async fn sync_block<'en>(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>>
+    where
+        B: en::IntoStream<'en> + 'en,
+        CacheBlock: From<CacheLock<B>>,
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    {
+        debug!("File::sync_block");
+        self.cache
+            .sync(&block_version(&self.path, &txn_id, &name))
+            .await?;
+
+        fs::File::write_block(self, txn_id, name).await
+    }
 }
 
 #[async_trait]

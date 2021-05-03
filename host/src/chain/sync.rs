@@ -1,7 +1,7 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 
 use async_trait::async_trait;
 use destream::de;
@@ -14,12 +14,11 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
-use crate::route::Public;
-use crate::scalar::{Link, Scalar, Value, ValueType};
+use crate::scalar::{Link, Scalar, Value};
 use crate::state::StateView;
 use crate::txn::Txn;
 
-use super::{ChainInstance, ChainType, Schema, Subject, CHAIN};
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
 const BLOCK_ID: Label = label("sync");
 
@@ -29,33 +28,32 @@ const BLOCK_ID: Label = label("sync");
 pub struct SyncChain {
     schema: Schema,
     subject: Subject,
-    file: fs::File<Value>,
+    file: fs::File<ChainBlock>,
 }
 
 #[async_trait]
 impl ChainInstance for SyncChain {
-    async fn append_delete(&self, _txn_id: TxnId, _path: TCPathBuf, _key: Value) -> TCResult<()> {
+    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+        let mut block = self.file.write_block(txn_id, BLOCK_ID.into()).await?;
+        block.append_delete(txn_id, path, key);
         Ok(())
     }
 
     async fn append_put(
         &self,
-        _txn_id: TxnId,
-        _path: TCPathBuf,
-        _key: Value,
-        _value: Scalar,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
     ) -> TCResult<()> {
+        let mut block = self.file.write_block(txn_id, BLOCK_ID.into()).await?;
+        block.append_put(txn_id, path, key, value);
         Ok(())
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
         let block = self.file.read_block(txn_id, BLOCK_ID.into()).await?;
-
-        if let &Value::String(ref last_commit) = &*block {
-            last_commit.parse().map(Some)
-        } else {
-            Ok(None)
-        }
+        Ok(block.mutations().keys().next().cloned())
     }
 
     fn subject(&self) -> &Subject {
@@ -64,11 +62,10 @@ impl ChainInstance for SyncChain {
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let subject = txn.get(source, Value::None).await?;
-
-        self.subject.put(txn, &[], Value::None, subject).await?;
+        self.subject.restore(*txn.id(), subject).await?;
 
         let mut block = self.file.write_block(*txn.id(), BLOCK_ID.into()).await?;
-        *block = Value::String(txn.id().to_string());
+        *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
 
         Ok(())
     }
@@ -79,7 +76,7 @@ impl Persist for SyncChain {
     type Schema = Schema;
     type Store = fs::Dir;
 
-    fn schema(&self) -> &'_ Schema {
+    fn schema(&self) -> &Schema {
         &self.schema
     }
 
@@ -87,16 +84,31 @@ impl Persist for SyncChain {
         let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
 
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
-            file.try_into()?
+            let file = fs::File::<ChainBlock>::try_from(file)?;
+
+            let block = file.read_block(txn_id, BLOCK_ID.into()).await?;
+            if block.mutations().len() > 1 {
+                return Err(TCError::internal(
+                    "SyncChain should only store one Transaction record at a time",
+                ));
+            }
+
+            // TODO: replay last transaction's mutations for crash recovery
+
+            file
         } else {
             let file = dir
-                .create_file(txn_id, CHAIN.into(), ValueType::String)
+                .create_file(txn_id, CHAIN.into(), ChainType::Sync)
                 .await?;
 
-            let file: fs::File<Value> = file.try_into()?;
+            let file = fs::File::<ChainBlock>::try_from(file)?;
             if !file.contains_block(&txn_id, &BLOCK_ID.into()).await? {
-                file.create_block(txn_id, BLOCK_ID.into(), Value::None)
-                    .await?;
+                file.create_block(
+                    txn_id,
+                    BLOCK_ID.into(),
+                    ChainBlock::with_txn(NULL_HASH, txn_id),
+                )
+                .await?;
             }
 
             file
@@ -116,14 +128,16 @@ impl Transact for SyncChain {
         {
             let mut block = self
                 .file
-                .write_block(*txn_id, BLOCK_ID.into())
+                .sync_block(*txn_id, BLOCK_ID.into())
                 .await
                 .unwrap();
 
-            *block = Value::String(txn_id.to_string());
+            self.subject.commit(txn_id).await;
+
+            *block = ChainBlock::with_txn(NULL_HASH, *txn_id);
         }
 
-        join!(self.subject.commit(txn_id), self.file.commit(txn_id));
+        self.file.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
