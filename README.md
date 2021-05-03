@@ -13,11 +13,35 @@
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
-Tinychain is useful in any situation which requires developing and deploying a cloud service. Anytime you consider developing a service with, for example, MySQL or MongoDB or Neo4j and Apache or Nginx or Django, you can probably get the same thing done faster and more scalably with Tinychain. The major advantage of Tinychain is its automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer.
+Tinychain features automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer. Tinychain also features automatic multithreading and GPU acceleration. These and other features are detailed in the [key features](#key-features) section.
 
 Tinychain is early beta software. Many features are not fully tested, or not yet available in the public API. You should not assume that Tinychain is secure, and you should make regular backups of your data.
 
-If you're not sure how to get started, or have a question, or find a bug, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
+If you're not sure whether Tinychain is for you, or if you have a question or find a bug, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
+
+## What it does
+
+### For developers
+
+Tinychain is an all-in-one backend host which allows you to rapidly prototype a complex application and scale it without rewriting. You can easily split a monolithic application into many microservices, or combine multiple services into one monolithic application. Tinychain optimizes your application's performance with automatic concurrency (multithreading) and GPU acceleration, with no extra code required. There is a Python client provided (try it out with `pip3 install tinychain`) but you can easily build your own client in any language by implementing Tinychain's JSON data description and protocol (see [technical details](#technical-details)). You can find more information in the [data structures](#data-structures) section, the [client README](https://github.com/haydnv/tinychain/tree/master/client), the [code examples](https://github.com/haydnv/tinychain/tree/master/tests), and the [tutorial videos](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
+
+### For operations/DevOps
+
+Tinychain eliminates the need to manage an ever-growing "stack" of platform software which sometimes requires mutually-incompatible dependencies. With a Tinychain application, you no longer need tools like Docker and Kubernetes to package and deploy your application backend, because its "stack" is simply the Tinychain host software. You can easily deploy your application to a different cloud provider, or on-premises for a client, simply by spinning up a Tinychain host.
+
+### For data scientists
+
+With Tinychain, data scientists can easily analyze live replicas of a production database, eliminating the need to copy entire tables and databases out of the platform which tracks and enforces ownership of the data. This also eliminates the need to maintain a separate platform (e.g. TensorFlow Serving) in order to serve models. Tinychain also allows the construction of stateful models, e.g. a recurrent neural network (RNN)\* with a per-user state in memory, or a model which updates a database when it encounters an unexpected input.
+
+### For product owners & executives
+
+Tinychain is designed with many unique features to minimize the operational risk of hosting your users' data. For example, Tinychain is the only database with *hypothetical queries*, which allow developers to examine the real consequences of potentially-destructive database updates without actually applying the updates. Tinychain is also the only database, and the only blockchain platform, designed from the ground up for compliance with data privacy laws like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act).
+
+Tinychain's all-in-one approach can also reduce operational costs by removing the need for developers to maintain a broad familiarity with a wide variety of specific platform tools, and removing the operational separation between application development and data science: Tinychain is a single platform which is useful to both developers and data scientists.
+
+### For end-users
+
+End users won't see Tinychain directly, but it makes the customer experience better by making cloud services faster, more reliable, and cheaper to operate, as well as lowering the risk of a data breach by eliminating the need to make copies of customer data for analysis.
 
 ## Getting started
 
@@ -38,6 +62,28 @@ There are instructions for setting up a Cluster in the [client README](https://g
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a series of tutorial videos on YouTube: [https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw)
 
 ## Key features
+
+| | Tinychain | Django (Python) | Ethereum | MongoDB | MySQL/MariaDB | Neo4j | Oracle | Spanner | Spring + Hibernate (Java) | PostgreSQL | TensorFlow |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| At-rest encryption | \* | | | x | x | x | x | x | | x | |
+| Automatic concurrency/multithreading | x | | | x | x | x | x | x | | x | x |
+| Automatic GPU acceleration | \* | | x | | | | | | | | x |
+| Blockchain compliant w/ GDPR & CCPA | \* | | | | | | | | | | |
+| Built-in cryptocurrency | | | x | | | | | | | | |
+| Cross-service transactions | x | | x | | | | | | | | |
+| Database tables | x | | | x | x | | x | x | | x | |
+| Document database | | | | x | | | x | | | | |
+| Distributed applications (dapps) | x | | x | | | | | | | | |
+| Graph database | \* | | | | | x | x | | | | |
+| Hypothetical queries | x | | | | | | | | | | |
+| Large ML library | | | | | | | | | | | x |
+| JSON RPC interface | x | x | x | x | | x | | | x | | |
+| Media (audio, video, image) support | \* | | | | | | | | | | x |
+| Millisecond latency | x | x | | x | x | x | x | x | x | x | x |
+| Object-oriented API | x | x | | x | | | | | x | | x |
+| Object-relational mapping (ORM) | \* | x | | x | | | | | x | | |
+| Tensor computation (ML models) | \*\* | | | | | | | | | | x |
+| Transactional reads & writes | x | | x | x | x | x | x | x | | x | |
 
 ### Safety
 
@@ -73,22 +119,24 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
     * **ReduceChain**\*: A **Chain** which defines a reduce method to compress old blocks, useful for metrics (e.g. to reduce per-second statistics to per-minute, per-minute to per-hour, etc.)
  * **Collection**
     * **BTree**: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
-    * **Table**\*\*: A database table, which supports one or more **BTree** indices
+    * **Table**: A database table, which supports one or more **BTree** indices
     * **Tensor**\*\*: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
-    * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**\*\*s
+    * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**s
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a transaction
     * **Op**: a user-defined executable function
 
-## The Tinychain protocol
+## Technical details
+
+This information is documented in case you want to develop your own general-purpose Tinychain client, or if you need to do an in-depth security or risk analysis. If you're just a regular developer using the Python client, you don't have to worry about any of this!
 
 ### Data description
 
 Tinychain exposes a JSON API over HTTP, and treats a subset of JSON as a Turing-complete application language. For example, this is a function to convert meters into feet:
 
 ```json
-{"/state/scalar/op/get": ["to_feet", [
+{"/state/scalar/op/get": ["meters", [
     {"/state/scalar/ref/if": [
         {"$meters/gte": 0},
         {"$meters/mul": 3.28},
@@ -134,7 +182,7 @@ The flow of operations within a single transaction is:
 
 ### Authentication
 
-Tinychain uses recursive JSON web tokens provided by the [rjwt](http://docs.rs/rjwt/) library. Each Tinychain host which handles part of a transaction must validate the auth token of the incoming request, sign it with its own private key, and forward it to any downstream dependencies.
+Tinychain uses recursive JSON web tokens provided by the [rjwt](http://docs.rs/rjwt/) library. Each Tinychain host which handles part of a transaction must validate the auth token of the incoming request, sign it with its own private key, and forward it to any downstream dependencies. Note the unusual security consideration of a recursive token: a downstream dependency receives all of the upstream tokens, and therefore is authorized to take any action which an upstream dependency is authorized to take. For this reason, it's very important to use only a minimal scope to authenticate the end-user, and grant further scopes as narrowly as possible.
 
 ### Life of a transaction
 
