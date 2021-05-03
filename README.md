@@ -27,7 +27,7 @@ Tinychain is an all-in-one backend host which allows you to rapidly prototype a 
 
 ### For operations/DevOps
 
-Tinychain eliminates the need to manage an ever-growing "stack" of platform software which sometimes requires mutually-incompatible dependencies. With a Tinychain application, you no longer need tools like Docker and Kubernetes to package and deploy your application backend, because its "stack" is simply the Tinychain host software. You can easily deploy your application to a different cloud provider, or on-premises for a client, simply by spinning up a Tinychain host.
+Tinychain eliminates the need to manage an ever-growing "stack" of platform software which sometimes requires mutually-incompatible dependencies. With a Tinychain application, you no longer need tools like Docker and Kubernetes to package and deploy your application backend, because its "stack" is simply the Tinychain host software. You can easily deploy your application to a different cloud provider, or on-premises for a client, simply by spinning up a new Tinychain host.
 
 ### For data scientists
 
