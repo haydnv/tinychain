@@ -21,6 +21,7 @@ use crate::state::State;
 use crate::txn::*;
 
 /// Configuration for [`Gateway`].
+#[derive(Clone)]
 pub struct Config {
     pub addr: IpAddr,
     pub http_port: u16,
@@ -104,6 +105,21 @@ impl Gateway {
         Link::from((self.root.clone(), path))
     }
 
+    /// Return a new, signed auth token with no claims.
+    pub fn new_token(&self, txn_id: &TxnId) -> TCResult<(String, Claims)> {
+        let token = Token::new(
+            self.root.clone().into(),
+            txn_id.time().into(),
+            self.config.request_ttl,
+            self.actor.id().clone(),
+            vec![],
+        );
+
+        let signed = self.actor.sign_token(&token).map_err(TCError::internal)?;
+        let claims = token.claims();
+        Ok((signed, claims))
+    }
+
     /// Authorize a transaction to execute on this host.
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
@@ -113,16 +129,7 @@ impl Gateway {
                 .map_err(TCError::unauthorized)
                 .await?
         } else {
-            let token = Token::new(
-                self.root.clone().into(),
-                txn_id.time().into(),
-                self.config.request_ttl,
-                self.actor.id().clone(),
-                vec![],
-            );
-            let signed = self.actor.sign_token(&token).map_err(TCError::internal)?;
-            let claims = token.claims();
-            (signed, claims)
+            self.new_token(&txn_id)?
         };
 
         self.txn_server.new_txn(self.clone(), txn_id, token).await

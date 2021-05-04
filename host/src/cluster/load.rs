@@ -7,22 +7,23 @@ use uplock::RwLock;
 
 use tc_error::*;
 use tc_transact::lock::TxnLock;
+use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::chain::{self, Chain, ChainType, Schema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::{Link, LinkHost, OpRef, Scalar, Value};
-use crate::txn::{Actor, TxnId};
+use crate::txn::{Actor, Txn, TxnId};
 
 use super::Cluster;
 
 /// Load a cluster from the filesystem, or instantiate a new one.
 pub async fn instantiate(
+    txn: &Txn,
     host: LinkHost,
     class: InstanceClass,
     data_dir: fs::Dir,
-    txn_id: TxnId,
 ) -> TCResult<InstanceExt<Cluster>> {
     let (link, proto) = class.into_inner();
     let link = link.ok_or_else(|| {
@@ -68,6 +69,7 @@ pub async fn instantiate(
         }
     }
 
+    let txn_id = *txn.id();
     let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
     let mut replicas = HashSet::new();
     replicas.insert((host, link.path().clone()).into());

@@ -109,7 +109,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
+        let txn_server = txn_server.clone();
+        let kernel = tinychain::Kernel::new(std::iter::empty());
+        let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
         let txn_id = TxnId::new(Gateway::time());
+        let token = gateway.new_token(&txn_id)?;
+        let txn = txn_server.new_txn(gateway, txn_id, token).await?;
 
         let data_dir = data_dir.ok_or_else(|| {
             TCError::internal("the --data_dir option is required to host a Cluster")
@@ -132,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let cluster = match InstanceClass::from_stream((), &mut decoder).await {
                 Ok(class) => {
-                    cluster::instantiate(host.clone(), class, data_dir.clone(), txn_id).await?
+                    cluster::instantiate(&txn, host.clone(), class, data_dir.clone()).await?
                 }
                 Err(cause) => panic!("error parsing cluster config {:?}: {}", path, cause),
             };
