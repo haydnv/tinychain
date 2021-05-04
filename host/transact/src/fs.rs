@@ -156,14 +156,17 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
     /// The type of block which this file is divided into.
     type Block: Block<B, Self>;
 
-    /// Return the IDs of all this file's blocks.
+    /// Return the IDs of all this `File``'s blocks.
     async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
 
     /// Return a new [`BlockId`] which is not used within this `File`.
     async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId>;
 
-    /// Return true if this file contains the given [`BlockId`] as of the given [`TxnId`].
+    /// Return true if this `File` contains the given [`BlockId`] as of the given [`TxnId`].
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
+
+    /// Copy all blocks from the source `File` into this `File`.
+    async fn copy_from(&self, other: Self, txn_id: TxnId) -> TCResult<()>;
 
     /// Create a new [`Self::Block`].
     async fn create_block(
@@ -216,10 +219,10 @@ pub trait Dir: Store + Sized + 'static {
     /// Return `true` if this directory has an entry at the given [`PathSegment`].
     async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool>;
 
-    /// Create a new [`Dir`].
+    /// Create a new `Dir`.
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
-    /// Create a new [`Dir`] with a new unique ID.
+    /// Create a new `Dir` with a new unique ID.
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
@@ -250,4 +253,12 @@ pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
 
     /// Load a saved state from persistent storage.
     async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+}
+
+/// Defines how to restore persistent state from backup.
+#[async_trait]
+pub trait Restore<D: Dir, T: Transaction<D>>: Sized {
+    type Schema;
+
+    async fn restore(&self, backup: Self) -> TCResult<()>;
 }

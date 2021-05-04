@@ -360,6 +360,7 @@ impl Transact for Dir {
 
         {
             let contents = self.contents.read(&txn_id).await.unwrap();
+
             join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {

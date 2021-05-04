@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{try_join, TryStreamExt};
 use log::debug;
 use uplock::*;
 use uuid::Uuid;
@@ -227,6 +228,38 @@ where
             .await
     }
 
+    async fn copy_from(&self, other: Self, txn_id: TxnId) -> TCResult<()> {
+        let (new_block_ids, mut contents) =
+            try_join!(other.contents.read(&txn_id), self.contents.write(txn_id))?;
+
+        let mut copied_block_ids = HashSet::with_capacity(new_block_ids.len());
+
+        let mut block_copies =
+            FuturesUnordered::from_iter(new_block_ids.iter().cloned().map(|block_id| {
+                let path = block_version(&self.path, &txn_id, &block_id);
+
+                other
+                    .read_block(txn_id, block_id.clone())
+                    .and_then(|source| self.cache.write(path, source.clone()))
+                    .map_ok(|_lock| block_id)
+            }));
+
+        while let Some(block_id) = block_copies.try_next().await? {
+            contents.insert(block_id.clone());
+            copied_block_ids.insert(block_id);
+        }
+
+        let mut mutated = self.mutated.write().await;
+        match mutated.entry(txn_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(copied_block_ids);
+            }
+            Entry::Occupied(mut entry) => entry.get_mut().extend(copied_block_ids),
+        };
+
+        Ok(())
+    }
+
     async fn create_block(
         &self,
         txn_id: TxnId,
@@ -363,8 +396,8 @@ where
         let cache = &self.cache;
         {
             let contents = self.contents.read(txn_id).await.expect("file block list");
-            let mutated = self.mutated.read().await;
-            if let Some(blocks) = mutated.get(txn_id) {
+            let mut mutated = self.mutated.write().await;
+            if let Some(blocks) = mutated.remove(txn_id) {
                 let commits = blocks
                     .iter()
                     .filter(|block_id| !contents.contains(block_id))
