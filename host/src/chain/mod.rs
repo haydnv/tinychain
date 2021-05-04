@@ -310,6 +310,9 @@ pub trait ChainInstance {
 
     /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
+
+    /// Prepare to commit by syncing this transaction's mutations to disk.
+    async fn prepare_commit(&self, txn_id: &TxnId);
 }
 
 /// The type of a [`Chain`].
@@ -411,6 +414,13 @@ impl ChainInstance for Chain {
         match self {
             Self::Block(chain) => chain.replicate(txn, source).await,
             Self::Sync(chain) => chain.replicate(txn, source).await,
+        }
+    }
+
+    async fn prepare_commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Block(chain) => chain.prepare_commit(txn_id).await,
+            Self::Sync(chain) => chain.prepare_commit(txn_id).await,
         }
     }
 }

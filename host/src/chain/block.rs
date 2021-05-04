@@ -175,6 +175,15 @@ impl ChainInstance for BlockChain {
 
         Ok(())
     }
+
+    async fn prepare_commit(&self, txn_id: &TxnId) {
+        let latest = self.latest.read(txn_id).await.expect("latest block");
+
+        self.file
+            .sync_block(*txn_id, (*latest).into())
+            .await
+            .expect("prepare BlockChain commit");
+    }
 }
 
 #[async_trait]

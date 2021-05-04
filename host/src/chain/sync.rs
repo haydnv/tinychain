@@ -69,6 +69,13 @@ impl ChainInstance for SyncChain {
 
         Ok(())
     }
+
+    async fn prepare_commit(&self, txn_id: &TxnId) {
+        self.file
+            .sync_block(*txn_id, BLOCK_ID.into())
+            .await
+            .expect("prepare SyncChain commit");
+    }
 }
 
 #[async_trait]
