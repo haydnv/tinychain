@@ -201,7 +201,21 @@ impl Persist<fs::Dir, Txn> for BlockChain {
                 .map_err(TCError::internal)?;
 
             let latest = block_ids.into_iter().fold(0, Ord::max);
-            // TODO: replay last transaction's mutations for crash recovery
+            let block = file.read_block(txn_id, latest.into()).await?;
+            if let Some((last_txn_id, ops)) = block.mutations().iter().last() {
+                for op in ops {
+                    subject
+                        .apply(txn, op)
+                        .map_err(|e| {
+                            TCError::internal(format!(
+                                "error replaying last transaction {}: {}",
+                                last_txn_id, e
+                            ))
+                        })
+                        .await?;
+                }
+            }
+
             Ok(BlockChain::new(schema, subject, latest, file))
         } else {
             let latest = 0u64;

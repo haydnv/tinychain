@@ -94,7 +94,19 @@ impl Persist<fs::Dir, Txn> for SyncChain {
                 ));
             }
 
-            // TODO: replay last transaction's mutations for crash recovery
+            if let Some((last_txn_id, ops)) = block.mutations().iter().next() {
+                for op in ops {
+                    subject
+                        .apply(txn, op)
+                        .map_err(|e| {
+                            TCError::internal(format!(
+                                "error replaying last transaction {}: {}",
+                                last_txn_id, e
+                            ))
+                        })
+                        .await?;
+                }
+            }
 
             file
         } else {

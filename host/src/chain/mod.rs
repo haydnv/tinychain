@@ -16,6 +16,7 @@ use tcgeneric::*;
 
 use crate::collection::{BTree, BTreeFile, CollectionType, Table, TableIndex, TableType};
 use crate::fs;
+use crate::route::Public;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -203,6 +204,17 @@ impl Subject {
                 let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
                 *block = backup;
                 Ok(())
+            }
+        }
+    }
+
+    async fn apply(&self, txn: &Txn, mutation: &data::Mutation) -> TCResult<()> {
+        use data::Mutation;
+
+        match mutation {
+            Mutation::Delete(path, key) => self.delete(txn, path, key.clone()).await,
+            Mutation::Put(path, key, value) => {
+                self.put(txn, path, key.clone(), value.clone().into()).await
             }
         }
     }
