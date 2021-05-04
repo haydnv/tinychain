@@ -164,31 +164,31 @@ impl Subject {
         }
     }
 
-    async fn load(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
+    async fn load(txn: &Txn, schema: Schema, dir: &fs::Dir) -> TCResult<Self> {
         match schema {
             Schema::BTree(schema) => {
-                if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
-                    BTreeFile::load(schema, file.try_into()?, txn_id)
+                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
+                    BTreeFile::load(txn, schema, file.try_into()?)
                         .map_ok(Self::BTree)
                         .await
                 } else {
-                    Self::create(Schema::BTree(schema), dir, txn_id).await
+                    Self::create(Schema::BTree(schema), dir, *txn.id()).await
                 }
             }
             Schema::Table(schema) => {
-                if dir.is_empty(&txn_id).await? {
-                    Self::create(Schema::Table(schema), dir, txn_id).await
+                if dir.is_empty(txn.id()).await? {
+                    Self::create(Schema::Table(schema), dir, *txn.id()).await
                 } else {
-                    TableIndex::load(schema, dir.clone(), txn_id)
+                    TableIndex::load(txn, schema, dir.clone())
                         .map_ok(Self::Table)
                         .await
                 }
             }
             Schema::Value(value) => {
-                if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
+                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
                     file.try_into().map(Self::Value)
                 } else {
-                    Self::create(Schema::Value(value), dir, txn_id).await
+                    Self::create(Schema::Value(value), dir, *txn.id()).await
                 }
             }
         }
@@ -484,23 +484,14 @@ impl<'en> en::IntoStream<'en> for ChainView<'en> {
     }
 }
 
-pub async fn load(
-    class: ChainType,
-    schema: Schema,
-    dir: fs::Dir,
-    txn_id: TxnId,
-) -> TCResult<Chain> {
+pub async fn load(txn: &Txn, class: ChainType, schema: Schema, dir: fs::Dir) -> TCResult<Chain> {
     match class {
         ChainType::Block => {
-            BlockChain::load(schema, dir, txn_id)
+            BlockChain::load(txn, schema, dir)
                 .map_ok(Chain::Block)
                 .await
         }
-        ChainType::Sync => {
-            SyncChain::load(schema, dir, txn_id)
-                .map_ok(Chain::Sync)
-                .await
-        }
+        ChainType::Sync => SyncChain::load(txn, schema, dir).map_ok(Chain::Sync).await,
     }
 }
 

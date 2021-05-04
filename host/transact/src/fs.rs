@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_value::Value;
 use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
-use super::TxnId;
+use super::{Transaction, TxnId};
 
 /// An alias for [`Id`] used for code clarity.
 pub type BlockId = PathSegment;
@@ -241,13 +241,13 @@ pub trait Dir: Store + Sized + 'static {
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist: Sized {
+pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
     type Schema;
     type Store: Store;
 
     /// Return the schema of this persistent state.
-    fn schema(&'_ self) -> &'_ Self::Schema;
+    fn schema(&self) -> &Self::Schema;
 
     /// Load a saved state from persistent storage.
-    async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self>;
+    async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
 }

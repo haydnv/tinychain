@@ -178,7 +178,7 @@ impl ChainInstance for BlockChain {
 }
 
 #[async_trait]
-impl Persist for BlockChain {
+impl Persist<fs::Dir, Txn> for BlockChain {
     type Schema = Schema;
     type Store = fs::Dir;
 
@@ -186,9 +186,10 @@ impl Persist for BlockChain {
         &self.schema
     }
 
-    async fn load(schema: Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
+    async fn load(txn: &Txn, schema: Schema, dir: fs::Dir) -> TCResult<Self> {
+        let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
+        let txn_id = *txn.id();
         if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             let file = fs::File::<ChainBlock>::try_from(file)?;
 

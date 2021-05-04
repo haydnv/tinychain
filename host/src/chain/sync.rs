@@ -72,7 +72,7 @@ impl ChainInstance for SyncChain {
 }
 
 #[async_trait]
-impl Persist for SyncChain {
+impl Persist<fs::Dir, Txn> for SyncChain {
     type Schema = Schema;
     type Store = fs::Dir;
 
@@ -80,9 +80,10 @@ impl Persist for SyncChain {
         &self.schema
     }
 
-    async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        let subject = Subject::load(schema.clone(), &dir, txn_id).await?;
+    async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
+        let txn_id = *txn.id();
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             let file = fs::File::<ChainBlock>::try_from(file)?;
 

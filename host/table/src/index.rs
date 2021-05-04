@@ -227,7 +227,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for Index<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D, Txn> for Index<F, D, Txn>
 where
     F: TryFrom<D::File>,
 {
@@ -238,8 +238,8 @@ where
         &self.schema
     }
 
-    async fn load(schema: IndexSchema, file: F, txn_id: TxnId) -> TCResult<Self> {
-        BTreeFile::load(schema.clone().into(), file, txn_id)
+    async fn load(txn: &Txn, schema: IndexSchema, file: F) -> TCResult<Self> {
+        BTreeFile::load(txn, schema.clone().into(), file)
             .map_ok(|btree| Self { schema, btree })
             .await
     }
@@ -951,7 +951,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist for TableIndex<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D, Txn> for TableIndex<F, D, Txn>
 where
     F: TryFrom<D::File, Error = TCError>,
 {
@@ -962,23 +962,23 @@ where
         &self.inner.schema
     }
 
-    async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self> {
+    async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let file = store
-            .get_file(&txn_id, &PRIMARY_INDEX.into())
+            .get_file(txn.id(), &PRIMARY_INDEX.into())
             .await?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
-        let primary = Index::load(schema.primary().clone(), file.try_into()?, txn_id).await?;
+        let primary = Index::load(txn, schema.primary().clone(), file.try_into()?).await?;
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
-            let file = store.get_file(&txn_id, name).await?.ok_or_else(|| {
+            let file = store.get_file(txn.id(), name).await?.ok_or_else(|| {
                 TCError::internal(format!("cannot load Table: missing index {}", name))
             })?;
 
             let index_schema = schema.primary().auxiliary(columns)?;
 
-            let index = Index::load(index_schema, file.try_into()?, txn_id).await?;
+            let index = Index::load(txn, index_schema, file.try_into()?).await?;
             auxiliary.push((name.clone(), index));
         }
 

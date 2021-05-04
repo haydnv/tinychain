@@ -704,7 +704,7 @@ impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist for BTreeFile<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D, T> {
     type Schema = RowSchema;
     type Store = F;
 
@@ -712,9 +712,10 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist for BTreeFile<F, D, T> {
         &self.inner.schema
     }
 
-    async fn load(schema: RowSchema, file: F, txn_id: TxnId) -> TCResult<Self> {
+    async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
         let order = validate_schema(&schema)?;
 
+        let txn_id = *txn.id();
         let mut root = None;
         for block_id in file.block_ids(&txn_id).await? {
             let block = file.read_block(txn_id, block_id.clone()).await?;
