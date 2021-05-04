@@ -228,7 +228,7 @@ where
             .await
     }
 
-    async fn copy_from(&self, other: Self, txn_id: TxnId) -> TCResult<()> {
+    async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()> {
         let (new_block_ids, mut contents) =
             try_join!(other.contents.read(&txn_id), self.contents.write(txn_id))?;
 

@@ -10,11 +10,13 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist, Store};
+use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
-use crate::collection::{BTree, BTreeFile, CollectionType, Table, TableIndex, TableType};
+use crate::collection::{
+    BTree, BTreeFile, Collection, CollectionType, Table, TableIndex, TableType,
+};
 use crate::fs;
 use crate::route::Public;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
@@ -197,7 +199,12 @@ impl Subject {
 
     async fn restore(&self, txn_id: TxnId, backup: State) -> TCResult<()> {
         match self {
-            Self::BTree(_btree) => Err(TCError::not_implemented("restore a BTree from backup")),
+            Self::BTree(btree) => match backup {
+                State::Collection(Collection::BTree(BTree::File(backup))) => {
+                    btree.restore(backup, txn_id).await
+                }
+                other => Err(TCError::bad_request("cannot restore a BTree from", other)),
+            },
             Self::Table(_table) => Err(TCError::not_implemented("restore a Table from backup")),
             Self::Value(file) => {
                 let backup = backup.try_into()?;

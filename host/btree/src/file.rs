@@ -731,6 +731,22 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D,
     }
 }
 
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D, T> for BTreeFile<F, D, T> {
+    async fn restore(&self, backup: Self, txn_id: TxnId) -> TCResult<()> {
+        if self.inner.schema != backup.inner.schema {
+            return Err(TCError::unsupported(
+                "cannot restore a BTree from a backup with a different schema",
+            ));
+        }
+
+        let mut root_id = self.inner.root.write(txn_id).await?;
+        self.inner.file.truncate(txn_id).await?;
+        *root_id = backup.inner.root.read(&txn_id).await?.clone();
+        self.inner.file.copy_from(&backup.inner.file, txn_id).await
+    }
+}
+
 impl<F, D, T> fmt::Display for BTreeFile<F, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a BTree")

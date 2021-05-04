@@ -166,7 +166,7 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
     async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
 
     /// Copy all blocks from the source `File` into this `File`.
-    async fn copy_from(&self, other: Self, txn_id: TxnId) -> TCResult<()>;
+    async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
 
     /// Create a new [`Self::Block`].
     async fn create_block(
@@ -258,7 +258,5 @@ pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
 /// Defines how to restore persistent state from backup.
 #[async_trait]
 pub trait Restore<D: Dir, T: Transaction<D>>: Sized {
-    type Schema;
-
-    async fn restore(&self, backup: Self) -> TCResult<()>;
+    async fn restore(&self, backup: Self, txn_id: TxnId) -> TCResult<()>;
 }
