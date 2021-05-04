@@ -201,11 +201,16 @@ impl Subject {
         match self {
             Self::BTree(btree) => match backup {
                 State::Collection(Collection::BTree(BTree::File(backup))) => {
-                    btree.restore(backup, txn_id).await
+                    btree.restore(&backup, txn_id).await
                 }
                 other => Err(TCError::bad_request("cannot restore a BTree from", other)),
             },
-            Self::Table(_table) => Err(TCError::not_implemented("restore a Table from backup")),
+            Self::Table(table) => match backup {
+                State::Collection(Collection::Table(Table::Table(backup))) => {
+                    table.restore(&backup, txn_id).await
+                }
+                other => Err(TCError::bad_request("cannot restore a Table from", other)),
+            },
             Self::Value(file) => {
                 let backup = backup.try_into()?;
                 let mut block = file.write_block(txn_id, SUBJECT.into()).await?;

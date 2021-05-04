@@ -15,7 +15,7 @@ pub use tc_btree::Column;
 pub type Row = Map<Value>;
 pub type RowSchema = Vec<Column>;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct IndexSchema {
     key: RowSchema,
     values: RowSchema,
@@ -314,7 +314,7 @@ impl fmt::Display for IndexSchema {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct TableSchema {
     primary: IndexSchema,
     indices: Vec<(Id, Vec<Id>)>,

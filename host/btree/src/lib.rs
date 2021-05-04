@@ -68,7 +68,7 @@ pub trait BTreeInstance: Clone + Instance {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Column {
     pub name: Id,
     pub dtype: ValueType,

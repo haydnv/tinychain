@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
@@ -11,7 +11,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist};
+use tc_transact::fs::{Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCTryStream, Tuple};
@@ -242,6 +242,13 @@ where
         BTreeFile::load(txn, schema.clone().into(), file)
             .map_ok(|btree| Self { schema, btree })
             .await
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D, Txn> for Index<F, D, Txn> {
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        self.btree.restore(&backup.btree, txn_id).await
     }
 }
 
@@ -989,6 +996,36 @@ where
                 auxiliary,
             }),
         })
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D, Txn> for TableIndex<F, D, Txn> {
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        if self.inner.schema != backup.inner.schema {
+            return Err(TCError::unsupported(
+                "cannot restore a Table using a backup with a different schema",
+            ));
+        }
+
+        let mut restores = Vec::with_capacity(self.inner.auxiliary.len() + 1);
+        restores.push(self.inner.primary.restore(&backup.inner.primary, txn_id));
+
+        let mut backup_indices = BTreeMap::from_iter(
+            backup
+                .inner
+                .auxiliary
+                .iter()
+                .map(|(name, index)| (name, index)),
+        );
+
+        for (name, index) in &self.inner.auxiliary {
+            restores.push(index.restore(backup_indices.remove(name).unwrap(), txn_id));
+        }
+
+        try_join_all(restores).await?;
+
+        Ok(())
     }
 }
 

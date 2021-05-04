@@ -258,5 +258,5 @@ pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
 /// Defines how to restore persistent state from backup.
 #[async_trait]
 pub trait Restore<D: Dir, T: Transaction<D>>: Sized {
-    async fn restore(&self, backup: Self, txn_id: TxnId) -> TCResult<()>;
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
 }

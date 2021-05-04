@@ -733,7 +733,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D,
 
 #[async_trait]
 impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D, T> for BTreeFile<F, D, T> {
-    async fn restore(&self, backup: Self, txn_id: TxnId) -> TCResult<()> {
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
                 "cannot restore a BTree from a backup with a different schema",

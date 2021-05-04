@@ -3,7 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import start_host, PORT
+from testutils import PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -103,64 +103,52 @@ class TableTests(unittest.TestCase):
         self.assertEqual(result, expected(list([[num2words(i), i] for i in range(10, 20)])))
 
 
-class Persistent(tc.Cluster):
-    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
+class ChainTests(PersistenceTest, unittest.TestCase):
+    NAME = "table"
 
-    def _configure(self):
-        self.table = tc.Chain.Block(tc.Table(SCHEMA))
+    def cluster(self, chain_type):
+        class Persistent(tc.Cluster):
+            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
 
+            def _configure(self):
+                self.table = tc.Chain.Block(tc.Table(SCHEMA))
 
-class PersistenceTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        hosts = []
-        for i in range(3):
-            port = PORT + i
-            host_uri = f"http://127.0.0.1:{port}" + tc.uri(Persistent).path()
-            host = start_host(f"test_table_{i}", [Persistent], host_uri=tc.URI(host_uri))
-            hosts.append(host)
+        return Persistent
 
-        cls.hosts = hosts
-
-    def testInsert(self):
+    def execute(self, hosts):
         row1 = ["one", 1]
         row2 = ["two", 2]
 
-        self.hosts[0].put("/test/table/table", ["one"], [1])
+        hosts[0].put("/test/table/table", ["one"], [1])
 
-        for host in self.hosts:
+        for host in hosts:
             actual = host.get("/test/table/table", ["one"])
             self.assertEqual(actual, row1)
 
-        self.hosts[1].stop()
-        self.hosts[2].put("/test/table/table", ["two"], [2])
-        self.hosts[1].start()
+        hosts[1].stop()
+        hosts[2].put("/test/table/table", ["two"], [2])
+        hosts[1].start()
 
-        for host in self.hosts:
+        for host in hosts:
             actual = host.get("/test/table/table", ["one"])
             self.assertEqual(actual, row1)
 
             actual = host.get("/test/table/table", ["two"])
             self.assertEqual(actual, row2)
 
-        self.hosts[2].stop()
-        self.hosts[1].delete("/test/table/table", ["one"])
-        self.hosts[2].start()
+        hosts[2].stop()
+        hosts[1].delete("/test/table/table", ["one"])
+        hosts[2].start()
 
-        for host in self.hosts:
+        for host in hosts:
             actual = host.get("/test/table/table")
             self.assertEqual(actual, expected([row2]))
 
         n = 100
         for i in range(n):
-            self.hosts[0].put("/test/table/table", [num2words(i)], [i])
+            hosts[0].put("/test/table/table", [num2words(i)], [i])
 
-        self.assertEqual(self.hosts[1].get("/test/table/table/count"), n)
-
-    @classmethod
-    def tearDownClass(cls):
-        for host in cls.hosts:
-            host.stop()
+        self.assertEqual(hosts[1].get("/test/table/table/count"), n)
 
 
 def expected(rows):
