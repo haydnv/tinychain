@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import tinychain as tc
 
 
@@ -38,4 +39,46 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
     print(f"start host on port {port}")
     host.start()
     return host
+
+
+class PersistenceTest(object):
+    NUM_HOSTS = 4
+    NAME = "persistence"
+
+    def cluster(self, chain_type):
+        raise NotImplementedError
+
+    def execute(self, hosts):
+        raise NotImplementedError
+
+    def testBlockChain(self):
+        self._execute(tc.Chain.Block)
+
+    def testSyncChain(self):
+        self._execute(tc.Chain.Sync)
+
+    def _execute(self, chain_type):
+        name = self.NAME
+
+        cluster = self.cluster(chain_type)
+        
+        hosts = []
+        for i in range(self.NUM_HOSTS):
+            port = PORT + i
+            host_uri = f"http://127.0.0.1:{port}" + tc.uri(cluster).path()
+            host = start_host(f"test_{name}_{i}", [cluster], host_uri=tc.URI(host_uri))
+            hosts.append(host)
+            printlines(5)
+
+        time.sleep(1)
+
+        self.execute(hosts)
+
+        for host in hosts:
+            host.stop()
+
+
+def printlines(n):
+    for _ in range(n):
+        print()
 

@@ -2,56 +2,36 @@ import time
 import tinychain as tc
 import unittest
 
-from testutils import PORT, start_host
+from testutils import PORT, PersistenceTest
 
 
-NUM_HOSTS = 4
+class ChainTests(PersistenceTest, unittest.TestCase):
+    NAME = "replication"
 
+    def cluster(self, chain_type):
+        class Rev(tc.Cluster):
+            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
 
-def cluster_class(chain_class):
-    class Rev(tc.Cluster):
-        __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
+            def _configure(self):
+                self.rev = chain_type(tc.UInt(0))
 
-        def _configure(self):
-            self.rev = chain_class(tc.UInt(0))
+            @tc.get_method
+            def version(self) -> tc.Number:
+                return self.rev
 
-        @tc.get_method
-        def version(self) -> tc.Number:
-            return self.rev
+            @tc.post_method
+            def bump(self, txn):
+                txn.rev = self.version()
+                return self.rev.set(txn.rev + 1)
 
-        @tc.post_method
-        def bump(self, txn):
-            txn.rev = self.version()
-            return self.rev.set(txn.rev + 1)
+        return Rev
 
-    return Rev
-
-
-class ChainTests(unittest.TestCase):
-    CHAIN = tc.Chain.Sync
-
-    def setUp(self):
-        Rev = cluster_class(self.CHAIN)
-
-        hosts = []
-        for i in range(NUM_HOSTS):
-            port = PORT + i
-            host_uri = f"http://127.0.0.1:{port}" + tc.uri(Rev).path()
-            host = start_host(f"test_replication_{i}", [Rev], host_uri=tc.URI(host_uri))
-            hosts.append(host)
-            printlines(5)
-
-        self.hosts = hosts
-
-        time.sleep(1)
-
-    def testReplication(self):
-        Rev = cluster_class(self.CHAIN)
-        cluster_path = tc.uri(Rev).path()
+    def execute(self, hosts):
+        cluster_path = "/app/test/replication"
 
         # check that the replica set is correctly updated across the cluster
-        expected = set("http://" + tc.uri(host) + cluster_path for host in self.hosts)
-        for host in self.hosts:
+        expected = set("http://" + tc.uri(host) + cluster_path for host in hosts)
+        for host in hosts:
             actual = {}
             for link in host.get(cluster_path + "/replicas"):
                 actual.update(link)
@@ -60,42 +40,30 @@ class ChainTests(unittest.TestCase):
             self.assertEqual(expected, actual)
 
         # test a distributed write
-        self.hosts[-1].post(cluster_path + "/bump")
-        for host in self.hosts:
+        hosts[-1].post(cluster_path + "/bump")
+        for host in hosts:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 1)
 
         # test a commit with one failed host
-        self.hosts[-1].stop()
-        self.hosts[-2].post(cluster_path + "/bump")
-        for host in self.hosts[:-1]:
+        hosts[-1].stop()
+        hosts[-2].post(cluster_path + "/bump")
+        for host in hosts[:-1]:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 2)
 
         # test restarting the failed host
-        self.hosts[-1].start()
-        actual = self.hosts[-1].get(cluster_path + "/rev")
+        hosts[-1].start()
+        actual = hosts[-1].get(cluster_path + "/rev")
         self.assertEqual(actual, 2)
 
         # test a distributed write after recovering
-        self.hosts[0].post(cluster_path + "/bump")
+        hosts[0].post(cluster_path + "/bump")
 
-        for host in self.hosts:
+        for host in hosts:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 3)
 
-    def tearDown(self):
-        for host in self.hosts:
-            host.stop()
-
-
-class BlockChainTests(ChainTests):
-    CHAIN = tc.Chain.Block
-
-
-def printlines(n):
-    for _ in range(n):
-        print()
 
 if __name__ == "__main__":
     unittest.main()
