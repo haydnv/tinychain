@@ -1,43 +1,18 @@
-use futures::TryFutureExt;
+use std::iter::FromIterator;
+
+use futures::{TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeInstance, Range};
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::Value;
-use tcgeneric::{label, PathSegment, Tuple};
+use tcgeneric::{label, Map, PathSegment, Tuple};
 
 use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
-
-struct CountHandler<'a, T> {
-    btree: &'a T,
-}
-
-impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::count does not accept a key (call BTree::slice first)",
-                        key,
-                    ));
-                }
-
-                self.btree.count(*txn.id()).map_ok(State::from).await
-            })
-        }))
-    }
-}
-
-impl<'a, T> From<&'a T> for CountHandler<'a, T> {
-    fn from(btree: &'a T) -> Self {
-        Self { btree }
-    }
-}
 
 struct BTreeHandler<'a, T> {
     btree: &'a T,
@@ -118,6 +93,66 @@ impl<'a, T> From<&'a T> for BTreeHandler<'a, T> {
     }
 }
 
+struct CountHandler<'a, T> {
+    btree: &'a T,
+}
+
+impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::count does not accept a key (call BTree::slice first)",
+                        key,
+                    ));
+                }
+
+                self.btree.count(*txn.id()).map_ok(State::from).await
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for CountHandler<'a, T> {
+    fn from(btree: &'a T) -> Self {
+        Self { btree }
+    }
+}
+
+struct FirstHandler<'a, T> {
+    btree: &'a T,
+}
+
+impl<'a, T: BTreeInstance> Handler<'a> for FirstHandler<'a, T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::first does not accept a key",
+                        key,
+                    ));
+                }
+
+                let mut keys = self.btree.clone().keys(*txn.id()).await?;
+                if let Some(values) = keys.try_next().await? {
+                    let names = self.btree.schema().iter().map(|col| col.name()).cloned();
+                    Ok(Map::from_iter(names.zip(values.into_iter().map(State::from))).into())
+                } else {
+                    Err(TCError::not_found("this BTree is empty"))
+                }
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for FirstHandler<'a, T> {
+    fn from(btree: &'a T) -> Self {
+        Self { btree }
+    }
+}
+
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
@@ -143,6 +178,7 @@ where
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
+            "first" => Some(Box::new(FirstHandler::from(btree))),
             _ => None,
         }
     } else {

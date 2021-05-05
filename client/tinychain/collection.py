@@ -136,6 +136,16 @@ class BTree(Collection):
 
         return self._delete("/")
 
+    def first(self):
+        """
+        Return the first row in this `BTree`.
+
+        If there are no rows, this will raise a :class:`tc.error.NotFound` exception.
+        To avoid this, first check `tc.If
+        """
+
+        return self._get("/first", Map)
+
     def insert(self, key):
         """
         Insert the given key into this `BTree`.
