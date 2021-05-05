@@ -97,7 +97,11 @@ class URI(object):
         
         Example:
             `value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))`
-        """ 
+        """
+
+        if not str(name):
+            return self
+
         return URI(str(self), [name])
 
     def host(self):
@@ -151,7 +155,10 @@ class URI(object):
         return str(self).startswith(prefix)
 
     def __add__(self, other):
-        return URI(str(self) + other)
+        if other == "/":
+            return self
+        else:
+            return URI(str(self) + other)
 
     def __radd__(self, other):
         return URI(other) + str(self)

@@ -35,36 +35,36 @@ class State(object):
     def __repr__(self):
         return f"{self.__class__.__name__}({form_of(self)})"
 
-    def _method(self, path):
-        subject = uri(self) + path
+    def _method(self, name):
+        subject = uri(self).append(name)
         if subject.startswith("/state") and subject.path() != uri(self.__class__):
             raise ValueError(
-                f"cannot call instance method {path} with an absolute path {uri(subject)}")
+                f"cannot call instance method {path} with an absolute path: {subject}")
 
         return subject
 
-    def _get(self, path, key=None, rtype=None):
-        subject = self._method(path)
+    def _get(self, name, key=None, rtype=None):
+        subject = self._method(name)
         rtype = State if rtype is None else rtype
         return rtype(OpRef.Get(subject, key))
 
-    def _put(self, path, key=None, value=None):
+    def _put(self, name, key=None, value=None):
         from .value import Nil
 
-        subject = self._method(path)
+        subject = self._method(name)
         return Nil(OpRef.Put(subject, key, value))
 
-    def _post(self, path, rtype=None, **params):
+    def _post(self, _method_name, rtype=None, **params):
         from .value import Nil
 
-        subject = self._method(path)
+        subject = self._method(_method_name)
         rtype = State if rtype is None else rtype
         return rtype(OpRef.Post(subject, **params))
 
-    def _delete(self, path, key=None):
+    def _delete(self, name, key=None):
         from .value import Nil
 
-        subject = self._method(path)
+        subject = self._method(name)
         return Nil(OpRef.Delete(subject, key))
 
     def dtype(self):

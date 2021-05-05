@@ -3,6 +3,7 @@
 import inspect
 import logging
 
+from .chain import Chain
 from .decorators import *
 from .ref import OpRef
 from .reflect import Meta
@@ -30,6 +31,8 @@ class Cluster(object, metaclass=Meta):
                     return attr(form)
 
                 setattr(instance, name, ctr.method(instance, name))
+            elif isinstance(attr, State):
+                setattr(instance, name, type(attr)(uri(cls) + f"/{name}"))
 
         return instance
 

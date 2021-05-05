@@ -112,9 +112,9 @@ class BTree(Collection):
         prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
 
         if any(isinstance(k, Range) for k in prefix):
-            return self._post("/", BTree, **{"range": prefix})
+            return self._post("", BTree, **{"range": prefix})
         else:
-            return self._get("/", prefix, BTree)
+            return self._get("", prefix, BTree)
 
     def count(self):
         """
@@ -124,7 +124,7 @@ class BTree(Collection):
         call `btree[prefix].count()`.
         """
 
-        return self._get("/count", rtype=UInt)
+        return self._get("count", rtype=UInt)
 
     def delete(self):
         """
@@ -134,17 +134,16 @@ class BTree(Collection):
         `btree[prefix].delete()`.
         """
 
-        return self._delete("/")
+        return self._delete("")
 
     def first(self):
         """
         Return the first row in this `BTree`.
 
         If there are no rows, this will raise a :class:`tc.error.NotFound` exception.
-        To avoid this, first check `tc.If
         """
 
-        return self._get("/first", Map)
+        return self._get("first", Map)
 
     def insert(self, key):
         """
@@ -153,14 +152,14 @@ class BTree(Collection):
         If the key is already present, this is a no-op.
         """
 
-        return self._put("/", value=key)
+        return self._put("", value=key)
 
     def reverse(self):
         """
         Return a slice of this `BTree` with the same range with its keys in reverse order.
         """
 
-        return self._get("/", (None, True), BTree)
+        return self._get("", (None, True), BTree)
 
 
 class Table(Collection):
@@ -187,7 +186,7 @@ class Table(Collection):
         call `table.where(range).count()`.
         """
 
-        return self._get("/count", rtype=UInt)
+        return self._get("count", rtype=UInt)
 
     def group_by(self, columns):
         """
@@ -196,7 +195,7 @@ class Table(Collection):
         If no index supports ordering by `columns`, this will raise a :class:`BadRequest` error.
         """
 
-        return self._get("/group", columns, Table)
+        return self._get("group", columns, Table)
 
     def insert(self, key, values=[]):
         """
@@ -205,7 +204,7 @@ class Table(Collection):
         If the key is already present, this will raise a :class:`BadRequest` error.
         """
 
-        return self._put("/insert", key, values)
+        return self._put("insert", key, values)
 
     def order_by(self, columns, reverse=False):
         """
@@ -215,7 +214,7 @@ class Table(Collection):
         :class:`BadRequest` error.
         """
 
-        return self._get("/order", (columns, reverse), Table)
+        return self._get("order", (columns, reverse), Table)
 
     def upsert(self, key, values=[]):
         """
@@ -225,7 +224,7 @@ class Table(Collection):
         with the given `values`.
         """
 
-        return self._put(key, values)
+        return self._put("", key, values)
 
     def where(self, **cond):
         """
@@ -239,5 +238,5 @@ class Table(Collection):
             col: Range.from_slice(val) if isinstance(val, slice) else val
             for col, val in cond.items()}
 
-        return self._post("/", Table, **cond)
+        return self._post("", Table, **cond)
 

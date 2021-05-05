@@ -136,7 +136,7 @@ class PutMethod(Method):
     __uri__ = uri(OpDef.Put)
 
     def __call__(self, key, value):
-        return OpRef.Put(uri(self.header) + "/" + self.name, key, value)
+        return OpRef.Put(uri(self.header).append(self.name), key, value)
 
     def __form__(self):
         sig = inspect.signature(self.form)
