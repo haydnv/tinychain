@@ -7,7 +7,7 @@ use tc_error::*;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPath, Tuple};
 
 use crate::object::InstanceExt;
-use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::*;
 use crate::state::State;
 use crate::txn::Txn;
@@ -49,15 +49,8 @@ impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
         context.insert(key_name, key.into());
         context.insert(value_name, value);
 
-        let state = call_method(txn, self.subject, self.path, context.into(), op_def).await?;
-        if state.is_none() {
-            Ok(())
-        } else {
-            Err(TCError::bad_request(
-                "PUT method should return None, not",
-                state,
-            ))
-        }
+        call_method(txn, self.subject, self.path, context.into(), op_def).await?;
+        Ok(())
     }
 }
 
@@ -89,6 +82,30 @@ impl<'a, T: Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
     }
 }
 
+struct DeleteMethod<'a, T: Instance> {
+    subject: &'a InstanceExt<T>,
+    method: DeleteOp,
+    path: &'a [PathSegment],
+}
+
+impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
+    async fn call(self, txn: Txn, key: Value) -> TCResult<()> {
+        let (key_name, op_def) = self.method;
+
+        let mut context = HashMap::with_capacity(1);
+        context.insert(key_name, key.into());
+
+        call_method(txn, self.subject, self.path, context.into(), op_def).await?;
+        Ok(())
+    }
+}
+
+impl<'a, T: Instance + Route + 'a> Handler<'a> for DeleteMethod<'a, T> {
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
+    }
+}
+
 impl<T: Instance + Route> Route for InstanceExt<T> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("InstanceExt::route {}", TCPath::from(path));
@@ -110,6 +127,11 @@ impl<T: Instance + Route> Route for InstanceExt<T> {
                 Scalar::Op(OpDef::Post(post_op)) => Some(Box::new(PostMethod {
                     subject: self,
                     method: post_op.clone(),
+                    path: &path[1..],
+                })),
+                Scalar::Op(OpDef::Delete(delete_op)) => Some(Box::new(DeleteMethod {
+                    subject: self,
+                    method: delete_op.clone(),
                     path: &path[1..],
                 })),
                 other => other.route(&path[1..]),
