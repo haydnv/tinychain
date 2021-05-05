@@ -38,12 +38,12 @@ serde_json = { version = "1.0" }
 sha2 = "0.9"
 structopt = "0.3"
 tbon = "0.1"
-tc-btree = { path = "btree" }
-tc-error = { path = "error" }
-tc-table = { path = "table" }
-tc-transact = { path = "transact" }
-tc-value = { path = "value" }
-tcgeneric = { path = "generic" }
+tc-btree = "~0.1.1"
+tc-error = "0.2"
+tc-table = "0.1"
+tc-transact = "0.4"
+tc-value = "~0.1.7"
+tcgeneric = "~0.1.4"
 tokio = { version = "1.5", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
