@@ -35,6 +35,38 @@ class State(object):
     def __repr__(self):
         return f"{self.__class__.__name__}({form_of(self)})"
 
+    def _method(self, path):
+        subject = uri(self) + path
+        if subject.startswith("/state") and subject.path() != uri(self.__class__):
+            raise ValueError(
+                f"cannot call instance method {path} with an absolute path {uri(subject)}")
+
+        return subject
+
+    def _get(self, path, key=None, rtype=None):
+        subject = self._method(path)
+        rtype = State if rtype is None else rtype
+        return rtype(OpRef.Get(subject, key))
+
+    def _put(self, path, key=None, value=None):
+        from .value import Nil
+
+        subject = self._method(path)
+        return Nil(OpRef.Put(subject, key, value))
+
+    def _post(self, path, rtype=None, **params):
+        from .value import Nil
+
+        subject = self._method(path)
+        rtype = State if rtype is None else rtype
+        return rtype(OpRef.Post(subject, **params))
+
+    def _delete(self, path, key=None):
+        from .value import Nil
+
+        subject = self._method(path)
+        return Nil(OpRef.Delete(subject, key))
+
     def dtype(self):
         """Return the native :class:`Class` of this `State`."""
         return Class(OpRef.get(uri(self) + "/class"))

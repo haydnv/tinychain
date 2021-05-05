@@ -147,6 +147,9 @@ class URI(object):
             if i > 0:
                 return self._root[:i]
 
+    def startswith(self, prefix):
+        return str(self).startswith(prefix)
+
     def __add__(self, other):
         return URI(str(self) + other)
 

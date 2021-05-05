@@ -41,6 +41,14 @@ class Cluster(object, metaclass=Meta):
         """Initialize this `Cluster`'s :class:~`chain.Chain`s."""
         pass
 
+    def _method(self, path):
+        subject = uri(self) + path
+        if subject.startswith("/state") and subject.path() != uri(self.__class__):
+            raise ValueError(
+                f"cannot call instance method {path} with an absolute path {uri(subject)}")
+
+        return subject
+
     def authorize(self, scope):
         """Raise an error if the current transaction has not been granted the given scope."""
 

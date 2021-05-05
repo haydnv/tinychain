@@ -2,23 +2,19 @@
 
 from .ref import OpRef
 from .reflect import Meta
-from .state import State
+from .state import Map, State
 from .util import *
-from .value import UInt, Nil, Value
+from .value import Nil, UInt, Value
 
 
 class Bound(object):
-    """
-    An upper or lower bound on a :class:`Range`.
-    """
+    """An upper or lower bound on a :class:`Range`."""
 
     pass
 
 
 class Ex(Bound):
-    """
-    An exclusive `Bound`.
-    """
+    """An exclusive `Bound`."""
 
     def __init__(self, value):
         self.value = value
@@ -28,9 +24,7 @@ class Ex(Bound):
 
 
 class In(Bound):
-    """
-    An inclusive `Bound`.
-    """
+    """An inclusive `Bound`."""
 
     def __init__(self, value):
         self.value = value
@@ -40,9 +34,8 @@ class In(Bound):
 
 
 class Un(Bound):
-    """
-    An unbounded side of a :class:`Range`.
-    """
+    """An unbounded side of a :class:`Range`"""
+
     def __json__(self):
         return Nil
 
@@ -52,9 +45,7 @@ Bound.In = In
 
 
 class Range(object):
-    """
-    A selection range of one or two :class:`Bound`\s.
-    """
+    """A selection range of one or two :class:`Bound`\s."""
 
     @staticmethod
     def from_slice(s):
@@ -76,9 +67,7 @@ class Range(object):
 
 
 class Column(object):
-    """
-    A column in the schema of a :class:`BTree`.
-    """
+    """A column in the schema of a :class:`BTree`."""
 
     def __init__(self, name, dtype, max_size=None):
         self.name = str(name)
@@ -93,24 +82,18 @@ class Column(object):
 
 
 class Collection(State, metaclass=Meta):
-    """
-    Data structure responsible for storing a collection of :class:`Value`\s.
-    """
+    """Data structure responsible for storing a collection of :class:`Value`\s."""
 
     __uri__ = uri(State) + "/collection"
 
 
 class BTree(Collection):
-    """
-    A `BTree` with a schema of named, :class:`Value`-typed :class:`Column`\s.
-    """
+    """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column`\s."""
 
     __uri__ = uri(Collection) + "/btree"
 
     class Schema(object):
-        """
-        A `BTree` schema which comprises a tuple of :class:`Column`\s.
-        """
+        """A `BTree` schema which comprises a tuple of :class:`Column`\s."""
 
         def __init__(self, *columns):
             self.columns = columns
@@ -129,9 +112,9 @@ class BTree(Collection):
         prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
 
         if any(isinstance(k, Range) for k in prefix):
-            return BTree(OpRef.Post(uri(self), **{"range": prefix}))
+            return self._post("/", BTree, **{"range": prefix})
         else:
-            return BTree(OpRef.Get(uri(self), prefix))
+            return self._get("/", prefix, BTree)
 
     def count(self):
         """
@@ -141,7 +124,7 @@ class BTree(Collection):
         call `btree[prefix].count()`.
         """
 
-        return UInt(OpRef.Get(uri(self) + "/count"))
+        return self._get("/count", rtype=UInt)
 
     def delete(self):
         """
@@ -151,7 +134,7 @@ class BTree(Collection):
         `btree[prefix].delete()`.
         """
 
-        return Nil(OpRef.Delete(uri(self)))
+        return self._delete("/")
 
     def insert(self, key):
         """
@@ -160,28 +143,23 @@ class BTree(Collection):
         If the key is already present, this is a no-op.
         """
 
-        return Nil(OpRef.Put(uri(self), None, key))
+        return self._put("/", value=key)
 
     def reverse(self):
         """
         Return a slice of this `BTree` with the same range with its keys in reverse order.
         """
 
-        return BTree(OpRef.Get(uri(self), (None, True)))
-
+        return self._get("/", (None, True), BTree)
 
 
 class Table(Collection):
-    """
-    A `Table` which supports a multi-column primary key, multi-column value, and optional indices.
-    """
+    """A `Table` defined by a primary key, values, and optional indices."""
 
     __uri__ = uri(Collection) + "/table"
 
     class Schema(object):
-        """
-        A `Table` schema which comprises a primary key and value :class:`Column`\s.
-        """
+        """A `Table` schema which comprises a primary key and value :class:`Column`\s."""
 
         def __init__(self, key, values=[], indices={}):
             self.key = key
@@ -199,36 +177,35 @@ class Table(Collection):
         call `table.where(range).count()`.
         """
 
-        return UInt(OpRef.Get(uri(self) + "/count"))
+        return self._get("/count", rtype=UInt)
 
     def group_by(self, columns):
         """
         Aggregate this `Table` according to the values of the specified columns.
 
-        If no index supports ordering by `columns`, this will raise a
-        :class:`tc.error.BadRequest` error.
+        If no index supports ordering by `columns`, this will raise a :class:`BadRequest` error.
         """
 
-        return Table(OpRef.Get(uri(self) + "/group", columns))
+        return self._get("/group", columns, Table)
 
     def insert(self, key, values=[]):
         """
         Insert the given row into this `Table`.
 
-        If the key is already present, this will raise a :class:`tc.error.BadRequest` error.
+        If the key is already present, this will raise a :class:`BadRequest` error.
         """
 
-        return Nil(OpRef.Put(uri(self) + "/insert", key, values))
+        return self._put("/insert", key, values)
 
     def order_by(self, columns, reverse=False):
         """
         Set the order in which this `Table`'s rows will be iterated over.
 
         If no index supports the given order, this will raise a
-        :class:`tc.error.BadRequest` error.
+        :class:`BadRequest` error.
         """
 
-        return Table(OpRef.Get(uri(self) + "/order", (columns, reverse)))
+        return self._get("/order", (columns, reverse), Table)
 
     def upsert(self, key, values=[]):
         """
@@ -238,19 +215,19 @@ class Table(Collection):
         with the given `values`.
         """
 
-        return Nil(OpRef.Put(uri(self), key, values))
+        return self._put(key, values)
 
     def where(self, **cond):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
         If there is no index which supports the given range, this will raise 
-        a :class:`tc.error.BadRequest` error.
+        a :class:`BadRequest` error.
         """
 
         cond = {
             col: Range.from_slice(val) if isinstance(val, slice) else val
             for col, val in cond.items()}
 
-        return Table(OpRef.Post(uri(self), **cond))
+        return self._post("/", Table, **cond)
 
