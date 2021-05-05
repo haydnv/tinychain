@@ -2,7 +2,7 @@
 //! cross-service transactions across an ensemble of microservices which implement the
 //! Tinychain protocol. Tinychain itself is also a Turing-complete application platform.
 //!
-//! Tinychain currently support `BlockChain`, `BTree`, and `Table` collection types,
+//! Tinychain currently supports `BlockChain`, `BTree`, and `Table` collection types,
 //! with more planned for the future.
 //!
 //! Tinychain is intended to be used as an executable binary (i.e., with `cargo install`) via its
