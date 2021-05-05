@@ -22,9 +22,9 @@ rand = "0.7"
 serde = { version = "1.0", features = []}
 sha2 = "0.9"
 destream_json = { version = "0.5", features = ["tokio-io"] }
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
-tc-value = { path = "../value" }
+tcgeneric = "~0.1.4"
+tc-error = "0.2"
+tc-value = "~0.1.7"
 tokio = { version = "1.5", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
