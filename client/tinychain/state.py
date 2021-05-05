@@ -39,7 +39,7 @@ class State(object):
         subject = uri(self).append(name)
         if subject.startswith("/state") and subject.path() != uri(self.__class__):
             raise ValueError(
-                f"cannot call instance method {path} with an absolute path: {subject}")
+                f"cannot call instance method {name} with an absolute path: {subject}")
 
         return subject
 

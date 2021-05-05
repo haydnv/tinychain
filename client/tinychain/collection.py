@@ -143,7 +143,7 @@ class BTree(Collection):
         If there are no rows, this will raise a :class:`tc.error.NotFound` exception.
         """
 
-        return self._get("first", Map)
+        return self._get("first", rtype=Map)
 
     def insert(self, key):
         """
