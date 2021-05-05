@@ -281,6 +281,7 @@ where
 
             let (l, r) = collator.bisect(&node.keys, range);
 
+            #[cfg(debug_assertions)]
             debug!("delete from {} [{}..{}] ({:?})", *node, l, r, range);
 
             if node.leaf {
@@ -649,6 +650,7 @@ where
             order
         );
 
+        #[cfg(debug_assertions)]
         debug!("root node {} is {}", *root_id, *root);
 
         if root.leaf {
