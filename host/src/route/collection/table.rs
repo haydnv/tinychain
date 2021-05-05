@@ -100,6 +100,30 @@ impl<'a, T> From<&'a T> for InsertHandler<'a, T> {
     }
 }
 
+struct LimitHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for LimitHandler<T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let limit = key.try_cast_into(|v| {
+                    TCError::bad_request("limit must be a positive integer, not", v)
+                })?;
+
+                Ok(Collection::Table(self.table.limit(limit).into()).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for LimitHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
 struct OrderHandler<T> {
     table: T,
 }
@@ -211,6 +235,29 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
     }
 }
 
+struct SelectHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for SelectHandler<T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let columns =
+                    key.try_cast_into(|v| TCError::bad_request("invalid column list", v))?;
+
+                Ok(Collection::Table(self.table.select(columns)?.into()).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for SelectHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
 impl<'a, T> From<&'a T> for TableHandler<'a, T> {
     fn from(table: &'a T) -> Self {
         Self { table }
@@ -240,8 +287,10 @@ fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
             "insert" => Some(Box::new(InsertHandler::from(table))),
+            "limit" => Some(Box::new(LimitHandler::from(table.clone()))),
             "group" => Some(Box::new(GroupHandler::from(table.clone()))),
             "order" => Some(Box::new(OrderHandler::from(table.clone()))),
+            "select" => Some(Box::new(SelectHandler::from(table.clone()))),
             _ => None,
         }
     } else {

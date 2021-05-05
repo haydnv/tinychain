@@ -206,6 +206,11 @@ class Table(Collection):
 
         return self._put("insert", key, values)
 
+    def limit(self, limit):
+        """Limit the number of rows returned from this `Table`."""
+
+        return self._get("limit", limit, Table)
+
     def order_by(self, columns, reverse=False):
         """
         Set the order in which this `Table`'s rows will be iterated over.
@@ -215,6 +220,11 @@ class Table(Collection):
         """
 
         return self._get("order", (columns, reverse), Table)
+
+    def select(self, *columns):
+        """Return a `Table` containing only the specified columns."""
+
+        return self._get("select", columns, Table)
 
     def upsert(self, key, values=[]):
         """

@@ -26,22 +26,6 @@ class TableTests(unittest.TestCase):
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
 
-    def testInsert(self):
-        for x in range(0, 100, 10):
-            keys = list(range(x))
-            random.shuffle(keys)
-
-            cxt = tc.Context()
-            cxt.table = tc.Table(SCHEMA)
-            cxt.inserts = [
-                cxt.table.insert((num2words(i),), (i,))
-                for i in keys]
-
-            cxt.result = tc.After(cxt.inserts, cxt.table.count())
-
-            result = self.host.post(ENDPOINT, cxt)
-            self.assertEqual(result, x)
-
     def testGroupBy(self):
         count = 50
         values = [(v % 2,) for v in range(count)]
@@ -62,6 +46,36 @@ class TableTests(unittest.TestCase):
             ]
         })
 
+    def testInsert(self):
+        for x in range(0, 100, 10):
+            keys = list(range(x))
+            random.shuffle(keys)
+
+            cxt = tc.Context()
+            cxt.table = tc.Table(SCHEMA)
+            cxt.inserts = [
+                cxt.table.insert((num2words(i),), (i,))
+                for i in keys]
+
+            cxt.result = tc.After(cxt.inserts, cxt.table.count())
+
+            result = self.host.post(ENDPOINT, cxt)
+            self.assertEqual(result, x)
+
+    def testLimit(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.limit(1))
+
+        result = self.host.post(ENDPOINT, cxt)
+        first_row = sorted(list(k + v) for k, v in zip(keys, values))[0]
+        self.assertEqual(result, expected([first_row]))
+
     def testOrderBy(self):
         count = 50
         values = [(v,) for v in range(count)]
@@ -75,6 +89,27 @@ class TableTests(unittest.TestCase):
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(rows))
+
+    def testSelect(self):
+        count = 5
+        values = [[v] for v in range(count)]
+        keys = [[num2words(i)] for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.After(cxt.inserts, cxt.table.select("name"))
+
+        expected = {
+            str(tc.uri(tc.Table)): [
+                tc.to_json(tc.Table.Schema([tc.Column("name", tc.String, 512)])),
+                list(sorted(keys))
+            ]
+        }
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        self.assertEqual(actual, expected)
 
     def testSlice(self):
         count = 50
