@@ -70,6 +70,36 @@ impl<T> From<T> for GroupHandler<T> {
     }
 }
 
+struct InsertHandler<'a, T> {
+    table: &'a T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for InsertHandler<'a, T> {
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(|txn, key, values| {
+            Box::pin(async move {
+                let key =
+                    key.try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
+
+                let values = Value::try_cast_from(values, |s| {
+                    TCError::bad_request("invalid values for Table row", s)
+                })?;
+
+                let values = values
+                    .try_cast_into(|v| TCError::bad_request("invalid values for Table row", v))?;
+
+                self.table.insert(*txn.id(), key, values).await
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for InsertHandler<'a, T> {
+    fn from(table: &'a T) -> Self {
+        Self { table }
+    }
+}
+
 struct OrderHandler<T> {
     table: T,
 }
@@ -209,6 +239,7 @@ fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
     } else if path.len() == 1 {
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
+            "insert" => Some(Box::new(InsertHandler::from(table))),
             "group" => Some(Box::new(GroupHandler::from(table.clone()))),
             "order" => Some(Box::new(OrderHandler::from(table.clone()))),
             _ => None,

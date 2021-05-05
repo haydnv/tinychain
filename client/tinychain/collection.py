@@ -195,8 +195,8 @@ class Table(Collection):
         """
         Return the number of rows in this `Table`.
 
-        To count the number of keys beginning with a specific prefix,
-        call `btree[prefix].count()`.
+        To count the number of keys which match a specific range,
+        call `table.where(range).count()`.
         """
 
         return UInt(OpRef.Get(uri(self) + "/count"))
@@ -204,6 +204,9 @@ class Table(Collection):
     def group_by(self, columns):
         """
         Aggregate this `Table` according to the values of the specified columns.
+
+        If no index supports ordering by `columns`, this will raise a
+        :class:`tc.error.BadRequest` error.
         """
 
         return Table(OpRef.Get(uri(self) + "/group", columns))
@@ -215,7 +218,7 @@ class Table(Collection):
         If the key is already present, this will raise a :class:`tc.error.BadRequest` error.
         """
 
-        return Nil(OpRef.Put(uri(self), key, values))
+        return Nil(OpRef.Put(uri(self) + "/insert", key, values))
 
     def order_by(self, columns, reverse=False):
         """
@@ -226,6 +229,16 @@ class Table(Collection):
         """
 
         return Table(OpRef.Get(uri(self) + "/order", (columns, reverse)))
+
+    def upsert(self, key, values=[]):
+        """
+        Upsert the given row into this `Table`.
+
+        If the row is not present, it will be inserted; otherwise, it will be updated
+        with the given `values`.
+        """
+
+        return Nil(OpRef.Put(uri(self), key, values))
 
     def where(self, **cond):
         """
