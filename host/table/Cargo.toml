@@ -18,8 +18,8 @@ destream = "0.3"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 safecast = "0.1"
-tc-btree = { path = "../btree" }
-tc-error = { path = "../error" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-btree = "~0.1.1"
+tc-error = "0.2"
+tc-transact = "0.4"
+tc-value = "~0.1.7"
+tcgeneric = "~0.1.4"
