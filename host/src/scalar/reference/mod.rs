@@ -1,4 +1,5 @@
-/// Utilities to reference to a [`State`] within a [`Txn`], and resolve that [`TCRef`].
+//! Utilities to reference to a [`State`] within a [`Txn`], and resolve that [`TCRef`].
+
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;

@@ -393,6 +393,7 @@ struct Inner<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     auxiliary: Vec<(Id, Index<F, D, Txn>)>,
 }
 
+/// The base type of a [`Table`].
 #[derive(Clone)]
 pub struct TableIndex<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     inner: Arc<Inner<F, D, Txn>>,

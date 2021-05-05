@@ -11,6 +11,7 @@ use super::{
 };
 use futures::{TryFutureExt, TryStreamExt};
 
+/// A slice of a [`BTree`]
 #[derive(Clone)]
 pub struct BTreeSlice<F, D, T> {
     source: BTreeFile<F, D, T>,

@@ -1,3 +1,7 @@
+//! A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s.
+//!
+//! Each block in the chain begins with the hash of the previous block.
+
 use std::convert::{TryFrom, TryInto};
 use std::num::ParseIntError;
 use std::pin::Pin;
@@ -26,6 +30,7 @@ use crate::txn::{Txn, TxnId};
 use super::data::Mutation;
 use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
 
+/// A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s
 #[derive(Clone)]
 pub struct BlockChain {
     schema: Schema,

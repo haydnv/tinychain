@@ -12,9 +12,13 @@ use tcgeneric::{label, Id, Label, Map};
 
 use super::{Value, ValueCollator};
 
+/// The prefix of an inclusive [`Bound`]
 pub const IN: Label = label("in");
+
+/// The prefix of an exclusive [`Bound`]
 pub const EX: Label = label("ex");
 
+/// An optional inclusive or exclusive bound
 #[derive(Clone, Eq, PartialEq)]
 pub enum Bound {
     In(Value),
@@ -82,6 +86,7 @@ impl fmt::Display for Bound {
     }
 }
 
+/// A range comprising a start and end [`Bound`]
 #[derive(Clone, Eq, PartialEq)]
 pub struct Range {
     pub start: Bound,
@@ -89,6 +94,7 @@ pub struct Range {
 }
 
 impl Range {
+    /// Return true if the given `Range` is within this `Range`.
     pub fn contains_range(&self, inner: &Self, collator: &ValueCollator) -> bool {
         use std::cmp::Ordering::*;
 
@@ -155,6 +161,7 @@ impl Range {
         true
     }
 
+    /// Return true if the given [`Value`] is within this `Range`.
     pub fn contains_value(&self, value: &Value, collator: &ValueCollator) -> bool {
         use std::cmp::Ordering::*;
 
@@ -187,10 +194,6 @@ impl Range {
         }
 
         true
-    }
-
-    pub fn into_inner(self) -> (Bound, Bound) {
-        (self.start, self.end)
     }
 }
 

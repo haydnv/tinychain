@@ -115,6 +115,7 @@ impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     }
 }
 
+/// A view of an [`InstanceExt`] at a specific [`Txn`], used for serialization.
 pub struct InstanceView<'en> {
     class: InstanceClass,
     parent: StateView<'en>,

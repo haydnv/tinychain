@@ -1,6 +1,4 @@
 //! Maintains the consistency of the network by coordinating transaction commits.
-//!
-//! INCOMPLETE AND UNSTABLE.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -35,6 +33,7 @@ use owner::Owner;
 use futures::stream::FuturesUnordered;
 pub use load::instantiate;
 
+/// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
 
 /// The [`Class`] of a [`Cluster`].

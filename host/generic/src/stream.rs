@@ -1,3 +1,5 @@
+//! Generic [`Stream`] types such as [`GroupStream`]
+
 use std::fmt;
 use std::mem;
 use std::pin::Pin;
@@ -9,6 +11,7 @@ use pin_project::pin_project;
 
 use super::TCResult;
 
+/// A [`Stream`] which groups an ordered input stream into only its unique entries using [`Eq`]
 #[pin_project]
 pub struct GroupStream<T, S: Stream<Item = TCResult<T>>> {
     #[pin]

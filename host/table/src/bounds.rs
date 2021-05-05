@@ -13,6 +13,7 @@ use tcgeneric::{Id, Map, Tuple};
 
 use super::Column;
 
+/// A bound on a single [`Column`] of a `Table`.
 #[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
@@ -20,6 +21,8 @@ pub enum ColumnBound {
 }
 
 impl ColumnBound {
+    /// Return true if the given [`ColumnBound`] falls within this one,
+    /// according to the given [`ValueCollator`].
     fn contains(&self, inner: &Self, collator: &ValueCollator) -> bool {
         use Ordering::*;
 
@@ -41,6 +44,7 @@ impl ColumnBound {
         }
     }
 
+    /// Return false if this `ColumnBound` is a single [`Value`].
     pub fn is_range(&self) -> bool {
         match self {
             ColumnBound::In(_) => true,
@@ -92,12 +96,14 @@ impl fmt::Display for ColumnBound {
     }
 }
 
+/// Selection bounds for a `Table`
 #[derive(Clone, Default)]
 pub struct Bounds {
     inner: HashMap<Id, ColumnBound>,
 }
 
 impl Bounds {
+    /// Construct a new `Table` `Bounds` from a given `key` according to the given schema.
     pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Self {
         assert_eq!(key.len(), key_columns.len());
 
@@ -111,6 +117,7 @@ impl Bounds {
         Self { inner }
     }
 
+    /// Convert these `Bounds` into an equivalent [`tc_btree::Range`] according to the given schema.
     pub fn into_btree_range(mut self, columns: &[Column]) -> TCResult<tc_btree::Range> {
         let on_err = |bounds: &HashMap<Id, ColumnBound>| {
             TCError::bad_request(
@@ -143,10 +150,7 @@ impl Bounds {
         }
     }
 
-    pub fn into_inner(self) -> HashMap<Id, ColumnBound> {
-        self.inner
-    }
-
+    /// Merge these `Bounds` with the given `other`.
     pub fn merge(&mut self, other: Self, collator: &ValueCollator) -> TCResult<()> {
         for (col_name, inner) in other.inner.into_iter() {
             if let Some(outer) = self.get(&col_name) {
@@ -162,6 +166,7 @@ impl Bounds {
         Ok(())
     }
 
+    /// Cast these `Bounds` to match the given schema, or return an error.
     pub fn validate(self, columns: &[Column]) -> TCResult<Bounds> {
         let try_cast_bound = |bound: Bound, dtype: ValueType| match bound {
             Bound::In(val) => dtype.try_cast(val).map(Bound::In),

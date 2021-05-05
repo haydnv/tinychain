@@ -1,3 +1,6 @@
+//! A [`Collection`] such as a [`BTree`] or [`Table`].
+
+/// The `Collection` enum used in `State::Collection`.
 use std::convert::TryInto;
 use std::fmt;
 
@@ -28,6 +31,7 @@ pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>
 pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
+/// The [`Class`] of a [`Collection`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
     BTree(BTreeType),
@@ -80,6 +84,7 @@ impl fmt::Display for CollectionType {
     }
 }
 
+/// A stateful, transaction-aware [`Collection`], such as a [`BTree`] or [`Table`].
 #[derive(Clone)]
 pub enum Collection {
     BTree(BTree),
@@ -109,6 +114,7 @@ impl From<Table> for Collection {
     }
 }
 
+/// A [`de::Visitor`] used to deserialize a [`Collection`].
 pub struct CollectionVisitor {
     txn: Txn,
 }
@@ -196,6 +202,7 @@ impl fmt::Display for Collection {
     }
 }
 
+/// A view of a [`Collection`] within a single `Transaction`, used for serialization.
 pub enum CollectionView<'en> {
     BTree(BTreeView<'en>),
     Table(TableView<'en>),

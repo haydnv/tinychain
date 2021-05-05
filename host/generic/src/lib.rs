@@ -7,7 +7,7 @@ use std::pin::Pin;
 
 use futures::{Future, Stream};
 
-use tc_error::TCResult;
+use tc_error::*;
 
 pub mod id;
 pub mod map;

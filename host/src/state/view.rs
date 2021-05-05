@@ -19,6 +19,7 @@ use crate::txn::Txn;
 
 use super::State;
 
+/// A view of a [`State`] within a single [`Txn`], used for serialization.
 pub enum StateView<'en> {
     Collection(CollectionView<'en>),
     Chain(ChainView<'en>),

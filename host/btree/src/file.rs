@@ -90,6 +90,7 @@ impl fmt::Display for NodeKey {
     }
 }
 
+/// A [`BTree`] node
 #[derive(Clone, Eq, PartialEq)]
 pub struct Node {
     leaf: bool,
@@ -219,6 +220,7 @@ struct Inner<F, D, T> {
     txn: PhantomData<T>,
 }
 
+/// The base type of a [`BTree`]
 #[derive(Clone)]
 pub struct BTreeFile<F, D, T> {
     inner: Arc<Inner<F, D, T>>,
@@ -242,6 +244,7 @@ where
         }
     }
 
+    /// Create a new `BTreeFile`.
     pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
         if !file.is_empty(&txn_id).await? {
             return Err(TCError::internal(

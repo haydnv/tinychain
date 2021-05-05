@@ -1,3 +1,5 @@
+//! A [`BTree`], an ordered transaction-aware collection of [`Key`]s
+
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Bound;
@@ -14,30 +16,38 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Link, NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
-#[allow(dead_code)]
 mod file;
 mod slice;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
+/// The file extension of a [`BTree`] as stored on-disk
 pub const EXT: &str = "node";
 
 pub use file::{BTreeFile, Node};
 pub use slice::BTreeSlice;
 
+/// A [`BTree`] key.
 pub type Key = Vec<Value>;
+
+/// A [`BTree`] selector.
 pub type Range = collate::Range<Value, Key>;
 
+/// Common [`BTree`] methods.
 #[async_trait]
 pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;
 
+    /// Return a reference to this `BTree`'s collator.
     fn collator(&self) -> &ValueCollator;
 
+    /// Return a reference to this `BTree`'s schema.
     fn schema(&self) -> &RowSchema;
 
+    /// Return a slice of this `BTree`'s with the given range.
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice>;
 
+    /// Return the number of [`Key`]s in this `BTree`.
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         // TODO: reimplement this more efficiently
         let keys = self.clone().keys(txn_id).await?;
@@ -45,16 +55,25 @@ pub trait BTreeInstance: Clone + Instance {
             .await
     }
 
+    /// Return `true` if this `BTree` has no [`Key`]s.
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 
+    /// Delete all the [`Key`]s in this `BTree`.
     async fn delete(&self, txn_id: TxnId) -> TCResult<()>;
 
+    /// Insert the given [`Key`] into this `BTree`.
+    ///
+    /// If the [`Key`] is already present, this is a no-op.
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
 
+    /// Return a `Stream` of this `BTree`'s [`Key`]s.
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
     where
         Self: 'a;
 
+    /// Insert all the keys from the given `Stream` into this `BTree`.
+    ///
+    /// This will stop and return an error if it encounters an invalid [`Key`].
     async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send + Unpin>(
         &self,
         txn_id: TxnId,
@@ -68,6 +87,7 @@ pub trait BTreeInstance: Clone + Instance {
     }
 }
 
+/// A `Column` used in the schema of a [`BTree`].
 #[derive(Clone, Eq, PartialEq)]
 pub struct Column {
     pub name: Id,
@@ -76,16 +96,19 @@ pub struct Column {
 }
 
 impl Column {
+    /// Get the name of this column.
     #[inline]
     pub fn name(&'_ self) -> &'_ Id {
         &self.name
     }
 
+    /// Get the [`Class`] of this column.
     #[inline]
     pub fn dtype(&self) -> ValueType {
         self.dtype
     }
 
+    /// Get the maximum size (in bytes) of this column.
     #[inline]
     pub fn max_len(&'_ self) -> &'_ Option<usize> {
         &self.max_len
@@ -230,8 +253,10 @@ impl fmt::Display for Column {
     }
 }
 
+/// The schema of a [`BTree`].
 pub type RowSchema = Vec<Column>;
 
+/// The [`Class`] of a [`BTree`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BTreeType {
     File,
@@ -272,6 +297,7 @@ impl fmt::Display for BTreeType {
     }
 }
 
+/// A stateful, transaction-aware, ordered collection of [`Key`]s with O(log n) inserts and slicing
 #[derive(Clone)]
 pub enum BTree<F, D, T> {
     File(BTreeFile<F, D, T>),
@@ -492,6 +518,7 @@ where
     }
 }
 
+/// A view of a [`BTree`] within a single [`Transaction`], used in serialization.
 pub struct BTreeView<'en> {
     schema: Vec<Column>,
     keys: TCTryStream<'en, Key>,

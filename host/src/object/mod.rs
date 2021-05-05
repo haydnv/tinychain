@@ -14,11 +14,11 @@ use crate::fs::Dir;
 use crate::state::State;
 use crate::txn::Txn;
 
-mod class;
-mod instance;
-
 pub use class::*;
 pub use instance::*;
+
+mod class;
+mod instance;
 
 const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; use an OpRef instead";
 const PREFIX: PathLabel = path_label(&["state", "object"]);
@@ -126,6 +126,7 @@ impl fmt::Display for Object {
     }
 }
 
+/// A view of an [`Object`] at a specific [`Txn`], used for serialization.
 pub enum ObjectView<'en> {
     Class(InstanceClass),
     Instance(InstanceView<'en>),

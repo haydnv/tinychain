@@ -1,4 +1,4 @@
-//! Provides a generic scalar `Value` enum which supports collation.
+//! Provides a generic scalar [`Value`] enum which supports collation.
 //!
 //! This library is part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
@@ -18,6 +18,7 @@ mod link;
 mod slice;
 mod value;
 
+/// [`Collate`] support for [`Value`]
 #[derive(Default, Clone)]
 pub struct ValueCollator {
     bytes: Collator<Bytes>,

@@ -1,6 +1,7 @@
-/// User-defined [`OpDef`]s.
-mod def;
-mod executor;
+//! User-defined [`OpDef`]s.
 
 pub use def::*;
 pub use executor::*;
+
+mod def;
+mod executor;

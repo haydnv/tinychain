@@ -2,11 +2,22 @@
 //! cross-service transactions across an ensemble of microservices which implement the
 //! Tinychain protocol. Tinychain itself is also a Turing-complete application platform.
 //!
+//! Tinychain currently support `BlockChain`, `BTree`, and `Table` collection types,
+//! with more planned for the future.
+//!
 //! Tinychain is intended to be used as an executable binary (i.e., with `cargo install`) via its
 //! HTTP API. For usage instructions and more details, visit the repository page at
 //! [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain).
 
 use std::path::PathBuf;
+
+pub use kernel::*;
+pub use tc_btree as btree;
+pub use tc_error as error;
+pub use tc_table as table;
+pub use tc_transact as transact;
+pub use tc_value as value;
+pub use tcgeneric as generic;
 
 mod fs;
 mod http;
@@ -21,13 +32,6 @@ pub mod object;
 pub mod scalar;
 pub mod state;
 pub mod txn;
-
-pub use kernel::*;
-pub use tc_btree as btree;
-pub use tc_error as error;
-pub use tc_transact as transact;
-pub use tc_value as value;
-pub use tcgeneric as generic;
 
 /// Initialize the transactional filesystem layer.
 pub async fn mount(

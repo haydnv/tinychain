@@ -492,11 +492,13 @@ impl fmt::Display for Chain {
     }
 }
 
+/// A helper struct for [`ChainView`]
 pub enum ChainViewData<'en> {
     Block((Schema, block::BlockSeq)),
     Sync(Box<(Schema, StateView<'en>)>),
 }
 
+/// A view of a [`Chain`] within a single [`Transaction`], used for serialization.
 pub struct ChainView<'en> {
     class: ChainType,
     data: ChainViewData<'en>,
@@ -518,6 +520,7 @@ impl<'en> en::IntoStream<'en> for ChainView<'en> {
     }
 }
 
+/// Load a [`Chain`] from disk.
 pub async fn load(txn: &Txn, class: ChainType, schema: Schema, dir: fs::Dir) -> TCResult<Chain> {
     match class {
         ChainType::Block => {
@@ -529,6 +532,7 @@ pub async fn load(txn: &Txn, class: ChainType, schema: Schema, dir: fs::Dir) -> 
     }
 }
 
+/// A [`de::Visitor`] for deserializing a [`Chain`].
 pub struct ChainVisitor {
     txn: Txn,
 }

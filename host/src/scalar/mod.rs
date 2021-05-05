@@ -20,14 +20,16 @@ use crate::route::Public;
 use crate::state::State;
 use crate::txn::Txn;
 
-pub mod op;
-pub mod reference;
-
 pub use op::*;
 pub use reference::*;
 pub use tc_value::*;
 
+pub mod op;
+pub mod reference;
+
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
+
+/// The label of an instance in its own method context
 pub const SELF: Label = label("self");
 
 /// The [`Class`] of a [`Scalar`].
@@ -765,6 +767,7 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>, T3: TryCastFrom<Scalar>> 
     }
 }
 
+/// A [`de::Visitor`] used to deserialize a [`Scalar`].
 #[derive(Default)]
 pub struct ScalarVisitor {
     value: tc_value::ValueVisitor,

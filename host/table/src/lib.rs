@@ -1,3 +1,5 @@
+//! A [`Table`], an ordered collection of [`Row`]s which supports `BTree`-based indexing
+
 use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
@@ -35,32 +37,43 @@ const ERR_INSERT: &str = "Insertion is not supported by instance of";
 const ERR_SLICE: &str = "Slicing is not supported by instance of";
 const ERR_UPDATE: &str = "Update is not supported by instance of";
 
+/// Common [`Table`] methods.
 #[async_trait]
 pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
     Instance<Class = TableType> + Clone + Sized + Into<Table<F, D, Txn>>
 {
+    /// The type of `Table` returned by this instance's `order_by` method.
     type OrderBy: TableInstance<F, D, Txn>;
+
+    /// The type of `Table` returned by this instance's `reversed` method.
     type Reverse: TableInstance<F, D, Txn>;
+
+    /// The type of `Table` returned by this instance's `slice` method.
     type Slice: TableInstance<F, D, Txn>;
 
+    /// Return the number of rows in this `Table`.
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
         let rows = self.rows(txn_id).await?;
         rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
             .await
     }
 
+    /// Delete all rows in this `Table`.
     async fn delete(&self, _txn_id: TxnId) -> TCResult<()> {
         Err(TCError::bad_request(ERR_DELETE, self.class()))
     }
 
+    /// Delete the given [`Row`] from this table, if present.
     async fn delete_row(&self, _txn_id: TxnId, _row: Row) -> TCResult<()> {
         Err(TCError::bad_request(ERR_DELETE, self.class()))
     }
 
+    /// Group this `Table` by the given columns.
     fn group_by(self, columns: Vec<Id>) -> TCResult<view::Aggregate<F, D, Txn, Self::OrderBy>> {
         group_by(self, columns)
     }
 
+    /// Construct and return a temporary index of the given columns.
     async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly<F, D, Txn>>
     where
         F: TryFrom<D::File, Error = TCError>,
@@ -69,39 +82,52 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         index::ReadOnly::copy_from(self, txn, columns).await
     }
 
+    /// Insert a new row into this `Table`.
     async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(TCError::bad_request(ERR_INSERT, self.class()))
     }
 
+    /// Return the schema of this `Table`'s key.
     fn key(&self) -> &[Column];
 
+    /// Return the schema of this `Table`'s values.
     fn values(&self) -> &[Column];
 
+    /// Return the schema of this `Table`.
     fn schema(&self) -> TableSchema;
 
+    /// Limit the number of rows returned by `rows`.
     fn limit(self, limit: u64) -> view::Limited<F, D, Txn> {
         view::Limited::new(self.into(), limit)
     }
 
+    /// Set the order returned by `rows`.
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy>;
 
+    /// Reverse the order returned by `rows`.
     fn reversed(self) -> TCResult<Self::Reverse>;
 
+    /// Limit the columns returned by `rows`.
     fn select(self, columns: Vec<Id>) -> TCResult<view::Selection<F, D, Txn, Self>> {
         let selection = view::Selection::new(self, columns)?;
         Ok(selection)
     }
 
+    /// Limit the returned `rows` to the given [`Bounds`].
     fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
         Err(TCError::bad_request(ERR_SLICE, self.class()))
     }
 
+    /// Return a stream of the rows in this `Table`.
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>>;
 
+    /// Return an error if this table does not support the given [`Bounds`].
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
+    /// Return an error if this table does not support ordering by the given columns.
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
+    /// Update the values of the columns in this `Table` to match the given [`Row`].
     async fn update(&self, _txn: &Txn, _value: Row) -> TCResult<()>
     where
         F: TryFrom<D::File, Error = TCError>,
@@ -110,15 +136,18 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         Err(TCError::bad_request(ERR_UPDATE, self.class()))
     }
 
+    /// Update one row of this `Table`.
     async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
         Err(TCError::bad_request(ERR_UPDATE, self.class()))
     }
 
+    /// Insert or update the given row.
     async fn upsert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(TCError::bad_request(ERR_INSERT, self.class()))
     }
 }
 
+/// The [`Class`] of a [`Table`].
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum TableType {
     Index,
@@ -172,6 +201,7 @@ impl fmt::Display for TableType {
     }
 }
 
+/// An ordered collection of [`Row`]s which supports `BTree`-based indexing
 #[derive(Clone)]
 pub enum Table<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     Index(Index<F, D, Txn>),
@@ -588,6 +618,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F
     }
 }
 
+/// A view of a [`Table`] within a single [`Transaction`], used for serialization.
 pub struct TableView<'en> {
     schema: TableSchema,
     rows: TCTryStream<'en, Vec<Value>>,

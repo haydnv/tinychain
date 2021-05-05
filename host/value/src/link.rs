@@ -19,6 +19,7 @@ use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
 
+/// The address portion of a [`Link`] (an IP address)
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
     IPv4(Ipv4Addr),
@@ -103,6 +104,7 @@ impl PartialEq<IpAddr> for LinkAddress {
     }
 }
 
+/// The protocol portion of a [`Link`] (e.g. "http")
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LinkProtocol {
     HTTP,
@@ -126,6 +128,7 @@ impl fmt::Display for LinkProtocol {
     }
 }
 
+/// The host portion of a [`Link`] (e.g. "http://127.0.0.1:8702")
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct LinkHost {
     protocol: LinkProtocol,
@@ -279,6 +282,7 @@ impl fmt::Display for LinkHost {
     }
 }
 
+/// A link to a network resource.
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Link {
     host: Option<LinkHost>,
@@ -286,18 +290,22 @@ pub struct Link {
 }
 
 impl Link {
+    /// Consume this `Link` and return its path.
     pub fn into_path(self) -> TCPathBuf {
         self.path
     }
 
+    /// Borrow this `Link`'s [`LinkHost`], if it has one.
     pub fn host(&'_ self) -> &'_ Option<LinkHost> {
         &self.host
     }
 
+    /// Borrow this `Link`'s path.
     pub fn path(&'_ self) -> &'_ TCPathBuf {
         &self.path
     }
 
+    /// Append the given [`PathSegment`] to this `Link` and return it.
     pub fn append(mut self, segment: PathSegment) -> Self {
         self.path = self.path.append(segment);
         self

@@ -12,9 +12,13 @@ use tcgeneric::{Id, Map};
 
 pub use tc_btree::Column;
 
+/// A `Table` row
 pub type Row = Map<Value>;
+
+/// The schema of a `Table` row
 pub type RowSchema = Vec<Column>;
 
+/// The schema of a `Table` index
 #[derive(Clone, Eq, PartialEq)]
 pub struct IndexSchema {
     key: RowSchema,
@@ -22,10 +26,12 @@ pub struct IndexSchema {
 }
 
 impl IndexSchema {
+    /// Return a list of the columns in this schema.
     pub fn columns(&self) -> Vec<Column> {
         [&self.key[..], &self.values[..]].concat()
     }
 
+    /// Iterate over the names of the columns in this schema.
     pub fn column_names(&self) -> impl Iterator<Item = &Id> {
         self.key
             .iter()
@@ -33,18 +39,22 @@ impl IndexSchema {
             .chain(self.values.iter().map(|col| &col.name))
     }
 
-    pub fn key(&'_ self) -> &'_ [Column] {
+    /// Return a slice of the columns in this schema's key.
+    pub fn key(&self) -> &[Column] {
         &self.key
     }
 
-    pub fn values(&'_ self) -> &'_ [Column] {
+    /// Return a slice of the columns in this schema's values.
+    pub fn values(&self) -> &[Column] {
         &self.values
     }
 
+    /// Return the number of columns in this schema.
     pub fn len(&self) -> usize {
         self.key.len() + self.values.len()
     }
 
+    /// Given a [`Row`], return a `(key, values)` tuple.
     pub fn key_values_from_row(&self, mut row: Row) -> TCResult<(Vec<Value>, Vec<Value>)> {
         if self.len() != row.len() {
             return Err(TCError::bad_request("Invalid row for schema", self));
@@ -69,6 +79,7 @@ impl IndexSchema {
         Ok((key, values))
     }
 
+    /// Given a `key` and `values`, return a [`Row`].
     pub fn row_from_key_values(&self, key: Vec<Value>, values: Vec<Value>) -> TCResult<Row> {
         assert_eq!(key.len(), self.key.len());
         assert_eq!(values.len(), self.values.len());
@@ -78,6 +89,7 @@ impl IndexSchema {
         self.row_from_values(row)
     }
 
+    /// Given a list of `Value`s, return a [`Row`].
     pub fn row_from_values(&self, values: Vec<Value>) -> TCResult<Row> {
         assert_eq!(values.len(), self.len());
 
@@ -89,6 +101,8 @@ impl IndexSchema {
 
         Ok(row.into())
     }
+
+    /// Return `true` if this schema starts with the given slice of column names.
     pub fn starts_with(&self, expected: &[Id]) -> bool {
         let schema = self.columns();
         if expected.len() > schema.len() {
@@ -105,6 +119,7 @@ impl IndexSchema {
         true
     }
 
+    /// Return the `IndexSchema` needed to index the given columns.
     pub fn auxiliary(&self, key: &[Id]) -> TCResult<IndexSchema> {
         let subset: HashSet<&Id> = key.iter().collect();
 
@@ -134,6 +149,7 @@ impl IndexSchema {
         Ok((key, values).into())
     }
 
+    /// Return an error if this schema does not support ordering by the given columns.
     pub fn validate_columns(&self, columns: &[Id]) -> TCResult<()> {
         let valid_columns: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for column in columns {
@@ -145,6 +161,7 @@ impl IndexSchema {
         Ok(())
     }
 
+    /// Return an error if the given key does not match this schema.
     pub fn validate_key(&self, key: Vec<Value>) -> TCResult<Vec<Value>> {
         if key.len() != self.key.len() {
             let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
@@ -163,6 +180,7 @@ impl IndexSchema {
         Ok(validated)
     }
 
+    /// Return an error if the given [`Row`] has any extra fields or incompatible values.
     pub fn validate_row_partial(&self, row: Row) -> TCResult<Row> {
         let mut validated = Row::new();
         let columns: HashMap<Id, ValueType> = self
@@ -183,6 +201,7 @@ impl IndexSchema {
         Ok(validated)
     }
 
+    /// Return an error if the given [`Row`] does not have a compatible value for every column.
     pub fn validate_row(&self, row: Row) -> TCResult<Row> {
         let expected: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         let actual: HashSet<Id> = row.keys().cloned().collect();
@@ -214,6 +233,7 @@ impl IndexSchema {
         self.validate_row_partial(row)
     }
 
+    /// Given a [`Row`], return an ordered list of [`Value`]s.
     pub fn values_from_row(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.len());
         for column in self.columns() {
@@ -314,6 +334,7 @@ impl fmt::Display for IndexSchema {
     }
 }
 
+/// The schema of a `Table`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct TableSchema {
     primary: IndexSchema,
@@ -321,6 +342,7 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
+    /// Construct a new `Table` schema.
     pub fn new<I: IntoIterator<Item = (Id, Vec<Id>)>>(primary: IndexSchema, indices: I) -> Self {
         Self {
             primary,
@@ -328,10 +350,12 @@ impl TableSchema {
         }
     }
 
+    /// Return a list of index names and the names of the columns they index.
     pub fn indices(&self) -> &[(Id, Vec<Id>)] {
         &self.indices
     }
 
+    /// Return the [`IndexSchema`] of this `TableSchema`'s primary index.
     pub fn primary(&self) -> &IndexSchema {
         &self.primary
     }
