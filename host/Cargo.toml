@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
@@ -40,7 +40,7 @@ structopt = "0.3"
 tbon = "0.1"
 tc-btree = "~0.1.1"
 tc-error = "0.2"
-tc-table = { path = "table" }
+tc-table = "~0.1.1"
 tc-transact = "0.4"
 tc-value = "~0.1.7"
 tcgeneric = "~0.1.4"
