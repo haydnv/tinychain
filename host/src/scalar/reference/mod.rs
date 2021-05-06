@@ -144,13 +144,18 @@ impl Refer for TCRef {
     ) -> TCResult<State> {
         debug!("TCRef::resolve {}", self);
 
-        match self {
-            Self::After(after) => after.resolve(context, txn).await,
-            Self::Case(case) => case.resolve(context, txn).await,
-            Self::Id(id_ref) => id_ref.resolve(context, txn).await,
-            Self::If(if_ref) => if_ref.resolve(context, txn).await,
-            Self::Op(op_ref) => op_ref.resolve(context, txn).await,
+        let mut state = State::from(self);
+        while let State::Scalar(Scalar::Ref(tc_ref)) = state {
+            state = match *tc_ref {
+                Self::After(after) => after.resolve(context, txn).await,
+                Self::Case(case) => case.resolve(context, txn).await,
+                Self::Id(id_ref) => id_ref.resolve(context, txn).await,
+                Self::If(if_ref) => if_ref.resolve(context, txn).await,
+                Self::Op(op_ref) => op_ref.resolve(context, txn).await,
+            }?;
         }
+
+        Ok(state)
     }
 }
 

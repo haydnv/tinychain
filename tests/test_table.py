@@ -22,9 +22,6 @@ class TableTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
         cxt.result = tc.After(cxt.table.insert(("name",), (0,)), cxt.table.count())
-
-        print(tc.to_json(cxt))
-        return
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
 
