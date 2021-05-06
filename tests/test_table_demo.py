@@ -23,10 +23,8 @@ class Web(tc.Cluster):
         self.cache = tc.Chain.Sync(tc.BTree(schema))
 
     @tc.get_method
-    def views(self, txn, name: tc.String):
-        txn.slice = self.cache[name]
-        txn.row = txn.slice.first()
-        return txn.row["views"]
+    def views(self, txn, name: tc.String) -> tc.UInt:
+        return self.cache[name].first()["views"]
 
     @tc.put_method
     def add_movie(self, txn, name: tc.String, metadata: tc.Map):

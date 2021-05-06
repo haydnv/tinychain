@@ -10,6 +10,7 @@ class Context(object):
 
     def __init__(self, context=None):
         object.__setattr__(self, "form", OrderedDict())
+        object.__setattr__(self, "ns", {})
 
         if context:
             if isinstance(context, self.__class__):
@@ -47,12 +48,22 @@ class Context(object):
     def __json__(self):
         return to_json(list(self.form.items()))
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name, state):
+        deanonymize(state, self)
+
         if name in object.__getattribute__(self, "form"):
             raise ValueError(f"Context already has a value named {name}")
         else:
-            self.form[name] = value
+            self.form[name] = state
+            self.ns[name] = 0
 
+    def generate_name(self, name):
+        if name in self.ns:
+            self.ns[name] += 1
+            return f"{name}_{self.ns[name]}"
+        else:
+            self.ns[name] = 0
+            return name
 
 def form_of(state):
     """Return the form of the given state."""
@@ -223,4 +234,15 @@ def to_json(obj):
         return {to_json(k): to_json(v) for k, v in obj.items()}
     else:
         return obj
+
+
+def deanonymize(state, context):
+    if hasattr(state, "__ns__"):
+        state.__ns__(context)
+    elif isinstance(state, tuple) or isinstance(state, list):
+        for item in state:
+            deanonymize(item, context)
+    elif isinstance(state, dict):
+        for key in state:
+            deanonymize(state[key], context)
 

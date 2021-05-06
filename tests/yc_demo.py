@@ -45,7 +45,7 @@ class InteractionTests(unittest.TestCase):
         host = start_host("test_yc_demo", [Wholesaler, Retailer])
 
         actual = host.get("/app/wholesaler/inventory")
-        self.assertEqual(IN_STOCK, actual)
+        self.assertEqual(100, actual)
 
         with self.assertRaises(tc.error.Unauthorized):
             host.post("/app/retailer/buy", {"quantity": 10})

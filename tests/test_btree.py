@@ -93,8 +93,7 @@ class BTreeTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.tree = tc.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.slice = cxt.tree[25:35]
-        cxt.delete = tc.After(cxt.inserts, cxt.slice.delete())
+        cxt.delete = tc.After(cxt.inserts, cxt.tree[25:35].delete())
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
         result = self.host.post(ENDPOINT, cxt)

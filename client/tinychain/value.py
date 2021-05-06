@@ -22,12 +22,12 @@ class Value(Scalar, metaclass=Meta):
     def eq(self, other):
         """Returns `true` if `self` is equal to `other`."""
 
-        return _get_op("eq", self, other)
+        return self._get("eq", other, Bool)
 
     def ne(self, other):
         """Returns `true` if `self` is not equal to `other`."""
 
-        return _get_op("ne", self, other)
+        return self._get("ne", other, Bool)
 
 
 class Nil(Value):
@@ -85,46 +85,42 @@ class Number(Value):
     def add(self, other):
         """Return the sum of `self` and `other`."""
 
-        return _get_op("add", self, other)
+        return self._get("add", other, self.__class__)
 
     def div(self, other):
         """Return the quotient of `self` and `other`."""
 
-        return _get_op("div", self, other)
+        return self._get("div", other, self.__class__)
 
     def gt(self, other):
         """Return true if `self` is greater than `other`."""
 
-        return _get_op("gt", self, other, Bool)
+        return self._get("gt", other, Bool)
 
     def gte(self, other):
         """Return true if `self` is greater than or equal to `other`."""
 
-        return _get_op("gte", self, other, Bool)
+        return self._get("gte", other, Bool)
 
     def lt(self, other):
         """Return true if `self` is less than `other`."""
 
-        return _get_op("lt", self, other, Bool)
+        return self._get("lt", other, Bool)
 
     def lte(self, other):
         """Return true if `self` is less than or equal to `other`."""
 
-        return _get_op("lte", self, other, Bool)
+        return self._get("lte", other, Bool)
 
     def mul(self, other):
         """Return the product of `self` and `other`."""
 
-        return _get_op("mul", self, other)
+        return self._get("mul", other, self.__class__)
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""
 
-        return _get_op("sub", self, other)
-
-
-def _get_op(name, subject, key, dtype=Number):
-    return dtype(OpRef.Get(uri(subject).append(name), key))
+        return self._get("sub", other, self.__class__)
 
 
 class Bool(Number):

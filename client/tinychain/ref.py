@@ -1,6 +1,6 @@
 """Reference types."""
 
-from .util import form_of, uri, URI, to_json
+from .util import *
 
 class Ref(object):
     """A reference to a :class:`State`."""
@@ -20,6 +20,10 @@ class After(Ref):
     def __json__(self):
         return {str(uri(self)): to_json([self.when, self.then])}
 
+    def __ns__(self, cxt):
+        deanonymize(self.when, cxt)
+        deanonymize(self.then, cxt)
+
 
 class Case(Ref):
     """A flow control operator used to branch execution conditionally."""
@@ -34,6 +38,11 @@ class Case(Ref):
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.switch, self.case])}
 
+    def __ns__(self, cxt):
+        deanonymize(self.cond, cxt)
+        deanonymize(self.switch, cxt)
+        deanonymize(self.then, cxt)
+
 
 class If(Ref):
     """A flow control operator used to resolve a :class:`State` conditionally."""
@@ -47,6 +56,11 @@ class If(Ref):
 
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
+
+    def __ns__(self, cxt):
+        deanonymize(self.cond, cxt)
+        deanonymize(self.then, cxt)
+        deanonymize(self.or_else, cxt)
 
 
 class OpRef(Ref):
@@ -65,6 +79,11 @@ class OpRef(Ref):
             subject = uri(self.subject)
 
         return {str(subject): to_json(self.args)}
+
+    def __ns__(self, cxt):
+        if isinstance(self.subject, MethodSubject):
+            deanonymize(self.subject, cxt)
+            deanonymize(self.args, cxt)
 
 
 class GetOpRef(OpRef):
@@ -122,4 +141,29 @@ OpRef.Get = GetOpRef
 OpRef.Put = PutOpRef
 OpRef.Post = PostOpRef
 OpRef.Delete = DeleteOpRef
+
+
+class MethodSubject(object):
+    def __init__(self, subject, method_name):
+        self.__uri__ = None
+        self.subject = subject
+        self.method_name = method_name
+
+    def __ns__(self, cxt):
+        name = cxt.generate_name(self.subject.__class__.__name__)
+        self.__uri__ = URI(name).append(self.method_name)
+        setattr(cxt, name, self.subject)
+
+    def __json__(self):
+        if self.__uri__ is None:
+            raise ValueError(
+                f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
+
+        return to_json(uri(self))
+
+    def __str__(self):
+        if self.__uri__ is None:
+            return str(uri(self.subject).append(self.method_name))
+        else:
+            return str(uri(self))
 

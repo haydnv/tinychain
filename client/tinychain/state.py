@@ -1,7 +1,7 @@
 """Tinychain `State`\s, such as `Map`, `Tuple`, and `Op`."""
 
 from . import reflect
-from .ref import Ref, OpRef
+from .ref import MethodSubject, Ref, OpRef
 from .util import *
 
 
@@ -29,6 +29,12 @@ class State(object):
         else:
             return {str(uri(self)): [to_json(form)]}
 
+    def __ns__(self, cxt):
+        form = form_of(self)
+
+        if isinstance(form, OpRef):
+            deanonymize(form, cxt)
+
     def __ref__(self, name):
         return self.__class__(URI(name))
 
@@ -36,6 +42,9 @@ class State(object):
         return f"{self.__class__.__name__}({form_of(self)})"
 
     def _method(self, name):
+        if isinstance(form_of(self), OpRef):
+            return MethodSubject(self, name)
+
         subject = uri(self).append(name)
         if subject.startswith("/state") and subject.path() != uri(self.__class__):
             raise ValueError(
@@ -69,7 +78,7 @@ class State(object):
 
     def dtype(self):
         """Return the native :class:`Class` of this `State`."""
-        return Class(OpRef.get(uri(self) + "/class"))
+        return Class(OpRef.Get(uri(self) + "/class"))
 
 
 class Map(State):
@@ -78,7 +87,7 @@ class Map(State):
     __uri__ = uri(State) + "/map"
 
     def __getitem__(self, key):
-        return OpRef.Get(uri(self), key)
+        return self._get("", key)
 
     def __json__(self):
         return to_json(form_of(self))
@@ -93,7 +102,7 @@ class Tuple(State):
         return to_json(form_of(self))
 
     def __getitem__(self, key):
-        return OpRef.Get(uri(self), key)
+        return self._get("", key)
 
 
 # Scalar types
