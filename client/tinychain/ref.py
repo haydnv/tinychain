@@ -55,15 +55,16 @@ class OpRef(Ref):
     __uri__ = uri(Ref) + "/op"
 
     def __init__(self, subject, args):
-        if isinstance(subject, Ref):
-            self.subject = subject
-        else:
-            self.subject = uri(subject)
-
+        self.subject = subject
         self.args = args
 
     def __json__(self):
-        return {str(self.subject): to_json(self.args)}
+        if isinstance(self.subject, Ref):
+            subject = self.subject
+        else:
+            subject = uri(self.subject)
+
+        return {str(subject): to_json(self.args)}
 
 
 class GetOpRef(OpRef):
@@ -72,10 +73,19 @@ class GetOpRef(OpRef):
     __uri__ = uri(OpRef) + "/get"
 
     def __init__(self, subject, key=None):
-        if str(uri(subject)).startswith("/state/scalar"):
-            OpRef.__init__(self, subject, key)
+        OpRef.__init__(self, subject, (key,))
+
+    def __json__(self):
+        if isinstance(self.subject, Ref):
+            subject = self.subject
         else:
-            OpRef.__init__(self, subject, (key,))
+            subject = uri(self.subject)
+
+        if str(uri(subject)).startswith("/state/scalar"):
+            (value,) = self.args
+            return {str(subject): to_json(value)}
+        else:
+            return {str(subject): to_json(self.args)}
 
 
 class PutOpRef(OpRef):
