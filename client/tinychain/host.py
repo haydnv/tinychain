@@ -157,6 +157,8 @@ class Local(Host):
         self._args = args
 
     def start(self, wait_time=STARTUP_TIME):
+        """Start this host process locally."""
+
         if self._process:
             raise RuntimeError("tried to start a host that's already running")
 
@@ -175,11 +177,15 @@ class Local(Host):
         if self._process:
             self._process.terminate()
             self._process.wait()
-            logging.info(f"Host {uri(self)} shut down successfully")
+            logging.info(f"Host {uri(self)} shut down")
         else:
             logging.info(f"{uri(self)} not running")
 
         self._process = None
+
+    def wait(self):
+        """Block the current thread until the running host is shut down."""
+        self._process.wait()
 
     def __del__(self):
         if self._process:
