@@ -199,6 +199,11 @@ class Table(Collection):
 
         return self._get("count", rtype=UInt)
 
+    def delete(self):
+        """Delete all contents of this `Table`."""
+
+        return self._delete("")
+
     def group_by(self, columns):
         """
         Aggregate this `Table` according to the values of the specified columns.

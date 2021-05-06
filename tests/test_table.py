@@ -25,6 +25,35 @@ class TableTests(unittest.TestCase):
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
 
+    def testDelete(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.delete = tc.After(cxt.inserts, cxt.table.delete())
+        cxt.result = tc.After(cxt.delete, cxt.table)
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected([]))
+
+    def testDeleteSlice(self):
+        count = 50
+        values = [[v] for v in range(count)]
+        keys = [[num2words(i)] for i in range(count)]
+        remaining = sorted([k + v for k, v in zip(keys, values) if v[0] >= 40])
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.delete = tc.After(cxt.inserts, cxt.table.where(views=slice(40)).delete())
+        cxt.result = tc.After(cxt.delete, cxt.table)
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(remaining))
+
     def testGroupBy(self):
         count = 50
         values = [(v % 2,) for v in range(count)]
