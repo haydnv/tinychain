@@ -102,6 +102,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
         .init();
 
+    if !config.workspace.exists() {
+        panic!(
+            "{:?} does not exist--create it or provide a different path for the --workspace flag",
+            config.workspace
+        );
+    }
+
+    if let Some(data_dir) = &config.data_dir {
+        if !data_dir.exists() {
+            panic!("{:?} does not exist--create it or provide a different path for the --data_dir flag", data_dir);
+        }
+    }
+
     let (workspace, data_dir) =
         mount(config.workspace.clone(), config.data_dir, config.cache_size).await?;
 
