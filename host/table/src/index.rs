@@ -505,18 +505,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         self.inner.primary.get(txn_id, key).await
     }
 
-    pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        if self.get(txn_id, key.to_vec()).await?.is_some() {
-            let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
-            Err(TCError::bad_request(
-                "tried to insert but this key already exists",
-                format!("[{}]", key.join(", ")),
-            ))
-        } else {
-            self.upsert(txn_id, key, values).await
-        }
-    }
-
     pub async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         let primary = &self.inner.primary;
 
@@ -597,10 +585,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         try_join_all(deletes).await?;
 
         Ok(())
-    }
-
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        TableIndex::insert(self, txn_id, key, values).await
     }
 
     fn key(&self) -> &[Column] {
@@ -925,9 +909,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         updated_row.extend(update);
         let (key, values) = self.inner.primary.schema.key_values_from_row(updated_row)?;
 
-        self.delete_row(txn_id, row)
-            .and_then(|()| self.insert(txn_id, key, values))
-            .await
+        self.upsert(txn_id, key, values).await
     }
 
     async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {

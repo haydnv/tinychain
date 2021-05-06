@@ -1,10 +1,11 @@
 """Data structures responsible for storing a collection of :class:`Value`\s"""
 
-from .ref import OpRef
+from .error import BadRequest, NotFound
+from .ref import If, OpRef
 from .reflect import Meta
 from .state import Map, State
 from .util import *
-from .value import Nil, UInt, Value
+from .value import Bool, Nil, UInt, Value
 
 
 class Bound(object):
@@ -140,7 +141,7 @@ class BTree(Collection):
         """
         Return the first row in this `BTree`.
 
-        If there are no rows, this will raise a :class:`tc.error.NotFound` exception.
+        If there are no rows, this will raise a :class:`NotFoundError`.
         """
 
         return self._get("first", rtype=Map)
@@ -178,6 +179,16 @@ class Table(Collection):
         def __json__(self):
             return to_json([[self.key, self.values], list(self.indices.items())])
 
+    def __getitem__(self, key):
+        """Return the row with the given key, or a :class:`NotFound` error."""
+
+        return Map(self._get("", key))
+
+    def contains(self, key):
+        """Return `True` if this `Table` contains the given key."""
+
+        return Bool(self._get("contains", key))
+
     def count(self):
         """
         Return the number of rows in this `Table`.
@@ -204,7 +215,15 @@ class Table(Collection):
         If the key is already present, this will raise a :class:`BadRequest` error.
         """
 
-        return self._put("insert", key, values)
+        return If(
+            self.contains(key),
+            BadRequest("cannot insert: key already exists"),
+            self._put("", key, values))
+
+    def is_empty(self):
+        """Return `True` if this table contains no rows."""
+
+        return self._get("is_empty", rtype=Bool)
 
     def limit(self, limit):
         """Limit the number of rows returned from this `Table`."""
@@ -228,10 +247,9 @@ class Table(Collection):
 
     def upsert(self, key, values=[]):
         """
-        Upsert the given row into this `Table`.
+        Insert the given row into this `Table`.
 
-        If the row is not present, it will be inserted; otherwise, it will be updated
-        with the given `values`.
+        If the row is already present, it will be updated with the given `values`.
         """
 
         return self._put("", key, values)

@@ -23,6 +23,8 @@ class TableTests(unittest.TestCase):
         cxt.table = tc.Table(SCHEMA)
         cxt.result = tc.After(cxt.table.insert(("name",), (0,)), cxt.table.count())
 
+        print(tc.to_json(cxt))
+        return
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
 
@@ -151,8 +153,8 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         return Persistent
 
     def execute(self, hosts):
-        row1 = ["one", 1]
-        row2 = ["two", 2]
+        row1 = {"name": "one", "views": 1}
+        row2 = {"name": "two", "views": 2}
 
         hosts[0].put("/test/table/table", ["one"], [1])
 
@@ -177,7 +179,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
         for host in hosts:
             actual = host.get("/test/table/table")
-            self.assertEqual(actual, expected([row2]))
+            self.assertEqual(actual, expected([["two", 2]]))
 
         n = 100
         for i in range(n):

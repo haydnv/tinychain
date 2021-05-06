@@ -39,7 +39,11 @@ impl Refer for After {
     ) -> TCResult<State> {
         debug!("After::resolve {} from context ()", self);
 
-        self.when.resolve(context, txn).await?;
+        let mut when = State::from(self.when);
+        while let State::Scalar(Scalar::Ref(tc_ref)) = when {
+            when = tc_ref.resolve(context, txn).await?;
+        }
+
         Ok(self.then.into())
     }
 }

@@ -40,7 +40,7 @@ structopt = "0.3"
 tbon = "0.1"
 tc-btree = "~0.1.1"
 tc-error = "0.2"
-tc-table = "0.1"
+tc-table = { path = "table" }
 tc-transact = "0.4"
 tc-value = "~0.1.7"
 tcgeneric = "~0.1.4"

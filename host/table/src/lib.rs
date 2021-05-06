@@ -82,11 +82,6 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
         index::ReadOnly::copy_from(self, txn, columns).await
     }
 
-    /// Insert a new row into this `Table`.
-    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
-        Err(TCError::bad_request(ERR_INSERT, self.class()))
-    }
-
     /// Return the schema of this `Table`'s key.
     fn key(&self) -> &[Column];
 
@@ -296,20 +291,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
             Self::Merge(merge) => merge.index(txn, columns).await,
             Self::Selection(selection) => selection.index(txn, columns).await,
             Self::TableSlice(slice) => slice.index(txn, columns).await,
-        }
-    }
-
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.insert(txn_id, key, values).await,
-            Self::ROIndex(index) => index.insert(txn_id, key, values).await,
-            Self::Table(table) => table.insert(txn_id, key, values).await,
-            Self::Aggregate(aggregate) => aggregate.insert(txn_id, key, values).await,
-            Self::IndexSlice(slice) => slice.insert(txn_id, key, values).await,
-            Self::Limit(limit) => limit.insert(txn_id, key, values).await,
-            Self::Merge(merge) => merge.insert(txn_id, key, values).await,
-            Self::Selection(selection) => selection.insert(txn_id, key, values).await,
-            Self::TableSlice(slice) => slice.insert(txn_id, key, values).await,
         }
     }
 
@@ -596,7 +577,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D
             let row = schema.row_from_values(row).map_err(de::Error::custom)?;
             let (key, values) = schema.key_values_from_row(row).map_err(de::Error::custom)?;
             self.table
-                .insert(self.txn_id, key, values)
+                .upsert(self.txn_id, key, values)
                 .map_err(de::Error::custom)
                 .await?;
         }

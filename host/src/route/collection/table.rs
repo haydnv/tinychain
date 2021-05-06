@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::iter::FromIterator;
 
 use futures::{TryFutureExt, TryStreamExt};
 use log::debug;
@@ -17,6 +18,34 @@ use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, 
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
+
+struct ContainsHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for ContainsHandler<T> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let key = primary_key(key, &self.table)?;
+                let slice = self.table.slice(key)?;
+
+                let mut rows = slice.rows(*txn.id()).await?;
+                rows.try_next()
+                    .map_ok(|row| row.is_some())
+                    .map_ok(Value::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ContainsHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
 
 struct CountHandler<T> {
     table: T,
@@ -66,36 +95,6 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for GroupHandl
 
 impl<T> From<T> for GroupHandler<T> {
     fn from(table: T) -> Self {
-        Self { table }
-    }
-}
-
-struct InsertHandler<'a, T> {
-    table: &'a T,
-}
-
-impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for InsertHandler<'a, T> {
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
-        Some(Box::new(|txn, key, values| {
-            Box::pin(async move {
-                let key =
-                    key.try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
-
-                let values = Value::try_cast_from(values, |s| {
-                    TCError::bad_request("invalid values for Table row", s)
-                })?;
-
-                let values = values
-                    .try_cast_into(|v| TCError::bad_request("invalid values for Table row", v))?;
-
-                self.table.insert(*txn.id(), key, values).await
-            })
-        }))
-    }
-}
-
-impl<'a, T> From<&'a T> for InsertHandler<'a, T> {
-    fn from(table: &'a T) -> Self {
         Self { table }
     }
 }
@@ -163,13 +162,21 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let key = primary_key(key, self.table)?;
-                    let slice = self.table.clone().slice(key)?;
+                    let bounds = primary_key(key.clone(), self.table)?;
+                    let slice = self.table.clone().slice(bounds)?;
                     let mut rows = slice.rows(*txn.id()).await?;
                     if let Some(row) = rows.try_next().await? {
-                        Ok(Value::from(row).into())
+                        let schema = self.table.schema();
+                        let columns = schema.primary().column_names().cloned();
+
+                        Ok(State::Scalar(
+                            Map::<Scalar>::from_iter(
+                                columns.zip(row.into_iter().map(Scalar::Value)),
+                            )
+                            .into(),
+                        ))
                     } else {
-                        Ok(Value::None.into())
+                        Err(TCError::not_found(key))
                     }
                 } else {
                     Ok(Collection::Table(self.table.clone().into()).into())
@@ -285,8 +292,8 @@ fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
         Some(Box::new(TableHandler::from(table)))
     } else if path.len() == 1 {
         match path[0].as_str() {
+            "contains" => Some(Box::new(ContainsHandler::from(table.clone()))),
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
-            "insert" => Some(Box::new(InsertHandler::from(table))),
             "limit" => Some(Box::new(LimitHandler::from(table.clone()))),
             "group" => Some(Box::new(GroupHandler::from(table.clone()))),
             "order" => Some(Box::new(OrderHandler::from(table.clone()))),
