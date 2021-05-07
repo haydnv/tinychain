@@ -93,13 +93,13 @@ impl IndexSchema {
     pub fn row_from_values(&self, values: Vec<Value>) -> TCResult<Row> {
         assert_eq!(values.len(), self.len());
 
-        let mut row = HashMap::new();
+        let mut row = Map::new();
         for (column, value) in self.columns().into_iter().zip(values.into_iter()) {
             let value = column.dtype.try_cast(value)?;
             row.insert(column.name, value);
         }
 
-        Ok(row.into())
+        Ok(row)
     }
 
     /// Return `true` if this schema starts with the given slice of column names.

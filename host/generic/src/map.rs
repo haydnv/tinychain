@@ -1,6 +1,6 @@
 //! A generic map whose keys are [`Id`]s
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
@@ -14,16 +14,16 @@ use tc_error::*;
 
 use super::{Id, Tuple};
 
-/// A generic map whose keys are [`Id`]s, based on [`HashMap`]
+/// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
 #[derive(Clone)]
 pub struct Map<T: Clone> {
-    inner: HashMap<Id, T>,
+    inner: BTreeMap<Id, T>,
 }
 
 impl<T: Clone> Map<T> {
     pub fn new() -> Self {
         Self {
-            inner: HashMap::new(),
+            inner: BTreeMap::new(),
         }
     }
 
@@ -39,7 +39,7 @@ impl<T: Clone> Map<T> {
         }
     }
 
-    pub fn into_inner(self) -> HashMap<Id, T> {
+    pub fn into_inner(self) -> BTreeMap<Id, T> {
         self.inner
     }
 
@@ -71,7 +71,7 @@ impl<T: Clone> Map<T> {
 
 impl<T: Clone> Default for Map<T> {
     fn default() -> Map<T> {
-        HashMap::new().into()
+        BTreeMap::new().into()
     }
 }
 
@@ -83,14 +83,14 @@ impl<T: Clone + PartialEq> PartialEq for Map<T> {
 
 impl<T: Clone + PartialEq + Eq> Eq for Map<T> {}
 
-impl<T: Clone> AsRef<HashMap<Id, T>> for Map<T> {
-    fn as_ref(&self) -> &HashMap<Id, T> {
+impl<T: Clone> AsRef<BTreeMap<Id, T>> for Map<T> {
+    fn as_ref(&self) -> &BTreeMap<Id, T> {
         &self.inner
     }
 }
 
 impl<T: Clone> Deref for Map<T> {
-    type Target = HashMap<Id, T>;
+    type Target = BTreeMap<Id, T>;
 
     fn deref(&'_ self) -> &'_ Self::Target {
         &self.inner
@@ -105,7 +105,7 @@ impl<T: Clone> DerefMut for Map<T> {
 
 impl<T: Clone> IntoIterator for Map<T> {
     type Item = (Id, T);
-    type IntoIter = <HashMap<Id, T> as IntoIterator>::IntoIter;
+    type IntoIter = <BTreeMap<Id, T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter()
@@ -114,13 +114,13 @@ impl<T: Clone> IntoIterator for Map<T> {
 
 impl<T: Clone> FromIterator<(Id, T)> for Map<T> {
     fn from_iter<I: IntoIterator<Item = (Id, T)>>(iter: I) -> Self {
-        let inner = HashMap::from_iter(iter);
+        let inner = BTreeMap::from_iter(iter);
         Map { inner }
     }
 }
 
-impl<T: Clone> From<HashMap<Id, T>> for Map<T> {
-    fn from(inner: HashMap<Id, T>) -> Self {
+impl<T: Clone> From<BTreeMap<Id, T>> for Map<T> {
+    fn from(inner: BTreeMap<Id, T>) -> Self {
         Map { inner }
     }
 }
@@ -134,7 +134,7 @@ where
     }
 
     fn opt_cast_from(tuple: Tuple<F>) -> Option<Self> {
-        let mut inner = HashMap::<Id, T>::new();
+        let mut inner = BTreeMap::<Id, T>::new();
 
         for f in tuple.into_iter() {
             if let Some((id, t)) = f.opt_cast_into() {
@@ -156,7 +156,7 @@ where
     type Context = T::Context;
 
     async fn from_stream<D: Decoder>(context: T::Context, d: &mut D) -> Result<Self, D::Error> {
-        let inner = HashMap::<Id, T>::from_stream(context, d).await?;
+        let inner = BTreeMap::<Id, T>::from_stream(context, d).await?;
         Ok(Self { inner })
     }
 }
@@ -173,13 +173,13 @@ impl<'en, T: Clone + ToStream<'en> + 'en> ToStream<'en> for Map<T> {
     }
 }
 
-impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for HashMap<Id, T> {
+impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
     fn can_cast_from(map: &Map<F>) -> bool {
         map.values().all(|f| T::can_cast_from(f))
     }
 
     fn opt_cast_from(source: Map<F>) -> Option<Self> {
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
 
         for (id, f) in source.into_iter() {
             if let Some(t) = T::opt_cast_from(f) {

@@ -1,6 +1,6 @@
 //! A Tinychain [`State`]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
@@ -213,7 +213,7 @@ impl Refer for State {
                 )
                 .await?;
 
-                let map = HashMap::from_iter(resolved);
+                let map = BTreeMap::from_iter(resolved);
                 Ok(State::Map(map.into()))
             }
             Self::Scalar(scalar) => scalar.resolve(context, txn).await,
@@ -393,7 +393,7 @@ impl TryCastFrom<State> for bool {
 impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Map(map) => HashMap::<Id, T>::can_cast_from(map),
+            State::Map(map) => BTreeMap::<Id, T>::can_cast_from(map),
             State::Tuple(tuple) => Map::<T>::can_cast_from(tuple),
             _ => false,
         }
@@ -401,7 +401,7 @@ impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            State::Map(map) => HashMap::<Id, T>::opt_cast_from(map).map(Map::from),
+            State::Map(map) => BTreeMap::<Id, T>::opt_cast_from(map).map(Map::from),
             State::Tuple(tuple) => Map::<T>::opt_cast_from(tuple),
             _ => None,
         }
@@ -573,7 +573,7 @@ impl TryCastFrom<State> for OpRef {
 impl TryCastFrom<State> for Scalar {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Map(map) => HashMap::<Id, Scalar>::can_cast_from(map),
+            State::Map(map) => BTreeMap::<Id, Scalar>::can_cast_from(map),
             State::Scalar(_) => true,
             State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
             _ => false,
@@ -582,7 +582,7 @@ impl TryCastFrom<State> for Scalar {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            State::Map(map) => HashMap::<Id, Scalar>::opt_cast_from(map)
+            State::Map(map) => BTreeMap::<Id, Scalar>::opt_cast_from(map)
                 .map(Map::from)
                 .map(Scalar::Map),
 
@@ -784,7 +784,7 @@ impl<'a> de::Visitor for StateVisitor {
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            let mut map = HashMap::new();
+            let mut map = BTreeMap::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
             let txn = self

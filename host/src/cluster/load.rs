@@ -30,9 +30,9 @@ pub async fn instantiate(
         TCError::unsupported("cluster config must specify a Link to the cluster to host")
     })?;
 
-    let mut chain_schema = HashMap::new();
-    let mut cluster_proto = HashMap::new();
-    let mut classes = HashMap::new();
+    let mut chain_schema = Map::new();
+    let mut cluster_proto = Map::new();
+    let mut classes = Map::new();
 
     for (id, scalar) in proto.into_iter() {
         debug!("Cluster member: {}", scalar);
@@ -74,7 +74,7 @@ pub async fn instantiate(
     let mut replicas = HashSet::new();
     replicas.insert((host, link.path().clone()).into());
 
-    let mut chains = HashMap::<Id, Chain>::new();
+    let mut chains = Map::<Chain>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
         let dir = dir.get_or_create_dir(txn_id, id.clone()).await?;
         let chain = chain::load(txn, class, schema, dir).await?;
@@ -86,8 +86,8 @@ pub async fn instantiate(
     let cluster = Cluster {
         link: link.clone(),
         actor: Arc::new(Actor::new(actor_id)),
-        chains: chains.into(),
-        classes: classes.into(),
+        chains,
+        classes,
         confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
         installed: TxnLock::new(

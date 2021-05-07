@@ -1,6 +1,6 @@
 //! Immutable values which always reside entirely in memory
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
@@ -441,8 +441,8 @@ impl TryCastFrom<Scalar> for Bound {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Map(map) if HashMap::<Id, Value>::can_cast_from(&map) => {
-                let map = HashMap::<Id, Value>::opt_cast_from(map).unwrap();
+            Scalar::Map(map) if BTreeMap::<Id, Value>::can_cast_from(&map) => {
+                let map = BTreeMap::<Id, Value>::opt_cast_from(map).unwrap();
                 Map::from(map).opt_cast_into()
             }
             Scalar::Value(value) if value.is_none() => Some(Self::Un),
@@ -555,7 +555,7 @@ impl TryCastFrom<Scalar> for Number {
 impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Map(map) => HashMap::<Id, T>::can_cast_from(map),
+            Scalar::Map(map) => BTreeMap::<Id, T>::can_cast_from(map),
             Scalar::Tuple(tuple) => Vec::<(Id, T)>::can_cast_from(tuple),
             _ => false,
         }
@@ -563,7 +563,7 @@ impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Map(map) => HashMap::<Id, T>::opt_cast_from(map).map(Map::from),
+            Scalar::Map(map) => BTreeMap::<Id, T>::opt_cast_from(map).map(Map::from),
             Scalar::Tuple(tuple) => {
                 if let Some(entries) = Vec::<(Id, T)>::opt_cast_from(tuple) {
                     Some(entries.into_iter().collect())
@@ -918,7 +918,7 @@ impl de::Visitor for ScalarVisitor {
             return Self::visit_subject(subject, params);
         }
 
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         let key = Id::from_str(&key).map_err(de::Error::custom)?;
         let value = access.next_value(()).await?;
         map.insert(key, value);

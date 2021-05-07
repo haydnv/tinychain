@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::iter::FromIterator;
 
 use log::debug;
@@ -22,10 +21,10 @@ impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
-        let mut context = HashMap::with_capacity(1);
+        let mut context = Map::new();
         context.insert(key_name, key.into());
 
-        call_method(txn, self.subject, self.path, context.into(), op_def).await
+        call_method(txn, self.subject, self.path, context, op_def).await
     }
 }
 
@@ -45,11 +44,11 @@ impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
-        let mut context = HashMap::with_capacity(2);
+        let mut context = Map::new();
         context.insert(key_name, key.into());
         context.insert(value_name, value);
 
-        call_method(txn, self.subject, self.path, context.into(), op_def).await?;
+        call_method(txn, self.subject, self.path, context, op_def).await?;
         Ok(())
     }
 }
@@ -92,10 +91,10 @@ impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
-        let mut context = HashMap::with_capacity(1);
+        let mut context = Map::new();
         context.insert(key_name, key.into());
 
-        call_method(txn, self.subject, self.path, context.into(), op_def).await?;
+        call_method(txn, self.subject, self.path, context, op_def).await?;
         Ok(())
     }
 }

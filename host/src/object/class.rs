@@ -1,6 +1,5 @@
 //! User-defined class implementation.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -122,12 +121,7 @@ impl de::Visitor for InstanceClassVisitor {
                 });
             }
 
-            let mut proto = if let Some(len) = access.size_hint() {
-                HashMap::with_capacity(len)
-            } else {
-                HashMap::new()
-            };
-
+            let mut proto = Map::new();
             let id: Id = key.parse().map_err(de::Error::custom)?;
             proto.insert(id, access.next_value(()).await?);
 
