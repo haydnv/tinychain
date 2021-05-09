@@ -67,7 +67,8 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | At-rest encryption | \* | | | x | x | x | x | x | | x | |
 | Automatic concurrency/multithreading | x | | | x | x | x | x | x | | x | x |
-| Automatic GPU acceleration | \* | | x | | | | | | | | x |
+| Automatic GPU acceleration | \*\* | | x | | | | | | | | x |
+| Automatic sharding | \* | | | x | | | x | x | | | |
 | Blockchain compliant w/ GDPR & CCPA | \* | | | | | | | | | | |
 | Built-in cryptocurrency | | | x | | | | | | | | |
 | Cross-service transactions | x | | x | | | | | | | | |
@@ -112,7 +113,7 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 
  * **Cluster**: a collection of **Chain**s and **Op**s responsible for managing consensus relative to other **Cluster**s on the network
  * **Chain**: A record of mutations applied to a subject **Collection** or **Value**
-    * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. if the host crashes)
+    * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. in the event of a power failure)
     * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age, and replaced with a copy of the **Chain**'s subject at that time
     * **BlockChain**: A **Chain** with a record of every mutation in the history of its **Collection** or **Value**
     * **CompliantChain**\*: A **Chain** which retains all history by default, but which allows purging all data owned by a given (anonymous) user ID, for compliance with legal requirements like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act)
