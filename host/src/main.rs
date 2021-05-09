@@ -30,6 +30,8 @@ fn data_size(flag: &str) -> TCResult<u64> {
         Ok(size * 1000)
     } else if flag.ends_with('M') {
         Ok(size * 1_000_000)
+    } else if flag.ends_with('G') {
+        Ok(size * 1_000_000_000)
     } else {
         Err(TCError::bad_request(ERR, flag))
     }
