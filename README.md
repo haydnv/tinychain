@@ -83,7 +83,8 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 | Millisecond latency | x | x | | x | x | x | x | x | x | x | x |
 | Object-oriented API | x | x | | x | | | | | x | | x |
 | Object-relational mapping (ORM) | \* | x | | x | | | | | x | | |
-| Tensor computation (ML models) | \*\* | | | | | | | | | | x |
+| Stateful ML models | \*\* | | | | | | | | | | | 
+| Tensor computation | \*\* | | | | | | | | | | x |
 | Transactional reads & writes | x | | x | x | x | x | x | x | | x | |
 
 ### Safety
