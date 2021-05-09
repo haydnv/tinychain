@@ -62,7 +62,7 @@ struct Config {
     )]
     pub workspace: PathBuf,
 
-    #[structopt(long = "cache_size", default_value = "5K", parse(try_from_str = data_size))]
+    #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
     pub cache_size: u64,
 
     #[structopt(

@@ -123,6 +123,7 @@ class Local(Host):
             clusters=[],
             port=DEFAULT_PORT,
             log_level="warn",
+            cache_size="5K",
             force_create=False):
 
         # set _process first so it's available to __del__ in case of an exception
@@ -147,6 +148,7 @@ class Local(Host):
             f"--workspace={workspace}",
             f"--http_port={port}",
             f"--log_level={log_level}",
+            f"--cache_size={cache_size}",
         ]
 
         if data_dir:
