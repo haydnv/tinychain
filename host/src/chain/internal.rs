@@ -1,7 +1,7 @@
 use futures::TryFutureExt;
 
 use tc_error::*;
-use tc_transact::fs::BlockId;
+use tc_transact::fs::{BlockData, BlockId, File};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::TxnId;
 use tcgeneric::{Instance, TCPathBuf};
@@ -62,36 +62,42 @@ impl ChainData {
         self.latest.read(txn_id).map_ok(|id| *id).await
     }
 
-    pub async fn create_block(
-        &self,
-        _txn_id: TxnId,
-        _block_id: BlockId,
-    ) -> TCResult<fs::Block<ChainBlock>> {
-        Err(TCError::not_implemented("ChainData::create_block"))
+    pub async fn create_next_block(&self, txn_id: TxnId) -> TCResult<fs::Block<ChainBlock>> {
+        let mut latest = self.latest.write(txn_id).await?;
+        let last_block = self.read_block(txn_id, (*latest).into()).await?;
+        let hash = last_block.hash().await?;
+        let block = ChainBlock::new(hash);
+
+        (*latest) += 1;
+        self.file
+            .create_block(txn_id, (*latest).into(), block)
+            .await
     }
 
     pub async fn read_block(
         &self,
-        _txn_id: TxnId,
-        _block_id: BlockId,
+        txn_id: TxnId,
+        block_id: BlockId,
     ) -> TCResult<fs::BlockRead<ChainBlock>> {
-        Err(TCError::not_implemented("ChainData::read_block"))
+        self.file.read_block(txn_id, block_id).await
     }
 
     pub async fn write_block(
         &self,
-        _txn_id: TxnId,
-        _block_id: BlockId,
+        txn_id: TxnId,
+        block_id: BlockId,
     ) -> TCResult<fs::BlockWrite<ChainBlock>> {
-        Err(TCError::not_implemented("ChainData::write_block"))
+        self.file.write_block(txn_id, block_id).await
     }
 
-    pub async fn read_latest(&self, _txn_id: TxnId) -> TCResult<fs::BlockRead<ChainBlock>> {
-        Err(TCError::not_implemented("ChainData::write_block"))
+    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<fs::BlockRead<ChainBlock>> {
+        let latest = self.latest.read(&txn_id).await?;
+        self.read_block(txn_id, (*latest).into()).await
     }
 
-    pub async fn write_latest(&self, _txn_id: TxnId) -> TCResult<fs::BlockWrite<ChainBlock>> {
-        Err(TCError::not_implemented("ChainData::write_block"))
+    pub async fn write_latest(&self, txn_id: TxnId) -> TCResult<fs::BlockWrite<ChainBlock>> {
+        let latest = self.latest.read(&txn_id).await?;
+        self.write_block(txn_id, (*latest).into()).await
     }
 
     pub async fn prepare_commit(&self, txn_id: &TxnId) {
