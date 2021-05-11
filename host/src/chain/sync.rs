@@ -146,6 +146,10 @@ impl Persist<fs::Dir, Txn> for SyncChain {
             file,
         })
     }
+
+    async fn save(&self, _txn_id: TxnId, _store: Self::Store) -> TCResult<Self::Schema> {
+        Err(TCError::not_implemented("BlockChain::save"))
+    }
 }
 
 #[async_trait]

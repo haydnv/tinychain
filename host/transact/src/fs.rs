@@ -253,6 +253,9 @@ pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
 
     /// Load a saved state from persistent storage.
     async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+
+    /// Save this state to the given `Store` (e.g. to make a copy).
+    async fn save(&self, txn_id: TxnId, store: Self::Store) -> TCResult<Self::Schema>;
 }
 
 /// Defines how to restore persistent state from backup.

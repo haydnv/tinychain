@@ -243,6 +243,11 @@ where
             .map_ok(|btree| Self { schema, btree })
             .await
     }
+
+    async fn save(&self, txn_id: TxnId, dest: F) -> TCResult<Self::Schema> {
+        self.btree.save(txn_id, dest).await?;
+        Ok(self.schema.clone())
+    }
 }
 
 #[async_trait]
@@ -944,6 +949,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D, Txn> for TableIndex<F, D, Txn>
 where
     F: TryFrom<D::File, Error = TCError>,
+    <D as Dir>::FileClass: From<BTreeType> + Send,
 {
     type Schema = TableSchema;
     type Store = D;
@@ -979,6 +985,33 @@ where
                 auxiliary,
             }),
         })
+    }
+
+    async fn save(&self, txn_id: TxnId, dir: D) -> TCResult<Self::Schema> {
+        if !dir.is_empty(&txn_id).await? {
+            return Err(TCError::bad_request(
+                "cannot copy Table",
+                "directory is not empty",
+            ));
+        }
+
+        let mut copies = Vec::with_capacity(self.inner.auxiliary.len() + 1);
+
+        let file = dir
+            .create_file(txn_id, PRIMARY_INDEX.into(), BTreeType::default())
+            .await?;
+        copies.push(self.inner.primary.save(txn_id, file.try_into()?));
+
+        for (name, index) in &self.inner.auxiliary {
+            let file = dir
+                .create_file(txn_id, name.clone(), BTreeType::default())
+                .await?;
+            copies.push(index.save(txn_id, file.try_into()?));
+        }
+
+        try_join_all(copies).await?;
+
+        Ok(self.inner.schema.clone())
     }
 }
 

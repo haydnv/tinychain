@@ -734,6 +734,18 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D,
 
         Ok(BTreeFile::new(file, schema, order, root))
     }
+
+    async fn save(&self, txn_id: TxnId, dest: F) -> TCResult<Self::Schema> {
+        if !dest.is_empty(&txn_id).await? {
+            return Err(TCError::bad_request(
+                "cannot copy BTree",
+                "destination is not empty",
+            ));
+        }
+
+        dest.copy_from(&self.inner.file, txn_id).await?;
+        Ok(self.inner.schema.clone())
+    }
 }
 
 #[async_trait]

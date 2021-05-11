@@ -13,16 +13,15 @@ use crate::state::State;
 use super::ChainBlock;
 
 pub struct ChainData {
+    dir: fs::Dir,
     file: fs::File<ChainBlock>,
     latest: TxnLock<Mutable<u64>>,
 }
 
 impl ChainData {
-    pub fn new(latest: u64, file: fs::File<ChainBlock>) -> Self {
-        Self {
-            latest: TxnLock::new("latest BlockChain block ordinal", latest.into()),
-            file,
-        }
+    pub fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
+        let latest = TxnLock::new("latest block ordinal", latest.into());
+        Self { dir, latest, file }
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
@@ -46,11 +45,15 @@ impl ChainData {
         }
 
         let value_ref = match value {
-            State::Scalar(value) => Ok(value),
-            other => Err(TCError::not_implemented(format!(
-                "Chain <- {}",
-                other.class()
+            State::Collection(collection) => Err(TCError::not_implemented(format!(
+                "update Chain with value {}",
+                collection.class()
             ))),
+            State::Scalar(value) => Ok(value),
+            other => Err(TCError::bad_request(
+                "Chain does not support value",
+                other.class(),
+            )),
         }?;
 
         let mut block = self.write_latest(txn_id).await?;
