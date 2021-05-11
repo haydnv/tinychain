@@ -398,7 +398,7 @@ where
             let contents = self.contents.read(txn_id).await.expect("file block list");
             let mut mutated = self.mutated.write().await;
             if let Some(blocks) = mutated.remove(txn_id) {
-                let commits = blocks
+                let deletes = blocks
                     .iter()
                     .filter(|block_id| !contents.contains(block_id))
                     .map(|block_id| {
@@ -406,7 +406,7 @@ where
                         cache.delete_and_sync(block_path)
                     });
 
-                try_join_all(commits).await.expect("commit file blocks");
+                try_join_all(deletes).await.expect("delete file blocks");
             }
         }
 
