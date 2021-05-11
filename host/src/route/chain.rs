@@ -4,10 +4,10 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_transact::fs::File;
 use tc_transact::Transaction;
+use tc_value::Value;
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::chain::{Chain, ChainInstance, Subject, SUBJECT};
-use crate::scalar::{Scalar, Value};
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
@@ -153,18 +153,11 @@ impl<'a> Handler<'a> for AppendHandler<'a> {
             Some(handler) => match handler.put() {
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
-                        let scalar_value = Scalar::try_cast_from(value.clone(), |v| {
-                            TCError::not_implemented(format!("update Chain with value {}", v))
-                        })?;
-
                         debug!("Chain::put {} <- {}", key, value);
+
+                        let path = self.path.to_vec().into();
                         self.chain
-                            .append_put(
-                                *txn.id(),
-                                self.path.to_vec().into(),
-                                key.clone(),
-                                scalar_value,
-                            )
+                            .append_put(*txn.id(), path, key.clone(), value.clone())
                             .await?;
 
                         put_handler(txn, key, value).await

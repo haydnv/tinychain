@@ -315,7 +315,7 @@ pub trait ChainInstance {
         txn_id: TxnId,
         path: TCPathBuf,
         key: Value,
-        value: Scalar,
+        value: State,
     ) -> TCResult<()>;
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
@@ -403,7 +403,7 @@ impl ChainInstance for Chain {
         txn_id: TxnId,
         path: TCPathBuf,
         key: Value,
-        value: Scalar,
+        value: State,
     ) -> TCResult<()> {
         match self {
             Self::Block(chain) => chain.append_put(txn_id, path, key, value).await,

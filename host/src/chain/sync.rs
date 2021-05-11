@@ -11,14 +11,15 @@ use futures::join;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{label, Label, TCPathBuf};
+use tcgeneric::{label, Instance, Label, TCPathBuf};
 
 use crate::fs;
-use crate::scalar::{Link, Scalar, Value};
-use crate::state::StateView;
+use crate::scalar::{Link, Value};
+use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
+use safecast::TryCastInto;
 
 const BLOCK_ID: Label = label("sync");
 
@@ -44,10 +45,15 @@ impl ChainInstance for SyncChain {
         txn_id: TxnId,
         path: TCPathBuf,
         key: Value,
-        value: Scalar,
+        value: State,
     ) -> TCResult<()> {
         let mut block = self.file.write_block(txn_id, BLOCK_ID.into()).await?;
-        block.append_put(txn_id, path, key, value);
+        block.append_put(
+            txn_id,
+            path,
+            key,
+            value.try_cast_into(|s| TCError::not_implemented(format!("Chain <- {}", s.class())))?,
+        );
         Ok(())
     }
 

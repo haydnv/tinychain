@@ -18,17 +18,18 @@ use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, Persist, Store};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact};
-use tcgeneric::TCPathBuf;
+use tcgeneric::{Instance, TCPathBuf};
 
 use crate::fs;
 use crate::route::Public;
-use crate::scalar::{Link, Scalar, Value};
+use crate::scalar::{Link, Value};
 use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::Mutation;
 use super::{Chain, ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
+use safecast::TryCastInto;
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s
 #[derive(Clone)]
@@ -64,7 +65,7 @@ impl ChainInstance for BlockChain {
         txn_id: TxnId,
         path: TCPathBuf,
         key: Value,
-        value: Scalar,
+        value: State,
     ) -> TCResult<()> {
         if value.is_ref() {
             return Err(TCError::bad_request(
@@ -75,7 +76,12 @@ impl ChainInstance for BlockChain {
 
         let latest = self.latest.read(&txn_id).await?;
         let mut block = self.file.write_block(txn_id, (*latest).into()).await?;
-        block.append_put(txn_id, path, key, value);
+        block.append_put(
+            txn_id,
+            path,
+            key,
+            value.try_cast_into(|s| TCError::not_implemented(format!("Chain <- {}", s.class())))?,
+        );
         Ok(())
     }
 
