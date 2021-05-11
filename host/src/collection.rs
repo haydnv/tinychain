@@ -5,23 +5,23 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::{de, en, EncodeMap};
-use futures::TryFutureExt;
+use bytes::Bytes;
+use destream::{de, en};
+use futures::{TryFutureExt, TryStreamExt};
 use log::debug;
+use sha2::{Digest, Sha256};
 
-use tc_btree::BTreeView;
+use tc_btree::{BTreeInstance, BTreeView};
 use tc_error::*;
-use tc_table::TableView;
+use tc_table::{TableInstance, TableView};
 use tc_transact::fs::Dir;
-use tc_transact::{IntoView, Transaction};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
 };
 
 use crate::fs;
 use crate::txn::Txn;
-
-const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
@@ -30,6 +30,8 @@ pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+
+const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
 /// The [`Class`] of a [`Collection`].
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -89,6 +91,45 @@ impl fmt::Display for CollectionType {
 pub enum Collection {
     BTree(BTree),
     Table(Table),
+}
+
+impl Collection {
+    #[allow(dead_code)]
+    async fn hash(self, txn_id: TxnId) -> TCResult<Bytes> {
+        // TODO: can this be consolidated with transact::fs::Block::hash?
+
+        let mut hasher = Sha256::default();
+
+        async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
+            hasher: &mut Sha256,
+            data: T,
+        ) -> TCResult<()> {
+            let mut data = destream_json::en::encode(data).map_err(TCError::internal)?;
+            while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
+                hasher.update(&chunk);
+            }
+
+            Ok(())
+        }
+
+        match self {
+            Self::BTree(btree) => {
+                let mut keys = btree.keys(txn_id).await?;
+                while let Some(key) = keys.try_next().await? {
+                    hash_chunks(&mut hasher, key).await?;
+                }
+            }
+            Self::Table(table) => {
+                let mut rows = table.rows(txn_id).await?;
+                while let Some(row) = rows.try_next().await? {
+                    hash_chunks(&mut hasher, row).await?;
+                }
+            }
+        }
+
+        let digest = hasher.finalize();
+        Ok(Bytes::from(digest.to_vec()))
+    }
 }
 
 impl Instance for Collection {
@@ -210,6 +251,8 @@ pub enum CollectionView<'en> {
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use destream::en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(1))?;
         match self {
             Self::BTree(btree) => map.encode_entry(BTreeType::default().path(), btree),
