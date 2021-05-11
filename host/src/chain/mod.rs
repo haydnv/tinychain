@@ -29,6 +29,9 @@ pub use sync::SyncChain;
 
 mod block;
 mod data;
+
+#[allow(dead_code)]
+mod internal;
 mod sync;
 
 const BLOCK_SIZE: u64 = 1_000_000;
