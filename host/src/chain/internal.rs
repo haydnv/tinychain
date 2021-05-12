@@ -1,20 +1,25 @@
+use std::convert::TryFrom;
+
 use async_trait::async_trait;
-use destream::{en, Encoder};
+use destream::{de, en};
 use futures::stream::{self, StreamExt};
 use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, File};
+use tc_transact::fs::{Block, BlockData, BlockId, Dir, File};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{Instance, TCPathBuf, TCTryStream};
+use tcgeneric::{label, Instance, Label, TCPathBuf, TCTryStream};
 
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::data::{ChainBlock, Mutation};
+use super::{ChainType, NULL_HASH};
+
+const HISTORY: Label = label("history");
 
 #[derive(Clone)]
 pub struct ChainData {
@@ -119,6 +124,76 @@ impl ChainData {
 }
 
 #[async_trait]
+impl de::FromStream for ChainData {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_seq(ChainDataVisitor { txn }).await
+    }
+}
+
+struct ChainDataVisitor {
+    txn: Txn,
+}
+
+#[async_trait]
+impl de::Visitor for ChainDataVisitor {
+    type Value = ChainData;
+
+    fn expecting() -> &'static str {
+        "Chain history"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let dir = self.txn.context().clone();
+        let file = dir
+            .create_file(txn_id, HISTORY.into(), ChainType::default())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let file = fs::File::<ChainBlock>::try_from(file).map_err(de::Error::custom)?;
+
+        if let Some(first_block) = seq.next_element(()).await? {
+            file.create_block(txn_id, 0u64.into(), first_block)
+                .map_err(de::Error::custom)
+                .await?;
+        } else {
+            let first_block = ChainBlock::new(NULL_HASH);
+            file.create_block(txn_id, 0u64.into(), first_block)
+                .map_err(de::Error::custom)
+                .await?;
+
+            return Ok(ChainData::new(0, dir, file));
+        }
+
+        let chain = ChainData::new(0, dir, file);
+
+        while let Some(block_data) = seq.next_element::<ChainBlock>(()).await? {
+            let block = chain
+                .create_next_block(txn_id)
+                .map_err(de::Error::custom)
+                .await?;
+
+            let mut block = block.write().await;
+            if block.last_hash() == block_data.last_hash() {
+                *block = block_data;
+            } else {
+                let unexpected = base64::encode(block_data.last_hash());
+                let expected = base64::encode(block.last_hash());
+
+                return Err(de::Error::invalid_value(
+                    format!("block with hash {}", unexpected),
+                    format!("block with hash {}", expected),
+                ));
+            }
+        }
+
+        Ok(chain)
+    }
+}
+
+#[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for ChainData {
     type Txn = Txn;
     type View =
@@ -191,7 +266,7 @@ pub enum MutationView<'en> {
 }
 
 impl<'en> en::IntoStream<'en> for MutationView<'en> {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Delete(path, key) => (path, key).into_stream(encoder),
             Self::Put(path, key, value) => (path, key, value).into_stream(encoder),

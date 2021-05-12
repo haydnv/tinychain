@@ -337,6 +337,12 @@ pub enum ChainType {
     Sync,
 }
 
+impl Default for ChainType {
+    fn default() -> Self {
+        Self::Sync
+    }
+}
+
 impl Class for ChainType {}
 
 impl NativeClass for ChainType {
