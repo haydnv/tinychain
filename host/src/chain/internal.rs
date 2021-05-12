@@ -90,14 +90,6 @@ impl ChainData {
         self.file.read_block(txn_id, block_id).await
     }
 
-    async fn read_block_owned(
-        self,
-        txn_id: TxnId,
-        block_id: BlockId,
-    ) -> TCResult<fs::BlockRead<ChainBlock>> {
-        self.file.read_block(txn_id, block_id).await
-    }
-
     pub async fn write_block(
         &self,
         txn_id: TxnId,
@@ -136,7 +128,8 @@ impl<'en> IntoView<'en, fs::Dir> for ChainData {
         let txn_id = *txn.id();
         let latest = self.latest.read(&txn_id).await?;
 
-        let read_block = move |block_id| Box::pin(self.clone().read_block_owned(txn_id, block_id));
+        let file = self.file.clone();
+        let read_block = move |block_id| Box::pin(file.clone().read_block_owned(txn_id, block_id));
 
         let seq = stream::iter(0..((*latest) + 1))
             .map(BlockId::from)
