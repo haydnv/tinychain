@@ -1,17 +1,22 @@
-use futures::TryFutureExt;
+use async_trait::async_trait;
+use destream::{en, Encoder};
+use futures::stream::{self, StreamExt};
+use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, File};
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::TxnId;
-use tcgeneric::{Instance, TCPathBuf};
+use tc_transact::{IntoView, Transaction, TxnId};
+use tc_value::Value;
+use tcgeneric::{Instance, TCPathBuf, TCTryStream};
 
 use crate::fs;
-use crate::scalar::Value;
-use crate::state::State;
+use crate::state::{State, StateView};
+use crate::txn::Txn;
 
-use super::ChainBlock;
+use super::data::{ChainBlock, Mutation};
 
+#[derive(Clone)]
 pub struct ChainData {
     dir: fs::Dir,
     file: fs::File<ChainBlock>,
@@ -85,6 +90,14 @@ impl ChainData {
         self.file.read_block(txn_id, block_id).await
     }
 
+    async fn read_block_owned(
+        self,
+        txn_id: TxnId,
+        block_id: BlockId,
+    ) -> TCResult<fs::BlockRead<ChainBlock>> {
+        self.file.read_block(txn_id, block_id).await
+    }
+
     pub async fn write_block(
         &self,
         txn_id: TxnId,
@@ -110,5 +123,85 @@ impl ChainData {
             .sync_block(*txn_id, (*latest).into())
             .await
             .expect("prepare BlockChain commit");
+    }
+}
+
+#[async_trait]
+impl<'en> IntoView<'en, fs::Dir> for ChainData {
+    type Txn = Txn;
+    type View =
+        en::SeqStream<TCError, ChainDataBlockView<'en>, TCTryStream<'en, ChainDataBlockView<'en>>>;
+
+    async fn into_view(self, txn: Txn) -> TCResult<Self::View> {
+        let txn_id = *txn.id();
+        let latest = self.latest.read(&txn_id).await?;
+
+        let read_block = move |block_id| Box::pin(self.clone().read_block_owned(txn_id, block_id));
+
+        let seq = stream::iter(0..((*latest) + 1))
+            .map(BlockId::from)
+            .then(read_block)
+            .map_ok(move |block| {
+                let txn = txn.clone();
+                let map =
+                    stream::iter(block.mutations().clone()).map(move |(past_txn_id, mutations)| {
+                        let txn = txn.clone();
+                        let mutations = stream::iter(mutations).then(move |op| {
+                            let txn = txn.clone();
+                            Box::pin(async move {
+                                match op {
+                                    Mutation::Delete(path, key) => {
+                                        Ok(MutationView::Delete(path, key))
+                                    }
+                                    Mutation::Put(_path, _key, value) if value.is_ref() => {
+                                        Err(TCError::not_implemented(
+                                            "resolve reference in Mutation::Put",
+                                        ))
+                                    }
+                                    Mutation::Put(path, key, value) => {
+                                        let value =
+                                            State::from(value).into_view(txn.clone()).await?;
+
+                                        Ok(MutationView::Put(path, key, value))
+                                    }
+                                }
+                            })
+                        });
+
+                        let mutations: TCTryStream<'en, MutationView<'en>> = Box::pin(mutations);
+                        let mutations = en::SeqStream::from(mutations);
+                        Ok((past_txn_id, mutations))
+                    });
+
+                let map: TCTryStream<'en, (TxnId, MutationViewSeq<'en>)> = Box::pin(map);
+                en::MapStream::from(map)
+            });
+
+        let seq: TCTryStream<'en, ChainDataBlockView<'en>> = Box::pin(seq);
+        Ok(en::SeqStream::from(seq))
+    }
+}
+
+type MutationViewSeq<'en> =
+    en::SeqStream<TCError, MutationView<'en>, TCTryStream<'en, MutationView<'en>>>;
+
+type ChainDataBlockView<'en> = en::MapStream<
+    TCError,
+    TxnId,
+    MutationViewSeq<'en>,
+    TCTryStream<'en, (TxnId, MutationViewSeq<'en>)>,
+>;
+
+pub enum MutationView<'en> {
+    Delete(TCPathBuf, Value),
+    Put(TCPathBuf, Value, StateView<'en>),
+}
+
+impl<'en> en::IntoStream<'en> for MutationView<'en> {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Delete(path, key) => (path, key).into_stream(encoder),
+            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+        }
     }
 }

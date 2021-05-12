@@ -65,6 +65,7 @@ impl de::Visitor for MutationVisitor {
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+
         let key = seq
             .next_element(())
             .await?
