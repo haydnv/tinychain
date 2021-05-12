@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
-use futures::{TryFutureExt, TryStreamExt};
+use futures::{join, TryFutureExt, TryStreamExt};
 
 use tc_error::*;
 use tc_transact::fs::{Block, BlockData, BlockId, Dir, File, Persist};
 use tc_transact::lock::{Mutable, TxnLock};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Instance, Label, TCPathBuf, TCTryStream};
 
@@ -18,9 +18,9 @@ use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::data::{ChainBlock, Mutation};
-use super::{ChainType, NULL_HASH};
+use super::{ChainType, CHAIN, NULL_HASH};
 
-const HISTORY: Label = label("history");
+const DATA: Label = label("data");
 
 #[derive(Clone)]
 pub struct ChainData {
@@ -30,9 +30,20 @@ pub struct ChainData {
 }
 
 impl ChainData {
-    pub fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
+    fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
         let latest = TxnLock::new("latest block ordinal", latest.into());
         Self { dir, latest, file }
+    }
+
+    pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
+        let file = dir.create_file(txn_id, CHAIN.into(), class).await?;
+        let file = fs::File::<ChainBlock>::try_from(file)?;
+        file.create_block(txn_id, 0u64.into(), ChainBlock::new(NULL_HASH))
+            .await?;
+
+        let dir = dir.create_dir(txn_id, DATA.into()).await?;
+
+        Ok(Self::new(0, dir, file))
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
@@ -70,6 +81,11 @@ impl ChainData {
         let mut block = self.write_latest(txn_id).await?;
         block.append_put(txn_id, path, key, value_ref);
         Ok(())
+    }
+
+    pub async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
+        let block = self.read_latest(txn_id).await?;
+        Ok(block.mutations().keys().next().cloned())
     }
 
     pub async fn latest_block_id(&self, txn_id: &TxnId) -> TCResult<u64> {
@@ -137,15 +153,21 @@ impl Persist<fs::Dir, Txn> for ChainData {
 
     async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
         let file = dir
-            .get_file(txn.id(), &HISTORY.into())
+            .get_file(txn.id(), &CHAIN.into())
             .await?
             .ok_or_else(|| TCError::internal("Chain has no history file"))?;
 
         let file = fs::File::<ChainBlock>::try_from(file)?;
 
+        let dir = dir
+            .get_dir(txn.id(), &DATA.into())
+            .await?
+            .ok_or_else(|| TCError::internal("Chain has no data directory"))?;
+
         let mut last_hash = Bytes::from(NULL_HASH);
         let mut latest = 0;
-        while file.contains_block(txn.id(), &latest.into()).await? {
+
+        loop {
             let block = file.read_block(*txn.id(), latest.into()).await?;
             if block.last_hash() == &last_hash {
                 last_hash = block.last_hash().clone();
@@ -156,7 +178,11 @@ impl Persist<fs::Dir, Txn> for ChainData {
                 )));
             }
 
-            latest += 1;
+            if file.contains_block(txn.id(), &(latest + 1).into()).await? {
+                latest += 1;
+            } else {
+                break;
+            }
         }
 
         Ok(ChainData::new(latest, dir, file))
@@ -164,6 +190,17 @@ impl Persist<fs::Dir, Txn> for ChainData {
 
     async fn save(&self, _txn_id: TxnId, _dir: fs::Dir) -> TCResult<()> {
         Err(TCError::not_implemented("ChainData::save"))
+    }
+}
+
+#[async_trait]
+impl Transact for ChainData {
+    async fn commit(&self, txn_id: &TxnId) {
+        join!(self.file.commit(txn_id), self.dir.commit(txn_id));
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(self.file.finalize(txn_id), self.dir.finalize(txn_id));
     }
 }
 
@@ -191,12 +228,18 @@ impl de::Visitor for ChainDataVisitor {
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
+
         let file = dir
-            .create_file(txn_id, HISTORY.into(), ChainType::default())
+            .create_file(txn_id, CHAIN.into(), ChainType::default())
             .map_err(de::Error::custom)
             .await?;
 
         let file = fs::File::<ChainBlock>::try_from(file).map_err(de::Error::custom)?;
+
+        let dir = dir
+            .create_dir(txn_id, DATA.into())
+            .map_err(de::Error::custom)
+            .await?;
 
         if let Some(first_block) = seq.next_element(()).await? {
             file.create_block(txn_id, 0u64.into(), first_block)

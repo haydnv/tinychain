@@ -1,27 +1,24 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
 
-use std::convert::{TryFrom, TryInto};
-
 use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::join;
+use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist};
+use tc_transact::fs::{Persist, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{label, Instance, Label, TCPathBuf};
+use tcgeneric::{Instance, TCPathBuf};
 
 use crate::fs;
 use crate::scalar::{Link, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, NULL_HASH};
-use safecast::TryCastInto;
-
-const BLOCK_ID: Label = label("sync");
+use super::internal::ChainData;
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, NULL_HASH};
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -29,13 +26,13 @@ const BLOCK_ID: Label = label("sync");
 pub struct SyncChain {
     schema: Schema,
     subject: Subject,
-    file: fs::File<ChainBlock>,
+    history: ChainData,
 }
 
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        let mut block = self.file.write_block(txn_id, BLOCK_ID.into()).await?;
+        let mut block = self.history.write_latest(txn_id).await?;
         block.append_delete(txn_id, path, key);
         Ok(())
     }
@@ -47,19 +44,19 @@ impl ChainInstance for SyncChain {
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        let mut block = self.file.write_block(txn_id, BLOCK_ID.into()).await?;
+        let mut block = self.history.write_latest(txn_id).await?;
         block.append_put(
             txn_id,
             path,
             key,
             value.try_cast_into(|s| TCError::not_implemented(format!("Chain <- {}", s.class())))?,
         );
+
         Ok(())
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
-        let block = self.file.read_block(txn_id, BLOCK_ID.into()).await?;
-        Ok(block.mutations().keys().next().cloned())
+        self.history.last_commit(txn_id).await
     }
 
     fn subject(&self) -> &Subject {
@@ -70,17 +67,14 @@ impl ChainInstance for SyncChain {
         let subject = txn.get(source, Value::None).await?;
         self.subject.restore(*txn.id(), subject).await?;
 
-        let mut block = self.file.write_block(*txn.id(), BLOCK_ID.into()).await?;
+        let mut block = self.history.write_latest(*txn.id()).await?;
         *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
 
         Ok(())
     }
 
     async fn prepare_commit(&self, txn_id: &TxnId) {
-        self.file
-            .sync_block(*txn_id, BLOCK_ID.into())
-            .await
-            .expect("prepare SyncChain commit");
+        self.history.prepare_commit(txn_id).await
     }
 }
 
@@ -94,56 +88,43 @@ impl Persist<fs::Dir, Txn> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        let is_new = dir.is_empty(txn.id()).await?;
+
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
-        let txn_id = *txn.id();
-        let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
-            let file = fs::File::<ChainBlock>::try_from(file)?;
-
-            let block = file.read_block(txn_id, BLOCK_ID.into()).await?;
-            if block.mutations().len() > 1 {
-                return Err(TCError::internal(
-                    "SyncChain should only store one Transaction record at a time",
-                ));
-            }
-
-            if let Some((last_txn_id, ops)) = block.mutations().iter().next() {
-                for op in ops {
-                    subject
-                        .apply(txn, op)
-                        .map_err(|e| {
-                            TCError::internal(format!(
-                                "error replaying last transaction {}: {}",
-                                last_txn_id, e
-                            ))
-                        })
-                        .await?;
-                }
-            }
-
-            file
+        let history = if is_new {
+            ChainData::create(*txn.id(), dir, ChainType::Sync).await?
         } else {
-            let file = dir
-                .create_file(txn_id, CHAIN.into(), ChainType::Sync)
-                .await?;
-
-            let file = fs::File::<ChainBlock>::try_from(file)?;
-            if !file.contains_block(&txn_id, &BLOCK_ID.into()).await? {
-                file.create_block(
-                    txn_id,
-                    BLOCK_ID.into(),
-                    ChainBlock::with_txn(NULL_HASH, txn_id),
-                )
-                .await?;
-            }
-
-            file
+            ChainData::load(txn, (), dir).await?
         };
+
+        let latest = history.latest_block_id(txn.id()).await?;
+        if latest > 0 {
+            return Err(TCError::internal(format!(
+                "a SyncChain can only have one block, found {}",
+                latest
+            )));
+        }
+
+        let block = history.read_latest(*txn.id()).await?;
+        for (past_txn_id, mutations) in block.mutations() {
+            for op in mutations {
+                subject
+                    .apply(txn, op)
+                    .map_err(|e| {
+                        TCError::internal(format!(
+                            "error replaying last transaction {}: {}",
+                            past_txn_id, e
+                        ))
+                    })
+                    .await?;
+            }
+        }
 
         Ok(SyncChain {
             schema,
             subject,
-            file,
+            history,
         })
     }
 
@@ -156,22 +137,17 @@ impl Persist<fs::Dir, Txn> for SyncChain {
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
         {
-            let mut block = self
-                .file
-                .sync_block(*txn_id, BLOCK_ID.into())
-                .await
-                .unwrap();
-
+            self.history.prepare_commit(txn_id).await;
             self.subject.commit(txn_id).await;
-
+            let mut block = self.history.write_latest(*txn_id).await.unwrap();
             *block = ChainBlock::with_txn(NULL_HASH, *txn_id);
         }
 
-        self.file.commit(txn_id).await
+        self.history.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(self.subject.finalize(txn_id), self.file.finalize(txn_id));
+        join!(self.subject.finalize(txn_id), self.history.finalize(txn_id));
     }
 }
 
@@ -198,12 +174,10 @@ impl de::Visitor for ChainVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let file = self
-            .txn
-            .context()
-            .create_file(*self.txn.id(), CHAIN.into(), ChainType::Sync)
-            .map_err(de::Error::custom)
-            .await?;
+        let history =
+            ChainData::create(*self.txn.id(), self.txn.context().clone(), ChainType::Sync)
+                .map_err(de::Error::custom)
+                .await?;
 
         let schema = seq
             .next_element(())
@@ -218,7 +192,7 @@ impl de::Visitor for ChainVisitor {
         Ok(SyncChain {
             schema,
             subject,
-            file: file.try_into().map_err(de::Error::custom)?,
+            history,
         })
     }
 }
