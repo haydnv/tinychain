@@ -1,12 +1,13 @@
 use std::convert::TryFrom;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
 use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::*;
-use tc_transact::fs::{Block, BlockData, BlockId, Dir, File};
+use tc_transact::fs::{Block, BlockData, BlockId, Dir, File, Persist};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
@@ -120,6 +121,49 @@ impl ChainData {
             .sync_block(*txn_id, (*latest).into())
             .await
             .expect("prepare BlockChain commit");
+    }
+}
+
+const SCHEMA: () = ();
+
+#[async_trait]
+impl Persist<fs::Dir, Txn> for ChainData {
+    type Schema = ();
+    type Store = fs::Dir;
+
+    fn schema(&self) -> &() {
+        &SCHEMA
+    }
+
+    async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        let file = dir
+            .get_file(txn.id(), &HISTORY.into())
+            .await?
+            .ok_or_else(|| TCError::internal("Chain has no history file"))?;
+
+        let file = fs::File::<ChainBlock>::try_from(file)?;
+
+        let mut last_hash = Bytes::from(NULL_HASH);
+        let mut latest = 0;
+        while file.contains_block(txn.id(), &latest.into()).await? {
+            let block = file.read_block(*txn.id(), latest.into()).await?;
+            if block.last_hash() == &last_hash {
+                last_hash = block.last_hash().clone();
+            } else {
+                return Err(TCError::internal(format!(
+                    "block {} hash does not match previous block",
+                    latest
+                )));
+            }
+
+            latest += 1;
+        }
+
+        Ok(ChainData::new(latest, dir, file))
+    }
+
+    async fn save(&self, _txn_id: TxnId, _dir: fs::Dir) -> TCResult<()> {
+        Err(TCError::not_implemented("ChainData::save"))
     }
 }
 
