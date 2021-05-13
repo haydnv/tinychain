@@ -5,15 +5,16 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
 use futures::{join, TryFutureExt, TryStreamExt};
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Block, BlockData, BlockId, Dir, File, Persist};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::Value;
 use tcgeneric::{label, Instance, Label, TCPathBuf, TCTryStream};
 
 use crate::fs;
+use crate::scalar::{Scalar, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -72,6 +73,7 @@ impl ChainData {
                 collection.class()
             ))),
             State::Scalar(value) => Ok(value),
+            other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
             other => Err(TCError::bad_request(
                 "Chain does not support value",
                 other.class(),
@@ -90,6 +92,10 @@ impl ChainData {
 
     pub async fn latest_block_id(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.latest.read(txn_id).map_ok(|id| *id).await
+    }
+
+    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<bool> {
+        self.file.contains_block(txn_id, block_id).await
     }
 
     pub async fn create_next_block(&self, txn_id: TxnId) -> TCResult<fs::Block<ChainBlock>> {
@@ -280,11 +286,13 @@ impl de::Visitor for ChainDataVisitor {
     }
 }
 
+pub type ChainDataView<'en> =
+    en::SeqStream<TCError, ChainDataBlockView<'en>, TCTryStream<'en, ChainDataBlockView<'en>>>;
+
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for ChainData {
     type Txn = Txn;
-    type View =
-        en::SeqStream<TCError, ChainDataBlockView<'en>, TCTryStream<'en, ChainDataBlockView<'en>>>;
+    type View = ChainDataView<'en>;
 
     async fn into_view(self, txn: Txn) -> TCResult<Self::View> {
         let txn_id = *txn.id();
@@ -329,7 +337,7 @@ impl<'en> IntoView<'en, fs::Dir> for ChainData {
                     });
 
                 let map: TCTryStream<'en, (TxnId, MutationViewSeq<'en>)> = Box::pin(map);
-                en::MapStream::from(map)
+                (block.last_hash().clone(), en::MapStream::from(map))
             });
 
         let seq: TCTryStream<'en, ChainDataBlockView<'en>> = Box::pin(seq);
@@ -340,12 +348,15 @@ impl<'en> IntoView<'en, fs::Dir> for ChainData {
 type MutationViewSeq<'en> =
     en::SeqStream<TCError, MutationView<'en>, TCTryStream<'en, MutationView<'en>>>;
 
-type ChainDataBlockView<'en> = en::MapStream<
-    TCError,
-    TxnId,
-    MutationViewSeq<'en>,
-    TCTryStream<'en, (TxnId, MutationViewSeq<'en>)>,
->;
+type ChainDataBlockView<'en> = (
+    Bytes,
+    en::MapStream<
+        TCError,
+        TxnId,
+        MutationViewSeq<'en>,
+        TCTryStream<'en, (TxnId, MutationViewSeq<'en>)>,
+    >,
+);
 
 pub enum MutationView<'en> {
     Delete(TCPathBuf, Value),

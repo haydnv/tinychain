@@ -23,6 +23,7 @@ use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
+use crate::chain::internal::ChainDataView;
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
@@ -503,7 +504,7 @@ impl fmt::Display for Chain {
 
 /// A helper struct for [`ChainView`]
 pub enum ChainViewData<'en> {
-    Block((Schema, block::BlockSeq)),
+    Block((Schema, ChainDataView<'en>)),
     Sync(Box<(Schema, StateView<'en>)>),
 }
 

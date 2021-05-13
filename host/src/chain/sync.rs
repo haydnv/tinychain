@@ -5,12 +5,11 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::join;
-use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::fs::{Persist, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{Instance, TCPathBuf};
+use tcgeneric::TCPathBuf;
 
 use crate::fs;
 use crate::scalar::{Link, Value};
@@ -32,9 +31,7 @@ pub struct SyncChain {
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        let mut block = self.history.write_latest(txn_id).await?;
-        block.append_delete(txn_id, path, key);
-        Ok(())
+        self.history.append_delete(txn_id, path, key).await
     }
 
     async fn append_put(
@@ -44,15 +41,7 @@ impl ChainInstance for SyncChain {
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        let mut block = self.history.write_latest(txn_id).await?;
-        block.append_put(
-            txn_id,
-            path,
-            key,
-            value.try_cast_into(|s| TCError::not_implemented(format!("Chain <- {}", s.class())))?,
-        );
-
-        Ok(())
+        self.history.append_put(txn_id, path, key, value).await
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
