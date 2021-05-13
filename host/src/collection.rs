@@ -1,7 +1,6 @@
 //! A [`Collection`] such as a [`BTree`] or [`Table`].
 
 /// The `Collection` enum used in `State::Collection`.
-use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -178,8 +177,6 @@ impl CollectionVisitor {
                     .create_file_tmp(*self.txn.id(), BTreeType::default())
                     .map_err(de::Error::custom)
                     .await?;
-
-                let file = file.try_into().map_err(de::Error::custom)?;
 
                 access
                     .next_value((self.txn.clone(), file))

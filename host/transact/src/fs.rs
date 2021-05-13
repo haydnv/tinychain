@@ -1,6 +1,7 @@
 //! Transactional filesystem traits and data structures. Unstable.
 
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::io;
 use std::ops::{Deref, DerefMut};
 
@@ -226,12 +227,21 @@ pub trait Dir: Store + Sized + 'static {
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<C: Send>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<Self::File>
+    async fn create_file<F: TryFrom<Self::File, Error = TCError>, C: Send>(
+        &self,
+        txn_id: TxnId,
+        name: Id,
+        class: C,
+    ) -> TCResult<F>
     where
         Self::FileClass: From<C>;
 
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File>
+    async fn create_file_tmp<F: TryFrom<Self::File, Error = TCError>, C: Send>(
+        &self,
+        txn_id: TxnId,
+        class: C,
+    ) -> TCResult<F>
     where
         Self::FileClass: From<C>;
 

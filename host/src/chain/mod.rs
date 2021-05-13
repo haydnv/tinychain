@@ -8,7 +8,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use safecast::{TryCastFrom, TryCastInto};
 
-use tc_btree::{BTreeType, Node};
+use tc_btree::BTreeType;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
@@ -145,8 +145,6 @@ impl Subject {
                     .create_file(txn_id, SUBJECT.into(), BTreeType::default())
                     .await?;
 
-                let file = fs::File::<Node>::try_from(file)?;
-
                 BTreeFile::create(file, schema, txn_id)
                     .map_ok(Self::BTree)
                     .await
@@ -157,11 +155,9 @@ impl Subject {
                     .await
             }
             Schema::Value(value) => {
-                let file = dir
+                let file: fs::File<Value> = dir
                     .create_file(txn_id, SUBJECT.into(), value.class())
                     .await?;
-
-                let file = fs::File::<Value>::try_from(file)?;
 
                 file.create_block(txn_id, SUBJECT.into(), value.clone())
                     .await?;
@@ -262,13 +258,12 @@ impl de::FromStream for Subject {
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let value = Value::from_stream((), decoder).await?;
 
-        let file: fs::FileEntry = txn
+        let file: fs::File<Value> = txn
             .context()
             .create_file(*txn.id(), SUBJECT.into(), value.class())
             .map_err(de::Error::custom)
             .await?;
 
-        let file: fs::File<Value> = file.try_into().map_err(de::Error::custom)?;
         file.create_block(*txn.id(), SUBJECT.into(), value)
             .map_err(de::Error::custom)
             .await?;

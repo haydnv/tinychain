@@ -37,8 +37,7 @@ impl ChainData {
     }
 
     pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
-        let file = dir.create_file(txn_id, CHAIN.into(), class).await?;
-        let file = fs::File::<ChainBlock>::try_from(file)?;
+        let file: fs::File<ChainBlock> = dir.create_file(txn_id, CHAIN.into(), class).await?;
         file.create_block(txn_id, 0u64.into(), ChainBlock::new(NULL_HASH))
             .await?;
 
@@ -235,12 +234,10 @@ impl de::Visitor for ChainDataVisitor {
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
 
-        let file = dir
+        let file: fs::File<ChainBlock> = dir
             .create_file(txn_id, CHAIN.into(), ChainType::default())
             .map_err(de::Error::custom)
             .await?;
-
-        let file = fs::File::<ChainBlock>::try_from(file).map_err(de::Error::custom)?;
 
         let dir = dir
             .create_dir(txn_id, DATA.into())

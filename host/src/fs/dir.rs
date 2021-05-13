@@ -1,7 +1,7 @@
 //! A transactional filesystem directory.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -293,7 +293,12 @@ impl fs::Dir for Dir {
             .await
     }
 
-    async fn create_file<C: Send>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<Self::File>
+    async fn create_file<F: TryFrom<FileEntry, Error = TCError>, C: Send>(
+        &self,
+        txn_id: TxnId,
+        name: Id,
+        class: C,
+    ) -> TCResult<F>
     where
         StateType: From<C>,
     {
@@ -308,10 +313,14 @@ impl fs::Dir for Dir {
         let path = fs_path(&self.path, &name);
         let file = FileEntry::new(self.cache.clone(), path, class)?;
         contents.insert(name, DirEntry::File(file.clone()));
-        Ok(file.into())
+        file.try_into()
     }
 
-    async fn create_file_tmp<C: Send>(&self, txn_id: TxnId, class: C) -> TCResult<Self::File>
+    async fn create_file_tmp<F: TryFrom<FileEntry, Error = TCError>, C: Send>(
+        &self,
+        txn_id: TxnId,
+        class: C,
+    ) -> TCResult<F>
     where
         StateType: From<C>,
     {

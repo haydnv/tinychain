@@ -283,8 +283,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> ReadOnly<F, D, Txn> {
             .create_file_tmp(*txn.id(), BTreeType::default())
             .await?;
 
-        let file = file.try_into()?;
-
         let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
         let (schema, btree) = if let Some(columns) = key_columns {
@@ -418,7 +416,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
             .create_file(txn_id, PRIMARY_INDEX.into(), BTreeType::default())
             .await?;
 
-        let primary_file = primary_file.try_into()?;
         let primary = Index::create(primary_file, schema.primary().clone(), txn_id).await?;
 
         let primary_schema = schema.primary();
@@ -438,8 +435,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
                     let file = context
                         .create_file(txn_id, name.clone(), BTreeType::default())
                         .await?;
-
-                    let file = file.try_into()?;
 
                     Self::create_index(file, primary_schema, column_names, txn_id)
                         .map_ok(move |index| (name, index))
@@ -1000,13 +995,14 @@ where
         let file = dir
             .create_file(txn_id, PRIMARY_INDEX.into(), BTreeType::default())
             .await?;
-        copies.push(self.inner.primary.save(txn_id, file.try_into()?));
+        copies.push(self.inner.primary.save(txn_id, file));
 
         for (name, index) in &self.inner.auxiliary {
             let file = dir
                 .create_file(txn_id, name.clone(), BTreeType::default())
                 .await?;
-            copies.push(index.save(txn_id, file.try_into()?));
+
+            copies.push(index.save(txn_id, file));
         }
 
         try_join_all(copies).await?;
