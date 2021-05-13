@@ -16,6 +16,9 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Link, NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
+pub use file::{BTreeFile, Node};
+pub use slice::BTreeSlice;
+
 mod file;
 mod slice;
 
@@ -23,9 +26,6 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
 /// The file extension of a [`BTree`] as stored on-disk
 pub const EXT: &str = "node";
-
-pub use file::{BTreeFile, Node};
-pub use slice::BTreeSlice;
 
 /// A [`BTree`] key.
 pub type Key = Vec<Value>;
@@ -77,13 +77,12 @@ pub trait BTreeInstance: Clone + Instance {
     async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send + Unpin>(
         &self,
         txn_id: TxnId,
-        mut keys: S,
+        keys: S,
     ) -> TCResult<()> {
-        while let Some(key) = keys.try_next().await? {
-            self.insert(txn_id, key).await?;
-        }
-
-        Ok(())
+        keys.map_ok(|key| self.insert(txn_id, key))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await
     }
 }
 

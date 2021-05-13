@@ -190,10 +190,6 @@ impl Persist<fs::Dir, Txn> for BlockChain {
 
         Ok(BlockChain::new(schema, subject, history))
     }
-
-    async fn save(&self, _txn_id: TxnId, _store: Self::Store) -> TCResult<Self::Schema> {
-        Err(TCError::not_implemented("BlockChain::save"))
-    }
 }
 
 #[async_trait]

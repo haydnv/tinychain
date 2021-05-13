@@ -734,18 +734,6 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D,
 
         Ok(BTreeFile::new(file, schema, order, root))
     }
-
-    async fn save(&self, txn_id: TxnId, dest: F) -> TCResult<Self::Schema> {
-        if !dest.is_empty(&txn_id).await? {
-            return Err(TCError::bad_request(
-                "cannot copy BTree",
-                "destination is not empty",
-            ));
-        }
-
-        dest.copy_from(&self.inner.file, txn_id).await?;
-        Ok(self.inner.schema.clone())
-    }
 }
 
 #[async_trait]
@@ -761,6 +749,22 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D, T> for BTreeFile<F, D,
         self.inner.file.truncate(txn_id).await?;
         *root_id = backup.inner.root.read(&txn_id).await?.clone();
         self.inner.file.copy_from(&backup.inner.file, txn_id).await
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance> CopyFrom<D, T, I>
+    for BTreeFile<F, D, T>
+{
+    async fn copy_from(source: I, file: F, txn_id: TxnId) -> TCResult<Self>
+    where
+        I: 'async_trait,
+    {
+        let schema = source.schema().clone();
+        let dest = Self::create(file, schema, txn_id).await?;
+        let keys = source.keys(txn_id).await?;
+        dest.try_insert_from(txn_id, keys).await?;
+        Ok(dest)
     }
 }
 

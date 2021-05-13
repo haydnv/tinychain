@@ -192,10 +192,6 @@ impl Persist<fs::Dir, Txn> for ChainData {
 
         Ok(ChainData::new(latest, dir, file))
     }
-
-    async fn save(&self, _txn_id: TxnId, _dir: fs::Dir) -> TCResult<()> {
-        Err(TCError::not_implemented("ChainData::save"))
-    }
 }
 
 #[async_trait]

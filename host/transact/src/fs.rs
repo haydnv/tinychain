@@ -263,13 +263,23 @@ pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
 
     /// Load a saved state from persistent storage.
     async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
-
-    /// Save this state to the given `Store` (e.g. to make a copy).
-    async fn save(&self, txn_id: TxnId, store: Self::Store) -> TCResult<Self::Schema>;
 }
 
 /// Defines how to restore persistent state from backup.
 #[async_trait]
 pub trait Restore<D: Dir, T: Transaction<D>>: Sized {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
+}
+
+/// Defines how to copy a base state from another instance, possibly a view.
+#[async_trait]
+pub trait CopyFrom<D: Dir, T: Transaction<D>, Instance>: Persist<D, T> {
+    /// Copy a new instance of `Self` from an existing instance.
+    async fn copy_from(
+        instance: Instance,
+        store: <Self as Persist<D, T>>::Store,
+        txn_id: TxnId,
+    ) -> TCResult<Self>
+    where
+        Instance: 'async_trait;
 }

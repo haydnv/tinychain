@@ -17,6 +17,7 @@ collate = "~0.1.9"
 destream = "0.3"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
+num_cpus = "1.13"
 safecast = "0.1"
 tc-btree = { path = "../btree" }
 tc-error = "0.2"
