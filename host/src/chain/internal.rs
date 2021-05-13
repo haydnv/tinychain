@@ -94,8 +94,8 @@ impl ChainData {
         self.latest.read(txn_id).map_ok(|id| *id).await
     }
 
-    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<bool> {
-        self.file.contains_block(txn_id, block_id).await
+    pub async fn contains_block(&self, txn_id: &TxnId, block_id: u64) -> TCResult<bool> {
+        self.file.contains_block(txn_id, &block_id.into()).await
     }
 
     pub async fn create_next_block(&self, txn_id: TxnId) -> TCResult<fs::Block<ChainBlock>> {
@@ -113,17 +113,17 @@ impl ChainData {
     pub async fn read_block(
         &self,
         txn_id: TxnId,
-        block_id: BlockId,
+        block_id: u64,
     ) -> TCResult<fs::BlockRead<ChainBlock>> {
-        self.file.read_block(txn_id, block_id).await
+        self.file.read_block(txn_id, block_id.into()).await
     }
 
     pub async fn write_block(
         &self,
         txn_id: TxnId,
-        block_id: BlockId,
+        block_id: u64,
     ) -> TCResult<fs::BlockWrite<ChainBlock>> {
-        self.file.write_block(txn_id, block_id).await
+        self.file.write_block(txn_id, block_id.into()).await
     }
 
     pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<fs::BlockRead<ChainBlock>> {

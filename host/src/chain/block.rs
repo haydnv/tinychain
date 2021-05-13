@@ -122,7 +122,7 @@ impl ChainInstance for BlockChain {
         (*self.history.write_block(*txn.id(), latest.into()).await?) = (*block).clone();
 
         let mut i = latest + 1;
-        while chain.history.contains_block(txn.id(), &i.into()).await? {
+        while chain.history.contains_block(txn.id(), i).await? {
             let block = chain.history.read_block(*txn.id(), i.into()).await?;
 
             for (_, ops) in block.mutations() {
@@ -280,32 +280,29 @@ async fn validate(txn: Txn, schema: Schema, history: ChainData) -> TCResult<Bloc
     let on_err =
         |latest| move |e| TCError::bad_request(format!("error replaying block {}", latest), e);
 
-    let mut latest = 0u64;
-    while history.contains_block(&txn_id, &latest.into()).await? {
-        let block = history.read_block(*txn_id, latest.into()).await?;
+    let mut i = 0u64;
+    while history.contains_block(&txn_id, i).await? {
+        let block = history.read_block(*txn_id, i.into()).await?;
 
         for (_, ops) in block.mutations() {
             for mutation in ops.iter().cloned() {
                 match mutation {
                     Mutation::Delete(path, key) => {
                         debug!("replay DELETE op: {}: {}", path, key);
-                        subject
-                            .delete(&txn, &path, key)
-                            .map_err(on_err(latest))
-                            .await?
+                        subject.delete(&txn, &path, key).map_err(on_err(i)).await?
                     }
                     Mutation::Put(path, key, value) => {
                         debug!("replay PUT op: {}: {} <- {}", path, key, value);
                         subject
                             .put(&txn, &path, key, value.into())
-                            .map_err(on_err(latest))
+                            .map_err(on_err(i))
                             .await?
                     }
                 }
             }
         }
 
-        latest += 1;
+        i += 1;
     }
 
     Ok(BlockChain::new(schema, subject, history))
