@@ -15,7 +15,7 @@ use tokio_util::io::StreamReader;
 
 use tc_error::*;
 use tc_value::Value;
-use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
+use tcgeneric::{Id, PathSegment, TCBoxTryFuture, TCTryStream};
 
 use super::{Transaction, TxnId};
 
@@ -33,12 +33,8 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: en::ToStream<'en>,
     {
-        let mut data = destream_json::en::encode(self).map_err(TCError::internal)?;
         let mut hasher = Sha256::default();
-        while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-            hasher.update(&chunk);
-        }
-
+        hash_chunks(&mut hasher, self).await?;
         let digest = hasher.finalize();
         Ok(Bytes::from(digest.to_vec()))
     }
@@ -282,4 +278,40 @@ pub trait CopyFrom<D: Dir, T: Transaction<D>, Instance>: Persist<D, T> {
     ) -> TCResult<Self>
     where
         Instance: 'async_trait;
+}
+
+/// Defines a standard hash for a persistent state.
+#[async_trait]
+pub trait Hash<'en> {
+    type Item: en::IntoStream<'en> + Send + 'en;
+
+    async fn base64_hash(&'en self, txn_id: TxnId) -> TCResult<String> {
+        self.hash(txn_id).map_ok(|hash| base64::encode(hash)).await
+    }
+
+    async fn hash(&'en self, txn_id: TxnId) -> TCResult<Bytes> {
+        let mut data = self.hashable(txn_id).await?;
+
+        let mut hasher = Sha256::default();
+        while let Some(item) = data.try_next().await? {
+            hash_chunks(&mut hasher, item).await?;
+        }
+
+        let digest = hasher.finalize();
+        Ok(Bytes::from(digest.to_vec()))
+    }
+
+    async fn hashable(&'en self, txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>>;
+}
+
+async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
+    hasher: &mut Sha256,
+    data: T,
+) -> TCResult<()> {
+    let mut data = destream_json::en::encode(data).map_err(TCError::internal)?;
+    while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
+        hasher.update(&chunk);
+    }
+
+    Ok(())
 }

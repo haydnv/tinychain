@@ -4,17 +4,15 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use destream::{de, en};
-use futures::{TryFutureExt, TryStreamExt};
+use futures::TryFutureExt;
 use log::debug;
-use sha2::{Digest, Sha256};
 
-use tc_btree::{BTreeInstance, BTreeView};
+use tc_btree::BTreeView;
 use tc_error::*;
-use tc_table::{TableInstance, TableView};
+use tc_table::TableView;
 use tc_transact::fs::Dir;
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
 };
@@ -90,45 +88,6 @@ impl fmt::Display for CollectionType {
 pub enum Collection {
     BTree(BTree),
     Table(Table),
-}
-
-impl Collection {
-    #[allow(dead_code)]
-    async fn hash(self, txn_id: TxnId) -> TCResult<Bytes> {
-        // TODO: can this be consolidated with transact::fs::Block::hash?
-
-        let mut hasher = Sha256::default();
-
-        async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
-            hasher: &mut Sha256,
-            data: T,
-        ) -> TCResult<()> {
-            let mut data = destream_json::en::encode(data).map_err(TCError::internal)?;
-            while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-                hasher.update(&chunk);
-            }
-
-            Ok(())
-        }
-
-        match self {
-            Self::BTree(btree) => {
-                let mut keys = btree.keys(txn_id).await?;
-                while let Some(key) = keys.try_next().await? {
-                    hash_chunks(&mut hasher, key).await?;
-                }
-            }
-            Self::Table(table) => {
-                let mut rows = table.rows(txn_id).await?;
-                while let Some(row) = rows.try_next().await? {
-                    hash_chunks(&mut hasher, row).await?;
-                }
-            }
-        }
-
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
-    }
 }
 
 impl Instance for Collection {

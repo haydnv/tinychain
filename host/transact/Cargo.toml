@@ -13,6 +13,7 @@ categories = ["concurrency", "data-structures"]
 
 [dependencies]
 async-trait = "0.1"
+base64 = "0.13"
 bytes = "1.0"
 destream = "0.3"
 env_logger = "0.8"

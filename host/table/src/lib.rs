@@ -11,17 +11,12 @@ use futures::stream::TryStreamExt;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
     path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, TCTryStream,
 };
-
-mod bounds;
-mod index;
-mod schema;
-mod view;
 
 use index::*;
 use view::*;
@@ -29,6 +24,11 @@ use view::*;
 pub use bounds::*;
 pub use index::TableIndex;
 pub use schema::*;
+
+mod bounds;
+mod index;
+mod schema;
+mod view;
 
 const PATH: PathLabel = path_label(&["state", "collection", "table"]);
 
@@ -478,6 +478,15 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
             Self::Selection(selection) => selection.upsert(txn_id, key, values).await,
             Self::TableSlice(slice) => slice.upsert(txn_id, key, values).await,
         }
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en> for Table<F, D, Txn> {
+    type Item = Vec<Value>;
+
+    async fn hashable(&'en self, txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
+        self.clone().rows(txn_id).await
     }
 }
 
