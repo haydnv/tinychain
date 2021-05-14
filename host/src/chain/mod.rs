@@ -171,9 +171,7 @@ impl Subject {
         match schema {
             Schema::BTree(schema) => {
                 if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
-                    BTreeFile::load(txn, schema, file.try_into()?)
-                        .map_ok(Self::BTree)
-                        .await
+                    BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                 } else {
                     Self::create(Schema::BTree(schema), dir, *txn.id()).await
                 }
@@ -189,7 +187,7 @@ impl Subject {
             }
             Schema::Value(value) => {
                 if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
-                    file.try_into().map(Self::Value)
+                    Ok(Self::Value(file))
                 } else {
                     Self::create(Schema::Value(value), dir, *txn.id()).await
                 }

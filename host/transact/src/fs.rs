@@ -245,7 +245,11 @@ pub trait Dir: Store + Sized + 'static {
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
     /// Get a [`Self::File`] in this `Dir`.
-    async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>>;
+    async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
+        &self,
+        txn_id: &TxnId,
+        name: &Id,
+    ) -> TCResult<Option<F>>;
 }
 
 /// Defines how to load a persistent data structure from the filesystem.

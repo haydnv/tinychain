@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -954,7 +954,7 @@ where
             .await?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
-        let primary = Index::load(txn, schema.primary().clone(), file.try_into()?).await?;
+        let primary = Index::load(txn, schema.primary().clone(), file).await?;
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
@@ -964,7 +964,7 @@ where
 
             let index_schema = schema.primary().auxiliary(columns)?;
 
-            let index = Index::load(txn, index_schema, file.try_into()?).await?;
+            let index = Index::load(txn, index_schema, file).await?;
             auxiliary.push((name.clone(), index));
         }
 

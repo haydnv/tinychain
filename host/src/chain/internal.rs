@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::fmt;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
@@ -8,20 +8,23 @@ use futures::stream::{self, StreamExt};
 use futures::{join, TryFutureExt, TryStreamExt};
 use safecast::*;
 
+use tc_btree::BTreeInstance;
 use tc_error::*;
+use tc_table::TableInstance;
 use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{label, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
+use tcgeneric::{label, Id, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
 
-use crate::collection::{BTreeFile, Collection, TableIndex};
+use crate::collection::{BTreeFile, Collection, CollectionType, TableIndex, TableType};
 use crate::fs;
-use crate::scalar::{OpRef, Scalar, Value};
+use crate::scalar::{OpRef, Scalar, Subject, TCRef, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::data::{ChainBlock, Mutation};
 use super::{ChainType, CHAIN, NULL_HASH};
+use tc_btree::BTreeType;
 
 const DATA: Label = label("data");
 
@@ -71,29 +74,38 @@ impl ChainData {
         let value_ref = match value {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
-                    let hash = btree.base64_hash(txn_id).await?;
-                    let file = self
-                        .dir
-                        .create_file(txn_id, hash.parse()?, btree.class())
-                        .await?;
+                    let hash: Id = btree.base64_hash(txn_id).await?.parse()?;
+                    let schema = btree.schema().to_vec();
+                    let classpath = BTreeType::default().path();
 
-                    let btree = BTreeFile::copy_from(btree, file, txn_id).await?;
+                    if !self.dir.contains(&txn_id, &hash).await? {
+                        let file = self
+                            .dir
+                            .create_file(txn_id, hash.clone(), btree.class())
+                            .await?;
+
+                        BTreeFile::copy_from(btree, file, txn_id).await?;
+                    }
 
                     Ok(OpRef::Get((
-                        btree.class().path().into(),
-                        Value::from_iter(btree.schema().to_vec()).into(),
+                        (hash.into(), classpath).into(),
+                        Value::from_iter(schema).into(),
                     ))
                     .into())
                 }
                 Collection::Table(table) => {
-                    let hash = table.base64_hash(txn_id).await?;
-                    let dir = self.dir.create_dir(txn_id, hash.parse()?).await?;
+                    let hash: Id = table.base64_hash(txn_id).await?.parse()?;
+                    let schema = table.schema().clone();
+                    let classpath = TableType::default().path();
 
-                    let table = TableIndex::copy_from(table, dir, txn_id).await?;
+                    if !self.dir.contains(&txn_id, &hash).await? {
+                        let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
+                        TableIndex::copy_from(table, dir, txn_id).await?;
+                    }
 
                     Ok(OpRef::Get((
-                        table.class().path().into(),
-                        Value::cast_from(table.schema().clone()).into(),
+                        (hash.into(), classpath).into(),
+                        Value::cast_from(schema).into(),
                     ))
                     .into())
                 }
@@ -170,6 +182,79 @@ impl ChainData {
             .await
             .expect("prepare BlockChain commit");
     }
+
+    pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
+        if let Scalar::Ref(tc_ref) = scalar {
+            if let TCRef::Op(OpRef::Get((Subject::Ref(hash, classpath), schema))) = *tc_ref {
+                let class = CollectionType::from_path(&classpath).ok_or_else(|| {
+                    TCError::internal(format!("invalid Collection type: {}", classpath))
+                })?;
+
+                self.resolve_inner(txn, hash.into(), schema, class)
+                    .map_ok(State::from)
+                    .await
+            } else {
+                Err(TCError::internal(format!(
+                    "invalid subject for historical Chain state {}",
+                    tc_ref
+                )))
+            }
+        } else if !scalar.is_ref() {
+            Ok(scalar.into())
+        } else {
+            Err(TCError::internal(format!(
+                "invalid subject for historical Chain state {}",
+                scalar
+            )))
+        }
+    }
+
+    async fn resolve_inner(
+        &self,
+        txn: &Txn,
+        hash: Id,
+        schema: Scalar,
+        class: CollectionType,
+    ) -> TCResult<Collection> {
+        match class {
+            CollectionType::BTree(_) => {
+                fn schema_err<I: fmt::Display>(info: I) -> TCError {
+                    TCError::internal(format!(
+                        "invalid BTree schema for historical Chain state: {}",
+                        info
+                    ))
+                }
+
+                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
+                let schema = schema.try_cast_into(|v| schema_err(v))?;
+
+                let file = self.dir.get_file(txn.id(), &hash).await?.ok_or_else(|| {
+                    TCError::internal(format!("Chain is missing historical state {}", hash))
+                })?;
+
+                let btree = BTreeFile::load(txn, schema, file).await?;
+                Ok(Collection::BTree(btree.into()))
+            }
+            CollectionType::Table(_) => {
+                fn schema_err<I: fmt::Display>(info: I) -> TCError {
+                    TCError::internal(format!(
+                        "invalid Table schema for historical Chain state: {}",
+                        info
+                    ))
+                }
+
+                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
+                let schema = schema.try_cast_into(|v| schema_err(v))?;
+
+                let dir = self.dir.get_dir(txn.id(), &hash).await?.ok_or_else(|| {
+                    TCError::internal(format!("missing historical Chain state {}", hash))
+                })?;
+
+                let table = TableIndex::load(txn, schema, dir).await?;
+                Ok(Collection::Table(table.into()))
+            }
+        }
+    }
 }
 
 const SCHEMA: () = ();
@@ -184,15 +269,15 @@ impl Persist<fs::Dir, Txn> for ChainData {
     }
 
     async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
-        let file = dir
-            .get_file(txn.id(), &CHAIN.into())
+        let txn_id = txn.id();
+
+        let file: fs::File<ChainBlock> = dir
+            .get_file(txn_id, &CHAIN.into())
             .await?
             .ok_or_else(|| TCError::internal("Chain has no history file"))?;
 
-        let file = fs::File::<ChainBlock>::try_from(file)?;
-
         let dir = dir
-            .get_dir(txn.id(), &DATA.into())
+            .get_dir(txn_id, &DATA.into())
             .await?
             .ok_or_else(|| TCError::internal("Chain has no data directory"))?;
 
@@ -200,7 +285,7 @@ impl Persist<fs::Dir, Txn> for ChainData {
         let mut latest = 0;
 
         loop {
-            let block = file.read_block(*txn.id(), latest.into()).await?;
+            let block = file.read_block(*txn_id, latest.into()).await?;
             if block.last_hash() == &last_hash {
                 last_hash = block.last_hash().clone();
             } else {
@@ -210,7 +295,7 @@ impl Persist<fs::Dir, Txn> for ChainData {
                 )));
             }
 
-            if file.contains_block(txn.id(), &(latest + 1).into()).await? {
+            if file.contains_block(txn_id, &(latest + 1).into()).await? {
                 latest += 1;
             } else {
                 break;

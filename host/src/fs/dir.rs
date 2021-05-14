@@ -338,11 +338,15 @@ impl fs::Dir for Dir {
         }
     }
 
-    async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>> {
+    async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
+        &self,
+        txn_id: &TxnId,
+        name: &Id,
+    ) -> TCResult<Option<F>> {
         let contents = self.contents.read(txn_id).await?;
         match contents.get(name) {
-            Some(DirEntry::File(file)) => Ok(Some(file.clone())),
-            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
+            Some(DirEntry::File(file)) => Ok(Some(file.clone().try_into()?)),
+            Some(other) => Err(TCError::bad_request("expected a file, not", other)),
             None => Ok(None),
         }
     }
