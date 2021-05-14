@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::{future, Stream, TryFutureExt, TryStreamExt};
 use log::debug;
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::*;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Hash};
@@ -191,6 +191,19 @@ impl TryCastFrom<Value> for Column {
         } else {
             None
         }
+    }
+}
+
+impl From<Column> for Value {
+    fn from(column: Column) -> Self {
+        Value::Tuple(
+            vec![
+                column.name.into(),
+                column.dtype.path().into(),
+                column.max_len.map(Value::from).into(),
+            ]
+            .into(),
+        )
     }
 }
 

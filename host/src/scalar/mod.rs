@@ -315,6 +315,12 @@ impl From<Map<Scalar>> for Scalar {
     }
 }
 
+impl From<OpRef> for Scalar {
+    fn from(op_ref: OpRef) -> Self {
+        Self::Ref(Box::new(TCRef::Op(op_ref)))
+    }
+}
+
 impl From<Range> for Scalar {
     fn from(range: Range) -> Self {
         Self::Range(range)

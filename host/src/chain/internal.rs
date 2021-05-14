@@ -1,20 +1,22 @@
 use std::convert::TryFrom;
+use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
 use futures::{join, TryFutureExt, TryStreamExt};
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{Block, BlockData, BlockId, Dir, File, Persist};
+use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{label, Instance, Label, TCPathBuf, TCTryStream};
+use tcgeneric::{label, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
 
+use crate::collection::{BTreeFile, Collection, TableIndex};
 use crate::fs;
-use crate::scalar::{Scalar, Value};
+use crate::scalar::{OpRef, Scalar, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -67,10 +69,35 @@ impl ChainData {
         }
 
         let value_ref = match value {
-            State::Collection(collection) => Err(TCError::not_implemented(format!(
-                "update Chain with value {}",
-                collection.class()
-            ))),
+            State::Collection(collection) => match collection {
+                Collection::BTree(btree) => {
+                    let hash = btree.base64_hash(txn_id).await?;
+                    let file = self
+                        .dir
+                        .create_file(txn_id, hash.parse()?, btree.class())
+                        .await?;
+
+                    let btree = BTreeFile::copy_from(btree, file, txn_id).await?;
+
+                    Ok(OpRef::Get((
+                        btree.class().path().into(),
+                        Value::from_iter(btree.schema().to_vec()).into(),
+                    ))
+                    .into())
+                }
+                Collection::Table(table) => {
+                    let hash = table.base64_hash(txn_id).await?;
+                    let dir = self.dir.create_dir(txn_id, hash.parse()?).await?;
+
+                    let table = TableIndex::copy_from(table, dir, txn_id).await?;
+
+                    Ok(OpRef::Get((
+                        table.class().path().into(),
+                        Value::cast_from(table.schema().clone()).into(),
+                    ))
+                    .into())
+                }
+            },
             State::Scalar(value) => Ok(value),
             other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
             other => Err(TCError::bad_request(

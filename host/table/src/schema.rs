@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use destream::{de, en};
@@ -8,7 +9,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_value::{Value, ValueType};
-use tcgeneric::{Id, Map};
+use tcgeneric::{Id, Map, Tuple};
 
 pub use tc_btree::Column;
 
@@ -303,6 +304,18 @@ impl From<IndexSchema> for RowSchema {
     }
 }
 
+impl CastFrom<IndexSchema> for Value {
+    fn cast_from(schema: IndexSchema) -> Self {
+        Value::Tuple(
+            vec![
+                Value::from_iter(schema.key),
+                Value::from_iter(schema.values),
+            ]
+            .into(),
+        )
+    }
+}
+
 #[async_trait]
 impl de::FromStream for IndexSchema {
     type Context = ();
@@ -361,6 +374,23 @@ impl TableSchema {
     }
 }
 
+#[async_trait]
+impl de::FromStream for TableSchema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|(primary, indices)| Self { primary, indices })
+            .await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for TableSchema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        (self.primary, self.indices).into_stream(encoder)
+    }
+}
+
 impl From<IndexSchema> for TableSchema {
     fn from(schema: IndexSchema) -> TableSchema {
         TableSchema {
@@ -379,6 +409,7 @@ impl TryCastFrom<Value> for TableSchema {
         if value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>() {
             let (primary, indices): (IndexSchema, Vec<(Id, Vec<Id>)>) =
                 value.opt_cast_into().unwrap();
+
             let indices = indices.into_iter().collect();
             Some(TableSchema { primary, indices })
         } else if value.matches::<IndexSchema>() {
@@ -391,19 +422,14 @@ impl TryCastFrom<Value> for TableSchema {
     }
 }
 
-#[async_trait]
-impl de::FromStream for TableSchema {
-    type Context = ();
+impl CastFrom<TableSchema> for Value {
+    fn cast_from(schema: TableSchema) -> Self {
+        let indices = schema
+            .indices
+            .into_iter()
+            .map(|(id, col_names)| (Value::from(id), Tuple::<Value>::from_iter(col_names)))
+            .map(|(id, col_names)| Value::Tuple(vec![id, col_names.into()].into()));
 
-    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(cxt, decoder)
-            .map_ok(|(primary, indices)| Self { primary, indices })
-            .await
-    }
-}
-
-impl<'en> en::IntoStream<'en> for TableSchema {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        (self.primary, self.indices).into_stream(encoder)
+        Self::Tuple(vec![schema.primary.cast_into(), Value::from_iter(indices)].into())
     }
 }

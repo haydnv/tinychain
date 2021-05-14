@@ -550,6 +550,12 @@ impl From<Option<Value>> for Value {
     }
 }
 
+impl From<TCPathBuf> for Value {
+    fn from(path: TCPathBuf) -> Value {
+        Value::Link(path.into())
+    }
+}
+
 impl From<Tuple<Value>> for Value {
     fn from(tuple: Tuple<Value>) -> Self {
         Self::Tuple(tuple)
@@ -559,6 +565,12 @@ impl From<Tuple<Value>> for Value {
 impl From<Vec<Value>> for Value {
     fn from(tuple: Vec<Value>) -> Self {
         Self::Tuple(tuple.into())
+    }
+}
+
+impl From<usize> for Value {
+    fn from(n: usize) -> Self {
+        Self::Number((n as u64).into())
     }
 }
 

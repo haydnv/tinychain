@@ -189,6 +189,12 @@ impl TryCastFrom<Scalar> for Subject {
     }
 }
 
+impl From<TCPathBuf> for Subject {
+    fn from(path: TCPathBuf) -> Self {
+        Self::Link(path.into())
+    }
+}
+
 impl From<Link> for Subject {
     fn from(link: Link) -> Self {
         Self::Link(link)
