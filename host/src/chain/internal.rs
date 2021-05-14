@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
-use futures::{join, TryFutureExt, TryStreamExt};
+use futures::{join, try_join, TryFutureExt, TryStreamExt};
+use log::debug;
 use safecast::*;
 
 use tc_btree::BTreeInstance;
@@ -16,15 +17,15 @@ use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{label, Id, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
 
-use crate::collection::{BTreeFile, Collection, CollectionType, TableIndex, TableType};
+use crate::collection::*;
 use crate::fs;
-use crate::scalar::{OpRef, Scalar, Subject, TCRef, Value};
+use crate::route::Public;
+use crate::scalar::{OpRef, Scalar, TCRef, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::data::{ChainBlock, Mutation};
-use super::{ChainType, CHAIN, NULL_HASH};
-use tc_btree::BTreeType;
+use super::{ChainType, Subject, CHAIN, NULL_HASH};
 
 const DATA: Label = label("data");
 
@@ -52,6 +53,7 @@ impl ChainData {
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+        debug!("ChainData::append_delete {} {} {}", txn_id, path, key);
         let mut block = self.write_latest(txn_id).await?;
         block.append_delete(txn_id, path, key);
         Ok(())
@@ -64,14 +66,27 @@ impl ChainData {
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        if value.is_ref() {
+        let value = self.save_state(txn_id, value).await?;
+
+        debug!(
+            "ChainData::append_put {} {} {} {}",
+            txn_id, path, key, value
+        );
+
+        let mut block = self.write_latest(txn_id).await?;
+        block.append_put(txn_id, path, key, value);
+        Ok(())
+    }
+
+    async fn save_state(&self, txn_id: TxnId, state: State) -> TCResult<Scalar> {
+        if state.is_ref() {
             return Err(TCError::bad_request(
                 "cannot update Chain with reference: {}",
-                value,
+                state,
             ));
         }
 
-        let value_ref = match value {
+        match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
                     let hash: Id = btree.base64_hash(txn_id).await?.parse()?;
@@ -116,11 +131,7 @@ impl ChainData {
                 "Chain does not support value",
                 other.class(),
             )),
-        }?;
-
-        let mut block = self.write_latest(txn_id).await?;
-        block.append_put(txn_id, path, key, value_ref);
-        Ok(())
+        }
     }
 
     pub async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
@@ -143,6 +154,8 @@ impl ChainData {
         let block = ChainBlock::new(hash);
 
         (*latest) += 1;
+        debug!("creating next chain block {}", *latest);
+
         self.file
             .create_block(txn_id, (*latest).into(), block)
             .await
@@ -174,18 +187,135 @@ impl ChainData {
         self.write_block(txn_id, (*latest).into()).await
     }
 
-    pub async fn prepare_commit(&self, txn_id: &TxnId) {
-        let latest = self.latest.read(txn_id).await.expect("latest block");
+    pub async fn apply_last(&self, txn: &Txn, subject: &Subject) -> TCResult<()> {
+        let latest = *self.latest.read(txn.id()).await?;
+        let block = self.read_block(*txn.id(), latest.into()).await?;
+        let last_block = if latest > 0 && block.mutations().is_empty() {
+            self.read_block(*txn.id(), (latest - 1).into()).await?
+        } else {
+            block
+        };
 
-        self.file
-            .sync_block(*txn_id, (*latest).into())
-            .await
-            .expect("prepare BlockChain commit");
+        if let Some((last_txn_id, ops)) = last_block.mutations().iter().last() {
+            for op in ops {
+                let result = match op {
+                    Mutation::Delete(path, key) => subject.delete(txn, path, key.clone()).await,
+                    Mutation::Put(path, key, value) => {
+                        self.resolve(txn, value.clone())
+                            .and_then(|value| subject.put(txn, path, key.clone(), value))
+                            .await
+                    }
+                };
+
+                if let Err(cause) = result {
+                    return Err(TCError::internal(format!(
+                        "error replaying last transaction {}: {}",
+                        last_txn_id, cause
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
+        debug!("replicate chain history");
+
+        let txn_id = *txn.id();
+
+        let (latest, other_latest) =
+            try_join!(self.latest.read(&txn_id), other.latest.read(&txn_id))?;
+
+        if (*latest) > (*other_latest) {
+            return Err(TCError::bad_request(
+                "cannot replicate from chain with fewer blocks",
+                *latest,
+            ));
+        }
+
+        const ERR_DIVERGENT: &str = "chain to replicate diverges at block";
+        for i in 0u64..*latest {
+            let block = self.read_block(txn_id, i.into()).await?;
+            let other = other.read_block(txn_id, i.into()).await?;
+            if &*block != &*other {
+                return Err(TCError::bad_request(ERR_DIVERGENT, i));
+            }
+        }
+
+        let mut i = *latest;
+        loop {
+            debug!("copy history from block {}", i);
+            let source = other.read_block(txn_id, i).await?;
+            let mut dest = self.write_block(txn_id, i).await?;
+
+            for (past_txn_id, ops) in source.mutations() {
+                let append = !dest.mutations().contains_key(past_txn_id);
+
+                for op in ops.iter().cloned() {
+                    debug!("replicating mutation at {}: {}", past_txn_id, op);
+
+                    let result = match op {
+                        Mutation::Delete(path, key) => {
+                            if append {
+                                dest.append_delete(*past_txn_id, path.clone(), key.clone());
+                            }
+
+                            subject.delete(txn, &path, key).await
+                        }
+                        Mutation::Put(path, key, value) => {
+                            other
+                                .resolve(txn, value)
+                                .and_then(|state| self.save_state(txn_id, state))
+                                .and_then(|value| {
+                                    if append {
+                                        dest.append_put(
+                                            *past_txn_id,
+                                            path.clone(),
+                                            key.clone(),
+                                            value.clone(),
+                                        );
+                                    }
+
+                                    subject.put(txn, &path, key, value.into())
+                                })
+                                .await
+                        }
+                    };
+
+                    if let Err(cause) = result {
+                        return Err(TCError::bad_request(
+                            format!("error at {} while replicating chain", past_txn_id),
+                            cause,
+                        ));
+                    }
+                }
+            }
+
+            let (source_hash, dest_hash) = try_join!(source.hash(), dest.hash())?;
+            if source_hash != dest_hash {
+                return Err(TCError::bad_request(
+                    "error replicating chain",
+                    format!("hashes diverge at block {}", i),
+                ));
+            }
+
+            i += 1;
+            if other.contains_block(txn.id(), i).await? {
+                self.create_next_block(*txn.id()).await?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
+        type OpSubject = crate::scalar::Subject;
+
         if let Scalar::Ref(tc_ref) = scalar {
-            if let TCRef::Op(OpRef::Get((Subject::Ref(hash, classpath), schema))) = *tc_ref {
+            if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
                 let class = CollectionType::from_path(&classpath).ok_or_else(|| {
                     TCError::internal(format!("invalid Collection type: {}", classpath))
                 })?;

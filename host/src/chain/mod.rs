@@ -18,7 +18,6 @@ use crate::collection::{
     BTree, BTreeFile, Collection, CollectionType, Table, TableIndex, TableType,
 };
 use crate::fs;
-use crate::route::Public;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -217,17 +216,6 @@ impl Subject {
             }
         }
     }
-
-    async fn apply(&self, txn: &Txn, mutation: &data::Mutation) -> TCResult<()> {
-        use data::Mutation;
-
-        match mutation {
-            Mutation::Delete(path, key) => self.delete(txn, path, key.clone()).await,
-            Mutation::Put(path, key, value) => {
-                self.put(txn, path, key.clone(), value.clone().into()).await
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -319,9 +307,6 @@ pub trait ChainInstance {
 
     /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
-
-    /// Prepare to commit by syncing this transaction's mutations to disk.
-    async fn prepare_commit(&self, txn_id: &TxnId);
 }
 
 /// The type of a [`Chain`].
@@ -429,13 +414,6 @@ impl ChainInstance for Chain {
         match self {
             Self::Block(chain) => chain.replicate(txn, source).await,
             Self::Sync(chain) => chain.replicate(txn, source).await,
-        }
-    }
-
-    async fn prepare_commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Block(chain) => chain.prepare_commit(txn_id).await,
-            Self::Sync(chain) => chain.prepare_commit(txn_id).await,
         }
     }
 }

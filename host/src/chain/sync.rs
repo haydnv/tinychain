@@ -31,7 +31,10 @@ pub struct SyncChain {
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        self.history.append_delete(txn_id, path, key).await
+        let mut block = self.history.write_latest(txn_id).await?;
+        block.clear_until(&txn_id);
+        block.append_delete(txn_id, path, key);
+        Ok(())
     }
 
     async fn append_put(
@@ -41,6 +44,11 @@ impl ChainInstance for SyncChain {
         key: Value,
         value: State,
     ) -> TCResult<()> {
+        {
+            let mut block = self.history.write_latest(txn_id).await?;
+            block.clear_until(&txn_id);
+        }
+
         self.history.append_put(txn_id, path, key, value).await
     }
 
@@ -60,10 +68,6 @@ impl ChainInstance for SyncChain {
         *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
 
         Ok(())
-    }
-
-    async fn prepare_commit(&self, txn_id: &TxnId) {
-        self.history.prepare_commit(txn_id).await
     }
 }
 
@@ -95,20 +99,7 @@ impl Persist<fs::Dir, Txn> for SyncChain {
             )));
         }
 
-        let block = history.read_latest(*txn.id()).await?;
-        for (past_txn_id, mutations) in block.mutations() {
-            for op in mutations {
-                subject
-                    .apply(txn, op)
-                    .map_err(|e| {
-                        TCError::internal(format!(
-                            "error replaying last transaction {}: {}",
-                            past_txn_id, e
-                        ))
-                    })
-                    .await?;
-            }
-        }
+        history.apply_last(txn, &subject).await?;
 
         Ok(SyncChain {
             schema,
@@ -121,14 +112,8 @@ impl Persist<fs::Dir, Txn> for SyncChain {
 #[async_trait]
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
-        {
-            self.history.prepare_commit(txn_id).await;
-            self.subject.commit(txn_id).await;
-            let mut block = self.history.write_latest(*txn_id).await.unwrap();
-            *block = ChainBlock::with_txn(NULL_HASH, *txn_id);
-        }
-
-        self.history.commit(txn_id).await
+        self.history.commit(txn_id).await;
+        self.subject.commit(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

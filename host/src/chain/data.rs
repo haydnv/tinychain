@@ -50,6 +50,15 @@ impl<'en> en::IntoStream<'en> for Mutation {
     }
 }
 
+impl fmt::Display for Mutation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Delete(path, key) => write!(f, "DELETE {}: {}", path, key),
+            Self::Put(path, key, value) => write!(f, "PUT {}: {} <- {}", path, key, value),
+        }
+    }
+}
+
 struct MutationVisitor;
 
 #[async_trait]
@@ -125,6 +134,20 @@ impl ChainBlock {
     /// Append a PUT op to the contents of this `ChainBlock`.
     pub fn append_put(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
         self.append(txn_id, Mutation::Put(path, key, value))
+    }
+
+    /// Delete all mutations listed in this `ChainBlock` prior to the given `TxnId`.
+    pub fn clear_until(&mut self, txn_id: &TxnId) {
+        let old_txn_ids: Vec<TxnId> = self
+            .contents
+            .keys()
+            .filter(|k| k < &txn_id)
+            .cloned()
+            .collect();
+
+        for old_txn_id in old_txn_ids.into_iter() {
+            self.contents.remove(&old_txn_id);
+        }
     }
 
     /// The mutations listed in this `ChainBlock`.

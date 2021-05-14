@@ -41,14 +41,6 @@ impl TxnId {
         }
     }
 
-    /// Return the next valid TxnId after this one (e.g. to construct a range).
-    pub fn next(&self) -> Self {
-        Self {
-            timestamp: self.timestamp,
-            nonce: self.nonce + 1,
-        }
-    }
-
     /// Return the last valid TxnId before this one (e.g. to construct a range).
     pub fn prev(&self) -> Self {
         Self {

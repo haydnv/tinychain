@@ -309,8 +309,6 @@ impl Cluster {
             owner.commit(&txn).await?;
         }
 
-        self.prepare_commit(txn.id()).await;
-
         let self_link = txn.link(self.link.path().clone());
         let mut replica_commits = FuturesUnordered::from_iter(
             replicas
@@ -355,15 +353,6 @@ impl Cluster {
         }
 
         self.finalize(txn.id()).await;
-    }
-
-    async fn prepare_commit(&self, txn_id: &TxnId) {
-        join_all(
-            self.chains
-                .values()
-                .map(|chain| chain.prepare_commit(txn_id)),
-        )
-        .await;
     }
 }
 
@@ -410,7 +399,9 @@ impl Transact for Cluster {
             );
         }
 
-        *confirmed = *txn_id;
+        if txn_id > &*confirmed {
+            *confirmed = *txn_id;
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
