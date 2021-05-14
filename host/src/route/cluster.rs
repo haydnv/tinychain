@@ -99,6 +99,7 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                     ));
                 }
 
+                self.cluster.write_ahead(txn.id()).await;
                 self.cluster.commit(txn.id()).await;
                 Ok(State::default())
             })

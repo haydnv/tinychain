@@ -69,6 +69,10 @@ impl ChainInstance for SyncChain {
 
         Ok(())
     }
+
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        self.history.commit(txn_id).await
+    }
 }
 
 #[async_trait]
@@ -112,7 +116,6 @@ impl Persist<fs::Dir, Txn> for SyncChain {
 #[async_trait]
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
-        self.history.commit(txn_id).await;
         self.subject.commit(txn_id).await;
     }
 

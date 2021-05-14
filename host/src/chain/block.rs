@@ -81,6 +81,32 @@ impl ChainInstance for BlockChain {
             .replicate(txn, &self.subject, chain.history)
             .await
     }
+
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        {
+            let block = self
+                .history
+                .read_latest(*txn_id)
+                .await
+                .expect("read latest chain block");
+
+            let num_mutations = if let Some(ops) = block.mutations().get(txn_id) {
+                ops.len()
+            } else {
+                0
+            };
+            debug!("BlockChain::write_ahead with {} mutations", num_mutations);
+
+            if block.size().await.expect("block size") >= super::BLOCK_SIZE {
+                self.history
+                    .create_next_block(*txn_id)
+                    .await
+                    .expect("bump chain block number");
+            }
+        }
+
+        self.history.commit(txn_id).await
+    }
 }
 
 #[async_trait]
@@ -111,29 +137,6 @@ impl Persist<fs::Dir, Txn> for BlockChain {
 #[async_trait]
 impl Transact for BlockChain {
     async fn commit(&self, txn_id: &TxnId) {
-        {
-            let block = self
-                .history
-                .read_latest(*txn_id)
-                .await
-                .expect("read latest chain block");
-
-            let num_mutations = if let Some(ops) = block.mutations().get(txn_id) {
-                ops.len()
-            } else {
-                0
-            };
-            debug!("BlockChain::write_ahead with {} mutations", num_mutations);
-
-            if block.size().await.expect("block size") >= super::BLOCK_SIZE {
-                self.history
-                    .create_next_block(*txn_id)
-                    .await
-                    .expect("bump chain block number");
-            }
-        }
-
-        self.history.commit(txn_id).await;
         self.subject.commit(txn_id).await;
     }
 
