@@ -16,7 +16,7 @@ use crate::scalar::{Link, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::internal::ChainData;
+use super::data::History;
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, NULL_HASH};
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
@@ -25,7 +25,7 @@ use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, NULL_HASH};
 pub struct SyncChain {
     schema: Schema,
     subject: Subject,
-    history: ChainData,
+    history: History,
 }
 
 #[async_trait]
@@ -90,9 +90,9 @@ impl Persist<fs::Dir, Txn> for SyncChain {
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
         let history = if is_new {
-            ChainData::create(*txn.id(), dir, ChainType::Sync).await?
+            History::create(*txn.id(), dir, ChainType::Sync).await?
         } else {
-            ChainData::load(txn, (), dir).await?
+            History::load(txn, (), dir).await?
         };
 
         let latest = history.latest_block_id(txn.id()).await?;
@@ -147,10 +147,9 @@ impl de::Visitor for ChainVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let history =
-            ChainData::create(*self.txn.id(), self.txn.context().clone(), ChainType::Sync)
-                .map_err(de::Error::custom)
-                .await?;
+        let history = History::create(*self.txn.id(), self.txn.context().clone(), ChainType::Sync)
+            .map_err(de::Error::custom)
+            .await?;
 
         let schema = seq
             .next_element(())

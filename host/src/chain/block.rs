@@ -20,8 +20,7 @@ use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
-use super::data::Mutation;
-use super::internal::{ChainData, ChainDataView};
+use super::data::History;
 use super::{Chain, ChainInstance, ChainType, Schema, Subject, CHAIN};
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s
@@ -29,11 +28,11 @@ use super::{Chain, ChainInstance, ChainType, Schema, Subject, CHAIN};
 pub struct BlockChain {
     schema: Schema,
     subject: Subject,
-    history: ChainData,
+    history: History,
 }
 
 impl BlockChain {
-    fn new(schema: Schema, subject: Subject, history: ChainData) -> Self {
+    fn new(schema: Schema, subject: Subject, history: History) -> Self {
         Self {
             schema,
             subject,
@@ -123,9 +122,9 @@ impl Persist<fs::Dir, Txn> for BlockChain {
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
         let history = if is_new {
-            ChainData::create(*txn.id(), dir, ChainType::Block).await?
+            History::create(*txn.id(), dir, ChainType::Block).await?
         } else {
-            ChainData::load(txn, (), dir).await?
+            History::load(txn, (), dir).await?
         };
 
         history.apply_last(txn, &subject).await?;
@@ -187,7 +186,7 @@ impl de::FromStream for BlockChain {
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for BlockChain {
     type Txn = Txn;
-    type View = (Schema, ChainDataView<'en>);
+    type View = (Schema, super::data::HistoryView<'en>);
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         let history = self.history.into_view(txn).await?;
@@ -195,7 +194,9 @@ impl<'en> IntoView<'en, fs::Dir> for BlockChain {
     }
 }
 
-async fn validate(txn: Txn, schema: Schema, history: ChainData) -> TCResult<BlockChain> {
+async fn validate(txn: Txn, schema: Schema, history: History) -> TCResult<BlockChain> {
+    use super::data::Mutation;
+
     let txn_id = txn.id();
 
     let subject = Subject::create(schema.clone(), txn.context(), *txn.id()).await?;

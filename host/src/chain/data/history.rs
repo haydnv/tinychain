@@ -17,6 +17,7 @@ use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{label, Id, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
 
+use crate::chain::{ChainType, Subject, CHAIN, NULL_HASH};
 use crate::collection::*;
 use crate::fs;
 use crate::route::Public;
@@ -24,19 +25,18 @@ use crate::scalar::{OpRef, Scalar, TCRef, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::data::{ChainBlock, Mutation};
-use super::{ChainType, Subject, CHAIN, NULL_HASH};
+use super::{ChainBlock, Mutation};
 
 const DATA: Label = label("data");
 
 #[derive(Clone)]
-pub struct ChainData {
+pub struct History {
     dir: fs::Dir,
     file: fs::File<ChainBlock>,
     latest: TxnLock<Mutable<u64>>,
 }
 
-impl ChainData {
+impl History {
     fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
         let latest = TxnLock::new("latest block ordinal", latest.into());
         Self { dir, latest, file }
@@ -53,7 +53,7 @@ impl ChainData {
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        debug!("ChainData::append_delete {} {} {}", txn_id, path, key);
+        debug!("History::append_delete {} {} {}", txn_id, path, key);
         let mut block = self.write_latest(txn_id).await?;
         block.append_delete(txn_id, path, key);
         Ok(())
@@ -68,10 +68,7 @@ impl ChainData {
     ) -> TCResult<()> {
         let value = self.save_state(txn_id, value).await?;
 
-        debug!(
-            "ChainData::append_put {} {} {} {}",
-            txn_id, path, key, value
-        );
+        debug!("History::append_put {} {} {} {}", txn_id, path, key, value);
 
         let mut block = self.write_latest(txn_id).await?;
         block.append_put(txn_id, path, key, value);
@@ -390,7 +387,7 @@ impl ChainData {
 const SCHEMA: () = ();
 
 #[async_trait]
-impl Persist<fs::Dir, Txn> for ChainData {
+impl Persist<fs::Dir, Txn> for History {
     type Schema = ();
     type Store = fs::Dir;
 
@@ -432,12 +429,12 @@ impl Persist<fs::Dir, Txn> for ChainData {
             }
         }
 
-        Ok(ChainData::new(latest, dir, file))
+        Ok(History::new(latest, dir, file))
     }
 }
 
 #[async_trait]
-impl Transact for ChainData {
+impl Transact for History {
     async fn commit(&self, txn_id: &TxnId) {
         join!(self.file.commit(txn_id), self.dir.commit(txn_id));
     }
@@ -448,21 +445,21 @@ impl Transact for ChainData {
 }
 
 #[async_trait]
-impl de::FromStream for ChainData {
+impl de::FromStream for History {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_seq(ChainDataVisitor { txn }).await
+        decoder.decode_seq(HistoryVisitor { txn }).await
     }
 }
 
-struct ChainDataVisitor {
+struct HistoryVisitor {
     txn: Txn,
 }
 
 #[async_trait]
-impl de::Visitor for ChainDataVisitor {
-    type Value = ChainData;
+impl de::Visitor for HistoryVisitor {
+    type Value = History;
 
     fn expecting() -> &'static str {
         "Chain history"
@@ -492,10 +489,10 @@ impl de::Visitor for ChainDataVisitor {
                 .map_err(de::Error::custom)
                 .await?;
 
-            return Ok(ChainData::new(0, dir, file));
+            return Ok(History::new(0, dir, file));
         }
 
-        let chain = ChainData::new(0, dir, file);
+        let chain = History::new(0, dir, file);
 
         while let Some(block_data) = seq.next_element::<ChainBlock>(()).await? {
             let block = chain
@@ -521,13 +518,13 @@ impl de::Visitor for ChainDataVisitor {
     }
 }
 
-pub type ChainDataView<'en> =
-    en::SeqStream<TCError, ChainDataBlockView<'en>, TCTryStream<'en, ChainDataBlockView<'en>>>;
+pub type HistoryView<'en> =
+    en::SeqStream<TCError, HistoryBlockView<'en>, TCTryStream<'en, HistoryBlockView<'en>>>;
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for ChainData {
+impl<'en> IntoView<'en, fs::Dir> for History {
     type Txn = Txn;
-    type View = ChainDataView<'en>;
+    type View = HistoryView<'en>;
 
     async fn into_view(self, txn: Txn) -> TCResult<Self::View> {
         let txn_id = *txn.id();
@@ -575,7 +572,7 @@ impl<'en> IntoView<'en, fs::Dir> for ChainData {
                 (block.last_hash().clone(), en::MapStream::from(map))
             });
 
-        let seq: TCTryStream<'en, ChainDataBlockView<'en>> = Box::pin(seq);
+        let seq: TCTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
         Ok(en::SeqStream::from(seq))
     }
 }
@@ -583,7 +580,7 @@ impl<'en> IntoView<'en, fs::Dir> for ChainData {
 type MutationViewSeq<'en> =
     en::SeqStream<TCError, MutationView<'en>, TCTryStream<'en, MutationView<'en>>>;
 
-type ChainDataBlockView<'en> = (
+type HistoryBlockView<'en> = (
     Bytes,
     en::MapStream<
         TCError,

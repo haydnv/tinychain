@@ -8,7 +8,6 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
-
 use tc_btree::BTreeType;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist, Restore, Store};
@@ -23,7 +22,6 @@ use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use crate::chain::internal::ChainDataView;
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
@@ -31,8 +29,6 @@ pub use sync::SyncChain;
 mod block;
 mod data;
 
-#[allow(dead_code)]
-mod internal;
 mod sync;
 
 const BLOCK_SIZE: u64 = 1_000_000;
@@ -487,7 +483,7 @@ impl fmt::Display for Chain {
 
 /// A helper struct for [`ChainView`]
 pub enum ChainViewData<'en> {
-    Block((Schema, ChainDataView<'en>)),
+    Block((Schema, data::HistoryView<'en>)),
     Sync(Box<(Schema, StateView<'en>)>),
 }
 

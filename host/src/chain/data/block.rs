@@ -1,5 +1,3 @@
-//! A [`ChainBlock`], the block type of a [`super::Chain`]
-
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
 
@@ -13,6 +11,7 @@ use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
 use tcgeneric::TCPathBuf;
 
+use crate::chain::{BLOCK_SIZE, EXT};
 use crate::scalar::{Scalar, Value};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -177,11 +176,11 @@ impl Mutate for ChainBlock {
 #[async_trait]
 impl BlockData for ChainBlock {
     fn ext() -> &'static str {
-        super::EXT
+        EXT
     }
 
     fn max_size() -> u64 {
-        super::BLOCK_SIZE
+        BLOCK_SIZE
     }
 }
 
