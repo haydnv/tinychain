@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
 
@@ -15,7 +16,7 @@ use tc_table::TableInstance;
 use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{label, Id, Instance, Label, NativeClass, TCPathBuf, TCTryStream};
+use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf, TCTryStream, Tuple};
 
 use crate::chain::{ChainType, Subject, CHAIN, NULL_HASH};
 use crate::collection::*;
@@ -479,43 +480,111 @@ impl de::Visitor for HistoryVisitor {
             .map_err(de::Error::custom)
             .await?;
 
-        if let Some(first_block) = seq.next_element(()).await? {
-            file.create_block(txn_id, 0u64.into(), first_block)
-                .map_err(de::Error::custom)
-                .await?;
-        } else {
-            let first_block = ChainBlock::new(NULL_HASH);
-            file.create_block(txn_id, 0u64.into(), first_block)
+        let first_block = ChainBlock::new(NULL_HASH);
+        file.create_block(txn_id, 0u64.into(), first_block)
+            .map_err(de::Error::custom)
+            .await?;
+
+        let history = History::new(0, dir, file);
+
+        let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
+
+        let mut i = 0u64;
+        let txn = subcontext(i).await?;
+
+        if let Some(state) = seq.next_element::<State>(txn).await? {
+            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
+                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
+                .map_err(de::Error::custom)?;
+
+            if hash != NULL_HASH {
+                let hash = base64::encode(hash);
+                let null_hash = base64::encode(NULL_HASH);
+                return Err(de::Error::invalid_value(
+                    format!("initial block hash {}", hash),
+                    format!("null hash {}", null_hash),
+                ));
+            }
+
+            let mutations = parse_block_state(&history, txn_id, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
-            return Ok(History::new(0, dir, file));
+            let mut block = history
+                .write_block(txn_id, i)
+                .map_err(de::Error::custom)
+                .await?;
+
+            *block = ChainBlock::with_mutations(hash, mutations);
         }
 
-        let chain = History::new(0, dir, file);
+        i += 1;
+        while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
+            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
+                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
+                .map_err(de::Error::custom)?;
 
-        while let Some(block_data) = seq.next_element::<ChainBlock>(()).await? {
-            let block = chain
+            let mut block = history
                 .create_next_block(txn_id)
+                .map_err(de::Error::custom)
+                .await?
+                .write()
+                .await;
+
+            if block.last_hash() != &hash {
+                let hash = base64::encode(hash);
+                let last_hash = base64::encode(block.last_hash());
+                return Err(de::Error::invalid_value(
+                    format!("block with last hash {}", hash),
+                    format!("block with last hash {}", last_hash),
+                ));
+            }
+
+            let mutations = parse_block_state(&history, txn_id, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
-            let mut block = block.write().await;
-            if block.last_hash() == block_data.last_hash() {
-                *block = block_data;
-            } else {
-                let unexpected = base64::encode(block_data.last_hash());
-                let expected = base64::encode(block.last_hash());
+            *block = ChainBlock::with_mutations(hash, mutations);
 
-                return Err(de::Error::invalid_value(
-                    format!("block with hash {}", unexpected),
-                    format!("block with hash {}", expected),
+            i += 1;
+        }
+
+        Ok(history)
+    }
+}
+
+async fn parse_block_state(
+    history: &History,
+    txn_id: TxnId,
+    block_data: Map<Tuple<State>>,
+) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>> {
+    let mut mutations = BTreeMap::new();
+
+    for (past_txn_id, ops) in block_data.into_iter() {
+        let past_txn_id = past_txn_id.to_string().parse()?;
+
+        let mut parsed = Vec::with_capacity(ops.len());
+
+        for op in ops.into_iter() {
+            if op.matches::<(TCPathBuf, Value)>() {
+                let (path, key) = op.opt_cast_into().unwrap();
+                parsed.push(Mutation::Delete(path, key));
+            } else if op.matches::<(TCPathBuf, Value, State)>() {
+                let (path, key, value) = op.opt_cast_into().unwrap();
+                let value = history.save_state(txn_id, value).await?;
+                parsed.push(Mutation::Put(path, key, value));
+            } else {
+                return Err(TCError::bad_request(
+                    "unable to parse historical mutation",
+                    op,
                 ));
             }
         }
 
-        Ok(chain)
+        mutations.insert(past_txn_id, parsed);
     }
+
+    Ok(mutations)
 }
 
 pub type HistoryView<'en> =

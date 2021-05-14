@@ -590,6 +590,8 @@ impl TryCastFrom<Value> for Bytes {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Bytes(_) => true,
+            Value::Tuple(tuple) => Vec::<u8>::can_cast_from(tuple),
+            Value::String(s) => base64::decode(s).is_ok(),
             Value::None => true,
             _ => false,
         }
@@ -598,7 +600,9 @@ impl TryCastFrom<Value> for Bytes {
     fn opt_cast_from(value: Value) -> Option<Bytes> {
         match value {
             Value::Bytes(bytes) => Some(bytes),
-            Value::None => Some(Bytes::default()),
+            Value::Tuple(tuple) => Vec::<u8>::opt_cast_from(tuple).map(Bytes::from),
+            Value::String(s) => base64::decode(s).ok().map(Bytes::from),
+            Value::None => Some(Bytes::new()),
             _ => None,
         }
     }
@@ -670,6 +674,16 @@ impl TryCastFrom<Value> for Number {
 }
 
 impl TryCastFrom<Value> for bool {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
+impl TryCastFrom<Value> for u8 {
     fn can_cast_from(value: &Value) -> bool {
         Number::can_cast_from(value)
     }

@@ -7,6 +7,7 @@ use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::de;
 use futures::future::try_join_all;
 use futures::TryFutureExt;
@@ -375,6 +376,22 @@ impl TryFrom<State> for Value {
 }
 
 impl TryCastFrom<State> for bool {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Bytes {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Scalar(scalar) => Self::can_cast_from(scalar),

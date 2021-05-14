@@ -8,6 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
@@ -386,6 +387,22 @@ impl TryFrom<Scalar> for Value {
         match scalar {
             Scalar::Value(value) => Ok(value),
             other => Err(TCError::bad_request("expected Value but found", other)),
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Bytes {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
         }
     }
 }
