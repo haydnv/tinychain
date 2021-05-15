@@ -87,7 +87,7 @@ impl History {
         match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
-                    let hash: Id = btree.base64_hash(txn_id).await?.parse()?;
+                    let hash: Id = btree.hash_hex(txn_id).await?.parse()?;
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
@@ -107,7 +107,7 @@ impl History {
                     .into())
                 }
                 Collection::Table(table) => {
-                    let hash: Id = table.base64_hash(txn_id).await?.parse()?;
+                    let hash: Id = table.hash_hex(txn_id).await?.parse()?;
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
@@ -498,8 +498,8 @@ impl de::Visitor for HistoryVisitor {
                 .map_err(de::Error::custom)?;
 
             if hash != NULL_HASH {
-                let hash = base64::encode(hash);
-                let null_hash = base64::encode(NULL_HASH);
+                let hash = hex::encode(hash);
+                let null_hash = hex::encode(NULL_HASH);
                 return Err(de::Error::invalid_value(
                     format!("initial block hash {}", hash),
                     format!("null hash {}", null_hash),
@@ -532,8 +532,8 @@ impl de::Visitor for HistoryVisitor {
                 .await;
 
             if block.last_hash() != &hash {
-                let hash = base64::encode(hash);
-                let last_hash = base64::encode(block.last_hash());
+                let hash = hex::encode(hash);
+                let last_hash = hex::encode(block.last_hash());
                 return Err(de::Error::invalid_value(
                     format!("block with last hash {}", hash),
                     format!("block with last hash {}", last_hash),

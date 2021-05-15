@@ -289,8 +289,8 @@ pub trait CopyFrom<D: Dir, T: Transaction<D>, Instance>: Persist<D, T> {
 pub trait Hash<'en> {
     type Item: en::IntoStream<'en> + Send + 'en;
 
-    async fn base64_hash(&'en self, txn_id: TxnId) -> TCResult<String> {
-        self.hash(txn_id).map_ok(|hash| base64::encode(hash)).await
+    async fn hash_hex(&'en self, txn_id: TxnId) -> TCResult<String> {
+        self.hash(txn_id).map_ok(|hash| hex::encode(hash)).await
     }
 
     async fn hash(&'en self, txn_id: TxnId) -> TCResult<Bytes> {
