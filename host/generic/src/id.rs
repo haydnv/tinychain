@@ -211,7 +211,7 @@ fn validate_id(id: &str) -> TCResult<()> {
     for pattern in &RESERVED_CHARS {
         if id.contains(pattern) {
             return Err(TCError::bad_request(
-                "A value ID may not contain this pattern",
+                format!("A value ID {} may not contain this pattern", id),
                 pattern,
             ));
         }
@@ -219,7 +219,7 @@ fn validate_id(id: &str) -> TCResult<()> {
 
     if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
         return Err(TCError::bad_request(
-            "A value ID may not contain whitespace",
+            format!("A value ID \"{}\" may not contain whitespace", id),
             format!("{:?}", w),
         ));
     }
