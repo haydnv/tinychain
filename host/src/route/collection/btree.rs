@@ -52,11 +52,18 @@ where
                     ));
                 }
 
-                let key =
-                    Value::try_cast_from(value, |s| TCError::bad_request("invalid BTree key", s))?;
-                let key = key.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
+                if let State::Collection(Collection::BTree(value)) = value {
+                    let keys = value.keys(*txn.id()).await?;
+                    self.btree.try_insert_from(*txn.id(), keys).await
+                } else if value.matches::<Value>() {
+                    let value = Value::opt_cast_from(value).unwrap();
+                    let value =
+                        value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
 
-                self.btree.insert(*txn.id(), key).await
+                    self.btree.insert(*txn.id(), value).await
+                } else {
+                    Err(TCError::bad_request("invalid BTree key", value))
+                }
             })
         }))
     }
