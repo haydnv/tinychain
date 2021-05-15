@@ -587,7 +587,7 @@ impl TryFrom<Value> for Tuple<Value> {
     fn try_from(value: Value) -> TCResult<Self> {
         match value {
             Value::Tuple(tuple) => Ok(tuple),
-            other => Err(TCError::bad_request("expected Tuple but found", other))
+            other => Err(TCError::bad_request("expected Tuple but found", other)),
         }
     }
 }
