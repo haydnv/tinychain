@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
-use futures::{TryFutureExt, TryStreamExt};
+use futures::{future, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
@@ -188,6 +188,21 @@ impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, values| {
             Box::pin(async move {
+                if key.is_none() {
+                    if let State::Collection(Collection::Table(table)) = values {
+                        let txn_id = *txn.id();
+                        let key_len = self.table.key().len();
+                        let rows = table.rows(txn_id).await?;
+
+                        return rows
+                            .map_ok(|mut row| (row.drain(..key_len).collect(), row))
+                            .map_ok(|(key, values)| self.table.upsert(txn_id, key, values))
+                            .try_buffer_unordered(num_cpus::get())
+                            .try_fold((), |(), ()| future::ready(Ok(())))
+                            .await;
+                    }
+                }
+
                 if values.matches::<Map<Value>>() {
                     let values = values.opt_cast_into().unwrap();
                     let bounds = cast_into_bounds(Scalar::Value(key))?;

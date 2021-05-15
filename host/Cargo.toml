@@ -31,6 +31,7 @@ hex = "0.4"
 http = "0.2"
 hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_warn"] }
+num_cpus = "1.13"
 rjwt = "0.4"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
