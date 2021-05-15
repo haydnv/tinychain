@@ -87,7 +87,7 @@ impl de::Visitor for MutationVisitor {
     }
 }
 
-/// A single filesystem block belonging to a [`super::Chain`].
+/// A single filesystem block belonging to a `Chain`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
     hash: Bytes,

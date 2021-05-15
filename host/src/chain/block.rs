@@ -1,4 +1,4 @@
-//! A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s.
+//! A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s.
 //!
 //! Each block in the chain begins with the hash of the previous block.
 
@@ -23,7 +23,7 @@ use crate::txn::{Txn, TxnId};
 use super::data::History;
 use super::{Chain, ChainInstance, ChainType, Schema, Subject, CHAIN};
 
-/// A [`Chain`] which stores every mutation of its [`Subject`] in a series of [`ChainBlock`]s
+/// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
 #[derive(Clone)]
 pub struct BlockChain {
     schema: Schema,
