@@ -5,23 +5,26 @@ use std::fmt;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::future::Future;
+use futures::future::{Future, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::fs::Dir;
+use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
+use crate::collection::{BTreeFile, Collection, CollectionType, TableIndex};
 use crate::object::InstanceExt;
 use crate::route::Public;
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
 
-mod hosted;
-
 use hosted::Hosted;
+
+mod hosted;
 
 const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -60,10 +63,7 @@ impl Kernel {
                 ))
             }
         } else if let Some(class) = StateType::from_path(path) {
-            let err = format!("Cannot cast into {} from {}", class, key);
-            State::Scalar(Scalar::Value(key))
-                .into_type(class)
-                .ok_or_else(|| TCError::unsupported(err))
+            construct_state(txn, class, key).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
@@ -270,6 +270,59 @@ fn execute<
             result
         }
     })
+}
+
+async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<State> {
+    match class {
+        StateType::Collection(class) => match class {
+            CollectionType::BTree(btt) => {
+                let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid BTree schema", v)
+                })?;
+
+                let file = txn.context().create_file_tmp(*txn.id(), btt).await?;
+                BTreeFile::create(file, schema, *txn.id())
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            }
+            CollectionType::Table(_) => {
+                let schema = tc_table::TableSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Table schema", v)
+                })?;
+
+                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                TableIndex::create(schema, &dir, *txn.id())
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            }
+        },
+        StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
+        StateType::Map => {
+            let value = Tuple::<(Id, Value)>::try_cast_from(value, |v| {
+                TCError::bad_request("invalid Map", v)
+            })?;
+
+            let map = value
+                .into_iter()
+                .map(|(id, value)| (id, State::from(value)))
+                .collect();
+
+            Ok(State::Map(map))
+        }
+        StateType::Object(ot) => Err(TCError::not_implemented(format!("GET {}", ot))),
+        StateType::Scalar(class) => {
+            let err = format!("Cannot cast into {} from {}", class, value);
+            State::Scalar(Scalar::Value(value))
+                .into_type(StateType::Scalar(class))
+                .ok_or_else(|| TCError::unsupported(err))
+        }
+        StateType::Tuple => {
+            let value: Tuple<Value> = value.try_into()?;
+            Ok(State::Tuple(value.into_iter().map(State::from).collect()))
+        }
+    }
 }
 
 fn error_type(err_type: &Id) -> Option<ErrorType> {

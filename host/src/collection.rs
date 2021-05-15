@@ -107,9 +107,21 @@ impl From<BTree> for Collection {
     }
 }
 
+impl From<BTreeFile> for Collection {
+    fn from(btree: BTreeFile) -> Self {
+        Self::BTree(btree.into())
+    }
+}
+
 impl From<Table> for Collection {
     fn from(table: Table) -> Self {
         Self::Table(table)
+    }
+}
+
+impl From<TableIndex> for Collection {
+    fn from(table: TableIndex) -> Self {
+        Self::Table(table.into())
     }
 }
 

@@ -1,6 +1,7 @@
 //! A generic [`Value`] which supports collation
 
 use std::cmp::Ordering;
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::str::FromStr;
@@ -577,6 +578,17 @@ impl From<usize> for Value {
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Self::Number(n.into())
+    }
+}
+
+impl TryFrom<Value> for Tuple<Value> {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Tuple(tuple) => Ok(tuple),
+            other => Err(TCError::bad_request("expected Tuple but found", other))
+        }
     }
 }
 
