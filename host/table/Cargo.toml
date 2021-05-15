@@ -1,6 +1,6 @@
 [package]
 name = "tc-table"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["haydnv"]
 edition = "2018"
 description = "Tinychain's Table collection type. Unstable."
@@ -14,13 +14,13 @@ categories = ["database", "database-implementations", "data-structures"]
 [dependencies]
 async-trait = "0.1"
 collate = "~0.1.9"
-destream = "0.3"
+destream = "0.4"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
-tc-btree = { path = "../btree" }
+tc-btree = "~0.1.2"
 tc-error = "0.2"
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-transact = "0.5"
+tc-value = "~0.1.8"
+tcgeneric = "~0.1.6"
