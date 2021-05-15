@@ -928,10 +928,12 @@ impl de::Visitor for ScalarVisitor {
             return Ok(Scalar::Map(Map::default()));
         };
 
-        if let Ok(path) = TCPathBuf::from_str(&key) {
-            if let Some(class) = ScalarType::from_path(&path) {
-                if let Ok(scalar) = Self::visit_map_value(class, &mut access).await {
-                    return Ok(scalar);
+        if key.starts_with('/') {
+            if let Ok(path) = TCPathBuf::from_str(&key) {
+                if let Some(class) = ScalarType::from_path(&path) {
+                    if let Ok(scalar) = Self::visit_map_value(class, &mut access).await {
+                        return Ok(scalar);
+                    }
                 }
             }
         }

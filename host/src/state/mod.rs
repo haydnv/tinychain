@@ -785,13 +785,15 @@ impl<'a> de::Visitor for StateVisitor {
         if let Some(key) = access.next_key::<String>(()).await? {
             debug!("deserialize: key is {}", key);
 
-            if let Ok(path) = TCPathBuf::from_str(&key) {
-                debug!("is {} a classpath?", path);
-                if let Some(class) = StateType::from_path(&path) {
-                    debug!("deserialize instance of {}...", class);
-                    return self.visit_map_value(class, &mut access).await;
-                } else {
-                    debug!("not a classpath: {}", path);
+            if key.starts_with('/') {
+                if let Ok(path) = TCPathBuf::from_str(&key) {
+                    debug!("is {} a classpath?", path);
+                    if let Some(class) = StateType::from_path(&path) {
+                        debug!("deserialize instance of {}...", class);
+                        return self.visit_map_value(class, &mut access).await;
+                    } else {
+                        debug!("not a classpath: {}", path);
+                    }
                 }
             }
 
