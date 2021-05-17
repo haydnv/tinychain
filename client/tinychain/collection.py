@@ -157,10 +157,10 @@ class BTree(Collection):
 
     def reverse(self):
         """
-        Return a slice of this `BTree` with the same range with its keys in reverse order.
+        Return a slice of this `BTree` with the same range but with its keys in reverse order.
         """
 
-        return self._get("", (None, True), BTree)
+        return self._get("reverse", rtype=BTree)
 
 
 class Table(Collection):

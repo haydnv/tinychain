@@ -25,18 +25,8 @@ where
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, range| {
             Box::pin(async move {
-                let invalid_range =
-                    |v: &Value| TCError::bad_request("invalid range for BTree slice", v);
-
-                let (range, reverse): (Value, bool) = if range.matches::<(Value, bool)>() {
-                    range.try_cast_into(invalid_range)?
-                } else {
-                    (range.try_cast_into(invalid_range)?, false)
-                };
-
                 let range = cast_into_range(Scalar::Value(range))?;
-                let slice = self.btree.clone().slice(range, reverse)?;
-
+                let slice = self.btree.clone().slice(range, false)?;
                 Ok(Collection::BTree(slice.into()).into())
             })
         }))
@@ -160,6 +150,37 @@ impl<'a, T> From<&'a T> for FirstHandler<'a, T> {
     }
 }
 
+struct ReverseHandler<T> {
+    btree: T,
+}
+
+impl<'a, T: BTreeInstance + 'a> Handler<'a> for ReverseHandler<T>
+where
+    BTree: From<<T as BTreeInstance>::Slice>,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::bad_request(
+                        "BTree::reverse does not accept a key",
+                        key,
+                    ));
+                }
+
+                let reversed = self.btree.slice(Range::default(), true)?;
+                Ok(Collection::from(BTree::from(reversed)).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ReverseHandler<T> {
+    fn from(btree: T) -> Self {
+        Self { btree }
+    }
+}
+
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
@@ -186,6 +207,7 @@ where
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
             "first" => Some(Box::new(FirstHandler::from(btree))),
+            "reverse" => Some(Box::new(ReverseHandler::from(btree.clone()))),
             _ => None,
         }
     } else {
