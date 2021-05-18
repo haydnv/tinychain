@@ -34,13 +34,26 @@ class Web(tc.Cluster):
             db.movies.insert([name], [metadata["year"], metadata["description"]]),
             self.cache.insert([name, 0]))
 
+    @tc.post_method
+    def add_view(self, txn, name: tc.String):
+        txn.views = self.views(name)
+        return tc.After(
+            self.cache[name, txn.views].delete(),
+            self.cache.insert([name, txn.views + 1]))
+
+
 class DemoTests(unittest.TestCase):
     def setUp(self):
         self.host = start_host("table_demo", [Database, Web], True)
 
     def testCache(self):
-        self.host.put("/app/web/add_movie", "Up", {"year": 2009, "description": "Pixar, balloons"})
+        self.host.put("/app/web/add_movie",
+            "Up", {"year": 2009, "description": "Pixar, balloons"})
+
         self.assertEqual(self.host.get("/app/web/views", "Up"), 0)
+
+        self.host.post("/app/web/add_view", {"name": "Up"})
+        self.assertEqual(self.host.get("/app/web/views", "Up"), 1)
 
     def tearDown(self):
         self.host.stop()
