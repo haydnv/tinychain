@@ -1,6 +1,6 @@
 //! An executor for an `OpDef`
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -46,18 +46,11 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
         debug!("execute op & capture {}", capture);
 
         while self.scope.resolve_id(&capture)?.is_ref() {
-            let mut visited = HashSet::with_capacity(self.scope.len());
             let mut pending = Vec::with_capacity(self.scope.len());
-            let mut unvisited = Vec::with_capacity(self.scope.len());
-            unvisited.push(capture.clone());
+            let mut unvisited = VecDeque::with_capacity(self.scope.len());
+            unvisited.push_back(capture.clone());
 
-            while let Some(id) = unvisited.pop() {
-                if visited.contains(&id) {
-                    return Err(TCError::bad_request("circular dependency detected", id));
-                } else {
-                    visited.insert(id.clone());
-                }
-
+            while let Some(id) = unvisited.pop_front() {
                 let state = self.scope.resolve_id(&id)?;
                 debug!("checking state {}: {}", id, state);
 
@@ -67,9 +60,13 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
 
                     let mut ready = true;
                     for dep_id in deps.into_iter() {
+                        if dep_id == id {
+                            return Err(TCError::bad_request("circular dependency", id));
+                        }
+
                         if self.scope.resolve_id(&dep_id)?.is_ref() {
                             ready = false;
-                            unvisited.push(dep_id);
+                            unvisited.push_back(dep_id);
                         }
                     }
 
