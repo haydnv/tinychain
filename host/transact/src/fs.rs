@@ -5,6 +5,9 @@ use std::convert::TryFrom;
 use std::io;
 use std::ops::{Deref, DerefMut};
 
+#[cfg(feature = "tensor")]
+use afarray::Array;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -112,6 +115,18 @@ impl BlockData for Value {
 
     fn max_size() -> u64 {
         4096
+    }
+}
+
+#[cfg(feature = "tensor")]
+#[async_trait]
+impl BlockData for Array {
+    fn ext() -> &'static str {
+        "array"
+    }
+
+    fn max_size() -> u64 {
+        131_072 // = 1 mibibyte / 64 bits
     }
 }
 

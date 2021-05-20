@@ -1,13 +1,28 @@
 use std::fmt;
 
+use number_general::NumberType;
+
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
+
+pub use bounds::Shape;
 
 #[allow(dead_code)]
 mod bounds;
+mod dense;
 
 type Coord = Vec<u64>;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
+
+pub trait TensorAccess: Send {
+    fn dtype(&self) -> NumberType;
+
+    fn ndim(&self) -> usize;
+
+    fn shape(&'_ self) -> &'_ Shape;
+
+    fn size(&self) -> u64;
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum TensorType {}
