@@ -1,0 +1,15 @@
+[package]
+name = "tc-tensor"
+version = "0.1.0"
+authors = ["haydnv"]
+edition = "2018"
+description = "Tinychain's Tensor collection type. Unstable."
+license = "Apache-2.0"
+readme = "README.md"
+repository = "http://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
+categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
+
+[dependencies]
+tcgeneric = "~0.1.6"
