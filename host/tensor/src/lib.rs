@@ -39,3 +39,9 @@ impl Instance for Tensor {
         todo!()
     }
 }
+
+impl fmt::Display for Tensor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Tensor")
+    }
+}

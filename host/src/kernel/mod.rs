@@ -297,6 +297,9 @@ async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<
                     .map_ok(State::from)
                     .await
             }
+
+            #[cfg(feature = "tensor")]
+            CollectionType::Tensor(tt) => Err(TCError::not_implemented(format!("GET {}", tt))),
         },
         StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
         StateType::Map => {

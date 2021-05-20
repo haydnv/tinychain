@@ -77,11 +77,19 @@ impl Schema {
                                 let schema = Value::try_cast_from(schema, |s| {
                                     TCError::bad_request("invalid Table schema", s)
                                 })?;
+
                                 let schema = schema.try_cast_into(|s| {
                                     TCError::bad_request("invalid Table schema", s)
                                 })?;
+
                                 Ok(Self::Table(schema))
                             }
+
+                            #[cfg(feature = "tensor")]
+                            CollectionType::Tensor(tt) => Err(TCError::not_implemented(format!(
+                                "chain Schema from scalar for {}",
+                                tt
+                            ))),
                         }
                     }
                     other => Err(TCError::bad_request("invalid Chain schema", other)),

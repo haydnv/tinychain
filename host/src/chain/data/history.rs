@@ -122,6 +122,12 @@ impl History {
                     ))
                     .into())
                 }
+
+                #[cfg(feature = "tensor")]
+                Collection::Tensor(tensor) => Err(TCError::not_implemented(format!(
+                    "History::save_state {}",
+                    tensor
+                ))),
             },
             State::Scalar(value) => Ok(value),
             other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
@@ -381,6 +387,12 @@ impl History {
                 let table = TableIndex::load(txn, schema, dir).await?;
                 Ok(Collection::Table(table.into()))
             }
+
+            #[cfg(feature = "tensor")]
+            CollectionType::Tensor(tt) => Err(TCError::not_implemented(format!(
+                "History::resolve instance of {}",
+                tt
+            ))),
         }
     }
 }

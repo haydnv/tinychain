@@ -47,6 +47,11 @@ impl FileEntry {
             StateType::Collection(ct) => match ct {
                 CollectionType::BTree(_) => Ok(Self::BTree(File::new(cache, path, Node::ext()))),
                 CollectionType::Table(tt) => Err(err(tt)),
+
+                #[cfg(feature = "tensor")]
+                CollectionType::Tensor(tt) => {
+                    Err(TCError::not_implemented(format!("create file for {}", tt)))
+                }
             },
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
             StateType::Scalar(st) => match st {

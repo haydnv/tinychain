@@ -23,10 +23,17 @@ use crate::txn::Txn;
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
 
+#[cfg(feature = "tensor")]
+pub use tc_tensor::TensorType;
+
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+
 pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+
+#[cfg(feature = "tensor")]
+pub type Tensor = tc_tensor::Tensor;
 
 const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -35,6 +42,9 @@ const PREFIX: PathLabel = path_label(&["state", "collection"]);
 pub enum CollectionType {
     BTree(BTreeType),
     Table(TableType),
+
+    #[cfg(feature = "tensor")]
+    Tensor(TensorType),
 }
 
 impl Class for CollectionType {}
@@ -56,8 +66,11 @@ impl NativeClass for CollectionType {
 
     fn path(&self) -> TCPathBuf {
         match self {
-            Self::BTree(btree) => btree.path(),
-            Self::Table(table) => table.path(),
+            Self::BTree(btt) => btt.path(),
+            Self::Table(tt) => tt.path(),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tt) => tt.path(),
         }
     }
 }
@@ -79,6 +92,9 @@ impl fmt::Display for CollectionType {
         match self {
             Self::BTree(btt) => fmt::Display::fmt(btt, f),
             Self::Table(tt) => fmt::Display::fmt(tt, f),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tt) => fmt::Display::fmt(tt, f),
         }
     }
 }
@@ -88,6 +104,9 @@ impl fmt::Display for CollectionType {
 pub enum Collection {
     BTree(BTree),
     Table(Table),
+
+    #[cfg(feature = "tensor")]
+    Tensor(Tensor),
 }
 
 impl Instance for Collection {
@@ -97,6 +116,9 @@ impl Instance for Collection {
         match self {
             Self::BTree(btree) => CollectionType::BTree(btree.class()),
             Self::Table(table) => CollectionType::Table(table.class()),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => CollectionType::Tensor(tensor.class()),
         }
     }
 }
@@ -155,6 +177,9 @@ impl CollectionVisitor {
                     .await
             }
             CollectionType::Table(_) => access.next_value(self.txn).map_ok(Collection::Table).await,
+
+            #[cfg(feature = "tensor")]
+            CollectionType::Tensor(_) => unimplemented!(),
         }
     }
 }
@@ -198,6 +223,9 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
             Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_tensor) => unimplemented!(),
         }
     }
 }
@@ -207,6 +235,9 @@ impl fmt::Display for Collection {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Table(table) => fmt::Display::fmt(table, f),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
         }
     }
 }
