@@ -2,6 +2,11 @@ use std::fmt;
 
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
+#[allow(dead_code)]
+mod bounds;
+
+type Coord = Vec<u64>;
+
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 #[derive(Clone, Copy, Eq, PartialEq)]

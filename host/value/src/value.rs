@@ -725,6 +725,16 @@ impl TryCastFrom<Value> for u64 {
     }
 }
 
+impl TryCastFrom<Value> for i64 {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
 impl TryCastFrom<Value> for TCPathBuf {
     fn can_cast_from(value: &Value) -> bool {
         match value {

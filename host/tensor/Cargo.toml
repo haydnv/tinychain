@@ -12,4 +12,8 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
+itertools  = "0.10"
+safecast = "0.1"
+tc-error = "0.1"
+tc-value = { path = "../value" }
 tcgeneric = "~0.1.6"
