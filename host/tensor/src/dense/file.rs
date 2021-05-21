@@ -1,10 +1,10 @@
-use std::iter::FromIterator;
+use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 
 use afarray::Array;
 use async_trait::async_trait;
-use futures::future;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::{future, try_join};
 use log::debug;
 use num::integer::div_ceil;
 use number_general::{Number, NumberInstance, NumberType};
@@ -26,6 +26,113 @@ pub struct BlockListFile<F, D, T> {
     shape: Shape,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
+    pub async fn constant(file: F, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
+        let size = shape.size();
+        let per_block = Array::max_size();
+
+        let value_clone = value.clone();
+        let blocks = (0..(size / per_block))
+            .map(move |_| Ok(Array::constant(value_clone.clone(), per_block as usize)));
+
+        let trailing_len = (size % per_block) as usize;
+        if trailing_len > 0 {
+            let blocks = blocks.chain(iter::once(Ok(Array::constant(value.clone(), trailing_len))));
+            BlockListFile::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks))
+                .await
+        } else {
+            BlockListFile::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks))
+                .await
+        }
+    }
+
+    pub async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
+        file: F,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: NumberType,
+        blocks: S,
+    ) -> TCResult<Self> {
+        blocks
+            .enumerate()
+            .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
+            .map_ok(|(id, block)| file.create_block(txn_id, id, block))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(BlockListFile {
+            dtype,
+            shape,
+            file,
+            dir: PhantomData,
+            txn: PhantomData,
+        })
+    }
+
+    pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
+        file: F,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: NumberType,
+        values: S,
+    ) -> TCResult<Self> {
+        let mut i = 0u64;
+        let mut values = values.chunks(Array::max_size() as usize);
+        while let Some(chunk) = values.next().await {
+            let block_id = BlockId::from(i);
+            let block = Array::from(chunk).cast_into(dtype);
+            file.create_block(txn_id, block_id, block).await?;
+            i += 1;
+        }
+
+        Ok(BlockListFile {
+            dtype,
+            shape,
+            file,
+            dir: PhantomData,
+            txn: PhantomData,
+        })
+    }
+
+    pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
+        let num_blocks = div_ceil(self.size(), Array::max_size());
+        let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
+            .then(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
+            .map_ok(|block| (*block).clone());
+
+        Box::pin(blocks)
+    }
+
+    pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
+        let num_blocks = div_ceil(self.size(), Array::max_size());
+        if num_blocks == 1 {
+            let block_id = BlockId::from(0u64);
+            let mut block = self.file.write_block(txn_id, block_id).await?;
+            block.sort(true)?;
+            return Ok(());
+        }
+
+        for block_id in 0..(num_blocks - 1) {
+            let next_block_id = BlockId::from(block_id + 1);
+            let block_id = BlockId::from(block_id);
+
+            let left = self.file.write_block(txn_id, block_id);
+            let right = self.file.write_block(txn_id, next_block_id);
+            let (mut left, mut right) = try_join!(left, right)?;
+
+            let mut block = Array::concatenate(&left, &right)?;
+            block.sort(true)?;
+
+            let (left_sorted, right_sorted) = block.split(Array::max_size() as usize)?;
+            *left = left_sorted;
+            *right = right_sorted;
+        }
+
+        Ok(())
+    }
 }
 
 impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
