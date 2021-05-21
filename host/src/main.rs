@@ -120,6 +120,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (workspace, data_dir) =
         mount(config.workspace.clone(), config.data_dir, config.cache_size).await?;
 
+    #[cfg(feature = "tensor")]
+    arrayfire::info();
+
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
     let mut clusters = Vec::with_capacity(config.clusters.len());

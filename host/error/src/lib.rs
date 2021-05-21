@@ -100,7 +100,11 @@ impl TCError {
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
-    pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(method: M, subject: S, path: P) -> Self {
+    pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(
+        method: M,
+        subject: S,
+        path: P,
+    ) -> Self {
         Self {
             code: ErrorType::MethodNotAllowed,
             message: format!("{} endpoint {} does not support {}", subject, path, method),
@@ -164,6 +168,16 @@ impl TCError {
 }
 
 impl std::error::Error for TCError {}
+
+#[cfg(feature = "tensor")]
+impl From<afarray::ArrayError> for TCError {
+    fn from(cause: afarray::ArrayError) -> Self {
+        Self {
+            code: ErrorType::BadRequest,
+            message: format!("tensor error: {}", cause),
+        }
+    }
+}
 
 impl fmt::Debug for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

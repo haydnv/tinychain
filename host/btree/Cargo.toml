@@ -19,8 +19,8 @@ futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
-tc-error = "0.2"
-tc-transact = "0.5"
-tc-value = "~0.1.8"
-tcgeneric = "~0.1.6"
+tc-error = { path = "../error" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
 uuid = "0.8"

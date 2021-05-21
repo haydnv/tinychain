@@ -125,6 +125,7 @@ impl BlockData for Array {
         "array"
     }
 
+    #[inline]
     fn max_size() -> u64 {
         131_072 // = 1 mibibyte / 64 bits
     }

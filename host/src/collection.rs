@@ -33,7 +33,7 @@ pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
-pub type Tensor = tc_tensor::Tensor;
+pub type Tensor = tc_tensor::Tensor<fs::File<afarray::Array>, fs::Dir, Txn>;
 
 const PREFIX: PathLabel = path_label(&["state", "collection"]);
 

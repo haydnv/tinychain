@@ -1,18 +1,30 @@
 use std::fmt;
+use std::pin::Pin;
 
-use number_general::NumberType;
+use futures::Future;
+use number_general::{Number, NumberType};
 
+use tc_error::*;
+use tc_transact::fs::Dir;
+use tc_transact::Transaction;
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-pub use bounds::Shape;
+pub use bounds::{Bounds, Shape};
+pub use dense::DenseTensor;
 
 #[allow(dead_code)]
 mod bounds;
 mod dense;
 
+const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
+
 type Coord = Vec<u64>;
 
-const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
+type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
+
+pub trait ReadValueAt<D: Dir, T: Transaction<D>> {
+    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a>;
+}
 
 pub trait TensorAccess: Send {
     fn dtype(&self) -> NumberType;
@@ -25,14 +37,20 @@ pub trait TensorAccess: Send {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum TensorType {}
+pub enum TensorType {
+    Dense,
+}
 
 impl Class for TensorType {}
 
 impl NativeClass for TensorType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
-        if path.len() > 3 && &path[..3] == &PREFIX[..] {
-            todo!()
+        if path.len() == 4 && &path[..3] == &PREFIX[..] {
+            match path[3].as_str() {
+                "dense" => Some(Self::Dense),
+                "sparse" => todo!(),
+                _ => None,
+            }
         } else {
             None
         }
@@ -50,17 +68,24 @@ impl fmt::Display for TensorType {
 }
 
 #[derive(Clone)]
-pub enum Tensor {}
+pub enum Tensor<F, D, T> {
+    Dense(DenseTensor<F, dense::BlockListFile<F, D, T>>),
+}
 
-impl Instance for Tensor {
+impl<F, D, T> Instance for Tensor<F, D, T>
+where
+    Self: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
-        todo!()
+        match self {
+            Self::Dense(_) => TensorType::Dense,
+        }
     }
 }
 
-impl fmt::Display for Tensor {
+impl<F, D, T> fmt::Display for Tensor<F, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Tensor")
     }
