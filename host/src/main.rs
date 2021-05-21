@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         mount(config.workspace.clone(), config.data_dir, config.cache_size).await?;
 
     #[cfg(feature = "tensor")]
-    arrayfire::info();
+    afarray::print_af_info();
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 

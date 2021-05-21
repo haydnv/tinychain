@@ -20,11 +20,10 @@ name = "tinychain"
 path = "src/main.rs"
 
 [features]
-tensor = ["afarray", "arrayfire", "tc-tensor"]
+tensor = ["afarray", "tc-tensor"]
 
 [dependencies]
-afarray = { version = "0.2", optional = true }
-arrayfire = { version = "3.8", optional = true }
+afarray = { version = "~0.3.4", optional = true }
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.4"
@@ -42,7 +41,7 @@ safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
-tbon = "0.2"
+tbon = "~0.2.1"
 tc-btree = { path = "btree" }
 tc-error = { path = "error" }
 tc-table = { path = "table" }
