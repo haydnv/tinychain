@@ -11,6 +11,7 @@ use futures::{future, try_join, TryFutureExt};
 use log::debug;
 use num::integer::div_ceil;
 use number_general::{Number, NumberInstance, NumberType};
+use strided::Stride;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, Dir, File};
@@ -326,10 +327,17 @@ impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T>
         let size = match dtype {
             NT::Bool => decoder.decode_array_bool(visitor).await,
             NT::Complex(ct) => match ct {
+                CT::C32 => {
+                    decoder
+                        .decode_array_f32(ComplexBlockListVisitor { visitor })
+                        .await
+                }
+                CT::C64 => {
+                    decoder
+                        .decode_array_f64(ComplexBlockListVisitor { visitor })
+                        .await
+                }
                 CT::Complex => Err(err_nonspecific(CT::Complex)),
-                _ => Err(de::Error::custom(
-                    "decoding a complex tensor is not yet implemented",
-                )),
             },
             NT::Float(ft) => match ft {
                 FT::F32 => decoder.decode_array_f32(visitor).await,
@@ -375,9 +383,23 @@ struct BlockListVisitor<'a, F> {
     file: &'a F,
 }
 
-impl<'a, F> BlockListVisitor<'a, F> {
+impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
     fn new(txn_id: TxnId, file: &'a F) -> Self {
         Self { txn_id, file }
+    }
+
+    async fn create_block<T: af::HasAfEnum, E: de::Error>(
+        &self,
+        block_id: u64,
+        block: ArrayExt<T>,
+    ) -> Result<<F as File<Array>>::Block, E>
+    where
+        Array: From<ArrayExt<T>>,
+    {
+        self.file
+            .create_block(self.txn_id, block_id.into(), block.into())
+            .map_err(de::Error::custom)
+            .await
     }
 }
 
@@ -404,11 +426,7 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
                 break;
             } else {
                 let block = ArrayExt::from(&buf[..block_size]);
-                self.file
-                    .create_block(self.txn_id, block_id.into(), block.into())
-                    .map_err(de::Error::custom)
-                    .await?;
-
+                self.create_block(block_id, block).await?;
                 size += block_size as u64;
                 block_id += 1;
             }
@@ -432,24 +450,6 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
     ) -> Result<Self::Value, A::Error> {
         debug_assert_eq!(Array::max_size(), PER_BLOCK as u64);
         self.visit_array::<bool, A, PER_BLOCK>(access).await
-    }
-
-    async fn visit_array_f32<A: de::ArrayAccess<f32>>(
-        self,
-        access: A,
-    ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 4;
-        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
-        self.visit_array::<f32, A, BUF_SIZE>(access).await
-    }
-
-    async fn visit_array_f64<A: de::ArrayAccess<f64>>(
-        self,
-        access: A,
-    ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 8;
-        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
-        self.visit_array::<f64, A, BUF_SIZE>(access).await
     }
 
     async fn visit_array_i16<A: de::ArrayAccess<i16>>(
@@ -512,6 +512,93 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         const BUF_SIZE: usize = PER_BLOCK / 8;
         debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
         self.visit_array::<u64, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_f32<A: de::ArrayAccess<f32>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 4;
+        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        self.visit_array::<f32, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_f64<A: de::ArrayAccess<f64>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 8;
+        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        self.visit_array::<f64, A, BUF_SIZE>(access).await
+    }
+}
+
+struct ComplexBlockListVisitor<'a, F> {
+    visitor: BlockListVisitor<'a, F>,
+}
+
+impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
+    async fn visit_array<
+        C: af::HasAfEnum,
+        T: af::HasAfEnum + Clone + Copy + Default,
+        A: de::ArrayAccess<T>,
+        const BUF_SIZE: usize,
+    >(
+        &self,
+        mut access: A,
+    ) -> Result<u64, A::Error>
+    where
+        ArrayExt<C>: From<(ArrayExt<T>, ArrayExt<T>)>,
+        Array: From<ArrayExt<C>>,
+    {
+        let mut buf = [T::default(); BUF_SIZE];
+        let mut size = 0u64;
+        let mut block_id = 0u64;
+
+        loop {
+            let block_size = access.buffer(&mut buf).await?;
+
+            if block_size == 0 {
+                break;
+            } else {
+                let (re, im) = Stride::new(&buf).substrides2();
+                let re = ArrayExt::<T>::from_iter(re.iter().cloned());
+                let im = ArrayExt::<T>::from_iter(im.iter().cloned());
+                let block = ArrayExt::from((re, im));
+                self.visitor.create_block(block_id, block).await?;
+                size += block_size as u64;
+                block_id += 1;
+            }
+        }
+
+        Ok(size)
+    }
+}
+
+#[async_trait]
+impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
+    type Value = u64;
+
+    fn expecting() -> &'static str {
+        "complex tensor data"
+    }
+
+    async fn visit_array_f32<A: de::ArrayAccess<f32>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = (PER_BLOCK / 4) * 2;
+        debug_assert_eq!((Array::max_size() / 4) * 2, BUF_SIZE as u64);
+        self.visit_array::<_, f32, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_f64<A: de::ArrayAccess<f64>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = (PER_BLOCK / 8) * 2;
+        debug_assert_eq!((Array::max_size() / 8) * 2, BUF_SIZE as u64);
+        self.visit_array::<_, f64, A, BUF_SIZE>(access).await
     }
 }
 
