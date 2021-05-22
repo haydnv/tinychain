@@ -17,6 +17,9 @@ pub use file::BlockListFile;
 
 mod file;
 
+// = 1 mibibyte / 64 bits (must be the same as Array::max_size())
+const PER_BLOCK: usize = 131_072;
+
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
     ReadValueAt<D, T> + TensorAccess + Send + Sync + 'static

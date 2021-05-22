@@ -18,6 +18,8 @@ mod dense;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
+pub type Schema = (NumberType, Shape);
+
 type Coord = Vec<u64>;
 
 type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;

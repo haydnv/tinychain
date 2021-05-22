@@ -1,10 +1,13 @@
+use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 
-use afarray::Array;
+use afarray::{Array, ArrayExt};
+use arrayfire as af;
 use async_trait::async_trait;
+use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use futures::{future, try_join};
+use futures::{future, try_join, TryFutureExt};
 use log::debug;
 use num::integer::div_ceil;
 use number_general::{Number, NumberInstance, NumberType};
@@ -15,9 +18,9 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
-use crate::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess};
+use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
 
-use super::{block_offsets, coord_block, DenseAccess, DenseAccessor};
+use super::{block_offsets, coord_block, DenseAccess, DenseAccessor, PER_BLOCK};
 
 #[derive(Clone)]
 pub struct BlockListFile<F, D, T> {
@@ -298,6 +301,221 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D, T> for BlockListF
     }
 }
 
+#[async_trait]
+impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T> {
+    type Context = (TxnId, F, Schema);
+
+    async fn from_stream<De: de::Decoder>(
+        cxt: (TxnId, F, Schema),
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
+        let (txn_id, file, (dtype, shape)) = cxt;
+        let visitor = BlockListVisitor::new(txn_id, &file);
+
+        use number_general::{
+            ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
+        };
+
+        fn err_nonspecific<T: fmt::Display, E: de::Error>(class: T) -> E {
+            de::Error::custom(format!(
+                "tensor does not support {} (use a more specific type)",
+                class
+            ))
+        }
+
+        let size = match dtype {
+            NT::Bool => decoder.decode_array_bool(visitor).await,
+            NT::Complex(ct) => match ct {
+                CT::Complex => Err(err_nonspecific(CT::Complex)),
+                _ => Err(de::Error::custom(
+                    "decoding a complex tensor is not yet implemented",
+                )),
+            },
+            NT::Float(ft) => match ft {
+                FT::F32 => decoder.decode_array_f32(visitor).await,
+                FT::F64 => decoder.decode_array_f64(visitor).await,
+                FT::Float => Err(err_nonspecific(FT::Float)),
+            },
+            NT::Int(it) => match it {
+                IT::I8 => Err(de::Error::custom("tensor does not support 8-bit integer")),
+                IT::I16 => decoder.decode_array_i16(visitor).await,
+                IT::I32 => decoder.decode_array_i32(visitor).await,
+                IT::I64 => decoder.decode_array_i64(visitor).await,
+                IT::Int => Err(err_nonspecific(FT::Float)),
+            },
+            NT::UInt(ut) => match ut {
+                UT::U8 => decoder.decode_array_u8(visitor).await,
+                UT::U16 => decoder.decode_array_u16(visitor).await,
+                UT::U32 => decoder.decode_array_u32(visitor).await,
+                UT::U64 => decoder.decode_array_u64(visitor).await,
+                UT::UInt => Err(err_nonspecific(FT::Float)),
+            },
+            NT::Number => Err(err_nonspecific(NT::Number)),
+        }?;
+
+        if size == shape.size() {
+            Ok(Self {
+                file,
+                shape,
+                dtype,
+                dir: PhantomData,
+                txn: PhantomData,
+            })
+        } else {
+            Err(de::Error::custom(format!(
+                "tensor data has the wrong number of elements ({}) for shape {}",
+                size, shape
+            )))
+        }
+    }
+}
+
+struct BlockListVisitor<'a, F> {
+    txn_id: TxnId,
+    file: &'a F,
+}
+
+impl<'a, F> BlockListVisitor<'a, F> {
+    fn new(txn_id: TxnId, file: &'a F) -> Self {
+        Self { txn_id, file }
+    }
+}
+
+impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
+    async fn visit_array<
+        T: af::HasAfEnum + Clone + Copy + Default,
+        A: de::ArrayAccess<T>,
+        const BUF_SIZE: usize,
+    >(
+        &self,
+        mut access: A,
+    ) -> Result<u64, A::Error>
+    where
+        Array: From<ArrayExt<T>>,
+    {
+        let mut buf = [T::default(); BUF_SIZE];
+        let mut size = 0u64;
+        let mut block_id = 0u64;
+
+        loop {
+            let block_size = access.buffer(&mut buf).await?;
+
+            if block_size == 0 {
+                break;
+            } else {
+                let block = ArrayExt::from(&buf[..block_size]);
+                self.file
+                    .create_block(self.txn_id, block_id.into(), block.into())
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                size += block_size as u64;
+                block_id += 1;
+            }
+        }
+
+        Ok(size)
+    }
+}
+
+#[async_trait]
+impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
+    type Value = u64;
+
+    fn expecting() -> &'static str {
+        "tensor data"
+    }
+
+    async fn visit_array_bool<A: de::ArrayAccess<bool>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        debug_assert_eq!(Array::max_size(), PER_BLOCK as u64);
+        self.visit_array::<bool, A, PER_BLOCK>(access).await
+    }
+
+    async fn visit_array_f32<A: de::ArrayAccess<f32>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 4;
+        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        self.visit_array::<f32, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_f64<A: de::ArrayAccess<f64>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 8;
+        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        self.visit_array::<f64, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_i16<A: de::ArrayAccess<i16>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 2;
+        debug_assert_eq!(Array::max_size() / 2, BUF_SIZE as u64);
+        self.visit_array::<i16, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_i32<A: de::ArrayAccess<i32>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 4;
+        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        self.visit_array::<i32, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_i64<A: de::ArrayAccess<i64>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 8;
+        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        self.visit_array::<i64, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        debug_assert_eq!(Array::max_size(), PER_BLOCK as u64);
+        self.visit_array::<u8, A, PER_BLOCK>(access).await
+    }
+
+    async fn visit_array_u16<A: de::ArrayAccess<u16>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 2;
+        debug_assert_eq!(Array::max_size() / 2, BUF_SIZE as u64);
+        self.visit_array::<u16, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_u32<A: de::ArrayAccess<u32>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 4;
+        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        self.visit_array::<u32, A, BUF_SIZE>(access).await
+    }
+
+    async fn visit_array_u64<A: de::ArrayAccess<u64>>(
+        self,
+        access: A,
+    ) -> Result<Self::Value, A::Error> {
+        const BUF_SIZE: usize = PER_BLOCK / 8;
+        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        self.visit_array::<u64, A, BUF_SIZE>(access).await
+    }
+}
+
+#[inline]
 fn coord_bounds(shape: &Shape) -> Coord {
     (0..shape.len())
         .map(|axis| shape[axis + 1..].iter().product())
