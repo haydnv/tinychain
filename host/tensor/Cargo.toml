@@ -12,14 +12,13 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
-afarray = "0.4"
+afarray = "~0.4.1"
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.4"
 futures = "0.3"
 itertools  = "0.10"
 log = { version = "0.4", features = ["release_max_level_warn"] }
-num = "0.4"
 number-general = "~0.3.7"
 num_cpus = "1.13"
 safecast = "0.1"

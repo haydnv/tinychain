@@ -310,7 +310,9 @@ struct BlockStreamView<'en> {
 
 impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use number_general::{FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT};
+        use number_general::{
+            ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
+        };
 
         fn encodable<'en, E: en::Error + 'en, T: af::HasAfEnum + Clone + Default + 'en>(
             blocks: TCTryStream<'en, Array>,
@@ -323,9 +325,10 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
 
         match self.dtype {
             NT::Bool => encoder.encode_array_bool(encodable(self.blocks)),
-            NT::Complex(_ct) => Err(en::Error::custom(
-                "not implemented: complex tensor serialization",
-            )),
+            NT::Complex(ct) => match ct {
+                CT::C32 => encoder.encode_array_f32(encodable_c32(self.blocks)),
+                _ => encoder.encode_array_f64(encodable_c64(self.blocks)),
+            },
             NT::Float(ft) => match ft {
                 FT::F32 => encoder.encode_array_f32(encodable(self.blocks)),
                 _ => encoder.encode_array_f64(encodable(self.blocks)),
@@ -347,6 +350,50 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
             ))),
         }
     }
+}
+
+fn encodable_c32<'en, E: en::Error + 'en>(
+    blocks: TCTryStream<'en, Array>,
+) -> impl Stream<Item = Result<Vec<f32>, E>> + 'en {
+    blocks
+        .map_ok(|arr| {
+            let source = arr.type_cast::<afarray::Complex<f32>>();
+            let re = source.re();
+            let im = source.im();
+
+            let mut i = 0;
+            let mut dest = vec![0.; source.len() * 2];
+            for (re, im) in re.to_vec().into_iter().zip(im.to_vec()) {
+                dest[i] = re;
+                dest[i + 1] = im;
+                i += 2;
+            }
+
+            dest
+        })
+        .map_err(en::Error::custom)
+}
+
+fn encodable_c64<'en, E: en::Error + 'en>(
+    blocks: TCTryStream<'en, Array>,
+) -> impl Stream<Item = Result<Vec<f64>, E>> + 'en {
+    blocks
+        .map_ok(|arr| {
+            let source = arr.type_cast::<afarray::Complex<f64>>();
+            let re = source.re();
+            let im = source.im();
+
+            let mut i = 0;
+            let mut dest = vec![0.; source.len() * 2];
+            for (re, im) in re.to_vec().into_iter().zip(im.to_vec()) {
+                dest[i] = re;
+                dest[i + 1] = im;
+                i += 2;
+            }
+
+            dest
+        })
+        .map_err(en::Error::custom)
 }
 
 fn block_offsets(

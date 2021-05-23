@@ -9,7 +9,6 @@ use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, try_join, TryFutureExt};
 use log::debug;
-use num::integer::div_ceil;
 use number_general::{Number, NumberInstance, NumberType};
 use strided::Stride;
 
@@ -608,4 +607,13 @@ fn coord_bounds(shape: &Shape) -> Coord {
     (0..shape.len())
         .map(|axis| shape[axis + 1..].iter().product())
         .collect()
+}
+
+#[inline]
+fn div_ceil(l: u64, r: u64) -> u64 {
+    if l % r == 0 {
+        l / r
+    } else {
+        (l / r) + 1
+    }
 }
