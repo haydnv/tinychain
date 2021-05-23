@@ -106,6 +106,13 @@ impl From<TableType> for StateType {
     }
 }
 
+#[cfg(feature = "tensor")]
+impl From<TensorType> for StateType {
+    fn from(tt: TensorType) -> Self {
+        Self::Collection(tt.into())
+    }
+}
+
 impl From<ValueType> for StateType {
     fn from(vt: ValueType) -> Self {
         Self::Scalar(vt.into())

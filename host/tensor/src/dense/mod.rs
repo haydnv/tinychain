@@ -1,17 +1,21 @@
+use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 
 use afarray::Array;
 use arrayfire as af;
 use async_trait::async_trait;
+use destream::de;
+use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
 use number_general::{Number, NumberType};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File};
 use tc_transact::{Transaction, TxnId};
+use tc_value::ValueType;
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
-use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess};
+use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorType};
 
 pub use file::BlockListFile;
 
@@ -170,6 +174,78 @@ impl<F: Send, B: TensorAccess> TensorAccess for DenseTensor<F, B> {
 
     fn size(&self) -> u64 {
         self.blocks.size()
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> de::FromStream
+    for DenseTensor<F, BlockListFile<F, D, T>>
+where
+    <D as Dir>::FileClass: From<TensorType> + Send,
+    F: TryFrom<<D as Dir>::File, Error = TCError>,
+{
+    type Context = T;
+
+    async fn from_stream<De: de::Decoder>(txn: T, decoder: &mut De) -> Result<Self, De::Error> {
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_tmp(txn_id, TensorType::Dense)
+            .map_err(de::Error::custom)
+            .await?;
+
+        decoder
+            .decode_seq(DenseTensorDecoder::new(txn_id, file))
+            .await
+    }
+}
+
+struct DenseTensorDecoder<F, D, T> {
+    txn_id: TxnId,
+    file: F,
+    dir: PhantomData<D>,
+    txn: PhantomData<T>,
+}
+
+impl<F, D, T> DenseTensorDecoder<F, D, T> {
+    fn new(txn_id: TxnId, file: F) -> Self {
+        Self {
+            txn_id,
+            file,
+            dir: PhantomData,
+            txn: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorDecoder<F, D, T> {
+    type Value = DenseTensor<F, BlockListFile<F, D, T>>;
+
+    fn expecting() -> &'static str {
+        "a dense tensor"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let (dtype, shape) = seq
+            .next_element::<(ValueType, Vec<u64>)>(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
+
+        let dtype = dtype
+            .try_into()
+            .map_err(|_| de::Error::invalid_type(dtype, "a Number type"))?;
+
+        let cxt = (self.txn_id, self.file, (dtype, shape.into()));
+        let blocks = seq
+            .next_element(cxt)
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(1, "dense tensor data"))?;
+
+        Ok(DenseTensor {
+            blocks,
+            file: PhantomData,
+        })
     }
 }
 

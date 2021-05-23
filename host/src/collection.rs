@@ -87,6 +87,13 @@ impl From<TableType> for CollectionType {
     }
 }
 
+#[cfg(feature = "tensor")]
+impl From<TensorType> for CollectionType {
+    fn from(tt: TensorType) -> Self {
+        Self::Tensor(tt)
+    }
+}
+
 impl fmt::Display for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -179,7 +186,9 @@ impl CollectionVisitor {
             CollectionType::Table(_) => access.next_value(self.txn).map_ok(Collection::Table).await,
 
             #[cfg(feature = "tensor")]
-            CollectionType::Tensor(_) => unimplemented!(),
+            CollectionType::Tensor(tt) => match tt {
+                TensorType::Dense => access.next_value(self.txn).map_ok(Collection::Tensor).await,
+            },
         }
     }
 }

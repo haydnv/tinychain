@@ -6,6 +6,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+#[cfg(feature = "tensor")]
+use afarray::Array;
 use async_trait::async_trait;
 use futures::future::{join_all, Future, TryFutureExt};
 use log::debug;
@@ -32,6 +34,9 @@ pub enum FileEntry {
     BTree(File<Node>),
     Chain(File<ChainBlock>),
     Value(File<Value>),
+
+    #[cfg(feature = "tensor")]
+    Tensor(File<Array>),
 }
 
 impl FileEntry {
@@ -93,6 +98,21 @@ impl From<File<ChainBlock>> for FileEntry {
     }
 }
 
+#[cfg(feature = "tensor")]
+impl TryFrom<FileEntry> for File<Array> {
+    type Error = TCError;
+
+    fn try_from(entry: FileEntry) -> TCResult<Self> {
+        match entry {
+            FileEntry::Tensor(file) => Ok(file),
+            other => Err(TCError::bad_request(
+                "expected a Tensor file but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl TryFrom<FileEntry> for File<ChainBlock> {
     type Error = TCError;
 
@@ -147,6 +167,9 @@ impl fmt::Display for FileEntry {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Value(value) => fmt::Display::fmt(value, f),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
         }
     }
 }
@@ -385,6 +408,9 @@ impl Transact for Dir {
                     FileEntry::BTree(file) => file.commit(txn_id),
                     FileEntry::Chain(file) => file.commit(txn_id),
                     FileEntry::Value(file) => file.commit(txn_id),
+
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.commit(txn_id),
                 },
             }))
             .await;
@@ -402,6 +428,9 @@ impl Transact for Dir {
                     FileEntry::BTree(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
                     FileEntry::Value(file) => file.finalize(txn_id),
+
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.finalize(txn_id),
                 },
             }))
             .await;

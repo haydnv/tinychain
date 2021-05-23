@@ -280,6 +280,17 @@ impl TryCastFrom<Value> for ValueType {
     }
 }
 
+impl TryFrom<ValueType> for NumberType {
+    type Error = TCError;
+
+    fn try_from(vt: ValueType) -> TCResult<NumberType> {
+        match vt {
+            ValueType::Number(nt) => Ok(nt),
+            other => Err(TCError::bad_request("expected a Number type, not", other))
+        }
+    }
+}
+
 #[async_trait]
 impl FromStream for ValueType {
     type Context = ();

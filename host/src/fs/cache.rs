@@ -3,6 +3,8 @@
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 
+#[cfg(feature = "tensor")]
+use afarray::Array;
 use async_trait::async_trait;
 use destream::IntoStream;
 use freqache::Entry;
@@ -49,6 +51,9 @@ pub enum CacheBlock {
     BTree(CacheLock<Node>),
     Chain(CacheLock<ChainBlock>),
     Value(CacheLock<Value>),
+
+    #[cfg(feature = "tensor")]
+    Tensor(CacheLock<Array>),
 }
 
 impl CacheBlock {
@@ -66,6 +71,11 @@ impl CacheBlock {
                 let contents = block.read().await;
                 contents.persist(sink).await
             }
+            #[cfg(feature = "tensor")]
+            Self::Tensor(block) => {
+                let contents = block.read().await;
+                contents.persist(sink).await
+            }
         }
     }
 
@@ -74,6 +84,8 @@ impl CacheBlock {
             Self::BTree(block) => block.ref_count(),
             Self::Chain(block) => block.ref_count(),
             Self::Value(block) => block.ref_count(),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(block) => block.ref_count(),
         }
     }
 }
@@ -84,7 +96,16 @@ impl Entry for CacheBlock {
             Self::BTree(_) => Node::max_size(),
             Self::Chain(_) => ChainBlock::max_size(),
             Self::Value(_) => Value::max_size(),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_) => Array::max_size(),
         }
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl From<CacheLock<Array>> for CacheBlock {
+    fn from(lock: CacheLock<Array>) -> CacheBlock {
+        Self::Tensor(lock)
     }
 }
 
@@ -103,6 +124,18 @@ impl From<CacheLock<Node>> for CacheBlock {
 impl From<CacheLock<Value>> for CacheBlock {
     fn from(lock: CacheLock<Value>) -> CacheBlock {
         Self::Value(lock)
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl TryFrom<CacheBlock> for CacheLock<Array> {
+    type Error = TCError;
+
+    fn try_from(block: CacheBlock) -> TCResult<Self> {
+        match block {
+            CacheBlock::Tensor(block) => Ok(block),
+            _ => Err(TCError::unsupported("unexpected block type")),
+        }
     }
 }
 

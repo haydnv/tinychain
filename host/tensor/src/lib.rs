@@ -1,11 +1,16 @@
+use std::convert::TryFrom;
 use std::fmt;
+use std::marker::PhantomData;
 use std::pin::Pin;
 
-use futures::Future;
+use afarray::Array;
+use async_trait::async_trait;
+use destream::de;
+use futures::{Future, TryFutureExt};
 use number_general::{Number, NumberType};
 
 use tc_error::*;
-use tc_transact::fs::Dir;
+use tc_transact::fs::{Dir, File};
 use tc_transact::Transaction;
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
@@ -83,6 +88,62 @@ where
     fn class(&self) -> Self::Class {
         match self {
             Self::Dense(_) => TensorType::Dense,
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> de::FromStream for Tensor<F, D, T>
+where
+    <D as Dir>::FileClass: From<TensorType> + Send,
+    F: TryFrom<<D as Dir>::File, Error = TCError>,
+{
+    type Context = T;
+
+    async fn from_stream<De: de::Decoder>(txn: T, decoder: &mut De) -> Result<Self, De::Error> {
+        decoder.decode_map(TensorVisitor::new(txn)).await
+    }
+}
+
+struct TensorVisitor<F, D, T> {
+    txn: T,
+    dir: PhantomData<D>,
+    file: PhantomData<F>,
+}
+
+impl<F, D, T> TensorVisitor<F, D, T> {
+    fn new(txn: T) -> Self {
+        Self {
+            txn,
+            dir: PhantomData,
+            file: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for TensorVisitor<F, D, T>
+where
+    <D as Dir>::FileClass: From<TensorType> + Send,
+    F: TryFrom<<D as Dir>::File, Error = TCError>,
+{
+    type Value = Tensor<F, D, T>;
+
+    fn expecting() -> &'static str {
+        "a Tensor"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let classpath = map
+            .next_key::<TCPathBuf>(())
+            .await?
+            .ok_or_else(|| de::Error::custom("missing Tensor class"))?;
+
+        let class = TensorType::from_path(&classpath)
+            .ok_or_else(|| de::Error::invalid_type(classpath, "a Tensor class"))?;
+
+        match class {
+            TensorType::Dense => map.next_value(self.txn).map_ok(Tensor::Dense).await,
         }
     }
 }
