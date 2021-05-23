@@ -11,6 +11,8 @@ use log::debug;
 use tc_btree::BTreeView;
 use tc_error::*;
 use tc_table::TableView;
+#[cfg(feature = "tensor")]
+use tc_tensor::TensorView;
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -234,7 +236,7 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
             Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
 
             #[cfg(feature = "tensor")]
-            Self::Tensor(_tensor) => unimplemented!(),
+            Self::Tensor(tensor) => tensor.into_view(txn).map_ok(CollectionView::Tensor).await,
         }
     }
 }
@@ -255,6 +257,9 @@ impl fmt::Display for Collection {
 pub enum CollectionView<'en> {
     BTree(BTreeView<'en>),
     Table(TableView<'en>),
+
+    #[cfg(feature = "tensor")]
+    Tensor(TensorView<'en>),
 }
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
@@ -265,6 +270,11 @@ impl<'en> en::IntoStream<'en> for CollectionView<'en> {
         match self {
             Self::BTree(btree) => map.encode_entry(BTreeType::default().path(), btree),
             Self::Table(table) => map.encode_entry(TableType::default().path(), table),
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => match tensor {
+                TensorView::Dense(tensor) => map.encode_entry(TensorType::Dense.path(), tensor),
+            },
         }?;
         map.end()
     }

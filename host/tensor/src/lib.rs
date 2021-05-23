@@ -5,14 +5,16 @@ use std::pin::Pin;
 
 use afarray::Array;
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en};
 use futures::{Future, TryFutureExt};
 use number_general::{Number, NumberType};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::Transaction;
+use tc_transact::{IntoView, Transaction};
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
+
+use dense::{BlockListFile, DenseAccess, DenseAccessor};
 
 pub use bounds::{Bounds, Shape};
 pub use dense::DenseTensor;
@@ -75,20 +77,25 @@ impl fmt::Display for TensorType {
 }
 
 #[derive(Clone)]
-pub enum Tensor<F, D, T> {
-    Dense(DenseTensor<F, dense::BlockListFile<F, D, T>>),
+pub enum Tensor<F: File<Array>, D: Dir, T: Transaction<D>> {
+    Dense(DenseTensor<F, D, T, DenseAccessor<F, D, T>>),
 }
 
-impl<F, D, T> Instance for Tensor<F, D, T>
-where
-    Self: Send + Sync,
-{
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Instance for Tensor<F, D, T> {
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
         match self {
             Self::Dense(_) => TensorType::Dense,
         }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
+    From<DenseTensor<F, D, T, B>> for Tensor<F, D, T>
+{
+    fn from(dense: DenseTensor<F, D, T, B>) -> Self {
+        Self::Dense(dense.into_inner().accessor().into())
     }
 }
 
@@ -143,12 +150,40 @@ where
             .ok_or_else(|| de::Error::invalid_type(classpath, "a Tensor class"))?;
 
         match class {
-            TensorType::Dense => map.next_value(self.txn).map_ok(Tensor::Dense).await,
+            TensorType::Dense => {
+                map.next_value::<DenseTensor<F, D, T, BlockListFile<F, D, T>>>(self.txn)
+                    .map_ok(Tensor::from)
+                    .await
+            }
         }
     }
 }
 
-impl<F, D, T> fmt::Display for Tensor<F, D, T> {
+#[async_trait]
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>> IntoView<'en, D> for Tensor<F, D, T> {
+    type Txn = T;
+    type View = TensorView<'en>;
+
+    async fn into_view(self, txn: T) -> TCResult<Self::View> {
+        match self {
+            Tensor::Dense(tensor) => tensor.into_view(txn).map_ok(TensorView::Dense).await,
+        }
+    }
+}
+
+pub enum TensorView<'en> {
+    Dense(dense::DenseTensorView<'en>),
+}
+
+impl<'en> en::IntoStream<'en> for TensorView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Dense(view) => view.into_stream(encoder),
+        }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> fmt::Display for Tensor<F, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Tensor")
     }

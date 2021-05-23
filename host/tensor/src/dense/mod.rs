@@ -1,19 +1,19 @@
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 
-use afarray::Array;
+use afarray::{Array, ArrayInstance};
 use arrayfire as af;
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en, EncodeSeq};
 use futures::future::TryFutureExt;
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use number_general::{Number, NumberType};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::ValueType;
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorType};
 
@@ -26,11 +26,11 @@ const PER_BLOCK: usize = 131_072;
 
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
-    ReadValueAt<D, T> + TensorAccess + Send + Sync + 'static
+    ReadValueAt<D, T> + TensorAccess + Send + Sync + Sized + 'static
 {
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
-    fn block_stream<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let blocks = self
                 .value_stream(txn)
@@ -44,7 +44,7 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
         })
     }
 
-    fn value_stream<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         Box::pin(async move {
             let values = self.block_stream(txn).await?;
 
@@ -74,7 +74,7 @@ pub enum DenseAccessor<F, D, T> {
     File(BlockListFile<F, D, T>),
 }
 
-impl<F: Send, D: Send, T: Send> TensorAccess for DenseAccessor<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F, D, T> {
     fn dtype(&self) -> NumberType {
         match self {
             Self::File(file) => file.dtype(),
@@ -106,13 +106,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         self
     }
 
-    fn block_stream<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         match self {
             Self::File(file) => file.block_stream(txn),
         }
     }
 
-    fn value_stream<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         match self {
             Self::File(file) => file.value_stream(txn),
         }
@@ -146,20 +146,22 @@ impl<F, D, T> From<BlockListFile<F, D, T>> for DenseAccessor<F, D, T> {
 }
 
 #[derive(Clone)]
-pub struct DenseTensor<F, B> {
+pub struct DenseTensor<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
     blocks: B,
     file: PhantomData<F>,
+    dir: PhantomData<D>,
+    txn: PhantomData<T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> ReadValueAt<D, T>
-    for DenseTensor<F, B>
-{
-    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
-        self.blocks.read_value_at(txn, coord)
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTensor<F, D, T, B> {
+    pub fn into_inner(self) -> B {
+        self.blocks
     }
 }
 
-impl<F: Send, B: TensorAccess> TensorAccess for DenseTensor<F, B> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
+    for DenseTensor<F, D, T, B>
+{
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
     }
@@ -177,9 +179,30 @@ impl<F: Send, B: TensorAccess> TensorAccess for DenseTensor<F, B> {
     }
 }
 
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> ReadValueAt<D, T>
+    for DenseTensor<F, D, T, B>
+{
+    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
+        self.blocks.read_value_at(txn, coord)
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> From<B>
+    for DenseTensor<F, D, T, B>
+{
+    fn from(blocks: B) -> Self {
+        Self {
+            blocks,
+            file: PhantomData,
+            dir: PhantomData,
+            txn: PhantomData,
+        }
+    }
+}
+
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> de::FromStream
-    for DenseTensor<F, BlockListFile<F, D, T>>
+    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
 where
     <D as Dir>::FileClass: From<TensorType> + Send,
     F: TryFrom<<D as Dir>::File, Error = TCError>,
@@ -195,19 +218,19 @@ where
             .await?;
 
         decoder
-            .decode_seq(DenseTensorDecoder::new(txn_id, file))
+            .decode_seq(DenseTensorVisitor::new(txn_id, file))
             .await
     }
 }
 
-struct DenseTensorDecoder<F, D, T> {
+struct DenseTensorVisitor<F, D, T> {
     txn_id: TxnId,
     file: F,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
 
-impl<F, D, T> DenseTensorDecoder<F, D, T> {
+impl<F, D, T> DenseTensorVisitor<F, D, T> {
     fn new(txn_id: TxnId, file: F) -> Self {
         Self {
             txn_id,
@@ -219,8 +242,8 @@ impl<F, D, T> DenseTensorDecoder<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorDecoder<F, D, T> {
-    type Value = DenseTensor<F, BlockListFile<F, D, T>>;
+impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisitor<F, D, T> {
+    type Value = DenseTensor<F, D, T, BlockListFile<F, D, T>>;
 
     fn expecting() -> &'static str {
         "a dense tensor"
@@ -238,14 +261,91 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorDecod
 
         let cxt = (self.txn_id, self.file, (dtype, shape.into()));
         let blocks = seq
-            .next_element(cxt)
+            .next_element::<BlockListFile<F, D, T>>(cxt)
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "dense tensor data"))?;
 
-        Ok(DenseTensor {
-            blocks,
-            file: PhantomData,
+        Ok(DenseTensor::from(blocks))
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> IntoView<'en, D>
+    for DenseTensor<F, D, T, B>
+{
+    type Txn = T;
+    type View = DenseTensorView<'en>;
+
+    async fn into_view(self, txn: T) -> TCResult<DenseTensorView<'en>> {
+        let dtype = self.dtype();
+        let shape = self.shape().to_vec();
+        let blocks = self.blocks.block_stream(txn).await?;
+
+        Ok(DenseTensorView {
+            schema: (ValueType::from(dtype).path(), shape),
+            blocks: BlockStreamView { dtype, blocks },
         })
+    }
+}
+
+pub struct DenseTensorView<'en> {
+    schema: (TCPathBuf, Vec<u64>),
+    blocks: BlockStreamView<'en>,
+}
+
+#[async_trait]
+impl<'en> en::IntoStream<'en> for DenseTensorView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut seq = encoder.encode_seq(Some(2))?;
+        seq.encode_element(self.schema)?;
+        seq.encode_element(self.blocks)?;
+        seq.end()
+    }
+}
+
+struct BlockStreamView<'en> {
+    dtype: NumberType,
+    blocks: TCTryStream<'en, Array>,
+}
+
+impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use number_general::{FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT};
+
+        fn encodable<'en, E: en::Error + 'en, T: af::HasAfEnum + Clone + Default + 'en>(
+            blocks: TCTryStream<'en, Array>,
+        ) -> impl Stream<Item = Result<Vec<T>, E>> + 'en {
+            blocks
+                .map_ok(|arr| arr.type_cast())
+                .map_ok(|arr| arr.to_vec())
+                .map_err(en::Error::custom)
+        }
+
+        match self.dtype {
+            NT::Bool => encoder.encode_array_bool(encodable(self.blocks)),
+            NT::Complex(_ct) => Err(en::Error::custom(
+                "not implemented: complex tensor serialization",
+            )),
+            NT::Float(ft) => match ft {
+                FT::F32 => encoder.encode_array_f32(encodable(self.blocks)),
+                _ => encoder.encode_array_f64(encodable(self.blocks)),
+            },
+            NT::Int(it) => match it {
+                IT::I8 | IT::I16 => encoder.encode_array_i16(encodable(self.blocks)),
+                IT::I32 => encoder.encode_array_i32(encodable(self.blocks)),
+                _ => encoder.encode_array_i64(encodable(self.blocks)),
+            },
+            NT::UInt(ut) => match ut {
+                UT::U8 => encoder.encode_array_u8(encodable(self.blocks)),
+                UT::U16 => encoder.encode_array_u16(encodable(self.blocks)),
+                UT::U32 => encoder.encode_array_u32(encodable(self.blocks)),
+                _ => encoder.encode_array_u64(encodable(self.blocks)),
+            },
+            NT::Number => Err(en::Error::custom(format!(
+                "invalid Tensor data type: {}",
+                NT::Number
+            ))),
+        }
     }
 }
 

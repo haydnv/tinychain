@@ -163,17 +163,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
         DenseAccessor::File(self)
     }
 
-    fn block_stream<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
-            let file = &self.file;
+            let size = self.size();
+            let file = self.file;
             let block_stream = Box::pin(
-                stream::iter(0..(div_ceil(self.size(), Array::max_size())))
+                stream::iter(0..(div_ceil(size, Array::max_size())))
                     .map(BlockId::from)
-                    .then(move |block_id| file.read_block(*txn.id(), block_id))
+                    .then(move |block_id| file.clone().read_block_owned(*txn.id(), block_id))
                     .map_ok(|block| (*block).clone()),
             );
 
-            let block_stream: TCTryStream<'a, Array> = Box::pin(block_stream);
+            let block_stream: TCTryStream<Array> = Box::pin(block_stream);
             Ok(block_stream)
         })
     }
