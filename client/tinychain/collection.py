@@ -273,3 +273,22 @@ class Table(Collection):
 
         return self._post("", Table, **cond)
 
+
+class Tensor(Collection):
+    "An n-dimensional array of numbers."
+
+    __uri__ = uri(Collection) + "/tensor"
+
+
+class DenseTensor(Tensor):
+    "An n-dimensional array of numbers stored as sequential blocks."
+
+    __uri__ = uri(Tensor) + "/dense"
+
+    @classmethod
+    def constant(cls, shape, value=0):
+        return cls(OpRef.Get(uri(cls) + "/constant", (shape, value)))
+
+
+Tensor.Dense = DenseTensor
+
