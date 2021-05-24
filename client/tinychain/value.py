@@ -129,14 +129,92 @@ class Bool(Number):
     __uri__ = uri(Number) + "/bool"
 
 
+class Complex(Number):
+    """A complex number."""
+
+    __uri__ = uri(Number) + "/complex"
+
+
+class C32(Complex):
+    """A complex 32-bit floating point number."""
+
+    __uri__ = uri(Complex) + "/32"
+
+
+class C64(Complex):
+    """A complex 64-bit floating point number."""
+
+    __uri__ = uri(Complex) + "/64"
+
+
+class Float(Number):
+    """A floating-point decimal number."""
+
+    __uri__ = uri(Number) + "/float"
+    
+
+class F32(Float):
+    """A 32-bit floating point number."""
+
+    __uri__ = uri(Float) + "/32"
+
+
+class F64(Float):
+    """A 64-bit floating point number."""
+
+    __uri__ = uri(Float) + "/64"
+
+
 class Int(Number):
     """An integer."""
 
     __uri__ = uri(Number) + "/int"
 
 
+class I16(Int):
+    """A 16-bit integer."""
+
+    __uri__ = uri(Int) + "/16"
+
+
+class I32(Int):
+    """A 32-bit integer."""
+
+    __uri__ = uri(Int) + "/32"
+
+
+class I64(Int):
+    """A 64-bit integer."""
+
+    __uri__ = uri(Int) + "/64"
+
+
 class UInt(Number):
     """An unsigned integer."""
 
     __uri__ = uri(Number) + "/uint"
+
+
+class U8(UInt):
+    """An 8-bit unsigned integer (a byte)."""
+
+    __uri__ = uri(UInt) + "/8"
+
+
+class U16(UInt):
+    """A 16-bit unsigned integer."""
+
+    __uri__ = uri(UInt) + "/16"
+
+
+class U32(UInt):
+    """A 32-bit unsigned integer."""
+
+    __uri__ = uri(UInt) + "/32"
+
+
+class U64(UInt):
+    """A 64-bit unsigned integer."""
+
+    __uri__ = uri(UInt) + "/64"
 
