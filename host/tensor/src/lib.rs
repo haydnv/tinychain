@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
+use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::pin::Pin;
 
@@ -7,13 +8,14 @@ use afarray::Array;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::{Future, TryFutureExt};
+use log::debug;
 use number_general::{Number, NumberType};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::{IntoView, Transaction};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
-    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf,
+    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, Tuple,
 };
 
 pub use bounds::{Bounds, Shape};
@@ -27,7 +29,7 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 pub type Schema = (NumberType, Shape);
 
-type Coord = Vec<u64>;
+pub type Coord = Vec<u64>;
 
 type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
@@ -43,6 +45,17 @@ pub trait TensorAccess: Send {
     fn shape(&'_ self) -> &'_ Shape;
 
     fn size(&self) -> u64;
+}
+
+#[async_trait]
+pub trait TensorIO<D: Dir>: TensorAccess + Sized {
+    type Txn: Transaction<D>;
+
+    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number>;
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()>;
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -89,6 +102,57 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Instance for Tensor<F, D, T> {
     fn class(&self) -> Self::Class {
         match self {
             Self::Dense(_) => TensorType::Dense,
+        }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for Tensor<F, D, T> {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Dense(dense) => dense.dtype(),
+        }
+    }
+
+    fn ndim(&self) -> usize {
+        match self {
+            Self::Dense(dense) => dense.ndim(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        match self {
+            Self::Dense(dense) => dense.shape(),
+        }
+    }
+
+    fn size(&self) -> u64 {
+        match self {
+            Self::Dense(dense) => dense.size(),
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> {
+    type Txn = T;
+
+    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.read_value(txn, coord).await,
+        }
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        debug!("Tensor::write_value_at {}, {}", Tuple::<u64>::from_iter(coord.to_vec()), value);
+
+        match self {
+            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
         }
     }
 }

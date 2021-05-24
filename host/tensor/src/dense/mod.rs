@@ -15,7 +15,7 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
-use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorType};
+use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorIO, TensorType};
 
 pub use file::BlockListFile;
 
@@ -187,6 +187,28 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 
     fn size(&self) -> u64 {
         self.blocks.size()
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> TensorIO<D>
+    for DenseTensor<F, D, T, B>
+{
+    type Txn = T;
+
+    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number> {
+        self.blocks
+            .read_value_at(txn, coord.to_vec())
+            .map_ok(|(_, val)| val)
+            .await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        self.blocks.clone().write_value(txn_id, bounds, value).await
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.blocks.write_value_at(txn_id, coord, value).await
     }
 }
 
