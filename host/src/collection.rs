@@ -156,6 +156,13 @@ impl From<TableIndex> for Collection {
     }
 }
 
+#[cfg(feature = "tensor")]
+impl From<Tensor> for Collection {
+    fn from(tensor: Tensor) -> Self {
+        Self::Tensor(tensor)
+    }
+}
+
 /// A [`de::Visitor`] used to deserialize a [`Collection`].
 pub struct CollectionVisitor {
     txn: Txn,

@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 use tc_btree::Node;
 use tc_error::*;
+#[cfg(feature = "tensor")]
+use tc_tensor::TensorType;
 use tc_transact::fs::{self, BlockData};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, TxnId};
@@ -54,9 +56,9 @@ impl FileEntry {
                 CollectionType::Table(tt) => Err(err(tt)),
 
                 #[cfg(feature = "tensor")]
-                CollectionType::Tensor(tt) => {
-                    Err(TCError::not_implemented(format!("create file for {}", tt)))
-                }
+                CollectionType::Tensor(tt) => match tt {
+                    TensorType::Dense => Ok(Self::Tensor(File::new(cache, path, Array::ext()))),
+                },
             },
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
             StateType::Scalar(st) => match st {

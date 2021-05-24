@@ -12,12 +12,12 @@ use number_general::{Number, NumberType};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction};
-use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
-
-use dense::{BlockListFile, DenseAccess, DenseAccessor};
+use tcgeneric::{
+    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf,
+};
 
 pub use bounds::{Bounds, Shape};
-pub use dense::DenseTensor;
+pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 
 #[allow(dead_code)]
 mod bounds;
@@ -66,7 +66,9 @@ impl NativeClass for TensorType {
     }
 
     fn path(&self) -> TCPathBuf {
-        PREFIX.into()
+        match self {
+            Self::Dense => TCPathBuf::from(PREFIX).append(label("dense")),
+        }
     }
 }
 

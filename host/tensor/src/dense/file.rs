@@ -33,6 +33,12 @@ pub struct BlockListFile<F, D, T> {
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
     pub async fn constant(file: F, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
+        if !file.is_empty(&txn_id).await? {
+            return Err(TCError::unsupported(
+                "cannot create new tensor: file is not empty",
+            ));
+        }
+
         let size = shape.size();
         let per_block = Array::max_size();
 

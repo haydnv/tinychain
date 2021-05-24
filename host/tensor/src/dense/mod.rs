@@ -159,6 +159,17 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
     }
 }
 
+impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFile<F, D, T>> {
+    pub async fn constant<S>(file: F, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
+    where
+        Shape: From<S>,
+    {
+        BlockListFile::constant(file, txn_id, shape.into(), value)
+            .map_ok(Self::from)
+            .await
+    }
+}
+
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
     for DenseTensor<F, D, T, B>
 {
