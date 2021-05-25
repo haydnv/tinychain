@@ -34,8 +34,10 @@ pub type Coord = Vec<u64>;
 
 type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
-pub trait ReadValueAt<D: Dir, T: Transaction<D>> {
-    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a>;
+pub trait ReadValueAt<D: Dir> {
+    type Txn: Transaction<D>;
+
+    fn read_value_at<'a>(&'a self, txn: &'a Self::Txn, coord: Coord) -> Read<'a>;
 }
 
 pub trait TensorAccess: Send {

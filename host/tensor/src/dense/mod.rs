@@ -26,7 +26,7 @@ const PER_BLOCK: usize = 131_072;
 
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
-    ReadValueAt<D, T> + TensorAccess + Send + Sync + Sized + 'static
+    ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
@@ -72,30 +72,35 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
 #[derive(Clone)]
 pub enum DenseAccessor<F, D, T> {
     File(BlockListFile<F, D, T>),
+    Slice(file::BlockListFileSlice<F, D, T>),
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F, D, T> {
     fn dtype(&self) -> NumberType {
         match self {
             Self::File(file) => file.dtype(),
+            Self::Slice(slice) => slice.dtype(),
         }
     }
 
     fn ndim(&self) -> usize {
         match self {
             Self::File(file) => file.ndim(),
+            Self::Slice(slice) => slice.ndim(),
         }
     }
 
     fn shape(&self) -> &Shape {
         match self {
             Self::File(file) => file.shape(),
+            Self::Slice(slice) => slice.shape(),
         }
     }
 
     fn size(&self) -> u64 {
         match self {
             Self::File(file) => file.size(),
+            Self::Slice(slice) => slice.size(),
         }
     }
 }
@@ -109,32 +114,39 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         match self {
             Self::File(file) => file.block_stream(txn),
+            Self::Slice(slice) => slice.block_stream(txn),
         }
     }
 
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         match self {
             Self::File(file) => file.value_stream(txn),
+            Self::Slice(slice) => slice.value_stream(txn),
         }
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         match self {
             Self::File(file) => file.write_value(txn_id, bounds, number).await,
+            Self::Slice(slice) => slice.write_value(txn_id, bounds, number).await,
         }
     }
 
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         match self {
             Self::File(file) => file.write_value_at(txn_id, coord, value),
+            Self::Slice(slice) => slice.write_value_at(txn_id, coord, value),
         }
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D, T> for DenseAccessor<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for DenseAccessor<F, D, T> {
+    type Txn = T;
+
     fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
         match self {
             Self::File(file) => file.read_value_at(txn, coord),
+            Self::Slice(slice) => slice.read_value_at(txn, coord),
         }
     }
 }
@@ -212,9 +224,11 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> ReadValueAt<D, T>
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> ReadValueAt<D>
     for DenseTensor<F, D, T, B>
 {
+    type Txn = T;
+
     fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
         self.blocks.read_value_at(txn, coord)
     }
