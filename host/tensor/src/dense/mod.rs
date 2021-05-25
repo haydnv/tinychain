@@ -334,8 +334,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisit
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let (dtype, shape) = seq
-            .next_element::<(ValueType, Vec<u64>)>(())
+        let (shape, dtype) = seq
+            .next_element::<(Vec<u64>, ValueType)>(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
 
@@ -343,7 +343,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisit
             .try_into()
             .map_err(|_| de::Error::invalid_type(dtype, "a Number type"))?;
 
-        let cxt = (self.txn_id, self.file, (dtype, shape.into()));
+        let cxt = (self.txn_id, self.file, (shape.into(), dtype));
         let blocks = seq
             .next_element::<BlockListFile<F, D, T>>(cxt)
             .await?
@@ -366,14 +366,14 @@ impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> In
         let blocks = self.blocks.block_stream(txn).await?;
 
         Ok(DenseTensorView {
-            schema: (ValueType::from(dtype).path(), shape),
+            schema: (shape, ValueType::from(dtype).path()),
             blocks: BlockStreamView { dtype, blocks },
         })
     }
 }
 
 pub struct DenseTensorView<'en> {
-    schema: (TCPathBuf, Vec<u64>),
+    schema: (Vec<u64>, TCPathBuf),
     blocks: BlockStreamView<'en>,
 }
 

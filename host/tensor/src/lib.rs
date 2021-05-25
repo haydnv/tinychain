@@ -28,7 +28,7 @@ mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-pub type Schema = (NumberType, Shape);
+pub type Schema = (Shape, NumberType);
 
 pub type Coord = Vec<u64>;
 

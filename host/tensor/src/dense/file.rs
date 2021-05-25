@@ -325,7 +325,7 @@ impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T>
         cxt: (TxnId, F, Schema),
         decoder: &mut De,
     ) -> Result<Self, De::Error> {
-        let (txn_id, file, (dtype, shape)) = cxt;
+        let (txn_id, file, (shape, dtype)) = cxt;
         let visitor = BlockListVisitor::new(txn_id, &file);
 
         use number_general::{
