@@ -19,6 +19,8 @@ mod object;
 mod scalar;
 mod state;
 
+// TODO: can Txn be borrowed?
+
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a> = Box<dyn FnOnce(Txn, Value) -> GetFuture<'a> + Send + 'a>;
 
@@ -31,6 +33,7 @@ pub type PostHandler<'a> = Box<dyn FnOnce(Txn, Map<State>) -> PostFuture<'a> + S
 pub type DeleteFuture<'a> = Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>>;
 pub type DeleteHandler<'a> = Box<dyn FnOnce(Txn, Value) -> DeleteFuture<'a> + Send + 'a>;
 
+#[async_trait]
 pub trait Handler<'a>: Send {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         None

@@ -37,14 +37,13 @@ pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Tx
 #[cfg(feature = "tensor")]
 pub type Tensor = tc_tensor::Tensor<fs::File<afarray::Array>, fs::Dir, Txn>;
 
-const PREFIX: PathLabel = path_label(&["state", "collection"]);
+pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
 /// The [`Class`] of a [`Collection`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
     BTree(BTreeType),
     Table(TableType),
-
     #[cfg(feature = "tensor")]
     Tensor(TensorType),
 }
@@ -59,6 +58,8 @@ impl NativeClass for CollectionType {
             match path[2].as_str() {
                 "btree" => BTreeType::from_path(path).map(Self::BTree),
                 "table" => TableType::from_path(path).map(Self::Table),
+                #[cfg(feature = "tensor")]
+                "tensor" => TensorType::from_path(path).map(Self::Tensor),
                 _ => None,
             }
         } else {
@@ -70,7 +71,6 @@ impl NativeClass for CollectionType {
         match self {
             Self::BTree(btt) => btt.path(),
             Self::Table(tt) => tt.path(),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.path(),
         }
@@ -101,7 +101,6 @@ impl fmt::Display for CollectionType {
         match self {
             Self::BTree(btt) => fmt::Display::fmt(btt, f),
             Self::Table(tt) => fmt::Display::fmt(tt, f),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => fmt::Display::fmt(tt, f),
         }
@@ -113,7 +112,6 @@ impl fmt::Display for CollectionType {
 pub enum Collection {
     BTree(BTree),
     Table(Table),
-
     #[cfg(feature = "tensor")]
     Tensor(Tensor),
 }
@@ -125,7 +123,6 @@ impl Instance for Collection {
         match self {
             Self::BTree(btree) => CollectionType::BTree(btree.class()),
             Self::Table(table) => CollectionType::Table(table.class()),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => CollectionType::Tensor(tensor.class()),
         }
@@ -192,6 +189,7 @@ impl CollectionVisitor {
                     .map_ok(Collection::BTree)
                     .await
             }
+
             CollectionType::Table(_) => access.next_value(self.txn).map_ok(Collection::Table).await,
 
             #[cfg(feature = "tensor")]
@@ -241,7 +239,6 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
             Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.into_view(txn).map_ok(CollectionView::Tensor).await,
         }
@@ -253,7 +250,6 @@ impl fmt::Display for Collection {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Table(table) => fmt::Display::fmt(table, f),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
         }
@@ -264,7 +260,6 @@ impl fmt::Display for Collection {
 pub enum CollectionView<'en> {
     BTree(BTreeView<'en>),
     Table(TableView<'en>),
-
     #[cfg(feature = "tensor")]
     Tensor(TensorView<'en>),
 }
@@ -277,7 +272,6 @@ impl<'en> en::IntoStream<'en> for CollectionView<'en> {
         match self {
             Self::BTree(btree) => map.encode_entry(BTreeType::default().path(), btree),
             Self::Table(table) => map.encode_entry(TableType::default().path(), table),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => match tensor {
                 TensorView::Dense(tensor) => map.encode_entry(TensorType::Dense.path(), tensor),

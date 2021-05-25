@@ -1,6 +1,6 @@
 use tcgeneric::PathSegment;
 
-use crate::collection::Collection;
+use crate::collection::{Collection, CollectionType};
 
 use super::{Handler, Route};
 
@@ -10,12 +10,21 @@ mod table;
 #[cfg(feature = "tensor")]
 mod tensor;
 
+impl Route for CollectionType {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match self {
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tt) => tt.route(path),
+            _ => None,
+        }
+    }
+}
+
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
             Self::BTree(btree) => btree.route(path),
             Self::Table(table) => table.route(path),
-
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.route(path),
         }

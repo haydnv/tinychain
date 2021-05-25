@@ -10,18 +10,14 @@ use log::debug;
 use safecast::*;
 
 use tc_error::*;
-#[cfg(feature = "tensor")]
-use tc_tensor::{DenseTensor, TensorType};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
-#[cfg(feature = "tensor")]
-use crate::collection::Tensor;
 use crate::collection::{BTreeFile, Collection, CollectionType, TableIndex};
 use crate::object::InstanceExt;
-use crate::route::Public;
+use crate::route::{Public, Route};
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
@@ -31,7 +27,6 @@ use hosted::Hosted;
 mod hosted;
 
 const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
-const TENSOR: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 type ExeScope<'a> = crate::scalar::Scope<'a, State>;
 
@@ -69,24 +64,6 @@ impl Kernel {
             }
         } else if let Some(class) = StateType::from_path(path) {
             construct_state(txn, class, key).await
-        } else if path.len() == 5 && &path[..3] == &TENSOR[..] {
-            #[cfg(feature = "tensor")]
-            {
-                match path[3].as_str() {
-                    "dense" => match path[4].as_str() {
-                        "constant" => construct_state(txn, TensorType::Dense.into(), key).await,
-                        other => Err(TCError::not_found(other)),
-                    },
-                    other => Err(TCError::not_found(other)),
-                }
-            }
-
-            #[cfg(not(feature = "tensor"))]
-            {
-                Err(TCError::unsupported(
-                    "Tinychain was not compiled with Tensor support",
-                ))
-            }
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
@@ -96,6 +73,21 @@ impl Kernel {
             );
 
             cluster.get(&txn, suffix, key).await
+        } else if path[..2] == crate::collection::PREFIX[..] {
+            let mut i = path.len() - 1;
+            while i > 0 {
+                if let Some(class) = CollectionType::from_path(&path[..i]) {
+                    if let Some(handler) = class.route(&path[i..]) {
+                        if let Some(handler) = handler.get() {
+                            return handler(txn.clone(), key).await;
+                        }
+                    }
+                }
+
+                i -= 1;
+            }
+
+            Err(TCError::not_found(TCPath::from(path)))
         } else if &path[0] == "error" && path.len() == 2 {
             let message = String::try_cast_from(key, |v| {
                 TCError::bad_request("cannot cast into error message string from", v)
@@ -322,34 +314,18 @@ async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<
             }
 
             #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => match tt {
-                TensorType::Dense => {
-                    let txn_id = *txn.id();
-                    let file = txn
-                        .context()
-                        .create_file_tmp(txn_id, TensorType::Dense)
-                        .await?;
-
-                    if value.matches::<(Vec<u64>, ValueType)>() {
-                        let (shape, dtype): (Vec<u64>, ValueType) = value.opt_cast_into().unwrap();
-                        let dtype = NumberType::try_from(dtype)?;
-                        DenseTensor::constant(file, txn_id, shape, dtype.zero())
-                            .map_ok(Tensor::from)
-                            .map_ok(Collection::from)
-                            .map_ok(State::from)
-                            .await
-                    } else if value.matches::<(Vec<u64>, Number)>() {
-                        let (shape, value): (Vec<u64>, Number) = value.opt_cast_into().unwrap();
-                        DenseTensor::constant(file, txn_id, shape, value)
-                            .map_ok(Tensor::from)
-                            .map_ok(Collection::from)
-                            .map_ok(State::from)
-                            .await
-                    } else {
-                        Err(TCError::bad_request("invalid tensor schema", value))
+            CollectionType::Tensor(tt) => {
+                if let Some(handler) = tt.route(&[]) {
+                    if let Some(handler) = handler.get() {
+                        return handler(txn.clone(), value).await;
                     }
                 }
-            },
+
+                Err(TCError::not_implemented(format!(
+                    "constructor handler for {}",
+                    tt
+                )))
+            }
         },
         StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
         StateType::Map => {
