@@ -141,22 +141,6 @@ pub struct Bounds {
 }
 
 impl Bounds {
-    fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
-        let bound = i64::try_cast_from(bound, |v| TCError::bad_request("Invalid bound", v))?;
-        if bound.abs() as u64 > dim {
-            return Err(TCError::bad_request(
-                format!("Index out of bounds for dimension {}", dim),
-                bound,
-            ));
-        }
-
-        if bound < 0 {
-            Ok(dim - bound.abs() as u64)
-        } else {
-            Ok(bound as u64)
-        }
-    }
-
     pub fn all(shape: &Shape) -> Bounds {
         shape
             .0

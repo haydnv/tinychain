@@ -21,9 +21,10 @@ use tcgeneric::{
 pub use bounds::{Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 
-#[allow(dead_code)]
 mod bounds;
 mod dense;
+#[allow(dead_code)]
+mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
@@ -149,7 +150,11 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> 
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        debug!("Tensor::write_value_at {}, {}", Tuple::<u64>::from_iter(coord.to_vec()), value);
+        debug!(
+            "Tensor::write_value_at {}, {}",
+            Tuple::<u64>::from_iter(coord.to_vec()),
+            value
+        );
 
         match self {
             Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
