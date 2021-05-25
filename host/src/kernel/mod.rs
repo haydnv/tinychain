@@ -5,17 +5,15 @@ use std::fmt;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::future::{Future, TryFutureExt};
+use futures::future::Future;
 use log::debug;
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
-use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
-use crate::collection::{BTreeFile, Collection, CollectionType, TableIndex};
+use crate::collection::CollectionType;
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
 use crate::scalar::*;
@@ -289,43 +287,17 @@ fn execute<
 
 async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<State> {
     match class {
-        StateType::Collection(class) => match class {
-            CollectionType::BTree(btt) => {
-                let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid BTree schema", v)
-                })?;
-
-                let file = txn.context().create_file_tmp(*txn.id(), btt).await?;
-                BTreeFile::create(file, schema, *txn.id())
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
-            }
-            CollectionType::Table(_) => {
-                let schema = tc_table::TableSchema::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid Table schema", v)
-                })?;
-
-                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
-                TableIndex::create(schema, &dir, *txn.id())
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
-            }
-
-            #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => {
-                if let Some(handler) = tt.route(&[]) {
-                    if let Some(handler) = handler.get() {
-                        return handler(txn.clone(), value).await;
-                    }
+        StateType::Collection(class) => {
+            if let Some(handler) = class.route(&[]) {
+                if let Some(handler) = handler.get() {
+                    return handler(txn.clone(), value).await;
                 }
-
-                Err(TCError::not_implemented(format!(
-                    "constructor handler for {}",
-                    tt
-                )))
             }
+
+            Err(TCError::not_implemented(format!(
+                "constructor handler for {}",
+                class
+            )))
         },
         StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
         StateType::Map => {

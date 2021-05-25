@@ -7,23 +7,54 @@ use safecast::*;
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_table::{Bounds, ColumnBound, TableInstance};
+use tc_table::{Bounds, ColumnBound, TableInstance, TableType};
+use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::{Range, Value};
 use tcgeneric::{Id, Map, PathSegment, Tuple};
 
 use crate::collection::{Collection, Table, TableIndex};
-use crate::fs::{Dir, File};
+use crate::fs;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 
+struct CreateHandler;
+
+impl<'a> Handler<'a> for CreateHandler {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, value| {
+            Box::pin(async move {
+                let schema = tc_table::TableSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Table schema", v)
+                })?;
+
+                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                TableIndex::create(schema, &dir, *txn.id())
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl Route for TableType {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() && self == &Self::Table {
+            Some(Box::new(CreateHandler))
+        } else {
+            None
+        }
+    }
+}
+
 struct ContainsHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for ContainsHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for ContainsHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
@@ -51,7 +82,7 @@ struct CountHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for CountHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for CountHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
@@ -78,7 +109,7 @@ struct GroupHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for GroupHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for GroupHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
@@ -103,7 +134,7 @@ struct LimitHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for LimitHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for LimitHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
@@ -127,7 +158,7 @@ struct OrderHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for OrderHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for OrderHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
@@ -157,7 +188,7 @@ struct TableHandler<'a, T> {
     table: &'a T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn>> Handler<'a> for TableHandler<'a, T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHandler<'a, T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
@@ -261,7 +292,7 @@ struct SelectHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<File<Node>, Dir, Txn> + 'a> Handler<'a> for SelectHandler<T> {
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for SelectHandler<T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
@@ -299,7 +330,7 @@ impl Route for TableIndex {
 }
 
 #[inline]
-fn route<'a, T: TableInstance<File<Node>, Dir, Txn>>(
+fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
     table: &'a T,
     path: &[PathSegment],
 ) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -339,7 +370,7 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
 }
 
 #[inline]
-fn primary_key<T: TableInstance<File<Node>, Dir, Txn>>(key: Value, table: &T) -> TCResult<Bounds> {
+fn primary_key<T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(key: Value, table: &T) -> TCResult<Bounds> {
     let key: Vec<Value> = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
 
     if key.len() == table.key().len() {

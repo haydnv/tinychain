@@ -13,9 +13,10 @@ mod tensor;
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
+            Self::BTree(btt) => btt.route(path),
+            Self::Table(tt) => tt.route(path),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.route(path),
-            _ => None,
         }
     }
 }

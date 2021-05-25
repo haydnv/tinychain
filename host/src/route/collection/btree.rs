@@ -3,8 +3,9 @@ use std::iter::FromIterator;
 use futures::{TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_btree::{BTreeInstance, Range};
+use tc_btree::{BTreeInstance, Range, BTreeType};
 use tc_error::*;
+use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{label, Map, PathSegment, Tuple};
@@ -13,6 +14,37 @@ use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
+
+struct CreateHandler;
+
+impl<'a> Handler<'a> for CreateHandler {
+
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, value| {
+            Box::pin(async move {
+                let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid BTree schema", v)
+                })?;
+
+                let file = txn.context().create_file_tmp(*txn.id(), BTreeType::default()).await?;
+                BTreeFile::create(file, schema, *txn.id())
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl Route for BTreeType {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() && self == &Self::File {
+            Some(Box::new(CreateHandler))
+        } else {
+            None
+        }
+    }
+}
 
 struct BTreeHandler<'a, T> {
     btree: &'a T,
