@@ -13,17 +13,20 @@ class DenseTensorTests(unittest.TestCase):
         cls.host = start_host("test_dense_tensor")
 
     def testConstant(self):
-        const = 1.414
+        c = 1.414
+        shape = [3, 2, 1]
 
         cxt = tc.Context()
-        cxt.tensor = tc.Tensor.Dense.constant((3, 2, 1), 1.414)
+        cxt.tensor = tc.Tensor.Dense.constant(shape, c)
+        cxt.result = tc.After(cxt.tensor.write([0, 0, 0], 0), cxt.tensor)
 
         expected = {
-            '/state/collection/tensor/dense': [
-                ['/state/scalar/value/number/float/64', [3, 2, 1]],
-                [const] * 6,
+            str(tc.uri(tc.Tensor.Dense)): [
+                [str(tc.uri(tc.F64)), shape],
+                [0.] + [c] * (product(shape) - 1)
             ]
         }
+
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(expected, actual)
 
@@ -31,6 +34,13 @@ class DenseTensorTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.host.stop()
 
+
+def product(seq):
+    p = 1
+    for n in seq:
+        p *= n
+
+    return p
 
 if __name__ == "__main__":
     unittest.main()

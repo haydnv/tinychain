@@ -5,7 +5,7 @@ from .ref import If, OpRef
 from .reflect import Meta
 from .state import Map, State
 from .util import *
-from .value import Bool, Nil, UInt, Value
+from .value import Bool, Nil, Number, UInt, Value
 
 
 class Bound(object):
@@ -278,6 +278,15 @@ class Tensor(Collection):
     "An n-dimensional array of numbers."
 
     __uri__ = uri(Collection) + "/tensor"
+
+    def __getitem__(self, bounds):
+        if not isinstance(bounds, tuple):
+            bounds = tuple(bounds)
+
+        return self._get("", bounds, Number)
+
+    def write(self, bounds, value):
+        return self._put("", bounds, value)
 
 
 class DenseTensor(Tensor):
