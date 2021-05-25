@@ -15,7 +15,10 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
-use super::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorIO, TensorType};
+use super::{
+    Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorIO, TensorInstance,
+    TensorTransform, TensorType,
+};
 
 pub use file::BlockListFile;
 
@@ -26,9 +29,9 @@ const PER_BLOCK: usize = 131_072;
 
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
-    ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
+    Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
-    type Slice: Clone + DenseAccess<F, D, T>;
+    type Slice: DenseAccess<F, D, T>;
 
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
@@ -215,8 +218,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
     }
 }
 
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorInstance<D>
+    for DenseTensor<F, D, T, B>
+{
+    type Dense = Self;
+
+    fn into_dense(self) -> Self::Dense {
+        self
+    }
+}
+
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> TensorIO<D>
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorIO<D>
     for DenseTensor<F, D, T, B>
 {
     type Txn = T;
@@ -237,13 +250,24 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: Clone + DenseAccess<F, D, T>> ReadValueAt<D>
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
     for DenseTensor<F, D, T, B>
 {
     type Txn = T;
 
     fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
         self.blocks.read_value_at(txn, coord)
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorTransform<D>
+    for DenseTensor<F, D, T, B>
+{
+    type Slice = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
+
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let blocks = self.blocks.clone().slice(bounds)?;
+        Ok(DenseTensor::from(blocks))
     }
 }
 

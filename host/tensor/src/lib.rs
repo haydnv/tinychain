@@ -50,6 +50,12 @@ pub trait TensorAccess: Send {
     fn size(&self) -> u64;
 }
 
+pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync {
+    type Dense: TensorInstance<D>;
+
+    fn into_dense(self) -> Self::Dense;
+}
+
 #[async_trait]
 pub trait TensorIO<D: Dir>: TensorAccess + Sized {
     type Txn: Transaction<D>;
@@ -59,6 +65,12 @@ pub trait TensorIO<D: Dir>: TensorAccess + Sized {
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()>;
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
+}
+
+pub trait TensorTransform<D: Dir>: TensorAccess + Sized {
+    type Slice: TensorInstance<D>;
+
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
