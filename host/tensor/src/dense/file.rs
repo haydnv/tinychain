@@ -165,6 +165,8 @@ impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
 
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockListFile<F, D, T> {
+    type Slice = BlockListFileSlice<F, D, T>;
+
     fn accessor(self) -> DenseAccessor<F, D, T> {
         DenseAccessor::File(self)
     }
@@ -183,6 +185,10 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
             let block_stream: TCTryStream<Array> = Box::pin(block_stream);
             Ok(block_stream)
         })
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        BlockListFileSlice::new(self, bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -618,7 +624,6 @@ pub struct BlockListFileSlice<F, D, T> {
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFileSlice<F, D, T> {
-    #[allow(dead_code)]
     fn new(source: BlockListFile<F, D, T>, bounds: Bounds) -> TCResult<Self> {
         let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
         Ok(Self { source, rebase })
@@ -647,6 +652,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for BlockListFileSl
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
     for BlockListFileSlice<F, D, T>
 {
+    type Slice = Self;
+
     fn accessor(self) -> DenseAccessor<F, D, T> {
         DenseAccessor::Slice(self)
     }
@@ -705,6 +712,11 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
 
         let values: TCTryStream<Number> = Box::pin(values.flatten());
         Box::pin(future::ready(Ok(values)))
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {

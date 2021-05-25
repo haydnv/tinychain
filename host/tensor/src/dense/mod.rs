@@ -28,9 +28,11 @@ const PER_BLOCK: usize = 131_072;
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
     ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
+    type Slice: Clone + DenseAccess<F, D, T>;
+
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let blocks = self
                 .value_stream(txn)
@@ -44,7 +46,7 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
         })
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         Box::pin(async move {
             let values = self.block_stream(txn).await?;
 
@@ -63,6 +65,8 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
             Ok(values)
         })
     }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
@@ -107,6 +111,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
 
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAccessor<F, D, T> {
+    type Slice = Self;
+
     fn accessor(self) -> Self {
         self
     }
@@ -122,6 +128,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.value_stream(txn),
             Self::Slice(slice) => slice.value_stream(txn),
+        }
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::File(file) => file.slice(bounds).map(Self::Slice),
+            Self::Slice(slice) => slice.slice(bounds).map(Self::Slice),
         }
     }
 
