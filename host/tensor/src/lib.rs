@@ -147,6 +147,16 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for Tensor<F, D, T>
     }
 }
 
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorInstance<D> for Tensor<F, D, T> {
+    type Dense = Self;
+
+    fn into_dense(self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Dense(dense),
+        }
+    }
+}
+
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> {
     type Txn = T;
@@ -172,6 +182,16 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> 
 
         match self {
             Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
+        }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F, D, T> {
+    type Slice = Self;
+
+    fn slice(&self, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.slice(bounds).map(Self::from),
         }
     }
 }

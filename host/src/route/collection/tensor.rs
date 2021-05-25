@@ -2,11 +2,11 @@ use futures::TryFutureExt;
 use safecast::{Match, TryCastInto};
 
 use tc_error::*;
-use tc_tensor::{Bounds, Coord, TensorIO};
+use tc_tensor::{Bounds, Coord, TensorIO, TensorTransform};
 use tc_transact::Transaction;
 use tcgeneric::PathSegment;
 
-use crate::collection::Tensor;
+use crate::collection::{Collection, Tensor};
 use crate::route::{GetHandler, PutHandler};
 use crate::scalar::Value;
 use crate::state::State;
@@ -28,6 +28,9 @@ impl<'a> Handler<'a> for TensorHandler<'a> {
                         .map_ok(Value::from)
                         .map_ok(State::from)
                         .await
+                } else if key.matches::<Bounds>() {
+                    let bounds = key.opt_cast_into().unwrap();
+                    self.tensor.slice(bounds).map(Collection::from).map(State::from)
                 } else {
                     Err(TCError::bad_request("invalid range for tensor", key))
                 }
