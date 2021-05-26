@@ -114,7 +114,7 @@ class Local(Host):
     """A local Tinychain host."""
 
     ADDRESS = "127.0.0.1"
-    STARTUP_TIME = 1.0
+    STARTUP_TIME = 1.1
 
     def __init__(self,
             path,

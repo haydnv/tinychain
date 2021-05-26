@@ -811,6 +811,7 @@ impl<'a> de::Visitor for StateVisitor {
             if key.starts_with('/') {
                 if let Ok(path) = TCPathBuf::from_str(&key) {
                     debug!("is {} a classpath?", path);
+
                     if let Some(class) = StateType::from_path(&path) {
                         debug!("deserialize instance of {}...", class);
                         return self.visit_map_value(class, &mut access).await;

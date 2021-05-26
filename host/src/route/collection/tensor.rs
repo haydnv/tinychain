@@ -1,18 +1,21 @@
 use std::convert::TryFrom;
 
 use futures::TryFutureExt;
-use safecast::{Match, TryCastInto};
+use log::debug;
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_tensor::{Bounds, Coord, DenseTensor, TensorIO, TensorTransform, TensorType};
+use tc_tensor::{
+    AxisBounds, Bounds, Coord, DenseTensor, TensorAccess, TensorIO, TensorTransform, TensorType,
+};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::PathSegment;
+use tcgeneric::{label, PathSegment};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
-use crate::route::{GetHandler, PutHandler};
-use crate::scalar::{Number, NumberClass, NumberType, Value, ValueType};
+use crate::route::{GetHandler, PostHandler, PutHandler};
+use crate::scalar::{Bound, Number, NumberClass, NumberType, Range, Scalar, Value, ValueType};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -61,13 +64,39 @@ impl<'a> Handler<'a> for CreateHandler {
     }
 }
 
+struct RangeHandler;
+
+impl<'a> Handler<'a> for RangeHandler {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.matches::<(Vec<u64>, Number, Number)>() {
+                    let (shape, start, stop): (Vec<u64>, Number, Number) =
+                        key.opt_cast_into().unwrap();
+
+                    let file = create_file(&txn).await?;
+
+                    DenseTensor::range(file, *txn.id(), shape, start, stop)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::from)
+                        .map_ok(State::from)
+                        .await
+                } else {
+                    Err(TCError::bad_request("invalid schema for range tensor", key))
+                }
+            })
+        }))
+    }
+}
+
 impl Route for TensorType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             Some(Box::new(CreateHandler { class: *self }))
-        } else if path.len() == 1 {
+        } else if path.len() == 1 && self == &Self::Dense {
             match path[0].as_str() {
-                "constant" if self == &Self::Dense => Some(Box::new(ConstantHandler)),
+                "constant" => Some(Box::new(ConstantHandler)),
+                "range" => Some(Box::new(RangeHandler)),
                 _ => None,
             }
         } else {
@@ -125,6 +154,19 @@ impl<'a> Handler<'a> for TensorHandler<'a> {
             })
         }))
     }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let bounds: Scalar = params.or_default(&label("bounds").into())?;
+                let bounds = cast_bounds(self.tensor.shape(), bounds)?;
+                self.tensor
+                    .slice(bounds)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
 }
 
 impl<'a> From<&'a Tensor> for TensorHandler<'a> {
@@ -157,4 +199,87 @@ async fn create_file(txn: &Txn) -> TCResult<fs::File<afarray::Array>> {
     txn.context()
         .create_file_tmp(*txn.id(), TensorType::Dense)
         .await
+}
+
+fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
+    let bound = i64::try_cast_from(bound, |v| TCError::bad_request("invalid bound", v))?;
+    if bound.abs() as u64 > dim {
+        return Err(TCError::bad_request(
+            format!("Index out of bounds for dimension {}", dim),
+            bound,
+        ));
+    }
+
+    if bound < 0 {
+        Ok(dim - bound.abs() as u64)
+    } else {
+        Ok(bound as u64)
+    }
+}
+
+pub fn cast_bounds(shape: &[u64], scalar: Scalar) -> TCResult<Bounds> {
+    debug!("tensor bounds from {}", scalar);
+
+    match scalar {
+        Scalar::Tuple(bounds) => {
+            let mut axes = Vec::with_capacity(shape.len());
+
+            for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
+                let bound = if bound.matches::<Range>() {
+                    let range = Range::opt_cast_from(bound).unwrap();
+                    let start = match range.start {
+                        Bound::Un => 0,
+                        Bound::In(start) => cast_bound(shape[axis], start)?,
+                        Bound::Ex(start) => cast_bound(shape[1], start)? + 1,
+                    };
+
+                    let end = match range.end {
+                        Bound::Un => shape[axis],
+                        Bound::In(end) => cast_bound(shape[axis], end)?,
+                        Bound::Ex(end) => cast_bound(shape[1], end)?,
+                    };
+
+                    AxisBounds::In(start..end)
+                } else if bound.matches::<Vec<u64>>() {
+                    bound.opt_cast_into().map(AxisBounds::Of).unwrap()
+                } else if let Scalar::Value(value) = bound {
+                    cast_bound(shape[axis], value).map(AxisBounds::At)?
+                } else {
+                    return Err(TCError::bad_request(
+                        format!("invalid bound for axis {}", axis),
+                        bound,
+                    ));
+                };
+
+                axes.push(bound);
+            }
+
+            Ok(Bounds { axes })
+        }
+        Scalar::Value(Value::Tuple(bounds)) => {
+            let mut axes = Vec::with_capacity(shape.len());
+            for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
+                let bound = match bound {
+                    Value::Tuple(indices) => {
+                        let indices = shape[..]
+                            .iter()
+                            .zip(indices.into_inner().into_iter())
+                            .map(|(dim, i)| cast_bound(*dim, i.into()))
+                            .collect::<TCResult<Vec<u64>>>()?;
+
+                        AxisBounds::Of(indices)
+                    }
+                    value => {
+                        let i = cast_bound(shape[axis], value)?;
+                        AxisBounds::At(i)
+                    }
+                };
+
+                axes.push(bound);
+            }
+
+            Ok(Bounds { axes })
+        }
+        other => Err(TCError::bad_request("invalid tensor bounds", other)),
+    }
 }

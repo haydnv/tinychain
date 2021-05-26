@@ -24,8 +24,8 @@ pub use file::BlockListFile;
 
 mod file;
 
-// = 1 mibibyte / 64 bits (must be the same as Array::max_size())
-const PER_BLOCK: usize = 131_072;
+// = (1 mibibyte / 64 bits) - 5 bytes overhead (must be the same as Array::max_size())
+const PER_BLOCK: usize = 131_067;
 
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
@@ -193,6 +193,21 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
         Shape: From<S>,
     {
         BlockListFile::constant(file, txn_id, shape.into(), value)
+            .map_ok(Self::from)
+            .await
+    }
+
+    pub async fn range<S>(
+        file: F,
+        txn_id: TxnId,
+        shape: S,
+        start: Number,
+        stop: Number,
+    ) -> TCResult<Self>
+    where
+        Shape: From<S>,
+    {
+        BlockListFile::range(file, txn_id, shape.into(), start, stop)
             .map_ok(Self::from)
             .await
     }

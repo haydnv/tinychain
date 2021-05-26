@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 use futures::{TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_btree::{BTreeInstance, Range, BTreeType};
+use tc_btree::{BTreeInstance, BTreeType, Range};
 use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -18,7 +18,6 @@ use crate::state::State;
 struct CreateHandler;
 
 impl<'a> Handler<'a> for CreateHandler {
-
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
@@ -26,7 +25,11 @@ impl<'a> Handler<'a> for CreateHandler {
                     TCError::bad_request("invalid BTree schema", v)
                 })?;
 
-                let file = txn.context().create_file_tmp(*txn.id(), BTreeType::default()).await?;
+                let file = txn
+                    .context()
+                    .create_file_tmp(*txn.id(), BTreeType::default())
+                    .await?;
+
                 BTreeFile::create(file, schema, *txn.id())
                     .map_ok(Collection::from)
                     .map_ok(State::from)

@@ -9,7 +9,7 @@ use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, try_join, TryFutureExt};
 use log::debug;
-use number_general::{Number, NumberInstance, NumberType};
+use number_general::{Number, NumberClass, NumberInstance, NumberType};
 use strided::Stride;
 
 use tc_error::*;
@@ -90,7 +90,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         values: S,
     ) -> TCResult<Self> {
         let mut i = 0u64;
-        let mut values = values.chunks(Array::max_size() as usize);
+        let mut values = values.chunks((Array::max_size() as usize) / dtype.size());
         while let Some(chunk) = values.next().await {
             let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
@@ -105,6 +105,28 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
             dir: PhantomData,
             txn: PhantomData,
         })
+    }
+
+    pub async fn range(
+        file: F,
+        txn_id: TxnId,
+        shape: Shape,
+        start: Number,
+        stop: Number,
+    ) -> TCResult<Self> {
+        let dtype = Ord::max(start.class(), stop.class());
+        let step = (stop - start) / Number::from(shape.size() as f32);
+
+        debug!(
+            "{} tensor with range {} to {}, step {}",
+            dtype, start, stop, step
+        );
+
+        let values = stream::iter(0..shape.size())
+            .map(Number::from)
+            .map(|i| start + (i * step));
+
+        Self::from_values(file, txn_id, shape, dtype, values).await
     }
 
     pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {

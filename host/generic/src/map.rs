@@ -63,6 +63,7 @@ impl<T: Clone> Map<T> {
         let param = self
             .remove(name)
             .ok_or_else(|| TCError::bad_request("missing required parameter", name))?;
+
         P::try_cast_from(param, |p| {
             TCError::bad_request(format!("invalid value for {}", name), p)
         })

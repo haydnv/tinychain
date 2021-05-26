@@ -649,6 +649,22 @@ impl TryCastFrom<Scalar> for bool {
     }
 }
 
+impl TryCastFrom<Scalar> for u64 {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {

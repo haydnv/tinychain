@@ -298,7 +298,7 @@ async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<
                 "constructor handler for {}",
                 class
             )))
-        },
+        }
         StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
         StateType::Map => {
             let value = Tuple::<(Id, Value)>::try_cast_from(value, |v| {

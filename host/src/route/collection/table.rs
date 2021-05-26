@@ -370,7 +370,10 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
 }
 
 #[inline]
-fn primary_key<T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(key: Value, table: &T) -> TCResult<Bounds> {
+fn primary_key<T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
+    key: Value,
+    table: &T,
+) -> TCResult<Bounds> {
     let key: Vec<Value> = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
 
     if key.len() == table.key().len() {

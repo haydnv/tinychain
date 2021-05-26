@@ -220,6 +220,12 @@ impl Bounds {
     }
 }
 
+impl Default for Bounds {
+    fn default() -> Self {
+        Self { axes: vec![] }
+    }
+}
+
 impl Deref for Bounds {
     type Target = Vec<AxisBounds>;
 

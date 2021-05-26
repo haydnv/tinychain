@@ -11,8 +11,6 @@ from .value import Bool, Nil, Number, UInt, Value
 class Bound(object):
     """An upper or lower bound on a :class:`Range`."""
 
-    pass
-
 
 class Ex(Bound):
     """An exclusive `Bound`."""
@@ -163,6 +161,7 @@ class BTree(Collection):
         return self._get("reverse", rtype=BTree)
 
 
+# TODO: add `update` method
 class Table(Collection):
     """A `Table` defined by a primary key, values, and optional indices."""
 
@@ -283,7 +282,14 @@ class Tensor(Collection):
         if not isinstance(bounds, tuple):
             bounds = tuple(bounds)
 
-        return self._get("", bounds, Number)
+        bounds = [
+            Range.from_slice(x) if isinstance(x, slice)
+            else x for x in bounds]
+
+        if any(isinstance(x, Range) for x in bounds):
+            return self._post("", Tensor, bounds=bounds)
+        else:
+            return self._get("", bounds, Number)
 
     def write(self, bounds, value):
         return self._put("", bounds, value)
@@ -293,6 +299,10 @@ class DenseTensor(Tensor):
     "An n-dimensional array of numbers stored as sequential blocks."
 
     __uri__ = uri(Tensor) + "/dense"
+
+    @classmethod
+    def arange(cls, shape, start, stop):
+        return cls(OpRef.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
     def constant(cls, shape, value=0):

@@ -18,7 +18,7 @@ use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, Tuple,
 };
 
-pub use bounds::{Bounds, Shape};
+pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 
 mod bounds;
