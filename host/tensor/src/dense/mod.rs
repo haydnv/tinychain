@@ -10,7 +10,7 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use number_general::{Number, NumberType};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File};
+use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
@@ -24,7 +24,7 @@ pub use file::BlockListFile;
 
 mod file;
 
-// = (1 mibibyte / 64 bits) - 5 bytes overhead (must be the same as Array::max_size())
+// number of elements per block = (1 mebibyte / 64 bits)
 const PER_BLOCK: usize = 131_067;
 
 #[async_trait]
@@ -40,7 +40,7 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
             let blocks = self
                 .value_stream(txn)
                 .await?
-                .chunks(Array::max_size() as usize)
+                .chunks(PER_BLOCK)
                 .map(|values| values.into_iter().collect::<TCResult<Vec<Number>>>())
                 .map_ok(Array::from);
 

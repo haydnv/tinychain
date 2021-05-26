@@ -23,6 +23,8 @@ use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
 
 use super::{block_offsets, coord_block, DenseAccess, DenseAccessor, PER_BLOCK};
 
+const MEBIBYTE: usize = 1_048_576;
+
 #[derive(Clone)]
 pub struct BlockListFile<F, D, T> {
     file: F,
@@ -41,13 +43,12 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         }
 
         let size = shape.size();
-        let per_block = Array::max_size();
 
         let value_clone = value.clone();
-        let blocks = (0..(size / per_block))
-            .map(move |_| Ok(Array::constant(value_clone.clone(), per_block as usize)));
+        let blocks = (0..(size / PER_BLOCK as u64))
+            .map(move |_| Ok(Array::constant(value_clone.clone(), PER_BLOCK)));
 
-        let trailing_len = (size % per_block) as usize;
+        let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
             let blocks = blocks.chain(iter::once(Ok(Array::constant(value.clone(), trailing_len))));
             BlockListFile::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks))
@@ -130,7 +131,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
     }
 
     pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
-        let num_blocks = div_ceil(self.size(), Array::max_size());
+        let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
             .then(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
             .map_ok(|block| (*block).clone());
@@ -139,7 +140,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
     }
 
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
-        let num_blocks = div_ceil(self.size(), Array::max_size());
+        let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
@@ -158,7 +159,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
             let mut block = Array::concatenate(&left, &right)?;
             block.sort(true)?;
 
-            let (left_sorted, right_sorted) = block.split(Array::max_size() as usize)?;
+            let (left_sorted, right_sorted) = block.split(PER_BLOCK)?;
             *left = left_sorted;
             *right = right_sorted;
         }
@@ -198,7 +199,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
             let size = self.size();
             let file = self.file;
             let block_stream = Box::pin(
-                stream::iter(0..(div_ceil(size, Array::max_size())))
+                stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
                     .map(BlockId::from)
                     .then(move |block_id| file.clone().read_block_owned(*txn.id(), block_id))
                     .map_ok(|block| (*block).clone()),
@@ -227,16 +228,15 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
         let bounds = self.shape().slice_bounds(bounds);
         let coord_bounds = coord_bounds(self.shape());
 
-        let per_block = Array::max_size() as usize;
         stream::iter(bounds.affected())
-            .chunks(per_block)
+            .chunks(PER_BLOCK)
             .map(|coords| {
                 let ndim = coords[0].len();
                 let num_coords = coords.len() as u64;
                 let (block_ids, af_indices, af_offsets) = coord_block(
                     coords.into_iter(),
                     &coord_bounds,
-                    per_block,
+                    PER_BLOCK,
                     ndim,
                     num_coords,
                 );
@@ -287,11 +287,11 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
                 .map(|(d, x)| d * x)
                 .sum();
 
-            let block_id = BlockId::from(offset / Array::max_size());
+            let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
 
             (*block)
-                .set_value((offset / Array::max_size()) as usize, value)
+                .set_value((offset / PER_BLOCK as u64) as usize, value)
                 .map_err(TCError::from)
         })
     }
@@ -323,16 +323,16 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFile
 
             debug!("coord {:?} is offset {}", coord, offset);
 
-            let block_id = BlockId::from(offset / Array::max_size());
+            let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let block = self.file.read_block(*txn.id(), block_id).await?;
 
             debug!(
                 "read offset {} from block of length {}",
-                offset % Array::max_size(),
+                offset % PER_BLOCK as u64,
                 block.len()
             );
 
-            let value = block.get_value((offset % Array::max_size()) as usize);
+            let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
             Ok((coord, value))
         })
@@ -485,16 +485,14 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        debug_assert_eq!(Array::max_size(), PER_BLOCK as u64);
-        self.visit_array::<bool, A, PER_BLOCK>(access).await
+        self.visit_array::<bool, A, MEBIBYTE>(access).await
     }
 
     async fn visit_array_i16<A: de::ArrayAccess<i16>>(
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 2;
-        debug_assert_eq!(Array::max_size() / 2, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 2;
         self.visit_array::<i16, A, BUF_SIZE>(access).await
     }
 
@@ -502,8 +500,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 4;
-        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 4;
         self.visit_array::<i32, A, BUF_SIZE>(access).await
     }
 
@@ -511,8 +508,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 8;
-        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 8;
         self.visit_array::<i64, A, BUF_SIZE>(access).await
     }
 
@@ -520,16 +516,14 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        debug_assert_eq!(Array::max_size(), PER_BLOCK as u64);
-        self.visit_array::<u8, A, PER_BLOCK>(access).await
+        self.visit_array::<u8, A, MEBIBYTE>(access).await
     }
 
     async fn visit_array_u16<A: de::ArrayAccess<u16>>(
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 2;
-        debug_assert_eq!(Array::max_size() / 2, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 2;
         self.visit_array::<u16, A, BUF_SIZE>(access).await
     }
 
@@ -537,8 +531,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 4;
-        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 4;
         self.visit_array::<u32, A, BUF_SIZE>(access).await
     }
 
@@ -546,8 +539,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 8;
-        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 8;
         self.visit_array::<u64, A, BUF_SIZE>(access).await
     }
 
@@ -555,8 +547,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 4;
-        debug_assert_eq!(Array::max_size() / 4, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 4;
         self.visit_array::<f32, A, BUF_SIZE>(access).await
     }
 
@@ -564,8 +555,7 @@ impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = PER_BLOCK / 8;
-        debug_assert_eq!(Array::max_size() / 8, BUF_SIZE as u64);
+        const BUF_SIZE: usize = MEBIBYTE / 8;
         self.visit_array::<f64, A, BUF_SIZE>(access).await
     }
 }
@@ -624,8 +614,7 @@ impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = (PER_BLOCK / 4) * 2;
-        debug_assert_eq!((Array::max_size() / 4) * 2, BUF_SIZE as u64);
+        const BUF_SIZE: usize = (MEBIBYTE / 4) * 2;
         self.visit_array::<_, f32, A, BUF_SIZE>(access).await
     }
 
@@ -633,8 +622,7 @@ impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
         self,
         access: A,
     ) -> Result<Self::Value, A::Error> {
-        const BUF_SIZE: usize = (PER_BLOCK / 8) * 2;
-        debug_assert_eq!((Array::max_size() / 8) * 2, BUF_SIZE as u64);
+        const BUF_SIZE: usize = (MEBIBYTE / 8) * 2;
         self.visit_array::<_, f64, A, BUF_SIZE>(access).await
     }
 }
