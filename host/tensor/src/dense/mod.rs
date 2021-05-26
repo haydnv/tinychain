@@ -20,18 +20,22 @@ use super::{
     TensorTransform, TensorType,
 };
 
+use access::*;
+
 pub use file::BlockListFile;
 
+mod access;
 mod file;
 
 // number of elements per block = (1 mebibyte / 64 bits)
-const PER_BLOCK: usize = 131_067;
+pub const PER_BLOCK: usize = 131_072;
 
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
     type Slice: DenseAccess<F, D, T>;
+    type Transpose: DenseAccess<F, D, T>;
 
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
@@ -71,15 +75,24 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()>;
 }
 
 #[derive(Clone)]
-pub enum DenseAccessor<F, D, T> {
+pub enum DenseAccessor<F: File<Array>, D: Dir, T: Transaction<D>> {
     File(BlockListFile<F, D, T>),
     Slice(file::BlockListFileSlice<F, D, T>),
+    Broadcast(Box<BlockListBroadcast<F, D, T, Self>>),
+    Cast(Box<BlockListCast<F, D, T, Self>>),
+    Combine(Box<BlockListCombine<F, D, T, Self, Self>>),
+    Expand(Box<BlockListExpand<F, D, T, Self>>),
+    Reduce(Box<BlockListReduce<F, D, T, Self>>),
+    Transpose(Box<BlockListTranspose<F, D, T, Self>>),
+    Unary(Box<BlockListUnary<F, D, T, Self>>),
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F, D, T> {
@@ -87,6 +100,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
         match self {
             Self::File(file) => file.dtype(),
             Self::Slice(slice) => slice.dtype(),
+            Self::Broadcast(broadcast) => broadcast.dtype(),
+            Self::Cast(cast) => cast.dtype(),
+            Self::Combine(combine) => combine.dtype(),
+            Self::Expand(expansion) => expansion.dtype(),
+            Self::Reduce(reduced) => reduced.dtype(),
+            Self::Transpose(transpose) => transpose.dtype(),
+            Self::Unary(unary) => unary.dtype(),
         }
     }
 
@@ -94,6 +114,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
         match self {
             Self::File(file) => file.ndim(),
             Self::Slice(slice) => slice.ndim(),
+            Self::Broadcast(broadcast) => broadcast.ndim(),
+            Self::Cast(cast) => cast.ndim(),
+            Self::Combine(combine) => combine.ndim(),
+            Self::Expand(expansion) => expansion.ndim(),
+            Self::Reduce(reduced) => reduced.ndim(),
+            Self::Transpose(transpose) => transpose.ndim(),
+            Self::Unary(unary) => unary.ndim(),
         }
     }
 
@@ -101,6 +128,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
         match self {
             Self::File(file) => file.shape(),
             Self::Slice(slice) => slice.shape(),
+            Self::Broadcast(broadcast) => broadcast.shape(),
+            Self::Cast(cast) => cast.shape(),
+            Self::Combine(combine) => combine.shape(),
+            Self::Expand(expansion) => expansion.shape(),
+            Self::Reduce(reduced) => reduced.shape(),
+            Self::Transpose(transpose) => transpose.shape(),
+            Self::Unary(unary) => unary.shape(),
         }
     }
 
@@ -108,6 +142,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
         match self {
             Self::File(file) => file.size(),
             Self::Slice(slice) => slice.size(),
+            Self::Broadcast(broadcast) => broadcast.size(),
+            Self::Cast(cast) => cast.size(),
+            Self::Combine(combine) => combine.size(),
+            Self::Expand(expansion) => expansion.size(),
+            Self::Reduce(reduced) => reduced.size(),
+            Self::Transpose(transpose) => transpose.size(),
+            Self::Unary(unary) => unary.size(),
         }
     }
 }
@@ -115,6 +156,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAccessor<F, D, T> {
     type Slice = Self;
+    type Transpose = Self;
 
     fn accessor(self) -> Self {
         self
@@ -124,6 +166,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.block_stream(txn),
             Self::Slice(slice) => slice.block_stream(txn),
+            Self::Broadcast(broadcast) => broadcast.block_stream(txn),
+            Self::Cast(cast) => cast.block_stream(txn),
+            Self::Combine(combine) => combine.block_stream(txn),
+            Self::Expand(expansion) => expansion.block_stream(txn),
+            Self::Reduce(reduced) => reduced.block_stream(txn),
+            Self::Transpose(transpose) => transpose.block_stream(txn),
+            Self::Unary(unary) => unary.block_stream(txn),
         }
     }
 
@@ -131,6 +180,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.value_stream(txn),
             Self::Slice(slice) => slice.value_stream(txn),
+            Self::Broadcast(broadcast) => broadcast.value_stream(txn),
+            Self::Cast(cast) => cast.value_stream(txn),
+            Self::Combine(combine) => combine.value_stream(txn),
+            Self::Expand(expansion) => expansion.value_stream(txn),
+            Self::Reduce(reduced) => reduced.value_stream(txn),
+            Self::Transpose(transpose) => transpose.value_stream(txn),
+            Self::Unary(unary) => unary.value_stream(txn),
         }
     }
 
@@ -138,6 +194,45 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.slice(bounds).map(Self::Slice),
             Self::Slice(slice) => slice.slice(bounds).map(Self::Slice),
+            Self::Broadcast(broadcast) => broadcast.slice(bounds).map(|slice| slice.accessor()),
+            Self::Cast(cast) => cast.slice(bounds).map(|slice| slice.accessor()),
+            Self::Combine(combine) => combine.slice(bounds).map(|slice| slice.accessor()),
+            Self::Expand(expansion) => expansion.slice(bounds).map(|slice| slice.accessor()),
+            Self::Reduce(reduced) => reduced.slice(bounds).map(|slice| slice.accessor()),
+            Self::Transpose(transpose) => transpose.slice(bounds).map(|slice| slice.accessor()),
+            Self::Unary(unary) => unary.slice(bounds).map(|slice| slice.accessor()),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::File(file) => file
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Slice(slice) => slice
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Broadcast(broadcast) => broadcast
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Cast(cast) => cast
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Combine(combine) => combine
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Expand(expansion) => expansion
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Reduce(reduced) => reduced
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Transpose(transpose) => transpose
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+            Self::Unary(unary) => unary
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
         }
     }
 
@@ -145,6 +240,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.write_value(txn_id, bounds, number).await,
             Self::Slice(slice) => slice.write_value(txn_id, bounds, number).await,
+            Self::Broadcast(broadcast) => broadcast.write_value(txn_id, bounds, number).await,
+            Self::Cast(cast) => cast.write_value(txn_id, bounds, number).await,
+            Self::Combine(combine) => combine.write_value(txn_id, bounds, number).await,
+            Self::Expand(expansion) => expansion.write_value(txn_id, bounds, number).await,
+            Self::Reduce(reduced) => reduced.write_value(txn_id, bounds, number).await,
+            Self::Transpose(transpose) => transpose.write_value(txn_id, bounds, number).await,
+            Self::Unary(unary) => unary.write_value(txn_id, bounds, number).await,
         }
     }
 
@@ -152,6 +254,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
         match self {
             Self::File(file) => file.write_value_at(txn_id, coord, value),
             Self::Slice(slice) => slice.write_value_at(txn_id, coord, value),
+            Self::Broadcast(broadcast) => broadcast.write_value_at(txn_id, coord, value),
+            Self::Cast(cast) => cast.write_value_at(txn_id, coord, value),
+            Self::Combine(combine) => combine.write_value_at(txn_id, coord, value),
+            Self::Expand(expansion) => expansion.write_value_at(txn_id, coord, value),
+            Self::Reduce(reduced) => reduced.write_value_at(txn_id, coord, value),
+            Self::Transpose(transpose) => transpose.write_value_at(txn_id, coord, value),
+            Self::Unary(unary) => unary.write_value_at(txn_id, coord, value),
         }
     }
 }
@@ -159,15 +268,24 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
 impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for DenseAccessor<F, D, T> {
     type Txn = T;
 
-    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         match self {
             Self::File(file) => file.read_value_at(txn, coord),
             Self::Slice(slice) => slice.read_value_at(txn, coord),
+            Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
+            Self::Cast(cast) => cast.read_value_at(txn, coord),
+            Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::Expand(expansion) => expansion.read_value_at(txn, coord),
+            Self::Reduce(reduced) => reduced.read_value_at(txn, coord),
+            Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
+            Self::Unary(unary) => unary.read_value_at(txn, coord),
         }
     }
 }
 
-impl<F, D, T> From<BlockListFile<F, D, T>> for DenseAccessor<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> From<BlockListFile<F, D, T>>
+    for DenseAccessor<F, D, T>
+{
     fn from(file: BlockListFile<F, D, T>) -> Self {
         Self::File(file)
     }
@@ -251,7 +369,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorI
 
     async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number> {
         self.blocks
-            .read_value_at(txn, coord.to_vec())
+            .clone()
+            .read_value_at(txn.clone(), coord.to_vec())
             .map_ok(|(_, val)| val)
             .await
     }
@@ -270,7 +389,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 {
     type Txn = T;
 
-    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         self.blocks.read_value_at(txn, coord)
     }
 }

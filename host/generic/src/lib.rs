@@ -9,22 +9,25 @@ use futures::{Future, Stream};
 
 use tc_error::*;
 
-pub mod id;
-pub mod map;
-pub mod stream;
-pub mod time;
-pub mod tuple;
-
 pub use id::*;
 pub use map::*;
 pub use stream::*;
 pub use time::*;
 pub use tuple::*;
 
+pub mod id;
+pub mod map;
+pub mod stream;
+pub mod time;
+pub mod tuple;
+
 /// A pinned future which returns a [`TCResult`]
 pub type TCBoxTryFuture<'a, T> = Pin<Box<dyn Future<Output = TCResult<T>> + Send + 'a>>;
 
-/// A pinned TryStream with error type [`TCError`]
+/// A pinned [`Stream`]
+pub type TCStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
+
+/// A pinned `TryStream` with error type [`TCError`]
 pub type TCTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
 /// A generic class trait

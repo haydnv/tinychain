@@ -21,6 +21,7 @@ use tcgeneric::{TCBoxTryFuture, TCTryStream};
 use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
 
+use super::access::BlockListTranspose;
 use super::{block_offsets, coord_block, DenseAccess, DenseAccessor, PER_BLOCK};
 
 const MEBIBYTE: usize = 1_048_576;
@@ -189,6 +190,7 @@ impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockListFile<F, D, T> {
     type Slice = BlockListFileSlice<F, D, T>;
+    type Transpose = BlockListTranspose<F, D, T, Self>;
 
     fn accessor(self) -> DenseAccessor<F, D, T> {
         DenseAccessor::File(self)
@@ -212,6 +214,10 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         BlockListFileSlice::new(self, bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -300,7 +306,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
 impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFile<F, D, T> {
     type Txn = T;
 
-    fn read_value_at<'a>(&'a self, txn: &'a T, coord: Coord) -> Read<'a> {
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             debug!(
                 "read value at {:?} from BlockListFile with shape {}",
@@ -663,6 +669,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
     for BlockListFileSlice<F, D, T>
 {
     type Slice = Self;
+    type Transpose = BlockListTranspose<F, D, T, Self>;
 
     fn accessor(self) -> DenseAccessor<F, D, T> {
         DenseAccessor::Slice(self)
@@ -729,6 +736,10 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
         self.source.slice(bounds)
     }
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         self.shape().validate_bounds(&bounds)?;
 
@@ -753,7 +764,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
 impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFileSlice<F, D, T> {
     type Txn = T;
 
-    fn read_value_at<'a>(&'a self, txn: &'a Self::Txn, coord: Coord) -> Read<'a> {
+    fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             self.shape().validate_coord(&coord)?;
             let coord = self.rebase.invert_coord(&coord);
