@@ -49,12 +49,12 @@ impl ChainInstance for BlockChain {
 
     async fn append_put(
         &self,
-        txn_id: TxnId,
+        txn: Txn,
         path: TCPathBuf,
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        self.history.append_put(txn_id, path, key, value).await
+        self.history.append_put(txn, path, key, value).await
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
@@ -109,9 +109,10 @@ impl ChainInstance for BlockChain {
 }
 
 #[async_trait]
-impl Persist<fs::Dir, Txn> for BlockChain {
+impl Persist<fs::Dir> for BlockChain {
     type Schema = Schema;
     type Store = fs::Dir;
+    type Txn = Txn;
 
     fn schema(&self) -> &Schema {
         &self.schema

@@ -350,13 +350,8 @@ pub trait ChainInstance {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(
-        &self,
-        txn_id: TxnId,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()>;
+    async fn append_put(&self, txn: Txn, path: TCPathBuf, key: Value, value: State)
+        -> TCResult<()>;
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
 
@@ -445,14 +440,14 @@ impl ChainInstance for Chain {
 
     async fn append_put(
         &self,
-        txn_id: TxnId,
+        txn: Txn,
         path: TCPathBuf,
         key: Value,
         value: State,
     ) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_put(txn_id, path, key, value).await,
-            Self::Sync(chain) => chain.append_put(txn_id, path, key, value).await,
+            Self::Block(chain) => chain.append_put(txn, path, key, value).await,
+            Self::Sync(chain) => chain.append_put(txn, path, key, value).await,
         }
     }
 

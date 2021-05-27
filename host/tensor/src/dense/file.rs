@@ -354,18 +354,23 @@ impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact for BlockLis
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> CopyFrom<D, T, B>
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> CopyFrom<D, B>
     for BlockListFile<F, D, T>
 {
-    async fn copy_from(_instance: B, _file: F, _txn_id: TxnId) -> TCResult<Self> {
-        unimplemented!("BlockListFile::copy_from")
+    async fn copy_from(other: B, file: F, txn: T) -> TCResult<Self> {
+        let txn_id = *txn.id();
+        let dtype = other.dtype();
+        let shape = other.shape().clone();
+        let blocks = other.block_stream(txn).await?;
+        Self::from_blocks(file, txn_id, shape, dtype, blocks).await
     }
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T> for BlockListFile<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D> for BlockListFile<F, D, T> {
     type Schema = Schema;
     type Store = F;
+    type Txn = T;
 
     fn schema(&self) -> &Schema {
         &self.schema
@@ -382,7 +387,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T> for BlockListFile<
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D, T> for BlockListFile<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D> for BlockListFile<F, D, T> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.schema.0 != backup.schema.0 {
             return Err(TCError::bad_request(

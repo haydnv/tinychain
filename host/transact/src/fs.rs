@@ -270,34 +270,33 @@ pub trait Dir: Store + Sized + 'static {
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist<D: Dir, T: Transaction<D>>: Sized {
+pub trait Persist<D: Dir>: Sized {
     type Schema;
     type Store: Store;
+    type Txn: Transaction<D>;
 
     /// Return the schema of this persistent state.
     fn schema(&self) -> &Self::Schema;
 
     /// Load a saved state from persistent storage.
-    async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
-}
-
-/// Defines how to restore persistent state from backup.
-#[async_trait]
-pub trait Restore<D: Dir, T: Transaction<D>>: Sized {
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
 }
 
 /// Defines how to copy a base state from another instance, possibly a view.
 #[async_trait]
-pub trait CopyFrom<D: Dir, T: Transaction<D>, Instance>: Persist<D, T> {
+pub trait CopyFrom<D: Dir, I>: Persist<D> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
-        instance: Instance,
-        store: <Self as Persist<D, T>>::Store,
-        txn_id: TxnId,
-    ) -> TCResult<Self>
-    where
-        Instance: 'async_trait;
+        instance: I,
+        store: <Self as Persist<D>>::Store,
+        txn: <Self as Persist<D>>::Txn,
+    ) -> TCResult<Self>;
+}
+
+/// Defines how to restore persistent state from backup.
+#[async_trait]
+pub trait Restore<D: Dir>: Persist<D> {
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
 }
 
 /// Defines a standard hash for a persistent state.

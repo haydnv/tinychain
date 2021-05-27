@@ -709,9 +709,10 @@ impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
     type Schema = RowSchema;
     type Store = F;
+    type Txn = T;
 
     fn schema(&self) -> &Self::Schema {
         &self.inner.schema
@@ -737,7 +738,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D, T> for BTreeFile<F, D,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D, T> for BTreeFile<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
@@ -753,13 +754,11 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D, T> for BTreeFile<F, D,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance> CopyFrom<D, T, I>
+impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
     for BTreeFile<F, D, T>
 {
-    async fn copy_from(source: I, file: F, txn_id: TxnId) -> TCResult<Self>
-    where
-        I: 'async_trait,
-    {
+    async fn copy_from(source: I, file: F, txn: T) -> TCResult<Self> {
+        let txn_id = *txn.id();
         let schema = source.schema().clone();
         let dest = Self::create(file, schema, txn_id).await?;
         let keys = source.keys(txn_id).await?;

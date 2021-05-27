@@ -39,17 +39,17 @@ impl ChainInstance for SyncChain {
 
     async fn append_put(
         &self,
-        txn_id: TxnId,
+        txn: Txn,
         path: TCPathBuf,
         key: Value,
         value: State,
     ) -> TCResult<()> {
         {
-            let mut block = self.history.write_latest(txn_id).await?;
-            block.clear_until(&txn_id);
+            let mut block = self.history.write_latest(*txn.id()).await?;
+            block.clear_until(txn.id());
         }
 
-        self.history.append_put(txn_id, path, key, value).await
+        self.history.append_put(txn, path, key, value).await
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
@@ -76,9 +76,10 @@ impl ChainInstance for SyncChain {
 }
 
 #[async_trait]
-impl Persist<fs::Dir, Txn> for SyncChain {
+impl Persist<fs::Dir> for SyncChain {
     type Schema = Schema;
     type Store = fs::Dir;
+    type Txn = Txn;
 
     fn schema(&self) -> &Schema {
         &self.schema

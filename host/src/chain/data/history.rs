@@ -64,12 +64,13 @@ impl History {
 
     pub async fn append_put(
         &self,
-        txn_id: TxnId,
+        txn: Txn,
         path: TCPathBuf,
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        let value = self.save_state(txn_id, value).await?;
+        let txn_id = *txn.id();
+        let value = self.save_state(txn, value).await?;
 
         debug!("History::append_put {} {} {} {}", txn_id, path, key, value);
 
@@ -78,7 +79,7 @@ impl History {
         Ok(())
     }
 
-    async fn save_state(&self, txn_id: TxnId, state: State) -> TCResult<Scalar> {
+    async fn save_state(&self, txn: Txn, state: State) -> TCResult<Scalar> {
         if state.is_ref() {
             return Err(TCError::bad_request(
                 "cannot update Chain with reference: {}",
@@ -86,6 +87,7 @@ impl History {
             ));
         }
 
+        let txn_id = *txn.id();
         match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
@@ -99,7 +101,7 @@ impl History {
                             .create_file(txn_id, hash.clone(), btree.class())
                             .await?;
 
-                        BTreeFile::copy_from(btree, file, txn_id).await?;
+                        BTreeFile::copy_from(btree, file, txn).await?;
                     }
 
                     Ok(OpRef::Get((
@@ -115,7 +117,7 @@ impl History {
 
                     if !self.dir.contains(&txn_id, &hash).await? {
                         let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
-                        TableIndex::copy_from(table, dir, txn_id).await?;
+                        TableIndex::copy_from(table, dir, txn).await?;
                     }
 
                     Ok(OpRef::Get((
@@ -143,7 +145,8 @@ impl History {
                             .dir
                             .create_file(txn_id, hash.clone(), TensorType::Dense)
                             .await?;
-                        DenseTensor::copy_from(tensor, file, txn_id).await?;
+
+                        DenseTensor::copy_from(tensor, file, txn).await?;
                     }
 
                     Ok(OpRef::Get((
@@ -294,7 +297,7 @@ impl History {
                         Mutation::Put(path, key, value) => {
                             other
                                 .resolve(txn, value)
-                                .and_then(|state| self.save_state(txn_id, state))
+                                .and_then(|state| self.save_state(txn.clone(), state))
                                 .and_then(|value| {
                                     if append {
                                         dest.append_put(
@@ -424,9 +427,10 @@ impl History {
 const SCHEMA: () = ();
 
 #[async_trait]
-impl Persist<fs::Dir, Txn> for History {
+impl Persist<fs::Dir> for History {
     type Schema = ();
     type Store = fs::Dir;
+    type Txn = Txn;
 
     fn schema(&self) -> &() {
         &SCHEMA
@@ -528,7 +532,7 @@ impl de::Visitor for HistoryVisitor {
         let mut i = 0u64;
         let txn = subcontext(i).await?;
 
-        if let Some(state) = seq.next_element::<State>(txn).await? {
+        if let Some(state) = seq.next_element::<State>(txn.clone()).await? {
             let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
                 .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
                 .map_err(de::Error::custom)?;
@@ -542,7 +546,7 @@ impl de::Visitor for HistoryVisitor {
                 ));
             }
 
-            let mutations = parse_block_state(&history, txn_id, block_data)
+            let mutations = parse_block_state(&history, txn.clone(), block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -576,7 +580,7 @@ impl de::Visitor for HistoryVisitor {
                 ));
             }
 
-            let mutations = parse_block_state(&history, txn_id, block_data)
+            let mutations = parse_block_state(&history, txn.clone(), block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -591,7 +595,7 @@ impl de::Visitor for HistoryVisitor {
 
 async fn parse_block_state(
     history: &History,
-    txn_id: TxnId,
+    txn: Txn,
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>> {
     let mut mutations = BTreeMap::new();
@@ -607,7 +611,7 @@ async fn parse_block_state(
                 parsed.push(Mutation::Delete(path, key));
             } else if op.matches::<(TCPathBuf, Value, State)>() {
                 let (path, key, value) = op.opt_cast_into().unwrap();
-                let value = history.save_state(txn_id, value).await?;
+                let value = history.save_state(txn.clone(), value).await?;
                 parsed.push(Mutation::Put(path, key, value));
             } else {
                 return Err(TCError::bad_request(

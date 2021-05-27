@@ -439,25 +439,22 @@ impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Ha
 
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    CopyFrom<D, T, DenseTensor<F, D, T, B>> for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+    CopyFrom<D, DenseTensor<F, D, T, B>> for DenseTensor<F, D, T, BlockListFile<F, D, T>>
 {
-    async fn copy_from(
-        instance: DenseTensor<F, D, T, B>,
-        file: F,
-        txn_id: TxnId,
-    ) -> TCResult<Self> {
-        BlockListFile::copy_from(instance.blocks, file, txn_id)
+    async fn copy_from(instance: DenseTensor<F, D, T, B>, file: F, txn: T) -> TCResult<Self> {
+        BlockListFile::copy_from(instance.blocks, file, txn)
             .map_ok(Self::from)
             .await
     }
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T>
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D>
     for DenseTensor<F, D, T, BlockListFile<F, D, T>>
 {
     type Schema = Schema;
     type Store = F;
+    type Txn = T;
 
     fn schema(&self) -> &Self::Schema {
         self.blocks.schema()
@@ -471,7 +468,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T>
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D, T>
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D>
     for DenseTensor<F, D, T, BlockListFile<F, D, T>>
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {

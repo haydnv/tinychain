@@ -227,12 +227,13 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D, Txn> for Index<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn>
 where
     F: TryFrom<D::File>,
 {
     type Schema = IndexSchema;
     type Store = F;
+    type Txn = Txn;
 
     fn schema(&self) -> &IndexSchema {
         &self.schema
@@ -246,7 +247,10 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D, Txn> for Index<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn>
+where
+    F: TryFrom<D::File>,
+{
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.btree.restore(&backup.btree, txn_id).await
     }
@@ -936,13 +940,14 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D, Txn> for TableIndex<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
 where
     F: TryFrom<D::File, Error = TCError>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
     type Schema = TableSchema;
     type Store = D;
+    type Txn = Txn;
 
     fn schema(&self) -> &Self::Schema {
         &self.inner.schema
@@ -979,7 +984,11 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D, Txn> for TableIndex<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
+where
+    F: TryFrom<D::File, Error = TCError>,
+    <D as Dir>::FileClass: From<BTreeType> + Send,
+{
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
@@ -1009,16 +1018,14 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D, Txn> for TableIndex<
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, I: TableInstance<F, D, Txn>> CopyFrom<D, Txn, I>
-    for TableIndex<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>, I: TableInstance<F, D, Txn> + 'static>
+    CopyFrom<D, I> for TableIndex<F, D, Txn>
 where
     F: TryFrom<D::File, Error = TCError>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
-    async fn copy_from(source: I, dir: D, txn_id: TxnId) -> TCResult<Self>
-    where
-        I: 'async_trait,
-    {
+    async fn copy_from(source: I, dir: D, txn: Txn) -> TCResult<Self> {
+        let txn_id = *txn.id();
         let schema = source.schema();
         let key_len = schema.primary().key().len();
         let table = Self::create(schema, &dir, txn_id).await?;
