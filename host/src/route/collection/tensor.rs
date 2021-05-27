@@ -110,15 +110,18 @@ struct TensorHandler<'a, T> {
     tensor: &'a T,
 }
 
-impl<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Send + Sync> Handler<'a>
-    for TensorHandler<'a, T>
+impl<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Clone + Send + Sync>
+    Handler<'a> for TensorHandler<'a, T>
 where
+    Collection: From<T>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.matches::<Coord>() {
+                if key.is_none() {
+                    Ok(Collection::from(self.tensor.clone()).into())
+                } else if key.matches::<Coord>() {
                     let coord = key.opt_cast_into().unwrap();
                     self.tensor
                         .read_value(&txn, coord)
@@ -194,11 +197,12 @@ impl Route for Tensor {
     }
 }
 
-fn route<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Send + Sync>(
+fn route<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Clone + Send + Sync>(
     tensor: &'a T,
     path: &'a [PathSegment],
 ) -> Option<Box<dyn Handler<'a> + 'a>>
 where
+    Collection: From<T>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
     if path.is_empty() {

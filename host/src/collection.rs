@@ -205,7 +205,10 @@ impl CollectionVisitor {
 
             #[cfg(feature = "tensor")]
             CollectionType::Tensor(tt) => match tt {
-                TensorType::Dense => access.next_value(self.txn).map_ok(Collection::Tensor).await,
+                TensorType::Dense => {
+                    let tensor: DenseTensor<DenseTensorFile> = access.next_value(self.txn).await?;
+                    Ok(Collection::Tensor(tensor.into()))
+                }
             },
         }
     }
