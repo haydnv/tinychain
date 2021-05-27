@@ -186,6 +186,8 @@ impl CollectionVisitor {
         class: CollectionType,
         access: &mut A,
     ) -> Result<Collection, A::Error> {
+        debug!("deserialize Collection");
+
         match class {
             CollectionType::BTree(_) => {
                 let file = self
@@ -206,6 +208,8 @@ impl CollectionVisitor {
             #[cfg(feature = "tensor")]
             CollectionType::Tensor(tt) => match tt {
                 TensorType::Dense => {
+                    debug!("deserialize Tensor");
+
                     let tensor: DenseTensor<DenseTensorFile> = access.next_value(self.txn).await?;
                     Ok(Collection::Tensor(tensor.into()))
                 }

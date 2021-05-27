@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -442,6 +442,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 
     async fn write(&self, txn: T, bounds: Bounds, other: Tensor<F, D, T>) -> TCResult<()> {
+        debug!("DenseTensor::write {} to {}", other, bounds);
+
         match other {
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
         }
@@ -616,14 +618,21 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisit
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        debug!("visit Tensor data to deserialize");
+
         let (shape, dtype) = seq
-            .next_element::<(Vec<u64>, ValueType)>(())
+            .next_element::<(Vec<u64>, TCPathBuf)>(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
 
-        let dtype = dtype
-            .try_into()
-            .map_err(|_| de::Error::invalid_type(dtype, "a Number type"))?;
+        debug!("decoded Tensor schema");
+
+        let dtype = match ValueType::from_path(&dtype) {
+            Some(ValueType::Number(nt)) => Ok(nt),
+            _ => Err(de::Error::invalid_type(dtype, "a NumberType")),
+        }?;
+
+        debug!("decoding Tensor blocks");
 
         let cxt = (self.txn_id, self.file, (shape.into(), dtype));
         let blocks = seq

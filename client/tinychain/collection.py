@@ -110,10 +110,7 @@ class BTree(Collection):
 
         prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
 
-        if any(isinstance(k, Range) for k in prefix):
-            return self._post("", BTree, **{"range": prefix})
-        else:
-            return self._get("", prefix, BTree)
+        return self._post("", BTree, **{"range": prefix})
 
     def count(self):
         """
@@ -282,7 +279,7 @@ class Tensor(Collection):
         """
         A `Tensor` schema which comprises a shape and data type.
 
-        The data type must be a subclass of `Number` and defaults to `F32`.s
+        The data type must be a subclass of `Number` and defaults to `F32`.
         """
 
         def __init__(self, shape, dtype=F32):
@@ -300,10 +297,7 @@ class Tensor(Collection):
             Range.from_slice(x) if isinstance(x, slice)
             else x for x in bounds]
 
-        if any(isinstance(x, Range) for x in bounds):
-            return self._post("", Tensor, bounds=bounds)
-        else:
-            return self._get("", bounds, Number)
+        return self._post("", Tensor, bounds=bounds)
 
     def write(self, bounds, value):
         return self._put("", bounds, value)

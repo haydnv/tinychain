@@ -7,7 +7,8 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorIO, TensorTransform, TensorType,
+    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorDualIO, TensorIO, TensorTransform,
+    TensorType,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -110,9 +111,14 @@ struct TensorHandler<'a, T> {
     tensor: &'a T,
 }
 
-impl<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Clone + Send + Sync>
-    Handler<'a> for TensorHandler<'a, T>
+impl<'a, T> Handler<'a> for TensorHandler<'a, T>
 where
+    T: TensorIO<fs::Dir, Txn = Txn>
+        + TensorDualIO<fs::Dir, Tensor>
+        + TensorTransform<fs::Dir>
+        + Clone
+        + Send
+        + Sync,
     Collection: From<T>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
@@ -142,27 +148,8 @@ where
     }
 
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
-        Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                if key.matches::<Coord>() {
-                    let coord = key.opt_cast_into().unwrap();
-                    let value = value
-                        .try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
-
-                    self.tensor.write_value_at(*txn.id(), coord, value).await
-                } else {
-                    let bounds = if key.is_none() {
-                        Bounds::all(self.tensor.shape())
-                    } else {
-                        key.try_cast_into(|v| TCError::bad_request("invalid tensor bounds", v))?
-                    };
-
-                    let value = value
-                        .try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
-
-                    self.tensor.write_value(*txn.id(), bounds, value).await
-                }
-            })
+        Some(Box::new(move |txn, key, value| {
+            Box::pin(write(self.tensor, txn, key.into(), value))
         }))
     }
 
@@ -200,11 +187,14 @@ impl Route for Tensor {
     }
 }
 
-fn route<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Clone + Send + Sync>(
-    tensor: &'a T,
-    path: &'a [PathSegment],
-) -> Option<Box<dyn Handler<'a> + 'a>>
+fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
+    T: TensorIO<fs::Dir, Txn = Txn>
+        + TensorDualIO<fs::Dir, Tensor>
+        + TensorTransform<fs::Dir>
+        + Clone
+        + Send
+        + Sync,
     Collection: From<T>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
@@ -223,6 +213,44 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
         .map_ok(Collection::from)
         .map_ok(State::from)
         .await
+}
+
+async fn write<T: TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor>>(
+    tensor: &T,
+    txn: Txn,
+    key: Scalar,
+    value: State,
+) -> TCResult<()> {
+    if key.matches::<Coord>() {
+        let value =
+            Value::try_cast_from(value, |v| TCError::bad_request("invalid tensor element", v))?;
+        let value = value.try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
+        let coord = key.opt_cast_into().unwrap();
+        return tensor.write_value_at(*txn.id(), coord, value).await;
+    }
+
+    let bounds = if key.is_none() {
+        Bounds::all(tensor.shape())
+    } else {
+        let bounds =
+            Value::try_cast_from(key, |k| TCError::bad_request("invalid tensor bounds", k))?;
+
+        bounds.try_cast_into(|k| TCError::bad_request("invalid tensor bounds", k))?
+    };
+
+    match value {
+        State::Collection(Collection::Tensor(value)) => tensor.write(txn, bounds, value).await,
+        State::Scalar(scalar) => {
+            let value =
+                scalar.try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
+
+            tensor.write_value(*txn.id(), bounds, value).await
+        }
+        other => Err(TCError::bad_request(
+            "cannot write this value to tensor",
+            other,
+        )),
+    }
 }
 
 async fn create_file(txn: &Txn) -> TCResult<fs::File<afarray::Array>> {

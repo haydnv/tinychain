@@ -82,6 +82,11 @@ impl FileEntry {
                 let file = File::load(cache.clone(), path, contents)?;
                 Ok(FileEntry::Chain(file))
             }
+            #[cfg(feature = "tensor")]
+            tc_tensor::EXT => {
+                let file = File::load(cache.clone(), path, contents)?;
+                Ok(FileEntry::Tensor(file))
+            }
             VALUE_EXT => {
                 let file = File::load(cache.clone(), path, contents)?;
                 Ok(FileEntry::Value(file))

@@ -70,7 +70,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def put(self, path, key, value, auth=None):
+    def put(self, path, key=None, value=None, auth=None):
         """Execute a PUT request."""
 
         url = self.link(path)
@@ -104,17 +104,13 @@ class Host(object):
 
         return self._handle(request)
 
-    def resolve(self, state, auth=None):
-        """Resove the given state."""
-
-        return self.post("/transact/execute", state, auth)
-
 
 class Local(Host):
     """A local Tinychain host."""
 
     ADDRESS = "127.0.0.1"
-    STARTUP_TIME = 1.1
+    SHUTDOWN_TIME = 0.1
+    STARTUP_TIME = 1.
 
     def __init__(self,
             path,
@@ -123,7 +119,7 @@ class Local(Host):
             clusters=[],
             port=DEFAULT_PORT,
             log_level="warn",
-            cache_size="5K",
+            cache_size="1G",
             force_create=False):
 
         # set _process first so it's available to __del__ in case of an exception
@@ -172,7 +168,7 @@ class Local(Host):
         else:
             logging.info(f"new instance running at {uri(self)}")
 
-    def stop(self):
+    def stop(self, wait_time=SHUTDOWN_TIME):
         """Shut down this host."""
 
         logging.info(f"Shutting down Tinychain host {uri(self)}")
@@ -180,6 +176,7 @@ class Local(Host):
             self._process.terminate()
             self._process.wait()
             logging.info(f"Host {uri(self)} shut down")
+            time.sleep(wait_time)
         else:
             logging.info(f"{uri(self)} not running")
 

@@ -293,8 +293,11 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
             let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
 
+            let offset = offset % PER_BLOCK as u64;
+            debug!("offset is {}", offset);
+
             (*block)
-                .set_value((offset / PER_BLOCK as u64) as usize, value)
+                .set_value(offset as usize, value)
                 .map_err(TCError::from)
         })
     }
@@ -501,6 +504,8 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
     where
         Array: From<ArrayExt<T>>,
     {
+        debug!("BlockListVisitor::create_block {}", block_id);
+
         self.file
             .create_block(self.txn_id, block_id.into(), block.into())
             .map_err(de::Error::custom)
@@ -520,7 +525,7 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
     where
         Array: From<ArrayExt<T>>,
     {
-        let mut buf = [T::default(); BUF_SIZE];
+        let mut buf = vec![T::default(); BUF_SIZE];
         let mut size = 0u64;
         let mut block_id = 0u64;
 

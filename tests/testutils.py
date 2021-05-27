@@ -34,6 +34,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
         clusters=config,
         port=port,
         log_level="debug",
+        cache_size="5K",
         force_create=True)
 
     print(f"start host on port {port}")

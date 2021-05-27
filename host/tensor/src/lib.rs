@@ -27,6 +27,7 @@ mod dense;
 #[allow(dead_code)]
 mod transform;
 
+pub const EXT: &str = "array";
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 pub type Schema = (Shape, NumberType);
@@ -216,7 +217,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
     }
 
     async fn write(&self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
-        debug!("write {} to {}", value, bounds);
+        debug!("Tensor::write {} to {}", value, bounds);
 
         match self {
             Self::Dense(dense) => dense.write(txn, bounds, value).await,

@@ -43,7 +43,7 @@ class DenseTensorTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
-    NUM_HOSTS = 4
+    NUM_HOSTS = 1
     NAME = "tensor"
 
     def cluster(self, chain_type):
@@ -54,6 +54,11 @@ class ChainTests(PersistenceTest, unittest.TestCase):
                 schema = tc.Tensor.Schema([2, 3], tc.I32)
                 self.dense = chain_type(tc.Tensor.Dense(schema))
 
+            @tc.put_method
+            def overwrite(self, txn):
+                txn.new = tc.Tensor.Dense.constant([3], 2)
+                return self.dense.write(None, txn.new)
+
         return Persistent
 
     def execute(self, hosts):
@@ -63,6 +68,11 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             actual = host.get("/test/tensor/dense")
             expected = expect(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
             self.assertEqual(actual, expected)
+
+        hosts[0].put("/test/tensor/overwrite")
+        expected = expect(tc.I32, [2, 3], [2] * 6)
+        actual = hosts[0].get("/test/tensor/dense")
+        self.assertEqual(actual, expected)
 
 
 def expect(dtype, shape, flat):
