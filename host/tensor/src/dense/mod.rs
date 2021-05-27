@@ -19,7 +19,7 @@ use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
     Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorDualIO, TensorIO,
-    TensorInstance, TensorTransform, TensorType,
+    TensorInstance, TensorReduce, TensorTransform, TensorType,
 };
 
 use access::*;
@@ -457,6 +457,53 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         self.blocks.read_value_at(txn, coord)
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorReduce<D>
+    for DenseTensor<F, D, T, B>
+{
+    type Reduce = DenseTensor<F, D, T, BlockListReduce<F, D, T, B>>;
+
+    fn product(&self, _axis: usize) -> TCResult<Self::Reduce> {
+        Err(TCError::not_implemented("DenseTensor::product"))
+    }
+
+    fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            let blocks = self.blocks.clone().block_stream(txn).await?;
+
+            let mut block_products = blocks.map_ok(|array| array.product());
+
+            let zero = self.dtype().zero();
+            let mut product = self.dtype().one();
+            while let Some(block_product) = block_products.try_next().await? {
+                if block_product == zero {
+                    return Ok(zero);
+                }
+
+                product = product * block_product;
+            }
+
+            Ok(product)
+        })
+    }
+
+    fn sum(&self, _axis: usize) -> TCResult<Self::Reduce> {
+        Err(TCError::not_implemented("DenseTensor::sum"))
+    }
+
+    fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            let blocks = self.blocks.clone().block_stream(txn).await?;
+
+            blocks
+                .map_ok(|array| array.sum())
+                .try_fold(self.dtype().zero(), |sum, block_sum| {
+                    future::ready(Ok(sum + block_sum))
+                })
+                .await
+        })
     }
 }
 

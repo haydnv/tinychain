@@ -15,8 +15,8 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
-    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf,
-    TCTryStream, Tuple,
+    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
+    TCPathBuf, TCTryStream, Tuple,
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -27,14 +27,15 @@ mod dense;
 #[allow(dead_code)]
 mod transform;
 
-pub const EXT: &str = "array";
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
+
+pub const EXT: &str = "array";
+
+type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
 pub type Schema = (Shape, NumberType);
 
 pub type Coord = Vec<u64>;
-
-type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
 pub trait ReadValueAt<D: Dir> {
     type Txn: Transaction<D>;
@@ -81,7 +82,19 @@ pub trait TensorDualIO<D: Dir, O>: TensorIO<D> + Sized {
     ) -> TCResult<()>;
 }
 
-pub trait TensorTransform<D: Dir>: TensorAccess + Sized {
+pub trait TensorReduce<D: Dir>: TensorIO<D> {
+    type Reduce: TensorInstance<D>;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
+
+    fn product_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce>;
+
+    fn sum_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+}
+
+pub trait TensorTransform<D: Dir>: TensorAccess {
     type Broadcast: TensorInstance<D>;
     type Cast: TensorInstance<D>;
     type Slice: TensorInstance<D>;
@@ -221,6 +234,34 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
 
         match self {
             Self::Dense(dense) => dense.write(txn, bounds, value).await,
+        }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorReduce<D> for Tensor<F, D, T> {
+    type Reduce = Self;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.product(axis).map(Self::from),
+        }
+    }
+
+    fn product_all(&self, txn: T) -> TCBoxTryFuture<'_, Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn),
+        }
+    }
+
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.sum(axis).map(Self::from),
+        }
+    }
+
+    fn sum_all(&self, txn: T) -> TCBoxTryFuture<'_, Number> {
+        match self {
+            Self::Dense(dense) => dense.sum_all(txn),
         }
     }
 }
