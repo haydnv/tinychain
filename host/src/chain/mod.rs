@@ -10,7 +10,7 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use tc_btree::BTreeType;
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist, Restore, Store};
+use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -234,7 +234,8 @@ impl Subject {
         }
     }
 
-    async fn restore(&self, txn_id: TxnId, backup: State) -> TCResult<()> {
+    async fn restore(&self, txn: &Txn, backup: State) -> TCResult<()> {
+        let txn_id = *txn.id();
         match self {
             Self::BTree(btree) => match backup {
                 State::Collection(Collection::BTree(BTree::File(backup))) => {
@@ -249,9 +250,18 @@ impl Subject {
                 other => Err(TCError::bad_request("cannot restore a Table from", other)),
             },
             #[cfg(feature = "tensor")]
-            Self::Tensor(_tensor) => match backup {
-                State::Collection(Collection::Tensor(Tensor::Dense(_backup))) => {
-                    unimplemented!()
+            Self::Tensor(tensor) => match backup {
+                State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
+                    let file = txn
+                        .context()
+                        .create_file_tmp(txn_id, TensorType::Dense)
+                        .await?;
+
+                    let backup =
+                        DenseTensor::<DenseTensorFile>::copy_from(backup, file, txn.clone())
+                            .await?;
+
+                    tensor.restore(&backup, txn_id).await
                 }
                 other => Err(TCError::bad_request(
                     "cannot restore a dense Tensor from",

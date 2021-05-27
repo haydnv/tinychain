@@ -62,7 +62,7 @@ impl ChainInstance for SyncChain {
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let subject = txn.get(source, Value::None).await?;
-        self.subject.restore(*txn.id(), subject).await?;
+        self.subject.restore(txn, subject).await?;
 
         let mut block = self.history.write_latest(*txn.id()).await?;
         *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
