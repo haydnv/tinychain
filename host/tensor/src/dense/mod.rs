@@ -6,8 +6,9 @@ use afarray::{Array, ArrayInstance};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
-use futures::future::TryFutureExt;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
+use log::debug;
 use number_general::{Number, NumberClass, NumberType};
 
 use tc_error::*;
@@ -17,8 +18,8 @@ use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
-    Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess, TensorIO, TensorInstance,
-    TensorTransform, TensorType,
+    Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorDualIO, TensorIO,
+    TensorInstance, TensorTransform, TensorType,
 };
 
 use access::*;
@@ -392,6 +393,61 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorI
     }
 }
 
+#[async_trait]
+impl<
+        F: File<Array>,
+        D: Dir,
+        T: Transaction<D>,
+        B: DenseAccess<F, D, T>,
+        OT: DenseAccess<F, D, T>,
+    > TensorDualIO<D, DenseTensor<F, D, T, OT>> for DenseTensor<F, D, T, B>
+{
+    async fn mask(&self, _txn: T, _other: DenseTensor<F, D, T, OT>) -> TCResult<()> {
+        Err(TCError::not_implemented("DenseTensor::mask"))
+    }
+
+    async fn write(&self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, OT>) -> TCResult<()> {
+        debug!("write dense tensor to dense {}", bounds);
+
+        let txn_id = *txn.id();
+        let coords = bounds.affected();
+        let slice = self.slice(bounds.clone())?;
+        let other = other
+            .broadcast(slice.shape().clone())?
+            .as_type(self.dtype())?;
+
+        let other_values = other.blocks.value_stream(txn).await?;
+        let values = futures::stream::iter(coords).zip(other_values);
+
+        values
+            .map(|(coord, r)| r.map(|value| (coord, value)))
+            .inspect_ok(|(coord, value)| debug!("write {} at {:?}", value, coord))
+            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
+    TensorDualIO<D, Tensor<F, D, T>> for DenseTensor<F, D, T, B>
+{
+    async fn mask(&self, txn: T, other: Tensor<F, D, T>) -> TCResult<()> {
+        match other {
+            Tensor::Dense(dense) => self.mask(txn, dense).await,
+        }
+    }
+
+    async fn write(&self, txn: T, bounds: Bounds, other: Tensor<F, D, T>) -> TCResult<()> {
+        match other {
+            Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
+        }
+    }
+}
+
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
     for DenseTensor<F, D, T, B>
 {
@@ -405,7 +461,19 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorTransform<D>
     for DenseTensor<F, D, T, B>
 {
+    type Broadcast = DenseTensor<F, D, T, BlockListBroadcast<F, D, T, B>>;
+    type Cast = DenseTensor<F, D, T, BlockListCast<F, D, T, B>>;
     type Slice = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
+        let blocks = BlockListCast::new(self.blocks.clone(), dtype);
+        Ok(DenseTensor::from(blocks))
+    }
+
+    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
+        let blocks = BlockListBroadcast::new(self.blocks.clone(), shape)?;
+        Ok(DenseTensor::from(blocks))
+    }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let blocks = self.blocks.clone().slice(bounds)?;

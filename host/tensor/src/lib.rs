@@ -68,8 +68,26 @@ pub trait TensorIO<D: Dir>: TensorAccess + Sized {
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
+#[async_trait]
+pub trait TensorDualIO<D: Dir, O>: TensorIO<D> + Sized {
+    async fn mask(&self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
+
+    async fn write(
+        &self,
+        txn: <Self as TensorIO<D>>::Txn,
+        bounds: bounds::Bounds,
+        value: O,
+    ) -> TCResult<()>;
+}
+
 pub trait TensorTransform<D: Dir>: TensorAccess + Sized {
+    type Broadcast: TensorInstance<D>;
+    type Cast: TensorInstance<D>;
     type Slice: TensorInstance<D>;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
+
+    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self::Broadcast>;
 
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
 }
@@ -187,8 +205,41 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> 
     }
 }
 
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
+    for Tensor<F, D, T>
+{
+    async fn mask(&self, txn: T, other: Self) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.mask(txn, other).await,
+        }
+    }
+
+    async fn write(&self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
+        debug!("write {} to {}", value, bounds);
+
+        match self {
+            Self::Dense(dense) => dense.write(txn, bounds, value).await,
+        }
+    }
+}
+
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F, D, T> {
+    type Broadcast = Self;
+    type Cast = Self;
     type Slice = Self;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
+        match self {
+            Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
+        }
+    }
+
+    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
+        match self {
+            Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
+        }
+    }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
         match self {
