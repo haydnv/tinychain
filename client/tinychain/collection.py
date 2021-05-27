@@ -5,7 +5,7 @@ from .ref import If, OpRef
 from .reflect import Meta
 from .state import Map, State
 from .util import *
-from .value import Bool, Nil, Number, UInt, Value
+from .value import Bool, F32, Nil, Number, UInt, Value
 
 
 class Bound(object):
@@ -277,6 +277,20 @@ class Tensor(Collection):
     "An n-dimensional array of numbers."
 
     __uri__ = uri(Collection) + "/tensor"
+
+    class Schema(object):
+        """
+        A `Tensor` schema which comprises a shape and data type.
+
+        The data type must be a subclass of `Number` and defaults to `F32`.s
+        """
+
+        def __init__(self, shape, dtype=F32):
+            self.shape = shape
+            self.dtype = dtype
+
+        def __json__(self):
+            return to_json([self.shape, str(uri(self.dtype))])
 
     def __getitem__(self, bounds):
         if not isinstance(bounds, tuple):

@@ -41,6 +41,30 @@ class DenseTensorTests(unittest.TestCase):
         cls.host.stop()
 
 
+
+class ChainTests(PersistenceTest, unittest.TestCase):
+    NUM_HOSTS = 4
+    NAME = "tensor"
+
+    def cluster(self, chain_type):
+        class Persistent(tc.Cluster):
+            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/tensor")
+
+            def _configure(self):
+                schema = tc.Tensor.Schema([2, 3], tc.I32)
+                self.dense = chain_type(tc.Tensor.Dense(schema))
+
+        return Persistent
+
+    def execute(self, hosts):
+        hosts[0].put("/test/tensor/dense", [0, 0], 1)
+
+        for host in hosts:
+            actual = host.get("/test/tensor/dense")
+            expected = expect(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
+            self.assertEqual(actual, expected)
+
+
 def expect(dtype, shape, flat):
     return {
         str(tc.uri(tc.Tensor.Dense)): [
