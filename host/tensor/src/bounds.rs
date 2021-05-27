@@ -363,6 +363,10 @@ impl Shape {
         true
     }
 
+    pub fn into_vec(self) -> Vec<u64> {
+        self.0
+    }
+
     pub fn size(&self) -> u64 {
         self.0.iter().product()
     }

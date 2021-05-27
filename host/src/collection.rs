@@ -26,7 +26,7 @@ pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
 
 #[cfg(feature = "tensor")]
-pub use tc_tensor::TensorType;
+pub use tc_tensor::{DenseAccess, TensorType};
 
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
@@ -36,6 +36,10 @@ pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Tx
 
 #[cfg(feature = "tensor")]
 pub type Tensor = tc_tensor::Tensor<fs::File<afarray::Array>, fs::Dir, Txn>;
+#[cfg(feature = "tensor")]
+pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<afarray::Array>, fs::Dir, Txn, B>;
+#[cfg(feature = "tensor")]
+pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<afarray::Array>, fs::Dir, Txn>;
 
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -157,6 +161,13 @@ impl From<TableIndex> for Collection {
 impl From<Tensor> for Collection {
     fn from(tensor: Tensor) -> Self {
         Self::Tensor(tensor)
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl<B: DenseAccess<fs::File<afarray::Array>, fs::Dir, Txn>> From<DenseTensor<B>> for Collection {
+    fn from(tensor: DenseTensor<B>) -> Self {
+        Self::Tensor(tensor.into())
     }
 }
 

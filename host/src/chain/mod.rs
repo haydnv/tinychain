@@ -17,6 +17,8 @@ use tcgeneric::*;
 use crate::collection::{
     BTree, BTreeFile, Collection, CollectionType, Table, TableIndex, TableType,
 };
+#[cfg(feature = "tensor")]
+use crate::collection::{DenseTensor, DenseTensorFile, Tensor, TensorType};
 use crate::fs;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
@@ -47,6 +49,8 @@ pub const EXT: &str = "chain";
 pub enum Schema {
     BTree(tc_btree::RowSchema),
     Table(tc_table::TableSchema),
+    #[cfg(feature = "tensor")]
+    Tensor(tc_tensor::Schema),
     Value(Value),
 }
 
@@ -61,12 +65,12 @@ impl Schema {
                             TCError::bad_request("invalid Collection type", class)
                         })?;
 
+                        let schema = Value::try_cast_from(schema, |s| {
+                            TCError::bad_request("expected a Value for chain schema, not", s)
+                        })?;
+
                         match class {
                             CollectionType::BTree(_) => {
-                                let schema = Value::try_cast_from(schema, |s| {
-                                    TCError::bad_request("invalid BTree schema", s)
-                                })?;
-
                                 let schema = schema.try_cast_into(|s| {
                                     TCError::bad_request("invalid BTree schema", s)
                                 })?;
@@ -74,10 +78,6 @@ impl Schema {
                                 Ok(Self::BTree(schema))
                             }
                             CollectionType::Table(_) => {
-                                let schema = Value::try_cast_from(schema, |s| {
-                                    TCError::bad_request("invalid Table schema", s)
-                                })?;
-
                                 let schema = schema.try_cast_into(|s| {
                                     TCError::bad_request("invalid Table schema", s)
                                 })?;
@@ -86,10 +86,14 @@ impl Schema {
                             }
 
                             #[cfg(feature = "tensor")]
-                            CollectionType::Tensor(tt) => Err(TCError::not_implemented(format!(
-                                "chain Schema from scalar for {}",
-                                tt
-                            ))),
+                            CollectionType::Tensor(_) => {
+                                let (shape, dtype): (Vec<u64>, ValueType) =
+                                    schema.try_cast_into(|s| {
+                                        TCError::bad_request("invalid Tensor schema", s)
+                                    })?;
+
+                                Ok(Self::Tensor((shape.into(), dtype.try_into()?)))
+                            }
                         }
                     }
                     other => Err(TCError::bad_request("invalid Chain schema", other)),
@@ -127,6 +131,15 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.encode_entry(TableType::default().path(), (schema,))?;
                 map.end()
             }
+            #[cfg(feature = "tensor")]
+            Self::Tensor((shape, dtype)) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(
+                    TensorType::Dense.path(),
+                    ((shape.into_vec(), ValueType::from(dtype).path()),),
+                )?;
+                map.end()
+            }
             Self::Value(value) => value.into_stream(encoder),
         }
     }
@@ -137,6 +150,8 @@ impl<'en> en::IntoStream<'en> for Schema {
 pub enum Subject {
     BTree(BTreeFile),
     Table(TableIndex),
+    #[cfg(feature = "tensor")]
+    Tensor(DenseTensor<DenseTensorFile>),
     Value(fs::File<Value>),
 }
 
@@ -156,6 +171,16 @@ impl Subject {
             Schema::Table(schema) => {
                 TableIndex::create(schema, dir, txn_id)
                     .map_ok(Self::Table)
+                    .await
+            }
+            #[cfg(feature = "tensor")]
+            Schema::Tensor(schema) => {
+                let file = dir
+                    .create_file(txn_id, SUBJECT.into(), TensorType::Dense)
+                    .await?;
+
+                DenseTensor::create(file, schema, txn_id)
+                    .map_ok(Self::Tensor)
                     .await
             }
             Schema::Value(value) => {
@@ -189,6 +214,16 @@ impl Subject {
                         .await
                 }
             }
+            #[cfg(feature = "tensor")]
+            Schema::Tensor(schema) => {
+                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
+                    DenseTensor::load(txn, schema, file)
+                        .map_ok(Self::Tensor)
+                        .await
+                } else {
+                    Self::create(Schema::Tensor(schema), dir, *txn.id()).await
+                }
+            }
             Schema::Value(value) => {
                 if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
                     Ok(Self::Value(file))
@@ -213,6 +248,16 @@ impl Subject {
                 }
                 other => Err(TCError::bad_request("cannot restore a Table from", other)),
             },
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_tensor) => match backup {
+                State::Collection(Collection::Tensor(Tensor::Dense(_backup))) => {
+                    unimplemented!()
+                }
+                other => Err(TCError::bad_request(
+                    "cannot restore a dense Tensor from",
+                    other,
+                )),
+            },
             Self::Value(file) => {
                 let backup = backup.try_into()?;
                 let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
@@ -229,6 +274,8 @@ impl Transact for Subject {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
             Self::Value(file) => file.commit(txn_id).await,
         }
     }
@@ -237,6 +284,8 @@ impl Transact for Subject {
         match self {
             Self::BTree(btree) => btree.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
             Self::Value(file) => file.finalize(txn_id).await,
         }
     }
@@ -275,6 +324,8 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
                 State::from(value.clone()).into_view(txn).await
             }
             Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
             Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
         }
     }
@@ -285,6 +336,8 @@ impl fmt::Display for Subject {
         match self {
             Self::BTree(btree) => write!(f, "chain Subject, {}", btree.class()),
             Self::Table(table) => write!(f, "chain Subject, {}", table.class()),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_) => write!(f, "chain Subject, {}", TensorType::Dense),
             Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
         }
     }

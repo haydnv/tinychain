@@ -13,8 +13,8 @@ use number_general::{Number, NumberClass, NumberInstance, NumberType};
 use strided::Stride;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, Dir, File};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
@@ -29,8 +29,7 @@ const MEBIBYTE: usize = 1_048_576;
 #[derive(Clone)]
 pub struct BlockListFile<F, D, T> {
     file: F,
-    dtype: NumberType,
-    shape: Shape,
+    schema: Schema,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
@@ -76,9 +75,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
             .await?;
 
         Ok(BlockListFile {
-            dtype,
-            shape,
             file,
+            schema: (shape, dtype),
             dir: PhantomData,
             txn: PhantomData,
         })
@@ -101,9 +99,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         }
 
         Ok(BlockListFile {
-            dtype,
-            shape,
             file,
+            schema: (shape, dtype),
             dir: PhantomData,
             txn: PhantomData,
         })
@@ -171,19 +168,19 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
 
 impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
     fn dtype(&self) -> NumberType {
-        self.dtype
+        self.schema.1
     }
 
     fn ndim(&self) -> usize {
-        self.shape.len()
+        self.schema.0.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+        &self.schema.0
     }
 
     fn size(&self) -> u64 {
-        self.shape.size()
+        self.schema.0.size()
     }
 }
 
@@ -285,7 +282,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
                 ));
             }
 
-            let value = value.into_type(self.dtype);
+            let value = value.into_type(self.dtype());
 
             let offset: u64 = coord_bounds(self.shape())
                 .iter()
@@ -342,6 +339,67 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFile
 
             Ok((coord, value))
         })
+    }
+}
+
+#[async_trait]
+impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact for BlockListFile<F, D, T> {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.file.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.file.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> CopyFrom<D, T, B>
+    for BlockListFile<F, D, T>
+{
+    async fn copy_from(_instance: B, _file: F, _txn_id: TxnId) -> TCResult<Self> {
+        unimplemented!("BlockListFile::copy_from")
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T> for BlockListFile<F, D, T> {
+    type Schema = Schema;
+    type Store = F;
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    async fn load(_txn: &T, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
+        Ok(Self {
+            file,
+            schema,
+            dir: PhantomData,
+            txn: PhantomData,
+        })
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D, T> for BlockListFile<F, D, T> {
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        if self.schema.0 != backup.schema.0 {
+            return Err(TCError::bad_request(
+                "cannot restore a dense Tensor from a backup with a different shape",
+                &backup.schema.0,
+            ));
+        }
+
+        if self.schema.1 != backup.schema.1 {
+            return Err(TCError::bad_request(
+                "cannot restore a dense Tensor from a backup with a different data type",
+                &backup.schema.1,
+            ));
+        }
+
+        self.file.truncate(txn_id).await?;
+        self.file.copy_from(&backup.file, txn_id).await
     }
 }
 
@@ -407,8 +465,7 @@ impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T>
         if size == shape.size() {
             Ok(Self {
                 file,
-                shape,
-                dtype,
+                schema: (shape, dtype),
                 dir: PhantomData,
                 txn: PhantomData,
             })
@@ -678,7 +735,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         let txn_id = *txn.id();
         let file = self.source.file;
-        let shape = self.source.shape;
+        let shape = self.source.schema.0;
         let mut bounds = self.rebase.bounds().clone();
         bounds.normalize(&shape);
         let coord_bounds = coord_bounds(&shape);

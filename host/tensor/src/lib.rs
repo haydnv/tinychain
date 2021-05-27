@@ -12,10 +12,11 @@ use log::debug;
 use number_general::{Number, NumberType};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
-    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, Tuple,
+    label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf,
+    TCTryStream, Tuple,
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -193,6 +194,15 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F,
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
         }
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>> Hash<'en> for Tensor<F, D, T> {
+    type Item = Array;
+
+    async fn hashable(&'en self, _txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
+        unimplemented!()
     }
 }
 

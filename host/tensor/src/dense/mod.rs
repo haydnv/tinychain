@@ -1,4 +1,5 @@
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::marker::PhantomData;
 
 use afarray::{Array, ArrayInstance};
@@ -7,16 +8,16 @@ use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
 use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
-use number_general::{Number, NumberType};
+use number_general::{Number, NumberClass, NumberType};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
-    Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess, TensorIO, TensorInstance,
+    Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess, TensorIO, TensorInstance,
     TensorTransform, TensorType,
 };
 
@@ -306,6 +307,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFile<F, D, T>> {
+    pub async fn create(file: F, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
+        let (shape, dtype) = schema;
+        BlockListFile::constant(file, txn_id, shape, dtype.zero())
+            .map_ok(Self::from)
+            .await
+    }
+
     pub async fn constant<S>(file: F, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
     where
         Shape: From<S>,
@@ -405,6 +413,72 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorT
     }
 }
 
+#[async_trait]
+impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact
+    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+{
+    async fn commit(&self, txn_id: &TxnId) {
+        self.blocks.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.blocks.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Hash<'en>
+    for DenseTensor<F, D, T, B>
+{
+    type Item = Array;
+
+    async fn hashable(&'en self, _txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
+        unimplemented!()
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
+    CopyFrom<D, T, DenseTensor<F, D, T, B>> for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+{
+    async fn copy_from(
+        instance: DenseTensor<F, D, T, B>,
+        file: F,
+        txn_id: TxnId,
+    ) -> TCResult<Self> {
+        BlockListFile::copy_from(instance.blocks, file, txn_id)
+            .map_ok(Self::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D, T>
+    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+{
+    type Schema = Schema;
+    type Store = F;
+
+    fn schema(&self) -> &Self::Schema {
+        self.blocks.schema()
+    }
+
+    async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        BlockListFile::load(txn, schema, store)
+            .map_ok(Self::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D, T>
+    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+{
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        self.blocks.restore(&backup.blocks, txn_id).await
+    }
+}
+
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> From<B>
     for DenseTensor<F, D, T, B>
 {
@@ -438,6 +512,14 @@ where
         decoder
             .decode_seq(DenseTensorVisitor::new(txn_id, file))
             .await
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> fmt::Display
+    for DenseTensor<F, D, T, B>
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a dense Tensor")
     }
 }
 

@@ -13,6 +13,8 @@ use safecast::*;
 use tc_btree::BTreeInstance;
 use tc_error::*;
 use tc_table::TableInstance;
+#[cfg(feature = "tensor")]
+use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
@@ -124,10 +126,32 @@ impl History {
                 }
 
                 #[cfg(feature = "tensor")]
-                Collection::Tensor(tensor) => Err(TCError::not_implemented(format!(
-                    "History::save_state {}",
-                    tensor
-                ))),
+                Collection::Tensor(Tensor::Dense(tensor)) => {
+                    let hash = tensor.hash_hex(txn_id).await?.parse()?;
+                    let shape: Tuple<Value> = tensor
+                        .shape()
+                        .to_vec()
+                        .into_iter()
+                        .map(Value::from)
+                        .collect();
+
+                    let dtype = tc_value::ValueType::from(tensor.dtype()).path();
+                    let classpath = TensorType::Dense.path();
+
+                    if !self.dir.contains(&txn_id, &hash).await? {
+                        let file = self
+                            .dir
+                            .create_file(txn_id, hash.clone(), TensorType::Dense)
+                            .await?;
+                        DenseTensor::copy_from(tensor, file, txn_id).await?;
+                    }
+
+                    Ok(OpRef::Get((
+                        (hash.into(), classpath).into(),
+                        Value::Tuple(vec![shape.into(), dtype.into()].into()).into(),
+                    ))
+                    .into())
+                }
             },
             State::Scalar(value) => Ok(value),
             other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),

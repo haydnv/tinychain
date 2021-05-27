@@ -1,12 +1,13 @@
 use std::convert::TryFrom;
 
+use afarray::Array;
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseTensor, TensorAccess, TensorIO, TensorTransform, TensorType,
+    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorIO, TensorTransform, TensorType,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -105,11 +106,15 @@ impl Route for TensorType {
     }
 }
 
-struct TensorHandler<'a> {
-    tensor: &'a Tensor,
+struct TensorHandler<'a, T> {
+    tensor: &'a T,
 }
 
-impl<'a> Handler<'a> for TensorHandler<'a> {
+impl<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Send + Sync> Handler<'a>
+    for TensorHandler<'a, T>
+where
+    Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
+{
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
@@ -169,19 +174,37 @@ impl<'a> Handler<'a> for TensorHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Tensor> for TensorHandler<'a> {
-    fn from(tensor: &'a Tensor) -> Self {
+impl<'a, T> From<&'a T> for TensorHandler<'a, T> {
+    fn from(tensor: &'a T) -> Self {
         Self { tensor }
+    }
+}
+
+impl<B: DenseAccess<fs::File<Array>, fs::Dir, Txn>> Route
+    for DenseTensor<fs::File<Array>, fs::Dir, Txn, B>
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        route(self, path)
     }
 }
 
 impl Route for Tensor {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(TensorHandler::from(self)))
-        } else {
-            None
-        }
+        route(self, path)
+    }
+}
+
+fn route<'a, T: TensorIO<fs::Dir, Txn = Txn> + TensorTransform<fs::Dir> + Send + Sync>(
+    tensor: &'a T,
+    path: &'a [PathSegment],
+) -> Option<Box<dyn Handler<'a> + 'a>>
+where
+    Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
+{
+    if path.is_empty() {
+        Some(Box::new(TensorHandler::from(tensor)))
+    } else {
+        None
     }
 }
 

@@ -318,6 +318,13 @@ impl From<Table> for State {
     }
 }
 
+#[cfg(feature = "tensor")]
+impl From<Tensor> for State {
+    fn from(tensor: Tensor) -> Self {
+        Self::Collection(tensor.into())
+    }
+}
+
 impl From<Tuple<State>> for State {
     fn from(tuple: Tuple<State>) -> Self {
         Self::Tuple(tuple)
