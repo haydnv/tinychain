@@ -135,7 +135,7 @@ where
                         .map(Collection::from)
                         .map(State::from)
                 } else {
-                    Err(TCError::bad_request("invalid range for tensor", key))
+                    Err(TCError::bad_request("invalid tensor bounds", key))
                 }
             })
         }))
@@ -150,14 +150,17 @@ where
                         .try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
 
                     self.tensor.write_value_at(*txn.id(), coord, value).await
-                } else if key.matches::<Bounds>() {
-                    let bounds = key.opt_cast_into().unwrap();
+                } else {
+                    let bounds = if key.is_none() {
+                        Bounds::all(self.tensor.shape())
+                    } else {
+                        key.try_cast_into(|v| TCError::bad_request("invalid tensor bounds", v))?
+                    };
+
                     let value = value
                         .try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
 
                     self.tensor.write_value(*txn.id(), bounds, value).await
-                } else {
-                    Err(TCError::bad_request("invalid range for tensor", key))
                 }
             })
         }))

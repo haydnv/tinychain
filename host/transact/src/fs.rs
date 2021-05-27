@@ -301,15 +301,16 @@ pub trait Restore<D: Dir>: Persist<D> {
 
 /// Defines a standard hash for a persistent state.
 #[async_trait]
-pub trait Hash<'en> {
+pub trait Hash<'en, D: Dir> {
     type Item: en::IntoStream<'en> + Send + 'en;
+    type Txn: Transaction<D>;
 
-    async fn hash_hex(&'en self, txn_id: TxnId) -> TCResult<String> {
-        self.hash(txn_id).map_ok(|hash| hex::encode(hash)).await
+    async fn hash_hex(&'en self, txn: &'en Self::Txn) -> TCResult<String> {
+        self.hash(txn).map_ok(|hash| hex::encode(hash)).await
     }
 
-    async fn hash(&'en self, txn_id: TxnId) -> TCResult<Bytes> {
-        let mut data = self.hashable(txn_id).await?;
+    async fn hash(&'en self, txn: &'en Self::Txn) -> TCResult<Bytes> {
+        let mut data = self.hashable(txn).await?;
 
         let mut hasher = Sha256::default();
         while let Some(item) = data.try_next().await? {
@@ -320,7 +321,7 @@ pub trait Hash<'en> {
         Ok(Bytes::from(digest.to_vec()))
     }
 
-    async fn hashable(&'en self, txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>>;
+    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCTryStream<'en, Self::Item>>;
 }
 
 async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(

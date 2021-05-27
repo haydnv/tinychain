@@ -87,11 +87,12 @@ pub trait BTreeInstance: Clone + Instance {
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> Hash<'en> for BTree<F, D, T> {
+impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> Hash<'en, D> for BTree<F, D, T> {
     type Item = Key;
+    type Txn = T;
 
-    async fn hashable(&'en self, txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
-        self.clone().keys(txn_id).await
+    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
+        self.clone().keys(*txn.id()).await
     }
 }
 

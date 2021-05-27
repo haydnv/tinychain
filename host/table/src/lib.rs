@@ -482,11 +482,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Ta
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en> for Table<F, D, Txn> {
+impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en, D> for Table<F, D, Txn> {
     type Item = Vec<Value>;
+    type Txn = Txn;
 
-    async fn hashable(&'en self, txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
-        self.clone().rows(txn_id).await
+    async fn hashable(&'en self, txn: &'en Txn) -> TCResult<TCTryStream<'en, Self::Item>> {
+        self.clone().rows(*txn.id()).await
     }
 }
 

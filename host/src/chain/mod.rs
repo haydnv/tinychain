@@ -10,7 +10,7 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use tc_btree::BTreeType;
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore, Store};
+use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -258,8 +258,7 @@ impl Subject {
                         .await?;
 
                     let backup =
-                        DenseTensor::<DenseTensorFile>::copy_from(backup, file, txn.clone())
-                            .await?;
+                        tc_transact::fs::CopyFrom::copy_from(backup, file, txn.clone()).await?;
 
                     tensor.restore(&backup, txn_id).await
                 }

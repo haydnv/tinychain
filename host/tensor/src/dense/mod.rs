@@ -427,13 +427,14 @@ impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact
 }
 
 #[async_trait]
-impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Hash<'en>
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Hash<'en, D>
     for DenseTensor<F, D, T, B>
 {
     type Item = Array;
+    type Txn = T;
 
-    async fn hashable(&'en self, _txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
-        unimplemented!()
+    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
+        self.blocks.clone().block_stream(txn.clone()).await
     }
 }
 

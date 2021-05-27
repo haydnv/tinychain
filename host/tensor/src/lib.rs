@@ -198,11 +198,14 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F,
 }
 
 #[async_trait]
-impl<'en, F: File<Array>, D: Dir, T: Transaction<D>> Hash<'en> for Tensor<F, D, T> {
+impl<'en, F: File<Array>, D: Dir, T: Transaction<D>> Hash<'en, D> for Tensor<F, D, T> {
     type Item = Array;
+    type Txn = T;
 
-    async fn hashable(&'en self, _txn_id: TxnId) -> TCResult<TCTryStream<'en, Self::Item>> {
-        unimplemented!()
+    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
+        match self {
+            Self::Dense(dense) => dense.hashable(txn).await,
+        }
     }
 }
 

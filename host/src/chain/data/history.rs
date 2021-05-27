@@ -91,7 +91,7 @@ impl History {
         match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
-                    let hash: Id = btree.hash_hex(txn_id).await?.parse()?;
+                    let hash: Id = btree.hash_hex(&txn).await?.parse()?;
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
@@ -111,7 +111,7 @@ impl History {
                     .into())
                 }
                 Collection::Table(table) => {
-                    let hash: Id = table.hash_hex(txn_id).await?.parse()?;
+                    let hash: Id = table.hash_hex(&txn).await?.parse()?;
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
@@ -129,7 +129,7 @@ impl History {
 
                 #[cfg(feature = "tensor")]
                 Collection::Tensor(Tensor::Dense(tensor)) => {
-                    let hash = tensor.hash_hex(txn_id).await?.parse()?;
+                    let hash = tensor.hash_hex(&txn).await?.parse()?;
                     let shape: Tuple<Value> = tensor
                         .shape()
                         .to_vec()
