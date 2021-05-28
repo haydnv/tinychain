@@ -60,7 +60,18 @@ pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync
 }
 
 #[async_trait]
-pub trait TensorIO<D: Dir>: TensorAccess + Sized {
+pub trait TensorBoolean<D: Dir, O>: TensorAccess {
+    type Combine: TensorInstance<D>;
+
+    fn and(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn or(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn xor(&self, other: &O) -> TCResult<Self::Combine>;
+}
+
+#[async_trait]
+pub trait TensorIO<D: Dir>: TensorAccess {
     type Txn: Transaction<D>;
 
     async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number>;
@@ -71,7 +82,7 @@ pub trait TensorIO<D: Dir>: TensorAccess + Sized {
 }
 
 #[async_trait]
-pub trait TensorDualIO<D: Dir, O>: TensorIO<D> + Sized {
+pub trait TensorDualIO<D: Dir, O>: TensorIO<D> {
     async fn mask(&self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
 
     async fn write(
@@ -82,7 +93,7 @@ pub trait TensorDualIO<D: Dir, O>: TensorIO<D> + Sized {
     ) -> TCResult<()>;
 }
 
-pub trait TensorMath<D: Dir, O>: TensorAccess + Sized {
+pub trait TensorMath<D: Dir, O>: TensorAccess {
     type Combine: TensorInstance<D>;
 
     fn add(&self, other: &O) -> TCResult<Self::Combine>;
@@ -215,6 +226,28 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorInstance<D> for Tensor<F, 
     }
 }
 
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorBoolean<D, Self> for Tensor<F, D, T> {
+    type Combine = Self;
+
+    fn and(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.and(other),
+        }
+    }
+
+    fn or(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.or(other),
+        }
+    }
+
+    fn xor(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.xor(other),
+        }
+    }
+}
+
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> {
     type Txn = T;
@@ -245,9 +278,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> 
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
-    for Tensor<F, D, T>
-{
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Self> for Tensor<F, D, T> {
     async fn mask(&self, txn: T, other: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.mask(txn, other).await,
@@ -263,7 +294,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Tensor<F, D, T>> for Tensor<F, D, T> {
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Self> for Tensor<F, D, T> {
     type Combine = Self;
 
     fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {

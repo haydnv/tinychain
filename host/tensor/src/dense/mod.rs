@@ -19,8 +19,9 @@ use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
-    Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorDualIO, TensorIO,
-    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType, TensorUnary,
+    Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorUnary,
 };
 
 use access::*;
@@ -394,6 +395,53 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorI
 
     fn into_dense(self) -> Self::Dense {
         self
+    }
+}
+
+impl<F, D, T, B, O> TensorBoolean<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
+    O: DenseAccess<F, D, T>,
+{
+    type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+
+    fn and(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::and, Number::and, NumberType::Bool)
+    }
+
+    fn or(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::or, Number::or, NumberType::Bool)
+    }
+
+    fn xor(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::xor, Number::xor, NumberType::Bool)
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
+    TensorBoolean<D, Tensor<F, D, T>> for DenseTensor<F, D, T, B>
+{
+    type Combine = Tensor<F, D, T>;
+
+    fn and(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(dense) => self.and(dense).map(Tensor::from),
+        }
+    }
+
+    fn or(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(dense) => self.or(dense).map(Tensor::from),
+        }
+    }
+
+    fn xor(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(dense) => self.xor(dense).map(Tensor::from),
+        }
     }
 }
 

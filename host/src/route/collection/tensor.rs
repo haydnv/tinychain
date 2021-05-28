@@ -7,8 +7,8 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorDualIO,
-    TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
+    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorBoolean,
+    TensorDualIO, TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -107,18 +107,18 @@ impl Route for TensorType {
     }
 }
 
-struct MathHandler<'a, T> {
+struct DualHandler<'a, T> {
     tensor: &'a T,
     op: fn(&'a T, &Tensor) -> TCResult<Tensor>,
 }
 
-impl<'a, T> MathHandler<'a, T> {
+impl<'a, T> DualHandler<'a, T> {
     fn new(tensor: &'a T, op: fn(&'a T, &Tensor) -> TCResult<Tensor>) -> Self {
         Self { tensor, op }
     }
 }
 
-impl<'a, T> Handler<'a> for MathHandler<'a, T>
+impl<'a, T> Handler<'a> for DualHandler<'a, T>
 where
     T: TensorMath<fs::Dir, Tensor, Combine = Tensor> + Send + Sync + 'a,
 {
@@ -281,6 +281,7 @@ impl Route for Tensor {
 fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
     T: TensorIO<fs::Dir, Txn = Txn>
+        + TensorBoolean<fs::Dir, Tensor, Combine = Tensor>
         + TensorDualIO<fs::Dir, Tensor>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorTransform<fs::Dir>
@@ -296,6 +297,11 @@ where
         Some(Box::new(TensorHandler::from(tensor)))
     } else if path.len() == 1 {
         match path[0].as_str() {
+            // boolean ops
+            "and" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::and))),
+            "or" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::or))),
+            "xor" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::xor))),
+
             // unary ops
             "abs" => Some(Box::new(UnaryHandler::new(
                 tensor.clone().into(),
@@ -315,10 +321,10 @@ where
             ))),
 
             // basic math
-            "add" => Some(Box::new(MathHandler::new(tensor, TensorMath::add))),
-            "div" => Some(Box::new(MathHandler::new(tensor, TensorMath::div))),
-            "mul" => Some(Box::new(MathHandler::new(tensor, TensorMath::mul))),
-            "sub" => Some(Box::new(MathHandler::new(tensor, TensorMath::sub))),
+            "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),
+            "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
+            "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
+            "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
 
             _ => None,
         }
