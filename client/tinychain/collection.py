@@ -246,6 +246,16 @@ class Table(Collection):
 
         return self._get("select", columns, Table)
 
+    def update(self, **values):
+        """
+        Update this `Table`\'s rows to the given values.
+
+        To limit the range of this update, use the `where` method, e.g.
+        `table.where(foo="bar").update(foo="baz")`.
+        """
+
+        return self._post("update", Nil, **values)
+
     def upsert(self, key, values=[]):
         """
         Insert the given row into this `Table`.

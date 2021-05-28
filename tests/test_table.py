@@ -54,6 +54,20 @@ class TableTests(unittest.TestCase):
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(remaining))
 
+    def testUpdateSlice(self):
+        count = 50
+        values = [[v] for v in range(count)]
+        keys = [[num2words(i)] for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.update = tc.After(cxt.inserts, cxt.table.where(views=slice(10)).update(views=0))
+        cxt.result = tc.After(cxt.update, cxt.table.where(views=slice(1)).count())
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, 10)
+
     def testGroupBy(self):
         count = 50
         values = [(v % 2,) for v in range(count)]

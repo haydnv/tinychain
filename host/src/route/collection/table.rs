@@ -317,6 +317,36 @@ impl<'a, T> From<&'a T> for TableHandler<'a, T> {
     }
 }
 
+struct UpdateHandler<T> {
+    table: T,
+}
+
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for UpdateHandler<T> {
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|txn, value| {
+            Box::pin(async move {
+                let value = value
+                    .into_iter()
+                    .map(|(col, v)| {
+                        Value::try_cast_from(v, |v| {
+                            TCError::bad_request("invalid Value for Table row", v)
+                        })
+                        .map(|v| (col, v))
+                    })
+                    .collect::<TCResult<Map<Value>>>()?;
+
+                self.table.update(&txn, value).map_ok(State::from).await
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for UpdateHandler<T> {
+    fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
 impl Route for Table {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
@@ -337,13 +367,16 @@ fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
     if path.is_empty() {
         Some(Box::new(TableHandler::from(table)))
     } else if path.len() == 1 {
+        let table = table.clone();
+
         match path[0].as_str() {
-            "contains" => Some(Box::new(ContainsHandler::from(table.clone()))),
-            "count" => Some(Box::new(CountHandler::from(table.clone()))),
-            "limit" => Some(Box::new(LimitHandler::from(table.clone()))),
-            "group" => Some(Box::new(GroupHandler::from(table.clone()))),
-            "order" => Some(Box::new(OrderHandler::from(table.clone()))),
-            "select" => Some(Box::new(SelectHandler::from(table.clone()))),
+            "contains" => Some(Box::new(ContainsHandler::from(table))),
+            "count" => Some(Box::new(CountHandler::from(table))),
+            "limit" => Some(Box::new(LimitHandler::from(table))),
+            "group" => Some(Box::new(GroupHandler::from(table))),
+            "order" => Some(Box::new(OrderHandler::from(table))),
+            "select" => Some(Box::new(SelectHandler::from(table))),
+            "update" => Some(Box::new(UpdateHandler::from(table))),
             _ => None,
         }
     } else {
