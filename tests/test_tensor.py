@@ -84,6 +84,26 @@ class DenseTensorTests(unittest.TestCase):
         expected = expect(tc.I64, shape, np.arange(-2, 4, 2))
         self.assertEqual(actual, expected)
 
+    def testLogic(self):
+        big = [20, 20, 10]
+        trailing = [10]
+
+        cxt = tc.Context()
+        cxt.big_ones = tc.Tensor.Dense.ones(big, tc.U8)
+        cxt.big_zeros = tc.Tensor.Dense.zeros(big, tc.U8)
+        cxt.true = tc.Tensor.Dense.ones(trailing)
+        cxt.false = tc.Tensor.Dense.zeros(trailing)
+        cxt.result = [
+            cxt.big_ones.logical_and(cxt.false).any(),
+            cxt.big_ones.logical_and(cxt.true).all(),
+            cxt.big_zeros.logical_or(cxt.true).all(),
+            cxt.big_zeros.logical_or(cxt.false).any(),
+            cxt.big_ones.logical_xor(cxt.big_zeros).all(),
+        ]
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, [False, True, True, False, True])
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

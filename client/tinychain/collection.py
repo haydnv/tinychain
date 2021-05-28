@@ -314,14 +314,53 @@ class Tensor(Collection):
     def __sub__(self, other):
         return self.sub(other)
 
+    def abs(self):
+        return self._get("abs", rtype=Tensor)
+
     def add(self, other):
         return self._post("add", Tensor, r=other)
+
+    def all(self):
+        return self._get("all", rtype=Tensor)
+
+    def any(self):
+        return self._get("any", rtype=Tensor)
 
     def div(self, other):
         return self._post("div", Tensor, r=other)
 
+    def eq(self, other):
+        return self._post("eq", Tensor, r=other)
+
+    def gt(self, other):
+        return self._post("gt", Tensor, r=other)
+
+    def gte(self, other):
+        return self._post("gte", Tensor, r=other)
+
+    def lt(self, other):
+        return self._post("lt", Tensor, r=other)
+
+    def lte(self, other):
+        return self._post("lte", Tensor, r=other)
+
+    def logical_and(self, other):
+        return self._post("and", Tensor, r=other)
+
+    def logical_not(self):
+        return self._get("not", rtype=Tensor)
+
+    def logical_or(self, other):
+        return self._post("or", Tensor, r=other)
+
+    def logical_xor(self, other):
+        return self._post("xor", Tensor, r=other)
+
     def mul(self, other):
         return self._post("mul", Tensor, r=other)
+
+    def ne(self, other):
+        return self._post("ne", Tensor, r=other)
 
     def sub(self, other):
         return self._post("sub", Tensor, r=other)
@@ -342,6 +381,15 @@ class DenseTensor(Tensor):
     @classmethod
     def constant(cls, shape, value=0):
         return cls(OpRef.Get(uri(cls) + "/constant", (shape, value)))
+
+    @classmethod
+    def ones(cls, shape, dtype=F32):
+        return cls.constant(shape, dtype(1))
+
+    @classmethod
+    def zeros(cls, shape, dtype=F32):
+        return cls.constant(shape, dtype(0))
+
 
 
 Tensor.Dense = DenseTensor
