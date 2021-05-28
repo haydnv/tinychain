@@ -59,15 +59,32 @@ pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync
     fn into_dense(self) -> Self::Dense;
 }
 
-#[async_trait]
 pub trait TensorBoolean<D: Dir, O>: TensorAccess {
     type Combine: TensorInstance<D>;
 
-    fn and(&self, other: &O) -> TCResult<Self::Combine>;
+    fn and(self, other: O) -> TCResult<Self::Combine>;
 
-    fn or(&self, other: &O) -> TCResult<Self::Combine>;
+    fn or(self, other: O) -> TCResult<Self::Combine>;
 
-    fn xor(&self, other: &O) -> TCResult<Self::Combine>;
+    fn xor(self, other: O) -> TCResult<Self::Combine>;
+}
+
+#[async_trait]
+pub trait TensorCompare<D: Dir, O>: TensorIO<D> {
+    type Compare: TensorInstance<D>;
+    type Dense: TensorInstance<D>;
+
+    async fn eq(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+
+    fn gt(self, other: O) -> TCResult<Self::Compare>;
+
+    async fn gte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+
+    fn lt(self, other: O) -> TCResult<Self::Compare>;
+
+    async fn lte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+
+    fn ne(self, other: O) -> TCResult<Self::Compare>;
 }
 
 #[async_trait]
@@ -96,13 +113,13 @@ pub trait TensorDualIO<D: Dir, O>: TensorIO<D> {
 pub trait TensorMath<D: Dir, O>: TensorAccess {
     type Combine: TensorInstance<D>;
 
-    fn add(&self, other: &O) -> TCResult<Self::Combine>;
+    fn add(self, other: O) -> TCResult<Self::Combine>;
 
-    fn div(&self, other: &O) -> TCResult<Self::Combine>;
+    fn div(self, other: O) -> TCResult<Self::Combine>;
 
-    fn mul(&self, other: &O) -> TCResult<Self::Combine>;
+    fn mul(self, other: O) -> TCResult<Self::Combine>;
 
-    fn sub(&self, other: &O) -> TCResult<Self::Combine>;
+    fn sub(self, other: O) -> TCResult<Self::Combine>;
 }
 
 pub trait TensorReduce<D: Dir>: TensorIO<D> {
@@ -229,21 +246,63 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorInstance<D> for Tensor<F, 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorBoolean<D, Self> for Tensor<F, D, T> {
     type Combine = Self;
 
-    fn and(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn and(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.and(other),
         }
     }
 
-    fn or(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn or(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.or(other),
         }
     }
 
-    fn xor(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn xor(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.xor(other),
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorCompare<D, Self> for Tensor<F, D, T> {
+    type Compare = Self;
+    type Dense = Self;
+
+    async fn eq(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.eq(other, txn).await,
+        }
+    }
+
+    fn gt(self, other: Tensor<F, D, T>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.gt(other),
+        }
+    }
+
+    async fn gte(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.gte(other, txn).await,
+        }
+    }
+
+    fn lt(self, other: Tensor<F, D, T>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.lt(other),
+        }
+    }
+
+    async fn lte(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.lte(other, txn).await,
+        }
+    }
+
+    fn ne(self, other: Tensor<F, D, T>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.ne(other),
         }
     }
 }
@@ -297,25 +356,25 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Self> for Tensor
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Self> for Tensor<F, D, T> {
     type Combine = Self;
 
-    fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn add(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.add(other),
         }
     }
 
-    fn div(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn div(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.div(other),
         }
     }
 
-    fn mul(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn mul(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.mul(other),
         }
     }
 
-    fn sub(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn sub(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.sub(other),
         }

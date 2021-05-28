@@ -8,7 +8,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_tensor::{
     AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorBoolean,
-    TensorDualIO, TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
+    TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -107,21 +107,18 @@ impl Route for TensorType {
     }
 }
 
-struct DualHandler<'a, T> {
-    tensor: &'a T,
-    op: fn(&'a T, &Tensor) -> TCResult<Tensor>,
+struct DualHandler<T> {
+    tensor: T,
+    op: fn(T, Tensor) -> TCResult<Tensor>,
 }
 
-impl<'a, T> DualHandler<'a, T> {
-    fn new(tensor: &'a T, op: fn(&'a T, &Tensor) -> TCResult<Tensor>) -> Self {
+impl<T> DualHandler<T> {
+    fn new(tensor: T, op: fn(T, Tensor) -> TCResult<Tensor>) -> Self {
         Self { tensor, op }
     }
 }
 
-impl<'a, T> Handler<'a> for DualHandler<'a, T>
-where
-    T: TensorMath<fs::Dir, Tensor, Combine = Tensor> + Send + Sync + 'a,
-{
+impl<'a, T: TensorAccess + Send + Sync + 'a> Handler<'a> for DualHandler<T> {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
@@ -132,9 +129,38 @@ where
                     r.broadcast(self.tensor.shape().clone())?
                 };
 
-                (self.op)(self.tensor, &r)
+                (self.op)(self.tensor, r)
                     .map(Collection::from)
                     .map(State::from)
+            })
+        }))
+    }
+}
+
+struct DualHandlerAsync<T, F> {
+    tensor: T,
+    op: fn(T, Tensor, Txn) -> F,
+}
+
+impl<T, F> DualHandlerAsync<T, F> {
+    fn new(tensor: T, op: fn(T, Tensor, Txn) -> F) -> Self {
+        Self { tensor, op }
+    }
+}
+
+impl<'a, T, F> Handler<'a> for DualHandlerAsync<T, F>
+where
+    T: Send + Sync + 'a,
+    F: Future<Output = TCResult<Tensor>> + Send + 'a,
+{
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let other = params.require(&label("r").into())?;
+                (self.op)(self.tensor, other, txn)
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -281,6 +307,7 @@ impl Route for Tensor {
 fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
     T: TensorIO<fs::Dir, Txn = Txn>
+        + TensorCompare<fs::Dir, Tensor, Compare = Tensor, Dense = Tensor>
         + TensorBoolean<fs::Dir, Tensor, Combine = Tensor>
         + TensorDualIO<fs::Dir, Tensor>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
@@ -296,29 +323,33 @@ where
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor)))
     } else if path.len() == 1 {
+        let tensor = tensor.clone();
+
         match path[0].as_str() {
             // boolean ops
             "and" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::and))),
             "or" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::or))),
             "xor" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::xor))),
 
+            // comparison ops
+            "eq" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::eq))),
+            "gt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gt))),
+            "gte" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::gte))),
+            "lt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lt))),
+            "lte" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::lte))),
+            "ne" => Some(Box::new(DualHandler::new(tensor, TensorCompare::ne))),
+
             // unary ops
-            "abs" => Some(Box::new(UnaryHandler::new(
-                tensor.clone().into(),
-                TensorUnary::abs,
-            ))),
+            "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
-                tensor.clone().into(),
+                tensor.into(),
                 TensorUnary::all,
             ))),
             "any" => Some(Box::new(UnaryHandlerAsync::new(
-                tensor.clone().into(),
+                tensor.into(),
                 TensorUnary::any,
             ))),
-            "not" => Some(Box::new(UnaryHandler::new(
-                tensor.clone().into(),
-                TensorUnary::not,
-            ))),
+            "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
 
             // basic math
             "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),

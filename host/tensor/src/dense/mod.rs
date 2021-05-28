@@ -26,6 +26,7 @@ use super::{
 
 use access::*;
 
+use crate::TensorCompare;
 pub use file::BlockListFile;
 
 mod access;
@@ -309,8 +310,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
     }
 
     fn combine<OT: DenseAccess<F, D, T>>(
-        &self,
-        other: &DenseTensor<F, D, T, OT>,
+        self,
+        other: DenseTensor<F, D, T, OT>,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
@@ -324,8 +325,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
         }
 
         let blocks = BlockListCombine::new(
-            self.blocks.clone(),
-            other.blocks.clone(),
+            self.blocks,
+            other.blocks,
             combinator,
             value_combinator,
             dtype,
@@ -408,15 +409,15 @@ where
 {
     type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
 
-    fn and(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn and(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
-    fn or(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn or(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
-    fn xor(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn xor(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
@@ -426,21 +427,126 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
 {
     type Combine = Tensor<F, D, T>;
 
-    fn and(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn and(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.and(dense).map(Tensor::from),
         }
     }
 
-    fn or(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn or(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.or(dense).map(Tensor::from),
         }
     }
 
-    fn xor(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn xor(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.xor(dense).map(Tensor::from),
+        }
+    }
+}
+
+#[async_trait]
+impl<F, D, T, B, O> TensorCompare<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
+    O: DenseAccess<F, D, T>,
+{
+    type Compare = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+    type Dense = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+
+    async fn eq(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+        fn eq(l: Number, r: Number) -> Number {
+            Number::from(l == r)
+        }
+
+        self.combine(other, Array::eq, eq, NumberType::Bool)
+    }
+
+    fn gt(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+        fn gt(l: Number, r: Number) -> Number {
+            Number::from(l > r)
+        }
+
+        self.combine(other, Array::gt, gt, NumberType::Bool)
+    }
+
+    async fn gte(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+        fn gte(l: Number, r: Number) -> Number {
+            Number::from(l >= r)
+        }
+
+        self.combine(other, Array::gte, gte, NumberType::Bool)
+    }
+
+    fn lt(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+        fn lt(l: Number, r: Number) -> Number {
+            Number::from(l > r)
+        }
+
+        self.combine(other, Array::lt, lt, NumberType::Bool)
+    }
+
+    async fn lte(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+        fn lte(l: Number, r: Number) -> Number {
+            Number::from(l > r)
+        }
+
+        self.combine(other, Array::lte, lte, NumberType::Bool)
+    }
+
+    fn ne(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+        fn ne(l: Number, r: Number) -> Number {
+            Number::from(l > r)
+        }
+
+        self.combine(other, Array::ne, ne, NumberType::Bool)
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
+    TensorCompare<D, Tensor<F, D, T>> for DenseTensor<F, D, T, B>
+{
+    type Compare = Tensor<F, D, T>;
+    type Dense = Tensor<F, D, T>;
+
+    async fn eq(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.eq(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn gt(self, other: Tensor<F, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.gt(other).map(Tensor::from),
+        }
+    }
+
+    async fn gte(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.gte(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn lt(self, other: Tensor<F, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.lt(other).map(Tensor::from),
+        }
+    }
+
+    async fn lte(self, other: Tensor<F, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.lte(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn ne(self, other: Tensor<F, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.ne(other).map(Tensor::from),
         }
     }
 }
@@ -535,7 +641,7 @@ where
 {
     type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
 
-    fn add(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn add(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         fn add_array(l: &Array, r: &Array) -> Array {
             l + r
         }
@@ -544,7 +650,7 @@ where
         self.combine(other, add_array, Add::add, dtype)
     }
 
-    fn div(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn div(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         fn div_array(l: &Array, r: &Array) -> Array {
             l / r
         }
@@ -553,7 +659,7 @@ where
         self.combine(other, div_array, Div::div, dtype)
     }
 
-    fn mul(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn mul(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         fn mul_array(l: &Array, r: &Array) -> Array {
             l * r
         }
@@ -562,7 +668,7 @@ where
         self.combine(other, mul_array, Mul::mul, dtype)
     }
 
-    fn sub(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn sub(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
         fn sub_array(l: &Array, r: &Array) -> Array {
             l - r
         }
@@ -581,25 +687,25 @@ where
 {
     type Combine = Tensor<F, D, T>;
 
-    fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn add(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(other) => self.add(other).map(Tensor::from),
         }
     }
 
-    fn div(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn div(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(other) => self.div(other).map(Tensor::from),
         }
     }
 
-    fn mul(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn mul(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(other) => self.mul(other).map(Tensor::from),
         }
     }
 
-    fn sub(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+    fn sub(self, other: Tensor<F, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(other) => self.sub(other).map(Tensor::from),
         }
