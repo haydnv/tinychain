@@ -36,6 +36,54 @@ class DenseTensorTests(unittest.TestCase):
         expected = expect(tc.I64, [2], np.arange(1, 11).reshape([2, 5])[1, 2:-1])
         self.assertEqual(actual, expected)
 
+    def testAdd(self):
+        shape = [5, 2, 1]
+
+        cxt = tc.Context()
+        cxt.left = tc.Tensor.Dense.arange(shape, 1., 6.)
+        cxt.right = tc.Tensor.Dense.constant([5], 2)
+        cxt.result = cxt.left + cxt.right
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect(tc.F64, shape, np.arange(1, 6, 0.5) + 2)
+        self.assertEqual(actual, expected)
+
+    def testDiv(self):
+        shape = [3]
+
+        cxt = tc.Context()
+        cxt.left = tc.Tensor.Dense.arange(shape, 2., 8.)
+        cxt.right = tc.Tensor.Dense.constant([1], 2)
+        cxt.result = cxt.left / cxt.right
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect(tc.F64, shape, np.arange(1, 4))
+        self.assertEqual(actual, expected)
+
+    def testMul(self):
+        shape = [5, 2, 1]
+
+        cxt = tc.Context()
+        cxt.left = tc.Tensor.Dense.arange(shape, 1, 11)
+        cxt.right = tc.Tensor.Dense.constant([5], 2)
+        cxt.result = cxt.left * cxt.right
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect(tc.I64, shape, np.arange(1, 11) * 2)
+        self.assertEqual(actual, expected)
+
+    def testSub(self):
+        shape = [1, 3]
+
+        cxt = tc.Context()
+        cxt.left = tc.Tensor.Dense.arange(shape, 0, 6)
+        cxt.right = tc.Tensor.Dense.constant([1], 2)
+        cxt.result = cxt.left - cxt.right
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect(tc.I64, shape, np.arange(-2, 4, 2))
+        self.assertEqual(actual, expected)
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

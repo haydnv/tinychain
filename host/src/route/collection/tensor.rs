@@ -1,14 +1,14 @@
 use std::convert::TryFrom;
 
 use afarray::Array;
-use futures::TryFutureExt;
+use futures::{TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorDualIO, TensorIO, TensorTransform,
-    TensorType,
+    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorAccess, TensorDualIO, TensorIO, TensorMath,
+    TensorTransform, TensorType,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -107,6 +107,39 @@ impl Route for TensorType {
     }
 }
 
+struct MathHandler<'a, T> {
+    tensor: &'a T,
+    op: fn(&'a T, &Tensor) -> TCResult<Tensor>,
+}
+
+impl<'a, T> MathHandler<'a, T> {
+    fn new(tensor: &'a T, op: fn(&'a T, &Tensor) -> TCResult<Tensor>) -> Self {
+        Self { tensor, op }
+    }
+}
+
+impl<'a, T> Handler<'a> for MathHandler<'a, T>
+where
+    T: TensorMath<fs::Dir, Tensor, Combine = Tensor> + Send + Sync + 'a,
+{
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let r = params.require::<Tensor>(&label("r").into())?;
+                let r = if r.shape() == self.tensor.shape() {
+                    r
+                } else {
+                    r.broadcast(self.tensor.shape().clone())?
+                };
+
+                (self.op)(self.tensor, &r)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
 struct TensorHandler<'a, T> {
     tensor: &'a T,
 }
@@ -191,6 +224,7 @@ fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handle
 where
     T: TensorIO<fs::Dir, Txn = Txn>
         + TensorDualIO<fs::Dir, Tensor>
+        + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorTransform<fs::Dir>
         + Clone
         + Send
@@ -200,6 +234,14 @@ where
 {
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor)))
+    } else if path.len() == 1 {
+        match path[0].as_str() {
+            "add" => Some(Box::new(MathHandler::new(tensor, TensorMath::add))),
+            "div" => Some(Box::new(MathHandler::new(tensor, TensorMath::div))),
+            "mul" => Some(Box::new(MathHandler::new(tensor, TensorMath::mul))),
+            "sub" => Some(Box::new(MathHandler::new(tensor, TensorMath::sub))),
+            _ => None,
+        }
     } else {
         None
     }

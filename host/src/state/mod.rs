@@ -12,7 +12,7 @@ use destream::de;
 use futures::future::try_join_all;
 use futures::TryFutureExt;
 use log::debug;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom};
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -623,6 +623,23 @@ impl TryCastFrom<State> for Scalar {
                 .map(Tuple::from)
                 .map(Scalar::Tuple),
 
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl TryCastFrom<State> for Tensor {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(collection) => Self::can_cast_from(collection),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => Self::opt_cast_from(collection),
             _ => None,
         }
     }

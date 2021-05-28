@@ -299,6 +299,33 @@ class Tensor(Collection):
 
         return self._post("", Tensor, bounds=bounds)
 
+    def __add__(self, other):
+        return self.add(other)
+
+    def __div__(self, other):
+        return self.div(other)
+
+    def __truediv__(self, other):
+        return self.div(other)
+
+    def __mul__(self, other):
+        return self.mul(other)
+
+    def __sub__(self, other):
+        return self.sub(other)
+
+    def add(self, other):
+        return self._post("add", Tensor, r=other)
+
+    def div(self, other):
+        return self._post("div", Tensor, r=other)
+
+    def mul(self, other):
+        return self._post("mul", Tensor, r=other)
+
+    def sub(self, other):
+        return self._post("sub", Tensor, r=other)
+
     def write(self, bounds, value):
         return self._put("", bounds, value)
 

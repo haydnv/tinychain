@@ -524,6 +524,40 @@ where
     }
 }
 
+impl<F, D, T, B> TensorMath<D, Tensor<F, D, T>> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
+{
+    type Combine = Tensor<F, D, T>;
+
+    fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.add(other).map(Tensor::from),
+        }
+    }
+
+    fn div(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.div(other).map(Tensor::from),
+        }
+    }
+
+    fn mul(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.mul(other).map(Tensor::from),
+        }
+    }
+
+    fn sub(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.sub(other).map(Tensor::from),
+        }
+    }
+}
+
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
     for DenseTensor<F, D, T, B>
 {

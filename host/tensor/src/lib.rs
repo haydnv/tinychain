@@ -254,26 +254,26 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Tensor<F, D, T>> f
     type Combine = Self;
 
     fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
-        match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
+        match self {
+            Self::Dense(this) => this.add(other),
         }
     }
 
     fn div(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
-        match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.div(right).map(Self::from),
+        match self {
+            Self::Dense(this) => this.div(other),
         }
     }
 
     fn mul(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
-        match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.mul(right).map(Self::from),
+        match self {
+            Self::Dense(this) => this.mul(other),
         }
     }
 
     fn sub(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
-        match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.sub(right).map(Self::from),
+        match self {
+            Self::Dense(this) => this.sub(other),
         }
     }
 }
