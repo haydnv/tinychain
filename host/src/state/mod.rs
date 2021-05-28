@@ -12,7 +12,7 @@ use destream::de;
 use futures::future::try_join_all;
 use futures::TryFutureExt;
 use log::debug;
-use safecast::{TryCastFrom};
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -358,6 +358,12 @@ impl From<Box<TCRef>> for State {
 impl From<Value> for State {
     fn from(value: Value) -> Self {
         Self::Scalar(value.into())
+    }
+}
+
+impl From<bool> for State {
+    fn from(b: bool) -> Self {
+        Self::Scalar(b.into())
     }
 }
 

@@ -25,7 +25,6 @@ use crate::txn::Txn;
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
 
-use safecast::TryCastFrom;
 #[cfg(feature = "tensor")]
 pub use tc_tensor::{DenseAccess, TensorType};
 
@@ -173,7 +172,7 @@ impl<B: DenseAccess<fs::File<afarray::Array>, fs::Dir, Txn>> From<DenseTensor<B>
 }
 
 #[cfg(feature = "tensor")]
-impl TryCastFrom<Collection> for Tensor {
+impl safecast::TryCastFrom<Collection> for Tensor {
     fn can_cast_from(collection: &Collection) -> bool {
         match collection {
             Collection::Tensor(_) => true,

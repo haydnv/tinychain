@@ -352,6 +352,12 @@ impl From<Value> for Scalar {
     }
 }
 
+impl From<bool> for Scalar {
+    fn from(b: bool) -> Self {
+        Self::Value(b.into())
+    }
+}
+
 impl From<u64> for Scalar {
     fn from(n: u64) -> Self {
         Self::Value(n.into())

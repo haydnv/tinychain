@@ -1,14 +1,14 @@
 use std::convert::TryFrom;
 
 use afarray::Array;
-use futures::{TryFutureExt};
+use futures::{Future, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, TensorAccess, TensorDualIO, TensorIO, TensorMath,
-    TensorTransform, TensorType,
+    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorDualIO,
+    TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
@@ -206,6 +206,64 @@ impl<'a, T> From<&'a T> for TensorHandler<'a, T> {
     }
 }
 
+struct UnaryHandler {
+    tensor: Tensor,
+    op: fn(&Tensor) -> TCResult<Tensor>,
+}
+
+impl UnaryHandler {
+    fn new(tensor: Tensor, op: fn(&Tensor) -> TCResult<Tensor>) -> Self {
+        Self { tensor, op }
+    }
+}
+
+impl<'a> Handler<'a> for UnaryHandler {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let tensor = if key.is_none() {
+                    self.tensor
+                } else {
+                    let bounds = cast_bounds(self.tensor.shape(), key.into())?;
+                    self.tensor.slice(bounds)?
+                };
+
+                (self.op)(&tensor).map(Collection::from).map(State::from)
+            })
+        }))
+    }
+}
+
+struct UnaryHandlerAsync<F: Send> {
+    tensor: Tensor,
+    op: fn(Tensor, Txn) -> F,
+}
+
+impl<'a, F: Send> UnaryHandlerAsync<F> {
+    fn new(tensor: Tensor, op: fn(Tensor, Txn) -> F) -> Self {
+        Self { tensor, op }
+    }
+}
+
+impl<'a, F> Handler<'a> for UnaryHandlerAsync<F>
+where
+    F: Future<Output = TCResult<bool>> + Send + 'a,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    (self.op)(self.tensor, txn).map_ok(State::from).await
+                } else {
+                    let bounds = cast_bounds(self.tensor.shape(), key.into())?;
+                    let slice = self.tensor.slice(bounds)?;
+                    (self.op)(slice, txn).map_ok(State::from).await
+                }
+            })
+        }))
+    }
+}
+
 impl<B: DenseAccess<fs::File<Array>, fs::Dir, Txn>> Route
     for DenseTensor<fs::File<Array>, fs::Dir, Txn, B>
 {
@@ -226,9 +284,11 @@ where
         + TensorDualIO<fs::Dir, Tensor>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorTransform<fs::Dir>
+        + TensorUnary<fs::Dir>
         + Clone
         + Send
         + Sync,
+    Tensor: From<T>,
     Collection: From<T>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
@@ -236,10 +296,30 @@ where
         Some(Box::new(TensorHandler::from(tensor)))
     } else if path.len() == 1 {
         match path[0].as_str() {
+            // unary ops
+            "abs" => Some(Box::new(UnaryHandler::new(
+                tensor.clone().into(),
+                TensorUnary::abs,
+            ))),
+            "all" => Some(Box::new(UnaryHandlerAsync::new(
+                tensor.clone().into(),
+                TensorUnary::all,
+            ))),
+            "any" => Some(Box::new(UnaryHandlerAsync::new(
+                tensor.clone().into(),
+                TensorUnary::any,
+            ))),
+            "not" => Some(Box::new(UnaryHandler::new(
+                tensor.clone().into(),
+                TensorUnary::not,
+            ))),
+
+            // basic math
             "add" => Some(Box::new(MathHandler::new(tensor, TensorMath::add))),
             "div" => Some(Box::new(MathHandler::new(tensor, TensorMath::div))),
             "mul" => Some(Box::new(MathHandler::new(tensor, TensorMath::mul))),
             "sub" => Some(Box::new(MathHandler::new(tensor, TensorMath::sub))),
+
             _ => None,
         }
     } else {
@@ -271,14 +351,7 @@ async fn write<T: TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor>>(
         return tensor.write_value_at(*txn.id(), coord, value).await;
     }
 
-    let bounds = if key.is_none() {
-        Bounds::all(tensor.shape())
-    } else {
-        let bounds =
-            Value::try_cast_from(key, |k| TCError::bad_request("invalid tensor bounds", k))?;
-
-        bounds.try_cast_into(|k| TCError::bad_request("invalid tensor bounds", k))?
-    };
+    let bounds = cast_bounds(tensor.shape(), key.into())?;
 
     match value {
         State::Collection(Collection::Tensor(value)) => tensor.write(txn, bounds, value).await,
@@ -317,10 +390,11 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
     }
 }
 
-pub fn cast_bounds(shape: &[u64], scalar: Scalar) -> TCResult<Bounds> {
+pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
     debug!("tensor bounds from {}", scalar);
 
     match scalar {
+        none if none.is_none() => Ok(Bounds::all(shape)),
         Scalar::Tuple(bounds) => {
             let mut axes = Vec::with_capacity(shape.len());
 

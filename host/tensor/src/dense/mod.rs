@@ -10,7 +10,7 @@ use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::debug;
-use number_general::{Number, NumberClass, NumberType};
+use number_general::{Number, NumberClass, NumberInstance, NumberType};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
@@ -20,7 +20,7 @@ use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
     Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorDualIO, TensorIO,
-    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType, TensorUnary,
 };
 
 use access::*;
@@ -634,6 +634,58 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorT
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let blocks = self.blocks.clone().slice(bounds)?;
+        Ok(DenseTensor::from(blocks))
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorUnary<D>
+    for DenseTensor<F, D, T, B>
+{
+    type Unary = DenseTensor<F, D, T, BlockListUnary<F, D, T, B>>;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
+        let blocks = BlockListUnary::new(
+            self.blocks.clone(),
+            Array::abs,
+            <Number as NumberInstance>::abs,
+            NumberType::Bool,
+        );
+
+        Ok(DenseTensor::from(blocks))
+    }
+
+    async fn all(self, txn: T) -> TCResult<bool> {
+        let mut blocks = self.blocks.block_stream(txn).await?;
+
+        while let Some(array) = blocks.next().await {
+            if !array?.all() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    async fn any(self, txn: T) -> TCResult<bool> {
+        let mut blocks = self.blocks.block_stream(txn).await?;
+        while let Some(array) = blocks.next().await {
+            if array?.any() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn not(&self) -> TCResult<Self::Unary> {
+        let blocks = BlockListUnary::new(
+            self.blocks.clone(),
+            Array::not,
+            Number::not,
+            NumberType::Bool,
+        );
+
         Ok(DenseTensor::from(blocks))
     }
 }

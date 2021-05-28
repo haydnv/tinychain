@@ -118,6 +118,19 @@ pub trait TensorTransform<D: Dir>: TensorAccess {
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
 }
 
+#[async_trait]
+pub trait TensorUnary<D: Dir>: TensorIO<D> {
+    type Unary: TensorInstance<D>;
+
+    fn abs(&self) -> TCResult<Self::Unary>;
+
+    async fn all(self, txn: Self::Txn) -> TCResult<bool>;
+
+    async fn any(self, txn: Self::Txn) -> TCResult<bool>;
+
+    fn not(&self) -> TCResult<Self::Unary>;
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum TensorType {
     Dense,
@@ -326,6 +339,35 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F,
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorUnary<D> for Tensor<F, D, T> {
+    type Unary = Self;
+
+    fn abs(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.abs().map(Self::from),
+        }
+    }
+
+    async fn all(self, txn: T) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.all(txn).await,
+        }
+    }
+
+    async fn any(self, txn: T) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.any(txn).await,
+        }
+    }
+
+    fn not(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.not().map(Self::from),
         }
     }
 }
