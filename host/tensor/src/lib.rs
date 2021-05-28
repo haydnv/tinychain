@@ -82,6 +82,18 @@ pub trait TensorDualIO<D: Dir, O>: TensorIO<D> + Sized {
     ) -> TCResult<()>;
 }
 
+pub trait TensorMath<D: Dir, O>: TensorAccess + Sized {
+    type Combine: TensorInstance<D>;
+
+    fn add(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn div(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn mul(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn sub(&self, other: &O) -> TCResult<Self::Combine>;
+}
+
 pub trait TensorReduce<D: Dir>: TensorIO<D> {
     type Reduce: TensorInstance<D>;
 
@@ -225,7 +237,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
 {
     async fn mask(&self, txn: T, other: Self) -> TCResult<()> {
         match self {
-            Self::Dense(dense) => dense.mask(txn, other).await,
+            Self::Dense(this) => this.mask(txn, other).await,
         }
     }
 
@@ -233,7 +245,35 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Tensor<F, D, T>>
         debug!("Tensor::write {} to {}", value, bounds);
 
         match self {
-            Self::Dense(dense) => dense.write(txn, bounds, value).await,
+            Self::Dense(this) => this.write(txn, bounds, value).await,
+        }
+    }
+}
+
+impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Tensor<F, D, T>> for Tensor<F, D, T> {
+    type Combine = Self;
+
+    fn add(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
+        }
+    }
+
+    fn div(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.div(right).map(Self::from),
+        }
+    }
+
+    fn mul(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.mul(right).map(Self::from),
+        }
+    }
+
+    fn sub(&self, other: &Tensor<F, D, T>) -> TCResult<Self::Combine> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.sub(right).map(Self::from),
         }
     }
 }

@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
+use std::ops::{Add, Div, Mul, Sub};
 
 use afarray::{Array, ArrayInstance};
 use arrayfire as af;
@@ -19,7 +20,7 @@ use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::{
     Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorDualIO, TensorIO,
-    TensorInstance, TensorReduce, TensorTransform, TensorType,
+    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
 };
 
 use access::*;
@@ -305,6 +306,32 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
     pub fn into_inner(self) -> B {
         self.blocks
     }
+
+    fn combine<OT: DenseAccess<F, D, T>>(
+        &self,
+        other: &DenseTensor<F, D, T, OT>,
+        combinator: fn(&Array, &Array) -> Array,
+        value_combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
+    ) -> TCResult<DenseTensor<F, D, T, BlockListCombine<F, D, T, B, OT>>> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "Cannot combine tensors with different shapes: {}, {}",
+                self.shape(),
+                other.shape()
+            )));
+        }
+
+        let blocks = BlockListCombine::new(
+            self.blocks.clone(),
+            other.blocks.clone(),
+            combinator,
+            value_combinator,
+            dtype,
+        )?;
+
+        Ok(DenseTensor::from(blocks))
+    }
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFile<F, D, T>> {
@@ -394,19 +421,19 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorI
 }
 
 #[async_trait]
-impl<
-        F: File<Array>,
-        D: Dir,
-        T: Transaction<D>,
-        B: DenseAccess<F, D, T>,
-        OT: DenseAccess<F, D, T>,
-    > TensorDualIO<D, DenseTensor<F, D, T, OT>> for DenseTensor<F, D, T, B>
+impl<F, D, T, B, O> TensorDualIO<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
+    O: DenseAccess<F, D, T>,
 {
-    async fn mask(&self, _txn: T, _other: DenseTensor<F, D, T, OT>) -> TCResult<()> {
+    async fn mask(&self, _txn: T, _other: DenseTensor<F, D, T, O>) -> TCResult<()> {
         Err(TCError::not_implemented("DenseTensor::mask"))
     }
 
-    async fn write(&self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, OT>) -> TCResult<()> {
+    async fn write(&self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, O>) -> TCResult<()> {
         debug!("write dense tensor to dense {}", bounds);
 
         let txn_id = *txn.id();
@@ -447,6 +474,53 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
         match other {
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
         }
+    }
+}
+
+impl<F, D, T, B, O> TensorMath<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
+    O: DenseAccess<F, D, T>,
+{
+    type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+
+    fn add(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        fn add_array(l: &Array, r: &Array) -> Array {
+            l + r
+        }
+
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, add_array, Add::add, dtype)
+    }
+
+    fn div(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        fn div_array(l: &Array, r: &Array) -> Array {
+            l / r
+        }
+
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, div_array, Div::div, dtype)
+    }
+
+    fn mul(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        fn mul_array(l: &Array, r: &Array) -> Array {
+            l * r
+        }
+
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, mul_array, Mul::mul, dtype)
+    }
+
+    fn sub(&self, other: &DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+        fn sub_array(l: &Array, r: &Array) -> Array {
+            l - r
+        }
+
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, sub_array, Sub::sub, dtype)
     }
 }
 

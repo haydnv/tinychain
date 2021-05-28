@@ -43,7 +43,7 @@ class DenseTensorTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
-    NUM_HOSTS = 1
+    NUM_HOSTS = 4
     NAME = "tensor"
 
     def cluster(self, chain_type):
