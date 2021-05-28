@@ -33,6 +33,16 @@ impl HTTPServer {
         Self { gateway }
     }
 
+    async fn handle_timeout(
+        self: Arc<Self>,
+        request: hyper::Request<Body>,
+    ) -> Result<Response<Body>, hyper::Error> {
+        match tokio::time::timeout(self.gateway.request_ttl(), self.handle(request)).await {
+            Ok(result) => result,
+            Err(cause) => Ok(transform_error(TCError::timeout(cause))),
+        }
+    }
+
     async fn handle(
         self: Arc<Self>,
         request: hyper::Request<Body>,
@@ -185,7 +195,7 @@ impl crate::gateway::Server for HTTPServer {
             async {
                 Ok::<_, hyper::Error>(service_fn(move |req| {
                     let server = server.clone();
-                    HTTPServer::handle(server, req)
+                    HTTPServer::handle_timeout(server, req)
                 }))
             }
         });

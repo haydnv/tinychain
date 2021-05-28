@@ -95,6 +95,11 @@ impl Gateway {
         })
     }
 
+    /// Return the configured maximum request time-to-live (timeout duration).
+    pub fn request_ttl(&self) -> Duration {
+        self.config.request_ttl
+    }
+
     /// Return the network address of this `Gateway`
     pub fn root(&self) -> &LinkHost {
         &self.root

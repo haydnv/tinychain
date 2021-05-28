@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use futures::TryFutureExt;
+use log::debug;
 use uplock::RwLock;
 
 use tc_error::*;
@@ -99,6 +100,7 @@ async fn cleanup(workspace: &fs::Dir, txn_pool: &RwLock<HashMap<TxnId, Arc<Activ
         let mut expired = Vec::with_capacity(txn_pool.len());
         for (txn_id, txn) in txn_pool.iter() {
             if txn.expires() < &now {
+                debug!("transaction {} has expired", txn_id);
                 expired.push(*txn_id);
             }
         }
@@ -111,8 +113,7 @@ async fn cleanup(workspace: &fs::Dir, txn_pool: &RwLock<HashMap<TxnId, Arc<Activ
     };
 
     for txn_id in expired.into_iter() {
-        // TODO: implement delete
-        // workspace.delete(txn_id, txn_id.to_path()).await;
+        debug!("finalize expired transaction {}", txn_id);
         workspace.finalize(&txn_id).await;
     }
 }
