@@ -1,3 +1,4 @@
+/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
@@ -29,142 +30,214 @@ mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
+/// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";
 
 type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
+/// The schema of a [`Tensor`]
 pub type Schema = (Shape, NumberType);
 
+/// The address of an individual element in a [`Tensor`].
 pub type Coord = Vec<u64>;
 
+/// Trait defining a read operation for a single [`Tensor`] element
 pub trait ReadValueAt<D: Dir> {
+    /// The transaction context
     type Txn: Transaction<D>;
 
+    /// Read the value of the element at the given [`Coord`].
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a>;
 }
 
+/// Basic properties common to all [`Tensor`]s
 pub trait TensorAccess: Send {
+    /// The datatype of this [`Tensor`]
     fn dtype(&self) -> NumberType;
 
+    /// The number of dimensions of this [`Tensor`]
     fn ndim(&self) -> usize;
 
+    /// The shape of this [`Tensor`]
     fn shape(&'_ self) -> &'_ Shape;
 
+    /// The number of elements in this [`Tensor`]
     fn size(&self) -> u64;
 }
 
+/// A [`Tensor`] instance
 pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync {
+    /// A dense representation of this [`Tensor`]
     type Dense: TensorInstance<D>;
 
+    /// Return a dense representation of this [`Tensor`].
     fn into_dense(self) -> Self::Dense;
 }
 
+/// [`Tensor`] boolean operations.
 pub trait TensorBoolean<D: Dir, O>: TensorAccess {
+    /// The result type of a boolean operation.
     type Combine: TensorInstance<D>;
 
+    /// Logical and
     fn and(self, other: O) -> TCResult<Self::Combine>;
 
+    /// Logical or
     fn or(self, other: O) -> TCResult<Self::Combine>;
 
+    /// Logical xor
     fn xor(self, other: O) -> TCResult<Self::Combine>;
 }
 
+/// Tensor comparison operations
 #[async_trait]
 pub trait TensorCompare<D: Dir, O>: TensorIO<D> {
+    /// The result of a comparison operation
     type Compare: TensorInstance<D>;
+
+    /// The result of a comparison operation which can only return a dense [`Tensor`]
     type Dense: TensorInstance<D>;
 
+    /// Element-wise equality
     async fn eq(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
 
+    /// Element-wise greater-than
     fn gt(self, other: O) -> TCResult<Self::Compare>;
 
+    /// Element-wise greater-or-equal
     async fn gte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
 
+    /// Element-wise less-than
     fn lt(self, other: O) -> TCResult<Self::Compare>;
 
+    /// Element-wise less-or-equal
     async fn lte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
 
+    /// Element-wise not-equal
     fn ne(self, other: O) -> TCResult<Self::Compare>;
 }
 
+/// [`Tensor`] I/O operations
 #[async_trait]
 pub trait TensorIO<D: Dir>: TensorAccess {
+    /// Transaction context type
     type Txn: Transaction<D>;
 
+    /// Read a single value from this [`Tensor`].
     async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number>;
 
+    /// Write a single value to the slice of this [`Tensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()>;
 
+    /// Overwrite a single element of this [`Tensor`].
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
+/// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
 #[async_trait]
 pub trait TensorDualIO<D: Dir, O>: TensorIO<D> {
+    /// Zero out the elements of this [`Tensor`] where the corresponding element of `value` is nonzero.
     async fn mask(&self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
 
+    /// Overwrite the slice of this [`Tensor`] given by [`Bounds`] with the given `value`.
     async fn write(
         &self,
         txn: <Self as TensorIO<D>>::Txn,
-        bounds: bounds::Bounds,
+        bounds: Bounds,
         value: O,
     ) -> TCResult<()>;
 }
 
+/// [`Tensor`] math operations
 pub trait TensorMath<D: Dir, O>: TensorAccess {
+    /// The result type of a math operation
     type Combine: TensorInstance<D>;
 
+    /// Add two tensors together.
     fn add(self, other: O) -> TCResult<Self::Combine>;
 
+    /// Divide `self` by `other`.
     fn div(self, other: O) -> TCResult<Self::Combine>;
 
+    /// Multiply two tensors together.
     fn mul(self, other: O) -> TCResult<Self::Combine>;
 
+    /// Subtract `other` from `self`.
     fn sub(self, other: O) -> TCResult<Self::Combine>;
 }
 
+/// [`Tensor`] reduction operations
 pub trait TensorReduce<D: Dir>: TensorIO<D> {
+    /// The result type of a reduce operation
     type Reduce: TensorInstance<D>;
 
+    /// Return the product of this [`Tensor`] along the given `axis`.
     fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
 
+    /// Return the product of all elements in this [`Tensor`].
     fn product_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
 
+    /// Return the sum of this [`Tensor`] along the given `axis`.
     fn sum(&self, axis: usize) -> TCResult<Self::Reduce>;
 
+    /// Return the sum of all elements in this [`Tensor`].
     fn sum_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
 }
 
+/// [`Tensor`] transforms
 pub trait TensorTransform<D: Dir>: TensorAccess {
+    /// A broadcasted [`Tensor`]
     type Broadcast: TensorInstance<D>;
+
+    /// A type-cast [`Tensor`]
     type Cast: TensorInstance<D>;
+
+    /// A [`Tensor`] with an expanded dimension
     type Expand: TensorInstance<D>;
+
+    /// A [`Tensor`] slice
     type Slice: TensorInstance<D>;
+
+    /// A transposed [`Tensor`]
     type Transpose: TensorInstance<D>;
 
+    /// Cast this [`Tensor`] to the given `dtype`.
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
 
-    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self::Broadcast>;
+    /// Broadcast this [`Tensor`] to the given `shape`.
+    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast>;
 
+    /// Insert a new dimension of size 1 at the given `axis`.
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
 
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
+    /// Return a slice of this [`Tensor`] with the given `bounds`.
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice>;
 
+    /// Transpose this [`Tensor`] by reordering its axes according to the given `permutation`.
+    /// If no permutation is given, the axes will be reversed.
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }
 
+/// Unary [`Tensor`] operations
 #[async_trait]
 pub trait TensorUnary<D: Dir>: TensorIO<D> {
+    /// The return type of a unary operation
     type Unary: TensorInstance<D>;
 
+    /// Element-wise absolute value
     fn abs(&self) -> TCResult<Self::Unary>;
 
+    /// Return `true` if all elements in this [`Tensor`] are nonzero.
     async fn all(self, txn: Self::Txn) -> TCResult<bool>;
 
+    /// Return `true` if any element in this [`Tensor`] is nonzero.
     async fn any(self, txn: Self::Txn) -> TCResult<bool>;
 
+    /// Element-wise logical not
     fn not(&self) -> TCResult<Self::Unary>;
 }
 
+/// The [`Class`] of [`Tensor`]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum TensorType {
     Dense,
@@ -198,6 +271,7 @@ impl fmt::Display for TensorType {
     }
 }
 
+/// An n-dimensional array of numbers which supports basic math and logic operations
 #[derive(Clone)]
 pub enum Tensor<F: File<Array>, D: Dir, T: Transaction<D>> {
     Dense(DenseTensor<F, D, T, DenseAccessor<F, D, T>>),
@@ -574,6 +648,7 @@ impl<'en, F: File<Array>, D: Dir, T: Transaction<D>> IntoView<'en, D> for Tensor
     }
 }
 
+/// A view of a [`Tensor`] at a given [`TxnId`], used in serialization
 pub enum TensorView<'en> {
     Dense(dense::DenseTensorView<'en>),
 }

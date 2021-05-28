@@ -26,6 +26,7 @@ use super::{block_offsets, coord_block, DenseAccess, DenseAccessor, PER_BLOCK};
 
 const MEBIBYTE: usize = 1_048_576;
 
+/// A wrapper around a `DenseTensor` [`File`]
 #[derive(Clone)]
 pub struct BlockListFile<F, D, T> {
     file: F,
@@ -35,6 +36,7 @@ pub struct BlockListFile<F, D, T> {
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
+    /// Construct a new `BlockListFile` with the given [`Shape`], filled with the given `value`.
     pub async fn constant(file: F, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
         if !file.is_empty(&txn_id).await? {
             return Err(TCError::unsupported(
@@ -59,6 +61,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         }
     }
 
+    /// Construct a new `BlockListFile` from the given `Stream` of [`Array`] blocks.
     pub async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
         file: F,
         txn_id: TxnId,
@@ -82,6 +85,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         })
     }
 
+    /// Construct a new `BlockListFile` from the given `Stream` of elements.
     pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
         file: F,
         txn_id: TxnId,
@@ -106,6 +110,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         })
     }
 
+    /// Construct a new `BlockListFile` of elements evenly distributed between `start` and `stop`.
     pub async fn range(
         file: F,
         txn_id: TxnId,
@@ -128,6 +133,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         Self::from_values(file, txn_id, shape, dtype, values).await
     }
 
+    /// Consume this `BlockListFile` handle and return a `Stream` of `Array` blocks.
     pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
@@ -137,6 +143,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         Box::pin(blocks)
     }
 
+    /// Sort the elements in this `BlockListFile`.
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         if num_blocks == 1 {
@@ -217,7 +224,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
         debug!("BlockListFile::write_value {} at {}", value, bounds);
 
         if !self.shape().contains_bounds(&bounds) {
@@ -228,7 +235,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
             }
         }
 
-        let bounds = self.shape().slice_bounds(bounds);
+        bounds.normalize(self.shape());
         let coord_bounds = coord_bounds(self.shape());
 
         stream::iter(bounds.affected())
@@ -700,6 +707,7 @@ impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
     }
 }
 
+/// A slice of a [`BlockListFile`]
 #[derive(Clone)]
 pub struct BlockListFileSlice<F, D, T> {
     source: BlockListFile<F, D, T>,

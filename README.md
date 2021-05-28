@@ -27,7 +27,7 @@ Tinychain is an all-in-one backend host which allows you to rapidly prototype a 
 
 ### For operations/DevOps
 
-Tinychain eliminates the need to manage an ever-growing "stack" of platform software which sometimes requires mutually-incompatible dependencies. With a Tinychain application, you no longer need tools like Docker and Kubernetes to package and deploy your application backend, because its "stack" is simply the Tinychain host software. You can easily deploy your application to a different cloud provider, or on-premises for a client, simply by spinning up a new Tinychain host.
+Tinychain eliminates the need to manage an ever-growing "stack" of platform software which sometimes requires mutually-incompatible dependencies. With a Tinychain application, you no longer need tools like Docker and Kubernetes to package and deploy your application backend, because its "stack" is simply the Tinychain host software. You can easily deploy your application to a different cloud provider, or on-premises for a client, simply by starting up a new Tinychain host.
 
 ### For data scientists
 
@@ -35,7 +35,7 @@ With Tinychain, data scientists can easily analyze live replicas of a production
 
 ### For product owners & executives
 
-Tinychain is designed with many unique features to minimize the operational risk of hosting your users' data. For example, Tinychain is the only database with *hypothetical queries*, which allow developers to examine the real consequences of potentially-destructive database updates without actually applying the updates. Tinychain is also the only database, and the only blockchain platform, designed from the ground up for compliance with data privacy laws like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act).
+Tinychain is designed with many unique features to minimize the operational risk of hosting your users' data. For example, Tinychain is the only database which supports *hypothetical queries*, which allow developers to examine the real consequences of potentially-destructive database updates without actually applying the updates. Tinychain is also the only database, and the only blockchain platform, designed from the ground up for compliance with data privacy laws like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act).
 
 Tinychain's all-in-one approach can also reduce operational costs by removing the need for developers to maintain a broad familiarity with a wide variety of specific platform tools, and removing the operational separation between application development and data science: Tinychain is a single platform which is useful to both developers and data scientists.
 
@@ -45,7 +45,7 @@ End users won't see Tinychain directly, but it makes the customer experience bet
 
 ## Getting started
 
-The easiest way to get started is to download the latest release from GitHub here: [github.com/haydnv/tinychain/releases](://github.com/haydnv/tinychain/releases). Binary releases are currently only available for 64-bit Intel Linux (you should be able to build from source on other architectures, but this has not been tested).
+The easiest way to get started is to download the latest release from GitHub here: [github.com/haydnv/tinychain/releases](://github.com/haydnv/tinychain/releases). Binary releases are currently only available for 64-bit x86 Linux (you should be able to build from source on other architectures, but this has not been tested).
 
 If you use the Rust programming language, you can install Tinychain on any platform by running `cargo install tinychain`.
 
@@ -67,7 +67,7 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | At-rest encryption | \* | | | x | x | x | x | x | | x | |
 | Automatic concurrency/multithreading | x | | | x | x | x | x | x | | x | x |
-| Automatic GPU acceleration | \*\* | | x | | | | | | | | x |
+| Automatic GPU acceleration | x | | x | | | | | | | | x |
 | Automatic sharding | \* | | | x | | | x | x | | | |
 | Blockchain compliant w/ GDPR & CCPA | \* | | | | | | | | | | |
 | Built-in cryptocurrency | | | x | | | | | | | | |
@@ -84,7 +84,7 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 | Object-oriented API | x | x | | x | | | | | x | | x |
 | Object-relational mapping (ORM) | \* | x | | x | | | | | x | | |
 | Stateful ML models | \*\* | | | | | | | | | | | 
-| Tensor computation | \*\* | | | | | | | | | | x |
+| Tensor computation | x | | | | | | | | | | x |
 | Transactional reads & writes | x | | x | x | x | x | x | x | | x | |
 
 ### Safety

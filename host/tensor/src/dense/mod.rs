@@ -32,18 +32,24 @@ pub use file::BlockListFile;
 mod access;
 mod file;
 
-// number of elements per block = (1 mebibyte / 64 bits)
+/// The number of elements per dense tensor block, equal to (1 mebibyte / 64 bits).
 pub const PER_BLOCK: usize = 131_072;
 
+/// Common [`DenseTensor`] access methods
 #[async_trait]
 pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
+    /// The type returned by `slice`
     type Slice: DenseAccess<F, D, T>;
+
+    /// The type returned by `transpose`
     type Transpose: DenseAccess<F, D, T>;
 
+    /// Return a [`DenseAccessor`] enum which contains this accessor.
     fn accessor(self) -> DenseAccessor<F, D, T>;
 
+    /// Return a stream of the [`Array`]s which this [`DenseTensor`] comprises.
     fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let blocks = self
@@ -58,6 +64,7 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
         })
     }
 
+    /// Return a stream of the elements of this [`DenseTensor`].
     fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         Box::pin(async move {
             let values = self.block_stream(txn).await?;
@@ -78,15 +85,20 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
         })
     }
 
+    /// Return a slice of this [`DenseTensor`].
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
+    /// Return a transpose of this [`DenseTensor`].
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
+    /// Write a value to the slice of this [`DenseTensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
+    /// Overwrite a single element of this [`DenseTensor`].
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()>;
 }
 
+/// A generic enum which can contain any [`DenseAccess`] impl
 #[derive(Clone)]
 pub enum DenseAccessor<F: File<Array>, D: Dir, T: Transaction<D>> {
     File(BlockListFile<F, D, T>),
@@ -296,6 +308,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> From<BlockListFile<F, D, T>>
     }
 }
 
+/// A `Tensor` stored as a [`File`] of dense [`Array`] blocks
 #[derive(Clone)]
 pub struct DenseTensor<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
     blocks: B,
@@ -305,6 +318,7 @@ pub struct DenseTensor<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTensor<F, D, T, B> {
+    /// Consume this `DenseTensor` handle and return its underlying [`DenseAccessor`]
     pub fn into_inner(self) -> B {
         self.blocks
     }
@@ -337,6 +351,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
 }
 
 impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFile<F, D, T>> {
+    /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: F, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         let (shape, dtype) = schema;
         BlockListFile::constant(file, txn_id, shape, dtype.zero())
@@ -344,6 +359,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
             .await
     }
 
+    /// Create a new `DenseTensor` filled with the given `value`.
     pub async fn constant<S>(file: F, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
     where
         Shape: From<S>,
@@ -353,6 +369,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
             .await
     }
 
+    /// Create a new `DenseTensor` filled with a range evenly distributed between `start` and `stop`.
     pub async fn range<S>(
         file: F,
         txn_id: TxnId,
@@ -1036,6 +1053,7 @@ impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> In
     }
 }
 
+/// A view of a [`DenseTensor`] as of a specific [`TxnId`], used in serialization
 pub struct DenseTensorView<'en> {
     schema: (Vec<u64>, TCPathBuf),
     blocks: BlockStreamView<'en>,

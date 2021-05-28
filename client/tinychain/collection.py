@@ -331,51 +331,87 @@ class Tensor(Collection):
         return self._post("add", Tensor, r=other)
 
     def all(self):
+        """Return `True` if all elements in this `Tensor` are nonzero."""
+
         return self._get("all", rtype=Tensor)
 
     def any(self):
+        """Return `True` if any element in this `Tensor` are nonzero."""
+
         return self._get("any", rtype=Tensor)
 
     def div(self, other):
+        """Divide this `Tensor` by another, broadcasting if necessary."""
+
         return self._post("div", Tensor, r=other)
 
     def eq(self, other):
+        """Return a boolean `Tensor` with element-wise equality values."""
+
         return self._post("eq", Tensor, r=other)
 
     def gt(self, other):
+        """Return a boolean `Tensor` with element-wise greater-than values."""
+
         return self._post("gt", Tensor, r=other)
 
     def gte(self, other):
+        """Return a boolean `Tensor` with element-wise greater-or-equal values."""
+
         return self._post("gte", Tensor, r=other)
 
     def lt(self, other):
+        """Return a boolean `Tensor` with element-wise less-than values."""
+
         return self._post("lt", Tensor, r=other)
 
     def lte(self, other):
+        """Return a boolean `Tensor` with element-wise less-or-equal values."""
+
         return self._post("lte", Tensor, r=other)
 
     def logical_and(self, other):
+        """Return a boolean `Tensor` with element-wise logical and values."""
+
         return self._post("and", Tensor, r=other)
 
     def logical_not(self):
+        """Return a boolean `Tensor` with element-wise logical not values."""
+
         return self._get("not", rtype=Tensor)
 
     def logical_or(self, other):
+        """Return a boolean `Tensor` with element-wise logical or values."""
+
         return self._post("or", Tensor, r=other)
 
     def logical_xor(self, other):
+        """Return a boolean `Tensor` with element-wise logical xor values."""
+
         return self._post("xor", Tensor, r=other)
 
     def mul(self, other):
+        """Multiply this `Tensor` by another, broadcasting if necessary."""
+
         return self._post("mul", Tensor, r=other)
 
     def ne(self, other):
+        """Return a boolean `Tensor` with element-wise not-equal values."""
+
         return self._post("ne", Tensor, r=other)
 
     def sub(self, other):
+        """Subtract another `Tensor` from this one, broadcasting if necessary."""
+
         return self._post("sub", Tensor, r=other)
 
     def write(self, bounds, value):
+        """
+        Write a `Tensor` or `Number` to the given slice of this one.
+
+        If `bounds` is `None`, this entire `Tensor` will be overwritten.
+        """
+
         return self._put("", bounds, value)
 
 
@@ -386,20 +422,38 @@ class DenseTensor(Tensor):
 
     @classmethod
     def arange(cls, shape, start, stop):
+        """
+        Return a `DenseTensor` with the given shape containing a range of numbers
+        evenly distributed between `start` and `stop`.
+        """
+
         return cls(OpRef.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
-    def constant(cls, shape, value=0):
+    def constant(cls, shape, value):
+        """Return a `DenseTensor` filled with the given `value`."""
+
         return cls(OpRef.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
     def ones(cls, shape, dtype=F32):
+        """
+        Return a `DenseTensor` filled with ones.
+
+        If `dtype` is not specified, the data type will be :class:`F32`.
+        """
+
         return cls.constant(shape, dtype(1))
 
     @classmethod
     def zeros(cls, shape, dtype=F32):
-        return cls.constant(shape, dtype(0))
+        """
+        Return a `DenseTensor` filled with ones.
 
+        If `dtype` is not specified, the data type will be :class:`F32`.
+        """
+
+        return cls.constant(shape, dtype(0))
 
 
 Tensor.Dense = DenseTensor

@@ -38,6 +38,7 @@ impl Iterator for AxisIter {
     }
 }
 
+/// The bounds of a `Tensor` along a single axis.
 #[derive(Clone)]
 pub enum AxisBounds {
     At(u64),
@@ -46,10 +47,12 @@ pub enum AxisBounds {
 }
 
 impl AxisBounds {
+    /// `AxisBounds` covering an entire axis
     pub fn all(dim: u64) -> AxisBounds {
         AxisBounds::In(0..dim)
     }
 
+    /// The length of these bounds
     pub fn dim(&self) -> u64 {
         match self {
             Self::At(_) => 0,
@@ -58,6 +61,7 @@ impl AxisBounds {
         }
     }
 
+    /// Return `true` if these `AxisBounds` specify a single index.
     pub fn is_index(&self) -> bool {
         if let Self::At(_) = self {
             true
@@ -135,12 +139,14 @@ impl fmt::Display for AxisBounds {
     }
 }
 
+/// `Tensor` bounds
 #[derive(Clone)]
 pub struct Bounds {
     pub axes: Vec<AxisBounds>,
 }
 
 impl Bounds {
+    /// The bounds of the entire `Tensor` with the given `Shape`
     pub fn all(shape: &Shape) -> Bounds {
         shape
             .0
@@ -150,6 +156,7 @@ impl Bounds {
             .into()
     }
 
+    /// Return an iterator over all the [`Coord`]s within these `Bounds`.
     pub fn affected(&self) -> Coords {
         use AxisBounds::*;
         let mut axes = Vec::with_capacity(self.len());
@@ -164,6 +171,7 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    /// Return `true` if these `bounds` contain the given coordinate.
     pub fn contains_coord(&self, coord: &[u64]) -> bool {
         if coord.len() != self.len() {
             return false;
@@ -182,6 +190,7 @@ impl Bounds {
         true
     }
 
+    /// Return `Some(Coord)` if these bounds match a single `Coord`, otherwise `None`
     pub fn as_coord(&self) -> Option<Coord> {
         let mut coord = Vec::with_capacity(self.axes.len());
         for x in &self.axes {
@@ -195,6 +204,15 @@ impl Bounds {
         Some(coord)
     }
 
+    /// Expand these `Bounds` to the entire given [`Shape`].
+    ///
+    /// Example:
+    /// ```
+    /// # use tc_tensor::{Bounds, Shape};
+    /// let mut bounds = Bounds::from(&[0u64][..]);
+    /// bounds.normalize(&Shape::from(vec![2, 3, 4]));
+    /// assert_eq!(bounds.to_shape(), Shape::from(vec![3, 4]));
+    /// ```
     pub fn normalize(&mut self, shape: &Shape) {
         assert!(self.len() <= shape.len());
 
@@ -203,6 +221,7 @@ impl Bounds {
         }
     }
 
+    /// Return the [`Shape`] of the `Tensor` slice with these `Bounds`.
     pub fn to_shape(&self) -> Shape {
         let mut shape = Vec::with_capacity(self.len());
         for bound in &self.axes {
@@ -215,6 +234,7 @@ impl Bounds {
         shape.into()
     }
 
+    /// Return the number of elements contained within these `Bounds`.
     pub fn size(&self) -> u64 {
         self.to_shape().size()
     }
@@ -314,10 +334,12 @@ impl fmt::Display for Bounds {
     }
 }
 
+/// The shape of a `Tensor`
 #[derive(Clone, Default)]
 pub struct Shape(Vec<u64>);
 
 impl Shape {
+    /// Return true if the given [`Bounds`] fit within this `Shape`.
     pub fn contains_bounds(&self, bounds: &Bounds) -> bool {
         if bounds.len() > self.len() {
             return false;
@@ -349,6 +371,7 @@ impl Shape {
         true
     }
 
+    /// Return `true` if the given `coord` exists within this `Shape`.
     pub fn contains_coord(&self, coord: &[u64]) -> bool {
         if coord.len() != self.len() {
             return false;
@@ -363,24 +386,17 @@ impl Shape {
         true
     }
 
+    /// Consume this `Shape` and return the underlying `Vec<u64>`.
     pub fn into_vec(self) -> Vec<u64> {
         self.0
     }
 
+    /// Return the number of elements contained within this `Shape`.
     pub fn size(&self) -> u64 {
         self.0.iter().product()
     }
 
-    pub fn slice_bounds(&self, mut bounds: Bounds) -> Bounds {
-        assert!(bounds.len() <= self.len());
-
-        for axis in bounds.len()..self.len() {
-            bounds.push(AxisBounds::In(0..self[axis]));
-        }
-
-        bounds
-    }
-
+    /// Return a `TCError` if the given `Bounds` don't fit within this `Shape`.
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         if self.contains_bounds(bounds) {
             Ok(())
@@ -392,6 +408,7 @@ impl Shape {
         }
     }
 
+    /// Return a `TCError` if the given `coord` doesn't fit within this `Shape`.
     pub fn validate_coord(&self, coord: &[u64]) -> TCResult<()> {
         for (axis, index) in coord.iter().enumerate() {
             if index >= &self[axis] {
