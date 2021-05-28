@@ -774,7 +774,9 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorT
 {
     type Broadcast = DenseTensor<F, D, T, BlockListBroadcast<F, D, T, B>>;
     type Cast = DenseTensor<F, D, T, BlockListCast<F, D, T, B>>;
+    type Expand = DenseTensor<F, D, T, BlockListExpand<F, D, T, B>>;
     type Slice = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
+    type Transpose = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         let blocks = BlockListCast::new(self.blocks.clone(), dtype);
@@ -786,8 +788,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorT
         Ok(DenseTensor::from(blocks))
     }
 
+    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
+        let blocks = BlockListExpand::new(self.blocks.clone(), axis)?;
+        Ok(DenseTensor::from(blocks))
+    }
+
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let blocks = self.blocks.clone().slice(bounds)?;
+        Ok(DenseTensor::from(blocks))
+    }
+
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let blocks = self.blocks.clone().transpose(permutation)?;
         Ok(DenseTensor::from(blocks))
     }
 }

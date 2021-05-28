@@ -137,13 +137,19 @@ pub trait TensorReduce<D: Dir>: TensorIO<D> {
 pub trait TensorTransform<D: Dir>: TensorAccess {
     type Broadcast: TensorInstance<D>;
     type Cast: TensorInstance<D>;
+    type Expand: TensorInstance<D>;
     type Slice: TensorInstance<D>;
+    type Transpose: TensorInstance<D>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self::Broadcast>;
 
+    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
+
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
+
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }
 
 #[async_trait]
@@ -412,23 +418,37 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorReduce<D> for Tensor<F, D,
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F, D, T> {
     type Broadcast = Self;
     type Cast = Self;
+    type Expand = Self;
     type Slice = Self;
+    type Transpose = Self;
 
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
         }
     }
 
-    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
+    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
+        }
+    }
+
+    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
         }
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
+        }
+    }
+
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
         }
     }
 }
