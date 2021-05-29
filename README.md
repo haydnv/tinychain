@@ -61,7 +61,7 @@ There are instructions for setting up a Cluster in the [client README](https://g
 
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
 
-*Note*: the Tensor feature which powers Tinychain's automatic GPU acceleration is built in to the latest binary release. If you need to compile Tinychain yourself, you'll need to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and follow the instructions to build the `arrayfire` crate: [https://crates.io/crates/arrayfire](https://crates.io/crates/arrayfire). If you run into any problems, [start a discussion](https://github.com/haydnv/tinychain/discussions) for help.
+To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and follow the [instructions](https://crates.io/crates/arrayfire) for ArrayFire's Rust crate to set the `AF_PATH` and `LD_LIBRARY_PATH` environment variables. Then, download the lastest `tinychain-gpu` binary or run `cargo install tinychain --features=tensor`. Please [start a discussion](https://github.com/haydnv/tinychain/discussions) if you run into any problems.
 
 ## Key features
 
