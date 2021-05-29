@@ -59,7 +59,9 @@ $ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'ke
 
 There are instructions for setting up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
 
-You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a series of tutorial videos on YouTube: [https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw)
+You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
+
+*Note*: the Tensor feature which powers Tinychain's automatic GPU acceleration is built in to the latest binary release. If you need to compile Tinychain yourself, you'll need to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and follow the instructions to build the `arrayfire` crate: [https://crates.io/crates/arrayfire](https://crates.io/crates/arrayfire). If you run into any problems, [start a discussion](https://github.com/haydnv/tinychain/discussions) for help.
 
 ## Key features
 
