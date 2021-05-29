@@ -23,7 +23,7 @@ number-general = "~0.3.7"
 num_cpus = "1.13"
 safecast = "0.1"
 strided = "~0.2.9"
-tc-error = { path = "../error", features = ["tensor"] }
-tc-value = { path = "../value" }
-tc-transact = { path = "../transact", features = ["tensor"] }
-tcgeneric = { path = "../generic" }
+tc-error = { version = "~0.2.2", features = ["tensor"] }
+tc-value = "~0.1.9"
+tc-transact = { version = "0.6", features = ["tensor"] }
+tcgeneric = "~0.1.7"
