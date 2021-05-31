@@ -43,7 +43,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     }
 
     async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        destream_json::de::read_from((), source)
+        tbon::de::read_from((), source)
             .map_err(|e| TCError::internal(format!("unable to parse saved block: {}", e)))
             .await
     }
@@ -52,7 +52,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: en::ToStream<'en>,
     {
-        let encoded = destream_json::en::encode(self)
+        let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
 
         let mut reader = StreamReader::new(
@@ -80,7 +80,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: Clone + en::IntoStream<'en> + 'en,
     {
-        let encoded = destream_json::en::encode(self)
+        let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
@@ -95,7 +95,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: en::ToStream<'en>,
     {
-        let encoded = destream_json::en::encode(self)
+        let encoded = tbon::en::encode(self)
             .map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
@@ -328,7 +328,7 @@ async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
     hasher: &mut Sha256,
     data: T,
 ) -> TCResult<()> {
-    let mut data = destream_json::en::encode(data).map_err(TCError::internal)?;
+    let mut data = tbon::en::encode(data).map_err(TCError::internal)?;
     while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
         hasher.update(&chunk);
     }

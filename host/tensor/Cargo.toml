@@ -25,5 +25,5 @@ safecast = "0.1"
 strided = "~0.2.9"
 tc-error = { version = "~0.2.2", features = ["tensor"] }
 tc-value = "~0.1.9"
-tc-transact = { version = "0.6", features = ["tensor"] }
+tc-transact = { path = "../transact", features = ["tensor"] }
 tcgeneric = "~0.1.7"
