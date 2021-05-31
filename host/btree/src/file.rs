@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -60,6 +61,7 @@ impl de::FromStream for NodeKey {
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(cxt, decoder)
             .map_ok(|(deleted, value)| Self { deleted, value })
+            .map_err(|e| de::Error::custom(format!("error decoding BTree node key: {}", e)))
             .await
     }
 }
@@ -79,8 +81,6 @@ impl<'en> en::IntoStream<'en> for NodeKey {
 #[cfg(debug_assertions)]
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::iter::FromIterator;
-
         write!(
             f,
             "BTree node key: {}{}",
@@ -148,12 +148,22 @@ impl de::FromStream for Node {
                 children,
                 rebalance,
             })
+            .map_err(|e| de::Error::custom(format!("error decoding BTree node: {}", e)))
             .await
     }
 }
 
 impl<'en> en::ToStream<'en> for Node {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        debug!(
+            "Node::to_stream {} {} {} {} {}",
+            self.leaf,
+            Tuple::<&NodeKey>::from_iter(&self.keys),
+            Value::from(self.parent.clone()),
+            Tuple::<&NodeId>::from_iter(&self.children),
+            self.rebalance
+        );
+
         en::IntoStream::into_stream(
             (
                 &self.leaf,
@@ -192,8 +202,6 @@ impl fmt::Debug for Node {
 #[cfg(debug_assertions)]
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::iter::FromIterator;
-
         if self.leaf {
             writeln!(f, "leaf node:")?;
         } else {

@@ -26,10 +26,10 @@ log = { version = "0.4", features = [] }
 rand = "0.7"
 serde = { version = "1.0", features = []}
 sha2 = "0.9"
-tbon = { version = "~0.2.1", features = ["tokio-io"] }
+tbon = { version = "~0.2.2", features = ["tokio-io"] }
 tcgeneric = "~0.1.7"
 tc-error = "~0.2.2"
-tc-value = "~0.1.9"
+tc-value = { path = "../value" }
 tokio = { version = "1.6", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"

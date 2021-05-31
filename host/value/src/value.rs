@@ -553,10 +553,10 @@ impl From<Number> for Value {
     }
 }
 
-impl From<Option<Value>> for Value {
-    fn from(opt: Option<Value>) -> Self {
+impl<T: Into<Value>> From<Option<T>> for Value {
+    fn from(opt: Option<T>) -> Self {
         match opt {
-            Some(value) => value,
+            Some(value) => value.into(),
             None => Self::None,
         }
     }
