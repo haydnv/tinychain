@@ -124,8 +124,8 @@ To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration,
  * **Collection**
     * **BTree**: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
     * **Table**: A database table, which supports one or more **BTree** indices
-    * **Tensor**\*\*: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
-    * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**s
+    * **Tensor**: An n-dimensional array of numbers which supports both sparse\*\* and dense representations, useful for machine learning applications
+    * **Graph**\*: A graph database which uses a sparse **Tensor** to compute relationships between rows in its **Table**s
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a transaction
