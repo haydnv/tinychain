@@ -268,6 +268,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
         DenseAccessor::Broadcast(Box::new(broadcast))
     }
 
+    // TODO: replace with block_stream
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
             self.clone()
@@ -693,9 +694,9 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
         DenseAccessor::Transpose(Box::new(accessor))
     }
 
-    fn value_stream<'a>(self, _txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn block_stream<'a>(self, _txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(future::ready(Err(TCError::not_implemented(
-            "BlockListTranspose::value_stream",
+            "BlockListTranspose::block_stream",
         ))))
     }
 

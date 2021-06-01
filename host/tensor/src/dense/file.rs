@@ -750,7 +750,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
         DenseAccessor::Slice(self)
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         let txn_id = *txn.id();
         let file = self.source.file;
         let shape = self.source.schema.0;
@@ -759,7 +759,6 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
         let coord_bounds = coord_bounds(&shape);
 
         let values = stream::iter(bounds.affected())
-            .inspect(|coord| debug!("reading value from source coord {:?}", coord))
             .chunks(PER_BLOCK)
             .then(move |coords| {
                 let ndim = coords[0].len();
@@ -783,27 +782,17 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
                         debug!("reading {} block_offsets", block_offsets.elements());
-                        match file_clone
-                            .clone()
-                            .read_block_owned(txn_id, block_id.into())
-                            .await
-                        {
-                            Ok(block) => {
-                                values.extend(block.get(&block_offsets.into()).to_vec());
-                            }
-                            Err(cause) => return stream::iter(vec![Err(cause)]),
-                        }
-
+                        let block = file_clone.read_block(txn_id, block_id.into()).await?;
+                        values.extend(block.get(&block_offsets.into()).to_vec());
                         start = new_start;
                     }
 
-                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
-                    stream::iter(values)
+                    Ok(Array::from(values))
                 })
             });
 
-        let values: TCTryStream<Number> = Box::pin(values.flatten());
-        Box::pin(future::ready(Ok(values)))
+        let blocks: TCTryStream<Array> = Box::pin(values);
+        Box::pin(future::ready(Ok(blocks)))
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
