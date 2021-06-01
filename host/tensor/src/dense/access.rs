@@ -585,7 +585,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
                 let reductor = self.reductor;
                 let source_bounds = self.rebase.invert_coord(&coord);
                 Box::pin(async move {
-                    let slice = source.clone().slice(source_bounds)?;
+                    let slice = source.slice(source_bounds)?;
                     reductor(&slice.accessor().into(), txn.clone()).await
                 })
             });
@@ -628,7 +628,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
         Box::pin(async move {
             let reductor = self.reductor;
             let source_bounds = self.rebase.invert_coord(&coord);
-            let slice = self.source.clone().slice(source_bounds)?;
+            let slice = self.source.slice(source_bounds)?;
             let value = reductor(&slice.accessor().into(), txn.clone()).await?;
 
             Ok((coord, value))

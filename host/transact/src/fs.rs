@@ -222,12 +222,12 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
 
 /// A transactional directory
 #[async_trait]
-pub trait Dir: Store + Sized + 'static {
+pub trait Dir: Store + Send + Sized + 'static {
     /// The type of a file entry in this `Dir`
     type File: Send;
 
     /// The `Class` of a file stored in this `Dir`
-    type FileClass;
+    type FileClass: Send;
 
     /// Return `true` if this directory has an entry at the given [`PathSegment`].
     async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool>;

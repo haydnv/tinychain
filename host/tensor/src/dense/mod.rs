@@ -748,12 +748,12 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorR
         Err(TCError::not_implemented("DenseTensor::product"))
     }
 
-    fn product_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
+    fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             let zero = self.dtype().zero();
             let mut product = self.dtype().one();
 
-            let blocks = self.blocks.block_stream(txn).await?;
+            let blocks = self.blocks.clone().block_stream(txn).await?;
             let mut block_products = blocks.map_ok(|array| array.product());
 
             while let Some(block_product) = block_products.try_next().await? {
@@ -772,10 +772,10 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorR
         Err(TCError::not_implemented("DenseTensor::sum"))
     }
 
-    fn sum_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
+    fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             let zero = self.dtype().zero();
-            let blocks = self.blocks.block_stream(txn).await?;
+            let blocks = self.blocks.clone().block_stream(txn).await?;
 
             blocks
                 .map_ok(|array| array.sum())

@@ -168,16 +168,16 @@ where
 }
 
 struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
-    tensor: T,
+    tensor: &'a T,
     reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
-    reduce_all: fn(T, Txn) -> TCBoxTryFuture<'a, Number>,
+    reduce_all: fn(&'a T, Txn) -> TCBoxTryFuture<'a, Number>,
 }
 
 impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
     fn new(
-        tensor: T,
+        tensor: &'a T,
         reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
-        reduce_all: fn(T, Txn) -> TCBoxTryFuture<'a, Number>,
+        reduce_all: fn(&'a T, Txn) -> TCBoxTryFuture<'a, Number>,
     ) -> Self {
         Self {
             tensor,
@@ -187,7 +187,7 @@ impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
     }
 }
 
-impl<'a, T: TensorReduce<fs::Dir> + 'a> Handler<'a> for ReduceHandler<'a, T>
+impl<'a, T: TensorReduce<fs::Dir> + Clone + Sync> Handler<'a> for ReduceHandler<'a, T>
 where
     Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
 {
@@ -201,7 +201,7 @@ where
                         .await
                 } else {
                     let axis = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
-                    (self.reduce)(self.tensor, axis)
+                    (self.reduce)(self.tensor.clone(), axis)
                         .map(Collection::from)
                         .map(State::from)
                 }
@@ -369,39 +369,39 @@ where
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor)))
     } else if path.len() == 1 {
-        let tensor = tensor.clone();
+        let cloned = tensor.clone();
 
         match path[0].as_str() {
             // boolean ops
-            "and" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::and))),
-            "or" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::or))),
-            "xor" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::xor))),
+            "and" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::and))),
+            "or" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::or))),
+            "xor" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::xor))),
 
             // comparison ops
-            "eq" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::eq))),
-            "gt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gt))),
-            "gte" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::gte))),
-            "lt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lt))),
-            "lte" => Some(Box::new(DualHandlerAsync::new(tensor, TensorCompare::lte))),
-            "ne" => Some(Box::new(DualHandler::new(tensor, TensorCompare::ne))),
+            "eq" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::eq))),
+            "gt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::gt))),
+            "gte" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::gte))),
+            "lt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::lt))),
+            "lte" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::lte))),
+            "ne" => Some(Box::new(DualHandler::new(cloned, TensorCompare::ne))),
 
             // unary ops
-            "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
+            "abs" => Some(Box::new(UnaryHandler::new(cloned.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
-                tensor.into(),
+                cloned.into(),
                 TensorUnary::all,
             ))),
             "any" => Some(Box::new(UnaryHandlerAsync::new(
-                tensor.into(),
+                cloned.into(),
                 TensorUnary::any,
             ))),
-            "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
+            "not" => Some(Box::new(UnaryHandler::new(cloned.into(), TensorUnary::not))),
 
             // basic math
-            "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),
-            "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
-            "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
-            "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
+            "add" => Some(Box::new(DualHandler::new(cloned, TensorMath::add))),
+            "div" => Some(Box::new(DualHandler::new(cloned, TensorMath::div))),
+            "mul" => Some(Box::new(DualHandler::new(cloned, TensorMath::mul))),
+            "sub" => Some(Box::new(DualHandler::new(cloned, TensorMath::sub))),
 
             // reduce ops
             "product" => Some(Box::new(ReduceHandler::new(

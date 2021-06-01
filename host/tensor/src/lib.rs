@@ -175,13 +175,13 @@ pub trait TensorReduce<D: Dir>: TensorIO<D> {
     fn product(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the product of all elements in this [`Tensor`].
-    fn product_all<'a>(self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<'a, Number>;
+    fn product_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
 
     /// Return the sum of this [`Tensor`] along the given `axis`.
     fn sum(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the sum of all elements in this [`Tensor`].
-    fn sum_all<'a>(self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<'a, Number>;
+    fn sum_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
 }
 
 /// [`Tensor`] transforms
@@ -470,7 +470,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorReduce<D> for Tensor<F, D,
         }
     }
 
-    fn product_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
+    fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.product_all(txn),
         }
@@ -482,7 +482,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorReduce<D> for Tensor<F, D,
         }
     }
 
-    fn sum_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
+    fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.sum_all(txn),
         }
