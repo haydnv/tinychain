@@ -600,19 +600,18 @@ where
     B: DenseAccess<F, D, T>,
     O: DenseAccess<F, D, T>,
 {
-    async fn mask(&self, _txn: T, _other: DenseTensor<F, D, T, O>) -> TCResult<()> {
+    async fn mask(self, _txn: T, _other: DenseTensor<F, D, T, O>) -> TCResult<()> {
         Err(TCError::not_implemented("DenseTensor::mask"))
     }
 
-    async fn write(&self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, O>) -> TCResult<()> {
+    async fn write(self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, O>) -> TCResult<()> {
         debug!("write dense tensor to dense {}", bounds);
 
+        let dtype = self.dtype();
         let txn_id = *txn.id();
         let coords = bounds.affected();
         let slice = self.slice(bounds.clone())?;
-        let other = other
-            .broadcast(slice.shape().clone())?
-            .as_type(self.dtype())?;
+        let other = other.broadcast(slice.shape().clone())?.cast_into(dtype)?;
 
         let other_values = other.blocks.value_stream(txn).await?;
         let values = futures::stream::iter(coords).zip(other_values);
@@ -633,13 +632,13 @@ where
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     TensorDualIO<D, Tensor<F, D, T>> for DenseTensor<F, D, T, B>
 {
-    async fn mask(&self, txn: T, other: Tensor<F, D, T>) -> TCResult<()> {
+    async fn mask(self, txn: T, other: Tensor<F, D, T>) -> TCResult<()> {
         match other {
             Tensor::Dense(dense) => self.mask(txn, dense).await,
         }
     }
 
-    async fn write(&self, txn: T, bounds: Bounds, other: Tensor<F, D, T>) -> TCResult<()> {
+    async fn write(self, txn: T, bounds: Bounds, other: Tensor<F, D, T>) -> TCResult<()> {
         debug!("DenseTensor::write {} to {}", other, bounds);
 
         match other {
@@ -794,28 +793,28 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorT
     type Slice = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
     type Transpose = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
 
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
-        let blocks = BlockListCast::new(self.blocks.clone(), dtype);
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        let blocks = BlockListCast::new(self.blocks, dtype);
         Ok(DenseTensor::from(blocks))
     }
 
-    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
-        let blocks = BlockListBroadcast::new(self.blocks.clone(), shape)?;
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        let blocks = BlockListBroadcast::new(self.blocks, shape)?;
         Ok(DenseTensor::from(blocks))
     }
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
-        let blocks = BlockListExpand::new(self.blocks.clone(), axis)?;
+    fn expand_dims(self, axis: usize) -> TCResult<Self::Expand> {
+        let blocks = BlockListExpand::new(self.blocks, axis)?;
         Ok(DenseTensor::from(blocks))
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let blocks = self.blocks.clone().slice(bounds)?;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let blocks = self.blocks.slice(bounds)?;
         Ok(DenseTensor::from(blocks))
     }
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let blocks = self.blocks.clone().transpose(permutation)?;
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let blocks = self.blocks.transpose(permutation)?;
         Ok(DenseTensor::from(blocks))
     }
 }

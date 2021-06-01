@@ -6,11 +6,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_tensor::{
-    AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorBoolean,
-    TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorReduce, TensorTransform, TensorType,
-    TensorUnary,
-};
+use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::{label, PathSegment, TCBoxTryFuture};
@@ -108,31 +104,34 @@ impl Route for TensorType {
     }
 }
 
-struct DualHandler<T> {
-    tensor: T,
-    op: fn(T, Tensor) -> TCResult<Tensor>,
+struct DualHandler {
+    tensor: Tensor,
+    op: fn(Tensor, Tensor) -> TCResult<Tensor>,
 }
 
-impl<T> DualHandler<T> {
-    fn new(tensor: T, op: fn(T, Tensor) -> TCResult<Tensor>) -> Self {
-        Self { tensor, op }
+impl DualHandler {
+    fn new<T>(tensor: T, op: fn(Tensor, Tensor) -> TCResult<Tensor>) -> Self
+    where
+        Tensor: From<T>,
+    {
+        Self {
+            tensor: tensor.into(),
+            op,
+        }
     }
 }
 
-impl<'a, T: TensorAccess + Send + Sync + 'a> Handler<'a> for DualHandler<T> {
+impl<'a> Handler<'a> for DualHandler {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let r = params.require::<Tensor>(&label("r").into())?;
-                let r = if r.shape() == self.tensor.shape() {
-                    r
-                } else {
-                    r.broadcast(self.tensor.shape().clone())?
-                };
+                let r = params.require(&label("r").into())?;
+                params.expect_empty()?;
 
-                (self.op)(self.tensor, r)
-                    .map(Collection::from)
-                    .map(State::from)
+                let (l, r) = broadcast(self.tensor, r)?;
+                debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
+
+                (self.op)(l, r).map(Collection::from).map(State::from)
             })
         }))
     }
@@ -210,11 +209,11 @@ where
     }
 }
 
-struct TensorHandler<'a, T> {
-    tensor: &'a T,
+struct TensorHandler<T> {
+    tensor: T,
 }
 
-impl<'a, T> Handler<'a> for TensorHandler<'a, T>
+impl<'a, T: 'a> Handler<'a> for TensorHandler<T>
 where
     T: TensorIO<fs::Dir, Txn = Txn>
         + TensorDualIO<fs::Dir, Tensor>
@@ -270,8 +269,8 @@ where
     }
 }
 
-impl<'a, T> From<&'a T> for TensorHandler<'a, T> {
-    fn from(tensor: &'a T) -> Self {
+impl<T> From<T> for TensorHandler<T> {
+    fn from(tensor: T) -> Self {
         Self { tensor }
     }
 }
@@ -367,7 +366,7 @@ where
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
     if path.is_empty() {
-        Some(Box::new(TensorHandler::from(tensor)))
+        Some(Box::new(TensorHandler::from(tensor.clone())))
     } else if path.len() == 1 {
         let cloned = tensor.clone();
 
@@ -433,7 +432,7 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
 }
 
 async fn write<T: TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor>>(
-    tensor: &T,
+    tensor: T,
     txn: Txn,
     key: Scalar,
     value: State,

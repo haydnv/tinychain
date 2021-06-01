@@ -137,15 +137,11 @@ pub trait TensorIO<D: Dir>: TensorAccess {
 #[async_trait]
 pub trait TensorDualIO<D: Dir, O>: TensorIO<D> {
     /// Zero out the elements of this [`Tensor`] where the corresponding element of `value` is nonzero.
-    async fn mask(&self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
+    async fn mask(self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
 
     /// Overwrite the slice of this [`Tensor`] given by [`Bounds`] with the given `value`.
-    async fn write(
-        &self,
-        txn: <Self as TensorIO<D>>::Txn,
-        bounds: Bounds,
-        value: O,
-    ) -> TCResult<()>;
+    async fn write(self, txn: <Self as TensorIO<D>>::Txn, bounds: Bounds, value: O)
+        -> TCResult<()>;
 }
 
 /// [`Tensor`] math operations
@@ -202,20 +198,20 @@ pub trait TensorTransform<D: Dir>: TensorAccess {
     type Transpose: TensorInstance<D>;
 
     /// Cast this [`Tensor`] to the given `dtype`.
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
 
     /// Broadcast this [`Tensor`] to the given `shape`.
-    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast>;
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast>;
 
     /// Insert a new dimension of size 1 at the given `axis`.
-    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
+    fn expand_dims(self, axis: usize) -> TCResult<Self::Expand>;
 
     /// Return a slice of this [`Tensor`] with the given `bounds`.
-    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice>;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
     /// Transpose this [`Tensor`] by reordering its axes according to the given `permutation`.
     /// If no permutation is given, the axes will be reversed.
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }
 
 /// Unary [`Tensor`] operations
@@ -418,13 +414,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorIO<D> for Tensor<F, D, T> 
 
 #[async_trait]
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorDualIO<D, Self> for Tensor<F, D, T> {
-    async fn mask(&self, txn: T, other: Self) -> TCResult<()> {
+    async fn mask(self, txn: T, other: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.mask(txn, other).await,
         }
     }
 
-    async fn write(&self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
+    async fn write(self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
         debug!("Tensor::write {} to {}", value, bounds);
 
         match self {
@@ -496,31 +492,35 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorTransform<D> for Tensor<F,
     type Slice = Self;
     type Transpose = Self;
 
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
+            Self::Dense(dense) => dense.cast_into(dtype).map(Self::from),
         }
     }
 
-    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+    fn broadcast(self, shape: Shape) -> TCResult<Self> {
+        if &shape == self.shape() {
+            return Ok(self);
+        }
+
         match self {
             Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
         }
     }
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+    fn expand_dims(self, axis: usize) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
         }
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
         }
     }
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
         }
@@ -665,4 +665,54 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> fmt::Display for Tensor<F, D, T>
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Tensor")
     }
+}
+
+pub fn broadcast<F: File<Array>, D: Dir, T: Transaction<D>>(
+    left: Tensor<F, D, T>,
+    right: Tensor<F, D, T>,
+) -> TCResult<(Tensor<F, D, T>, Tensor<F, D, T>)> {
+    if left.shape() == right.shape() {
+        return Ok((left, right));
+    }
+
+    let mut left_shape = left.shape().to_vec();
+    let mut right_shape = right.shape().to_vec();
+
+    match (left_shape.len(), right_shape.len()) {
+        (l, r) if l < r => {
+            for _ in 0..(r - l) {
+                left_shape.insert(0, 1);
+            }
+        }
+        (l, r) if r < l => {
+            for _ in 0..(l - r) {
+                right_shape.insert(0, 1);
+            }
+        }
+        _ => {}
+    }
+
+    let mut shape = Vec::with_capacity(left_shape.len());
+    for (l, r) in left_shape.iter().zip(right_shape.iter()) {
+        if l == r || *l == 1 {
+            shape.push(*r);
+        } else if *r == 1 {
+            shape.push(*l)
+        } else {
+            return Err(TCError::unsupported(format!(
+                "cannot broadcast dimension {} into {}",
+                l, r
+            )));
+        }
+    }
+
+    let left_shape = Shape::from(left_shape);
+    let right_shape = Shape::from(right_shape);
+    let shape = if left_shape.size() > right_shape.size() {
+        left_shape
+    } else {
+        right_shape
+    };
+
+    Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
 }
