@@ -8,11 +8,12 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_tensor::{
     AxisBounds, Bounds, Coord, DenseAccess, DenseTensor, Shape, TensorAccess, TensorBoolean,
-    TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorTransform, TensorType, TensorUnary,
+    TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorUnary,
 };
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, PathSegment};
+use tcgeneric::{label, PathSegment, TCBoxTryFuture};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -166,6 +167,49 @@ where
     }
 }
 
+struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
+    tensor: T,
+    reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
+    reduce_all: fn(T, Txn) -> TCBoxTryFuture<'a, Number>,
+}
+
+impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
+    fn new(
+        tensor: T,
+        reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
+        reduce_all: fn(T, Txn) -> TCBoxTryFuture<'a, Number>,
+    ) -> Self {
+        Self {
+            tensor,
+            reduce,
+            reduce_all,
+        }
+    }
+}
+
+impl<'a, T: TensorReduce<fs::Dir> + 'a> Handler<'a> for ReduceHandler<'a, T>
+where
+    Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    (self.reduce_all)(self.tensor, txn)
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await
+                } else {
+                    let axis = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
+                    (self.reduce)(self.tensor, axis)
+                        .map(Collection::from)
+                        .map(State::from)
+                }
+            })
+        }))
+    }
+}
+
 struct TensorHandler<'a, T> {
     tensor: &'a T,
 }
@@ -311,6 +355,7 @@ where
         + TensorBoolean<fs::Dir, Tensor, Combine = Tensor>
         + TensorDualIO<fs::Dir, Tensor>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
+        + TensorReduce<fs::Dir>
         + TensorTransform<fs::Dir>
         + TensorUnary<fs::Dir>
         + Clone
@@ -318,6 +363,7 @@ where
         + Sync,
     Tensor: From<T>,
     Collection: From<T>,
+    Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
 {
     if path.is_empty() {
@@ -356,6 +402,18 @@ where
             "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
             "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
             "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
+
+            // reduce ops
+            "product" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::product,
+                TensorReduce::product_all,
+            ))),
+            "sum" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::sum,
+                TensorReduce::sum_all,
+            ))),
 
             _ => None,
         }

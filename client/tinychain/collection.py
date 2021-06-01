@@ -400,10 +400,28 @@ class Tensor(Collection):
 
         return self._post("ne", Tensor, r=other)
 
+    def product(self, axis=None):
+        """
+        Calculate the product of this `Tensor` along the given `axis`,
+        or the total product if no axis is given.
+        """
+
+        rtype = Number if axis is None else tensor
+        return self._get("product", axis, rtype)
+
     def sub(self, other):
         """Subtract another `Tensor` from this one, broadcasting if necessary."""
 
         return self._post("sub", Tensor, r=other)
+
+    def sum(self, axis=None):
+        """
+        Calculate the sum of this `Tensor` along the given `axis`,
+        or the total sum if no axis is given.
+        """
+
+        rtype = Number if axis is None else tensor
+        return self._get("sum", axis, rtype)
 
     def write(self, bounds, value):
         """

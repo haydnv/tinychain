@@ -104,6 +104,26 @@ class DenseTensorTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [False, True, True, False, True])
 
+    def testProduct(self):
+        shape = [2, 3]
+
+        cxt = tc.Context()
+        cxt.big = tc.Tensor.Dense.arange(shape, 1, 7)
+        cxt.result = cxt.big.product()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, product(range(1, 7)))
+
+    def testSum(self):
+        shape = [5, 2]
+
+        cxt = tc.Context()
+        cxt.big = tc.Tensor.Dense.arange(shape, 0, 10)
+        cxt.result = cxt.big.sum()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, sum(range(10)))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

@@ -172,16 +172,16 @@ pub trait TensorReduce<D: Dir>: TensorIO<D> {
     type Reduce: TensorInstance<D>;
 
     /// Return the product of this [`Tensor`] along the given `axis`.
-    fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
+    fn product(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the product of all elements in this [`Tensor`].
-    fn product_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+    fn product_all<'a>(self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<'a, Number>;
 
     /// Return the sum of this [`Tensor`] along the given `axis`.
-    fn sum(&self, axis: usize) -> TCResult<Self::Reduce>;
+    fn sum(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the sum of all elements in this [`Tensor`].
-    fn sum_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+    fn sum_all<'a>(self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<'a, Number>;
 }
 
 /// [`Tensor`] transforms
@@ -464,25 +464,25 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorMath<D, Self> for Tensor<F
 impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorReduce<D> for Tensor<F, D, T> {
     type Reduce = Self;
 
-    fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
+    fn product(self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.product(axis).map(Self::from),
         }
     }
 
-    fn product_all(&self, txn: T) -> TCBoxTryFuture<'_, Number> {
+    fn product_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
         match self {
             Self::Dense(dense) => dense.product_all(txn),
         }
     }
 
-    fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
+    fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.sum(axis).map(Self::from),
         }
     }
 
-    fn sum_all(&self, txn: T) -> TCBoxTryFuture<'_, Number> {
+    fn sum_all<'a>(self, txn: T) -> TCBoxTryFuture<'a, Number> {
         match self {
             Self::Dense(dense) => dense.sum_all(txn),
         }
