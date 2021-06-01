@@ -27,6 +27,12 @@ pub struct Case {
 
 #[async_trait]
 impl Refer for Case {
+    fn is_view(&self) -> bool {
+        self.cond.is_view()
+            || self.switch.iter().any(Refer::is_view)
+            || self.case.iter().any(Refer::is_view)
+    }
+
     fn is_write(&self) -> bool {
         self.cond.is_write()
             || self.switch.iter().any(Refer::is_write)

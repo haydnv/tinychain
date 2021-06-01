@@ -37,6 +37,12 @@ const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 /// Trait defining dependencies and a resolution method for a [`TCRef`].
 #[async_trait]
 pub trait Refer {
+    /// Return `true` if this reference contains an [`OpRef`] whose `Subject` is a derived view.
+    ///
+    /// "Derived view" refers to a `Subject` which is not a `Link` or `self`, e.g.
+    /// "$self/slice".
+    fn is_view(&self) -> bool;
+
     /// Return `true` if resolving this reference may mutate some `State`.
     fn is_write(&self) -> bool;
 
@@ -130,6 +136,16 @@ impl Instance for TCRef {
 
 #[async_trait]
 impl Refer for TCRef {
+    fn is_view(&self) -> bool {
+        match self {
+            Self::After(after) => after.is_view(),
+            Self::Case(case) => case.is_view(),
+            Self::Id(id_ref) => id_ref.is_view(),
+            Self::If(if_ref) => if_ref.is_view(),
+            Self::Op(op_ref) => op_ref.is_view(),
+        }
+    }
+
     fn is_write(&self) -> bool {
         match self {
             Self::After(after) => after.is_write(),

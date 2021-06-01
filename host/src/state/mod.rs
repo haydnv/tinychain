@@ -189,6 +189,15 @@ impl State {
 
 #[async_trait]
 impl Refer for State {
+    fn is_view(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Refer::is_view),
+            Self::Scalar(scalar) => scalar.is_view(),
+            Self::Tuple(tuple) => tuple.iter().any(Refer::is_view),
+            _ => false, // TODO: should this check e.g. for a BTreeSlice or TableSlice?
+        }
+    }
+
     fn is_write(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(Refer::is_write),

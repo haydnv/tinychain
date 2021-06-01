@@ -82,6 +82,18 @@ pub enum Subject {
 }
 
 impl Subject {
+    fn is_view(&self) -> bool {
+        if let Self::Ref(id, path) = self {
+            if id.is_view() {
+                true
+            } else {
+                !path.is_empty()
+            }
+        } else {
+            false
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Ref(id_ref, _) if id_ref.id() != &SELF => id_ref.requires(deps),
@@ -260,6 +272,17 @@ pub enum OpRef {
     Delete(DeleteRef),
 }
 
+impl OpRef {
+    fn subject(&self) -> &Subject {
+        match self {
+            Self::Get((subject, _)) => subject,
+            Self::Put((subject, _, _)) => subject,
+            Self::Post((subject, _)) => subject,
+            Self::Delete((subject, _)) => subject,
+        }
+    }
+}
+
 impl Instance for OpRef {
     type Class = OpRefType;
 
@@ -276,6 +299,10 @@ impl Instance for OpRef {
 
 #[async_trait]
 impl Refer for OpRef {
+    fn is_view(&self) -> bool {
+        self.subject().is_view()
+    }
+
     fn is_write(&self) -> bool {
         match self {
             Self::Get(_) => false,

@@ -13,7 +13,7 @@ use tcgeneric::*;
 use crate::chain::{self, Chain, ChainType, Schema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::scalar::{Link, LinkHost, OpRef, Scalar, Value};
+use crate::scalar::{Link, LinkHost, OpRef, Refer, Scalar, Value};
 use crate::txn::{Actor, Txn, TxnId};
 
 use super::Cluster;
@@ -58,6 +58,17 @@ pub async fn instantiate(
                 }
             }
             Scalar::Op(op_def) => {
+                if !op_def.is_write() {
+                    for provider in op_def.form() {
+                        if provider.is_write() && provider.is_view() {
+                            return Err(TCError::internal(format!(
+                                "cannot write to a derived view in a {}",
+                                op_def.class()
+                            )));
+                        }
+                    }
+                }
+
                 cluster_proto.insert(id, Scalar::Op(op_def));
             }
             other => {

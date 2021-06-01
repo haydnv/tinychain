@@ -1,7 +1,7 @@
 import tinychain as tc
 import unittest
 
-from testutils import start_host
+from testutils import PORT, start_host
 
 
 class Database(tc.Cluster):
@@ -16,7 +16,7 @@ class Database(tc.Cluster):
 
 
 class Web(tc.Cluster):
-    __uri__ = tc.URI("/app/web")
+    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/web")
 
     def _configure(self):
         schema = tc.BTree.Schema(tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt))
@@ -42,21 +42,31 @@ class Web(tc.Cluster):
             self.cache.insert([name, txn.views + 1]))
 
 
+@unittest.skip
 class DemoTests(unittest.TestCase):
     def setUp(self):
-        self.host = start_host("table_demo", [Database, Web], True)
+        self.hosts = []
+        for i in range(3):
+            port = PORT + i
+            host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
+            host = start_host("table_demo", [Database, Web], True, host_uri)
+            self.hosts.append(host)
 
     def testCache(self):
-        self.host.put("/app/web/add_movie",
+        self.hosts[1].put("/app/web/add_movie",
             "Up", {"year": 2009, "description": "Pixar, balloons"})
 
-        self.assertEqual(self.host.get("/app/web/views", "Up"), 0)
+        self.assertEqual(self.hosts[2].get("/app/web/views", "Up"), 0)
 
-        self.host.post("/app/web/add_view", {"name": "Up"})
-        self.assertEqual(self.host.get("/app/web/views", "Up"), 1)
+        for i in range(5):
+            print()
+
+        self.hosts[0].post("/app/web/add_view", {"name": "Up"})
+        self.assertEqual(self.hosts[1].get("/app/web/views", "Up"), 1)
 
     def tearDown(self):
-        self.host.stop()
+        for host in self.hosts:
+            host.stop()
 
 
 if __name__ == "__main__":

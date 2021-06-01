@@ -28,6 +28,10 @@ pub struct IfRef {
 
 #[async_trait]
 impl Refer for IfRef {
+    fn is_view(&self) -> bool {
+        self.cond.is_view() || self.then.is_view() || self.or_else.is_view()
+    }
+
     fn is_write(&self) -> bool {
         self.cond.is_write() || self.then.is_write() || self.or_else.is_write()
     }

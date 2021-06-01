@@ -169,7 +169,7 @@ impl Cluster {
             .grant(&self.actor, self.link.path().clone(), vec![scope])
             .await?;
 
-        OpDef::call(op.into_def(), txn, context).await
+        OpDef::call(op.into_form(), txn, context).await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.

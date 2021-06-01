@@ -40,6 +40,10 @@ impl IdRef {
 
 #[async_trait]
 impl Refer for IdRef {
+    fn is_view(&self) -> bool {
+        self.to != SELF
+    }
+
     fn is_write(&self) -> bool {
         false
     }

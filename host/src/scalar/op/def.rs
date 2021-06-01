@@ -11,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tcgeneric::*;
 
-use crate::scalar::{Executor, Refer, Scalar};
+use crate::scalar::{Executor, Scalar};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -96,20 +96,31 @@ pub enum OpDef {
 }
 
 impl OpDef {
-    pub fn into_def(self) -> Vec<(Id, Scalar)> {
+    pub fn form(&self) -> impl Iterator<Item = &Scalar> {
         match self {
-            Self::Get((_, def)) => def,
-            Self::Put((_, _, def)) => def,
-            Self::Post(def) => def,
-            Self::Delete((_, def)) => def,
+            Self::Get((_, form)) => form,
+            Self::Put((_, _, form)) => form,
+            Self::Post(form) => form,
+            Self::Delete((_, form)) => form,
+        }
+        .iter()
+        .map(|(_id, scalar)| scalar)
+    }
+
+    pub fn into_form(self) -> Vec<(Id, Scalar)> {
+        match self {
+            Self::Get((_, form)) => form,
+            Self::Put((_, _, form)) => form,
+            Self::Post(form) => form,
+            Self::Delete((_, form)) => form,
         }
     }
 
     pub fn is_write(&self) -> bool {
         match self {
-            Self::Get((_, refs)) => refs.iter().map(|(_, scalar)| scalar).any(Refer::is_write),
+            Self::Get(_) => false,
             Self::Put(_) => true,
-            Self::Post(refs) => refs.iter().map(|(_, scalar)| scalar).any(Refer::is_write),
+            Self::Post(_) => false,
             Self::Delete(_) => true,
         }
     }

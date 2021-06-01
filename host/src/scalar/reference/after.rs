@@ -27,6 +27,10 @@ pub struct After {
 
 #[async_trait]
 impl Refer for After {
+    fn is_view(&self) -> bool {
+        self.when.is_view() || self.then.is_view()
+    }
+
     fn is_write(&self) -> bool {
         self.when.is_write() || self.then.is_write()
     }
