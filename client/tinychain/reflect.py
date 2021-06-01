@@ -30,8 +30,9 @@ class Meta(type):
         class Header(cls):
             pass
 
-        header = Header(URI("self"))
-        instance = cls(URI("self"))
+        instance_uri = URI("self")
+        header = Header(instance_uri)
+        instance = cls(instance_uri)
 
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_'):
@@ -40,7 +41,7 @@ class Meta(type):
             if isinstance(attr, MethodStub):
                 setattr(header, name, attr.method(instance, name))
             elif isinstance(attr, State):
-                setattr(header, name, type(attr)(URI(f"self/{name}")))
+                setattr(header, name, type(attr)(instance_uri.append(name)))
             else:
                 setattr(header, name, attr)
 

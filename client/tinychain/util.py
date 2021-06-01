@@ -99,7 +99,7 @@ class URI(object):
     def __init__(self, root, path=[]):
         assert root is not None
 
-        self._root = root
+        self._root = str(root)
         self._path = path
 
     def append(self, name):
@@ -134,16 +134,17 @@ class URI(object):
     def path(self):
         """Return the path segment of this `URI`."""
 
-        if "://" not in self._root:
-            return self._root + "/".join(self._path)
+        if "://" not in str(self._root):
+            return URI(self._root) + "/".join(self._path)
 
         start = self._root.index("://")
         start = self._root.index('/', start + 3)
 
+        prefix = URI(self._root[start:])
         if self._path:
-            return self._root[start:] + "/".join(self._path)
+            return prefix + "/".join(self._path)
         else:
-            return self._root[start:]
+            return prefix
 
     def port(self):
         """Return the port of this `URI`, if present."""
