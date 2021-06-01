@@ -529,7 +529,7 @@ pub struct BlockListReduce<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAc
 impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     BlockListReduce<F, D, T, B>
 {
-    fn new(source: B, axis: usize, reductor: Reductor<F, D, T>) -> TCResult<Self> {
+    pub fn new(source: B, axis: usize, reductor: Reductor<F, D, T>) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
 
         Ok(BlockListReduce {

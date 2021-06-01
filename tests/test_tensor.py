@@ -105,6 +105,18 @@ class DenseTensorTests(unittest.TestCase):
         self.assertEqual(actual, [False, True, True, False, True])
 
     def testProduct(self):
+        shape = [2, 3, 4]
+        axis = 1
+
+        cxt = tc.Context()
+        cxt.big = tc.Tensor.Dense.arange(shape, 0, 24)
+        cxt.result = cxt.big.product(axis)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.product(np.arange(0, 24).reshape(shape), axis)
+        self.assertEqual(actual, expect(tc.I64, [2, 4], expected.flatten()))
+
+    def testProductAll(self):
         shape = [2, 3]
 
         cxt = tc.Context()
@@ -115,6 +127,18 @@ class DenseTensorTests(unittest.TestCase):
         self.assertEqual(actual, product(range(1, 7)))
 
     def testSum(self):
+        shape = [4, 2, 3, 5]
+        axis = 2
+
+        cxt = tc.Context()
+        cxt.big = tc.Tensor.Dense.arange(shape, 0., 120.)
+        cxt.result = cxt.big.sum(axis)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.sum(np.arange(0, 120).reshape(shape), axis)
+        self.assertEqual(actual, expect(tc.F64, [4, 2, 5], expected.flatten()))
+
+    def testSumAll(self):
         shape = [5, 2]
 
         cxt = tc.Context()

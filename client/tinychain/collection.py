@@ -406,7 +406,7 @@ class Tensor(Collection):
         or the total product if no axis is given.
         """
 
-        rtype = Number if axis is None else tensor
+        rtype = Number if axis is None else Tensor
         return self._get("product", axis, rtype)
 
     def sub(self, other):
@@ -420,7 +420,7 @@ class Tensor(Collection):
         or the total sum if no axis is given.
         """
 
-        rtype = Number if axis is None else tensor
+        rtype = Number if axis is None else Tensor
         return self._get("sum", axis, rtype)
 
     def write(self, bounds, value):

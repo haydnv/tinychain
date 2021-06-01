@@ -744,8 +744,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorR
 {
     type Reduce = DenseTensor<F, D, T, BlockListReduce<F, D, T, B>>;
 
-    fn product(self, _axis: usize) -> TCResult<Self::Reduce> {
-        Err(TCError::not_implemented("DenseTensor::product"))
+    fn product(self, axis: usize) -> TCResult<Self::Reduce> {
+        BlockListReduce::new(self.blocks, axis, DenseTensor::product_all).map(DenseTensor::from)
     }
 
     fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
@@ -768,8 +768,8 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorR
         })
     }
 
-    fn sum(self, _axis: usize) -> TCResult<Self::Reduce> {
-        Err(TCError::not_implemented("DenseTensor::sum"))
+    fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
+        BlockListReduce::new(self.blocks, axis, DenseTensor::sum_all).map(DenseTensor::from)
     }
 
     fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
