@@ -40,6 +40,10 @@ impl IdRef {
 
 #[async_trait]
 impl Refer for IdRef {
+    fn is_write(&self) -> bool {
+        false
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         if self.to != SELF {
             deps.insert(self.to.clone());

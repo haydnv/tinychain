@@ -19,6 +19,12 @@ use crate::txn::Txn;
 
 use super::{Scalar, Scope, Value};
 
+pub use after::After;
+pub use case::Case;
+pub use id::*;
+pub use op::*;
+pub use r#if::IfRef;
+
 mod after;
 mod case;
 mod r#if;
@@ -26,17 +32,14 @@ mod r#if;
 pub mod id;
 pub mod op;
 
-pub use after::After;
-pub use case::Case;
-pub use id::*;
-pub use op::*;
-pub use r#if::IfRef;
-
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
 /// Trait defining dependencies and a resolution method for a [`TCRef`].
 #[async_trait]
 pub trait Refer {
+    /// Return `true` if resolving this reference may mutate some `State`.
+    fn is_write(&self) -> bool;
+
     /// Add the dependency [`Id`]s of this reference to the given set.
     fn requires(&self, deps: &mut HashSet<Id>);
 
@@ -127,6 +130,16 @@ impl Instance for TCRef {
 
 #[async_trait]
 impl Refer for TCRef {
+    fn is_write(&self) -> bool {
+        match self {
+            Self::After(after) => after.is_write(),
+            Self::Case(case) => case.is_write(),
+            Self::Id(id_ref) => id_ref.is_write(),
+            Self::If(if_ref) => if_ref.is_write(),
+            Self::Op(op_ref) => op_ref.is_write(),
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::After(after) => after.requires(deps),

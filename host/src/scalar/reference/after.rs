@@ -27,6 +27,10 @@ pub struct After {
 
 #[async_trait]
 impl Refer for After {
+    fn is_write(&self) -> bool {
+        self.when.is_write() || self.then.is_write()
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.when.requires(deps);
         self.then.requires(deps);

@@ -276,6 +276,15 @@ impl Instance for OpRef {
 
 #[async_trait]
 impl Refer for OpRef {
+    fn is_write(&self) -> bool {
+        match self {
+            Self::Get(_) => false,
+            Self::Put(_) => true,
+            Self::Post(_) => false,
+            Self::Delete(_) => true,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Get((subject, key)) => {

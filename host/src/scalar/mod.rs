@@ -257,6 +257,15 @@ impl Instance for Scalar {
 
 #[async_trait]
 impl Refer for Scalar {
+    fn is_write(&self) -> bool {
+        match self {
+            Self::Ref(tc_ref) => tc_ref.is_write(),
+            Self::Map(map) => map.values().any(Refer::is_write),
+            Self::Tuple(tuple) => tuple.iter().any(Refer::is_write),
+            _ => false,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

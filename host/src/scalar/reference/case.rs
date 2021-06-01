@@ -27,6 +27,12 @@ pub struct Case {
 
 #[async_trait]
 impl Refer for Case {
+    fn is_write(&self) -> bool {
+        self.cond.is_write()
+            || self.switch.iter().any(Refer::is_write)
+            || self.case.iter().any(Refer::is_write)
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
 

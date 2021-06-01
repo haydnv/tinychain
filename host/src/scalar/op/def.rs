@@ -11,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tcgeneric::*;
 
-use crate::scalar::{Executor, Scalar};
+use crate::scalar::{Executor, Refer, Scalar};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -95,20 +95,25 @@ pub enum OpDef {
     Delete(DeleteOp),
 }
 
-impl Instance for OpDef {
-    type Class = OpDefType;
-
-    fn class(&self) -> OpDefType {
+impl OpDef {
+    pub fn into_def(self) -> Vec<(Id, Scalar)> {
         match self {
-            Self::Get(_) => OpDefType::Get,
-            Self::Put(_) => OpDefType::Put,
-            Self::Post(_) => OpDefType::Post,
-            Self::Delete(_) => OpDefType::Delete,
+            Self::Get((_, def)) => def,
+            Self::Put((_, _, def)) => def,
+            Self::Post(def) => def,
+            Self::Delete((_, def)) => def,
         }
     }
-}
 
-impl OpDef {
+    pub fn is_write(&self) -> bool {
+        match self {
+            Self::Get((_, refs)) => refs.iter().map(|(_, scalar)| scalar).any(Refer::is_write),
+            Self::Put(_) => true,
+            Self::Post(refs) => refs.iter().map(|(_, scalar)| scalar).any(Refer::is_write),
+            Self::Delete(_) => true,
+        }
+    }
+
     pub async fn call<S: Into<State>, I: IntoIterator<Item = (Id, State)>>(
         op_def: Vec<(Id, S)>,
         txn: Txn,
@@ -128,13 +133,17 @@ impl OpDef {
             .capture(capture)
             .await
     }
+}
 
-    pub fn into_def(self) -> Vec<(Id, Scalar)> {
+impl Instance for OpDef {
+    type Class = OpDefType;
+
+    fn class(&self) -> OpDefType {
         match self {
-            Self::Get((_, def)) => def,
-            Self::Put((_, _, def)) => def,
-            Self::Post(def) => def,
-            Self::Delete((_, def)) => def,
+            Self::Get(_) => OpDefType::Get,
+            Self::Put(_) => OpDefType::Put,
+            Self::Post(_) => OpDefType::Post,
+            Self::Delete(_) => OpDefType::Delete,
         }
     }
 }
