@@ -23,13 +23,13 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
         tc.write_cluster(cluster, cluster_config, overwrite)
         config.append(cluster_config)
 
-    data_dir = "/tmp/tc/tmp/" + name
+    data_dir = f"/tmp/tc/tmp/{port}/{name}"
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
     host = tc.host.Local(
         TC_PATH,
-        workspace="/tmp/tc/tmp/" + name,
+        workspace=f"/tmp/tc/tmp/{port}/{name}",
         data_dir=data_dir,
         clusters=config,
         port=port,
