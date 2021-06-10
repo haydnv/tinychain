@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use log::debug;
+use log::{debug, warn};
 use uplock::RwLock;
 
 use tc_error::*;
@@ -61,10 +61,7 @@ pub async fn instantiate(
                 if !op_def.is_write() {
                     for provider in op_def.form() {
                         if provider.is_write() && provider.is_view() {
-                            return Err(TCError::internal(format!(
-                                "cannot write to a derived view in a {}",
-                                op_def.class()
-                            )));
+                            warn!("write to a derived view in Cluster: {}", provider);
                         }
                     }
                 }
