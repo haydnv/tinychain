@@ -18,7 +18,7 @@ class DenseTensorTests(unittest.TestCase):
         shape = [3, 2, 1]
 
         cxt = tc.Context()
-        cxt.tensor = tc.Tensor.Dense.constant(shape, c)
+        cxt.tensor = tc.tensor.Dense.constant(shape, c)
         cxt.result = tc.After(cxt.tensor.write([0, 0, 0], 0), cxt.tensor)
 
         expected = expect(tc.F64, shape, [0] + [c] * (product(shape) - 1))
@@ -29,7 +29,7 @@ class DenseTensorTests(unittest.TestCase):
         shape = [2, 5]
 
         cxt = tc.Context()
-        cxt.tensor = tc.Tensor.Dense.arange(shape, 1, 11)
+        cxt.tensor = tc.tensor.Dense.arange(shape, 1, 11)
         cxt.result = cxt.tensor[1, 2:-1]
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -40,8 +40,8 @@ class DenseTensorTests(unittest.TestCase):
         shape = [5, 2, 1]
 
         cxt = tc.Context()
-        cxt.left = tc.Tensor.Dense.arange(shape, 1., 6.)
-        cxt.right = tc.Tensor.Dense.constant([5], 2)
+        cxt.left = tc.tensor.Dense.arange(shape, 1., 6.)
+        cxt.right = tc.tensor.Dense.constant([5], 2)
         cxt.result = cxt.left + cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -52,8 +52,8 @@ class DenseTensorTests(unittest.TestCase):
         shape = [3]
 
         cxt = tc.Context()
-        cxt.left = tc.Tensor.Dense.arange(shape, 2., 8.)
-        cxt.right = tc.Tensor.Dense.constant([1], 2)
+        cxt.left = tc.tensor.Dense.arange(shape, 2., 8.)
+        cxt.right = tc.tensor.Dense.constant([1], 2)
         cxt.result = cxt.left / cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -64,8 +64,8 @@ class DenseTensorTests(unittest.TestCase):
         shape = [5, 2, 1]
 
         cxt = tc.Context()
-        cxt.left = tc.Tensor.Dense.arange(shape, 1, 11)
-        cxt.right = tc.Tensor.Dense.constant([5], 2)
+        cxt.left = tc.tensor.Dense.arange(shape, 1, 11)
+        cxt.right = tc.tensor.Dense.constant([5], 2)
         cxt.result = cxt.left * cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -76,8 +76,8 @@ class DenseTensorTests(unittest.TestCase):
         shape = [1, 3]
 
         cxt = tc.Context()
-        cxt.left = tc.Tensor.Dense.arange(shape, 0, 6)
-        cxt.right = tc.Tensor.Dense.constant([1], 2)
+        cxt.left = tc.tensor.Dense.arange(shape, 0, 6)
+        cxt.right = tc.tensor.Dense.constant([1], 2)
         cxt.result = cxt.left - cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -89,10 +89,10 @@ class DenseTensorTests(unittest.TestCase):
         trailing = [10]
 
         cxt = tc.Context()
-        cxt.big_ones = tc.Tensor.Dense.ones(big, tc.U8)
-        cxt.big_zeros = tc.Tensor.Dense.zeros(big, tc.U8)
-        cxt.true = tc.Tensor.Dense.ones(trailing)
-        cxt.false = tc.Tensor.Dense.zeros(trailing)
+        cxt.big_ones = tc.tensor.Dense.ones(big, tc.U8)
+        cxt.big_zeros = tc.tensor.Dense.zeros(big, tc.U8)
+        cxt.true = tc.tensor.Dense.ones(trailing)
+        cxt.false = tc.tensor.Dense.zeros(trailing)
         cxt.result = [
             cxt.big_ones.logical_and(cxt.false).any(),
             cxt.big_ones.logical_and(cxt.true).all(),
@@ -109,7 +109,7 @@ class DenseTensorTests(unittest.TestCase):
         axis = 1
 
         cxt = tc.Context()
-        cxt.big = tc.Tensor.Dense.arange(shape, 0, 24)
+        cxt.big = tc.tensor.Dense.arange(shape, 0, 24)
         cxt.result = cxt.big.product(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -120,7 +120,7 @@ class DenseTensorTests(unittest.TestCase):
         shape = [2, 3]
 
         cxt = tc.Context()
-        cxt.big = tc.Tensor.Dense.arange(shape, 1, 7)
+        cxt.big = tc.tensor.Dense.arange(shape, 1, 7)
         cxt.result = cxt.big.product()
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -131,7 +131,7 @@ class DenseTensorTests(unittest.TestCase):
         axis = 2
 
         cxt = tc.Context()
-        cxt.big = tc.Tensor.Dense.arange(shape, 0., 120.)
+        cxt.big = tc.tensor.Dense.arange(shape, 0., 120.)
         cxt.result = cxt.big.sum(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -142,7 +142,7 @@ class DenseTensorTests(unittest.TestCase):
         shape = [5, 2]
 
         cxt = tc.Context()
-        cxt.big = tc.Tensor.Dense.arange(shape, 0, 10)
+        cxt.big = tc.tensor.Dense.arange(shape, 0, 10)
         cxt.result = cxt.big.sum()
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -163,12 +163,12 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/tensor")
 
             def _configure(self):
-                schema = tc.Tensor.Schema([2, 3], tc.I32)
-                self.dense = chain_type(tc.Tensor.Dense(schema))
+                schema = tc.schema.Tensor([2, 3], tc.I32)
+                self.dense = chain_type(tc.tensor.Dense(schema))
 
             @tc.put_method
             def overwrite(self, txn):
-                txn.new = tc.Tensor.Dense.constant([3], 2)
+                txn.new = tc.tensor.Dense.constant([3], 2)
                 return self.dense.write(None, txn.new)
 
         return Persistent
@@ -189,7 +189,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
 def expect(dtype, shape, flat):
     return {
-        str(tc.uri(tc.Tensor.Dense)): [
+        str(tc.uri(tc.tensor.Dense)): [
             [shape, str(tc.uri(dtype))],
             list(flat),
         ]
@@ -205,4 +205,3 @@ def product(seq):
 
 if __name__ == "__main__":
     unittest.main()
-

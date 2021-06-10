@@ -7,7 +7,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
-SCHEMA = tc.BTree.Schema(tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
+SCHEMA = tc.schema.BTree(tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
 
 
 class BTreeTests(unittest.TestCase):

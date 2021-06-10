@@ -7,7 +7,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
-SCHEMA = tc.Table.Schema(
+SCHEMA = tc.schema.Table(
     [tc.Column("name", tc.String, 512)],
     [tc.Column("views", tc.UInt)],
     {"views": ["views", "name"]})
@@ -72,7 +72,6 @@ class TableTests(unittest.TestCase):
         count = 50
         values = [(v % 2,) for v in range(count)]
         keys = [(num2words(i),) for i in range(count)]
-        rows = list(reversed([list(k + v) for k, v in zip(keys, values)]))
 
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
@@ -144,7 +143,7 @@ class TableTests(unittest.TestCase):
 
         expected = {
             str(tc.uri(tc.Table)): [
-                tc.to_json(tc.Table.Schema([tc.Column("name", tc.String, 512)])),
+                tc.to_json(tc.schema.Table([tc.Column("name", tc.String, 512)])),
                 list(sorted(keys))
             ]
         }

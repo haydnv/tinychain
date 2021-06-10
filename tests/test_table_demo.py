@@ -8,7 +8,7 @@ class Database(tc.Cluster):
     __uri__ = tc.URI("/app/db")
 
     def _configure(self):
-        schema = tc.Table.Schema(
+        schema = tc.schema.Table(
             [tc.Column("name", tc.String, 100)],
             [tc.Column("year", tc.UInt), tc.Column("description", tc.String, 1000)])
 
@@ -19,7 +19,7 @@ class Web(tc.Cluster):
     __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/web")
 
     def _configure(self):
-        schema = tc.BTree.Schema(tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt))
+        schema = tc.schema.BTree(tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt))
         self.cache = tc.Chain.Sync(tc.BTree(schema))
 
     @tc.get_method
