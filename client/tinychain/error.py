@@ -1,6 +1,6 @@
 """Generic error types."""
 
-from .util import *
+from tinychain.util import uri, URI
 
 
 class TinychainError(Exception):

@@ -3,12 +3,13 @@
 import inspect
 import logging
 
-from . import ref
-from .decorators import *
-from .op import Op
-from .reflect import Meta
-from .state import State, Tuple
-from .util import form_of, uri, URI, to_json
+from tinychain import ref
+from tinychain.decorators import *
+from tinychain.op import Op
+from tinychain.reflect.meta import Meta
+from tinychain.state import State, Tuple
+from tinychain.util import form_of, uri, URI, to_json
+
 
 class Cluster(object, metaclass=Meta):
     """A hosted Tinychain service."""

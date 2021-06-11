@@ -1,9 +1,9 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from . import ref
-from .reflect import Meta
-from .state import State
-from .util import uri, URI
+from tinychain import ref
+from tinychain.reflect.meta import Meta
+from tinychain.state import State
+from tinychain.util import uri, URI
 
 
 class Chain(State, metaclass=Meta):

@@ -1,6 +1,6 @@
 """Reference types."""
 
-from .util import *
+from tinychain.util import deanonymize, to_json, uri, URI
 
 
 class Ref(object):

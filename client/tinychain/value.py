@@ -1,8 +1,8 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from .reflect import Meta
-from .state import Scalar
-from .util import uri
+from tinychain.reflect.meta import Meta
+from tinychain.state import Scalar
+from tinychain.util import uri
 
 
 # Scalar value types

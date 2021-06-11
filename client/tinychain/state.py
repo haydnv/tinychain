@@ -1,8 +1,7 @@
-"""Tinychain `State`\s, such as `Map`, `Tuple`, and `Op`."""
+"""Tinychain `State`s, such as `Map`, `Tuple`, and `Op`."""
 
-from . import ref
-from . import reflect
-from .util import *
+from tinychain import ref, reflect
+from tinychain.util import *
 
 
 class State(object):
@@ -20,7 +19,7 @@ class State(object):
         if isinstance(form, URI):
             self.__uri__ = form
 
-        reflect.gen_headers(self)
+        reflect.meta.gen_headers(self)
 
     def __json__(self):
         form = form_of(self)

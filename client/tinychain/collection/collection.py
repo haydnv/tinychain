@@ -1,4 +1,4 @@
-from tinychain.reflect import Meta
+from tinychain.reflect.meta import Meta
 from tinychain.state import State
 from tinychain.util import to_json, uri
 from tinychain.value import Nil

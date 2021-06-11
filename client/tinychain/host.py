@@ -6,12 +6,11 @@ import os
 import pathlib
 import requests
 import subprocess
-import sys
 import time
 import urllib.parse
 
-from .error import *
-from .util import to_json, uri
+from tinychain.error import *
+from tinychain.util import to_json, uri
 
 
 DEFAULT_PORT = 8702

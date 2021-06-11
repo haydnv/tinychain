@@ -1,41 +1,42 @@
-from .reflect import Method, MethodStub, Delete, Get, Post, Put
+from tinychain.reflect.meta import MethodStub
+from tinychain.reflect import method, op
 
 
-def get_method(method):
+def get_method(form):
     """Annotation for a callable method specifying that it is a GET method."""
-    return MethodStub(Method.Get, method)
+    return MethodStub(method.Get, form)
 
 
-def put_method(method):
+def put_method(form):
     """Annotation for a callable method specifying that it is a PUT method."""
-    return MethodStub(Method.Put, method)
+    return MethodStub(method.Put, form)
 
 
-def post_method(method):
+def post_method(form):
     """Annotation for a callable method specifying that it is a POST method."""
-    return MethodStub(Method.Post, method)
+    return MethodStub(method.Post, form)
 
 
-def delete_method(method):
+def delete_method(form):
     """Annotation for a callable method specifying that it is a DELETE method."""
-    return MethodStub(Method.Delete, method)
+    return MethodStub(method.Delete, form)
 
 
-def get_op(op):
+def get_op(form):
     """Annotation for a callable function specifying that it is a GET :class:`Op`."""
-    return Get(op)
+    return op.Get(form)
 
 
-def put_op(op):
+def put_op(form):
     """Annotation for a callable function specifying that it is a PUT :class:`Op`."""
-    return Put(op)
+    return op.Put(form)
 
 
-def post_op(op):
+def post_op(form):
     """Annotation for a callable function specifying that it is a POST :class:`Op`."""
-    return Post(op)
+    return op.Post(form)
 
 
-def delete_op(op):
+def delete_op(form):
     """Annotation for a callable function specifying that it is a DELETE :class:`Op`."""
-    return Delete(op)
+    return op.Delete(form)
