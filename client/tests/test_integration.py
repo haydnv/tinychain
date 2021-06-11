@@ -10,14 +10,14 @@ class Balance(tc.Cluster):
     __uri__ = tc.URI("/app/balance")
 
     def _configure(self):
-        self.weight = tc.Chain.Sync(tc.Number(0))
+        self.weight = tc.chain.Sync(tc.Number(0))
 
 
 class Left(Balance):
     __uri__ = tc.uri(Balance) + "/left"
 
     @tc.put_method
-    def weigh(self, txn, key: tc.Nil, weight: tc.Number):
+    def weigh(self, txn, _key: tc.Nil, weight: tc.Number):
         right = tc.use(Right)
         txn.total = CONSERVED
         txn.update = tc.After(right.weigh(None, txn.total - weight), self.weight.set(weight))
@@ -28,7 +28,7 @@ class Right(Balance):
     __uri__ = tc.uri(Balance) + "/right"
 
     @tc.put_method
-    def weigh(self, txn, key: tc.Nil, weight: tc.Number):
+    def weigh(self, txn, _key: tc.Nil, weight: tc.Number):
         left = tc.use(Left)
         txn.total = CONSERVED
         txn.update = tc.After(left.weigh(None, txn.total - weight), self.weight.set(weight))
@@ -39,24 +39,22 @@ class ClusterTests(unittest.TestCase):
     def testToJson(self):
         self.maxDiff = None
         expected = {
-            'weigh': {'/state/scalar/op/put': ['key', 'weight', [
+            'weigh': {'/state/scalar/op/put': ['_key', 'weight', [
                 ['total', 20],
                 ['update', {'/state/scalar/ref/after': [
-                    {'/app/balance/right/weigh': [None, {'$total/sub': [{'$weight': []}]}]}, 
+                    {'/app/balance/right/weigh': [None, {'$total/sub': [{'$weight': []}]}]},
                     {'$self/weight': [None, {'$weight': []}]}
                 ]}],
                 ['_return', {'/state/scalar/ref/if': [
-                    {'$weight/eq': [{'$self/weight': [None]}]},
+                    {'$self/weight/eq': [{'$weight': []}]},
                     None,
                     {'$update': []}
-                ]}]
-            ]]},
+                ]}]]
+            ]},
             'weight': {'/state/chain/sync': [0]}
         }
 
         actual = tc.to_json(tc.form_of(Left))
-        print(actual)
-        return
         self.assertEqual(expected, actual)
 
 

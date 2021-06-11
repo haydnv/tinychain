@@ -12,7 +12,7 @@ class Database(tc.Cluster):
             [tc.Column("name", tc.String, 100)],
             [tc.Column("year", tc.UInt), tc.Column("description", tc.String, 1000)])
 
-        self.movies = tc.Chain.Block(tc.Table(schema))
+        self.movies = tc.chain.Block(tc.Table(schema))
 
 
 class Web(tc.Cluster):
@@ -20,10 +20,10 @@ class Web(tc.Cluster):
 
     def _configure(self):
         schema = tc.schema.BTree(tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt))
-        self.cache = tc.Chain.Sync(tc.BTree(schema))
+        self.cache = tc.chain.Sync(tc.BTree(schema))
 
     @tc.get_method
-    def views(self, txn, name: tc.String) -> tc.UInt:
+    def views(self, _txn, name: tc.String) -> tc.UInt:
         return self.cache[name].first()["views"]
 
     @tc.put_method

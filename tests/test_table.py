@@ -187,7 +187,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
 
             def _configure(self):
-                self.table = tc.Chain.Block(tc.Table(SCHEMA))
+                self.table = tc.chain.Block(tc.Table(SCHEMA))
 
         return Persistent
 
@@ -233,7 +233,7 @@ class ErrorTest(unittest.TestCase):
             __uri__ = tc.URI(f"/test/table")
 
             def _configure(self):
-                self.table = tc.Chain.Block(tc.Table(SCHEMA))
+                self.table = tc.chain.Block(tc.Table(SCHEMA))
 
         self.host = start_host("table_error", [Persistent])
 

@@ -1,22 +1,21 @@
-import time
 import tinychain as tc
 import unittest
 
-from testutils import PORT, TC_PATH, start_host
+from testutils import start_host
 
 
 class BlockChainTest(tc.Cluster):
     __uri__ = tc.URI("/app/example/block")
 
     def _configure(self):
-        self.rev = tc.Chain.Block(tc.Number(0))
+        self.rev = tc.chain.Block(tc.Number(0))
 
 
 class SyncChainTest(tc.Cluster):
     __uri__ = tc.URI("/app/example/sync")
 
     def _configure(self):
-        self.rev = tc.Chain.Sync(tc.Number(0))
+        self.rev = tc.chain.Sync(tc.Number(0))
 
 
 class ClusterTests(unittest.TestCase):

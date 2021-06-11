@@ -11,7 +11,7 @@ class Balance(tc.Cluster):
     __uri__ = tc.URI("/app/balance")
 
     def _configure(self):
-        self.weight = tc.Chain.Sync(tc.UInt(10))
+        self.weight = tc.chain.Sync(tc.UInt(10))
 
 
 class Left(Balance):

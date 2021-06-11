@@ -12,9 +12,9 @@ LINK = "http://127.0.0.1:8702/app/area"
 
 @tc.get_op
 def example(txn) -> tc.Number:
-    txn.a = tc.Number(5) # this is a State
-    txn.b = tc.Number(10) # this is a State
-    txn.product = txn.a * txn.b # this is a Ref
+    txn.a = tc.Number(5)            # this is a State
+    txn.b = tc.Number(10)           # this is a State
+    txn.product = txn.a * txn.b     # this is a Ref
     return txn.product
 
 
@@ -133,4 +133,3 @@ class ClientDocTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

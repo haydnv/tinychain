@@ -1,15 +1,13 @@
-"""Data structures responsible for keeping track of mutations to a :class:`Value`"""
+"""Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from .ref import Ref, OpRef
-from .reflect import Meta
-from .state import Scalar, State
-from .util import *
+from tinychain.ref import Ref, OpRef
+from tinychain.reflect import Meta
+from tinychain.state import State
+from tinychain.util import *
 
 
 class Chain(State, metaclass=Meta):
-    """
-    Data structure responsible for keeping track of mutations to a :class:`Value`.
-    """
+    """Data structure responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`."""
 
     __uri__ = uri(State) + "/chain"
 
@@ -34,23 +32,16 @@ class Chain(State, metaclass=Meta):
         return OpRef.Put(uri(self), None, value)
 
 
-class BlockChain(Chain):
-    """
-    A :class:`Chain` which keeps track of the entire update history of its subject.
-    """
+class Block(Chain):
+    """A :class:`Chain` which keeps track of the entire update history of its subject."""
 
     __uri__ = uri(Chain) + "/block"
 
 
-class SyncChain(Chain):
+class Sync(Chain):
     """
     A :class:`Chain` which keeps track of only the current transaction's operations,
     in order to recover from a transaction failure (e.g. if the host crashes).
     """
 
     __uri__ = uri(Chain) + "/sync"
-
-
-Chain.Block = BlockChain
-Chain.Sync = SyncChain
-

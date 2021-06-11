@@ -53,10 +53,10 @@ class PersistenceTest(object):
         raise NotImplementedError
 
     def testBlockChain(self):
-        self._execute(tc.Chain.Block)
+        self._execute(tc.chain.Block)
 
     def testSyncChain(self):
-        self._execute(tc.Chain.Sync)
+        self._execute(tc.chain.Sync)
 
     def _execute(self, chain_type):
         name = self.NAME

@@ -1,10 +1,10 @@
+import tinychain.chain
 import tinychain.collection.bound as bound
 import tinychain.collection.schema as schema
 import tinychain.collection.tensor as tensor
 import tinychain.error
 import tinychain.host
 
-from tinychain.chain import Chain
 from tinychain.cluster import Cluster, write_cluster
 from tinychain.collection.btree import BTree
 from tinychain.collection.schema import Column

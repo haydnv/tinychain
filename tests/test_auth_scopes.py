@@ -12,7 +12,7 @@ class Wholesaler(tc.Cluster):
     __uri__ = tc.URI("/app/wholesaler")
 
     def _configure(self):
-        self.in_stock = tc.Chain.Sync(IN_STOCK)
+        self.in_stock = tc.chain.Sync(IN_STOCK)
 
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
