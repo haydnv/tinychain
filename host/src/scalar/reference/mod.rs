@@ -40,11 +40,14 @@ pub trait Refer {
     /// Return `true` if this reference contains an [`OpRef`] whose `Subject` is a derived view.
     ///
     /// "Derived view" refers to a `Subject` which is not a `Link` or `self`, e.g.
-    /// "$self/slice".
+    /// "$btree/slice".
     fn is_view(&self) -> bool;
 
     /// Return `true` if resolving this reference may mutate some `State`.
     fn is_write(&self) -> bool;
+
+    /// Return `true` if resolving this reference may mutate a view of a `State`.
+    fn is_derived_write(&self) -> bool;
 
     /// Add the dependency [`Id`]s of this reference to the given set.
     fn requires(&self, deps: &mut HashSet<Id>);
@@ -153,6 +156,16 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.is_write(),
             Self::If(if_ref) => if_ref.is_write(),
             Self::Op(op_ref) => op_ref.is_write(),
+        }
+    }
+
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::After(after) => after.is_derived_write(),
+            Self::Case(case) => case.is_derived_write(),
+            Self::Id(id_ref) => id_ref.is_derived_write(),
+            Self::If(if_ref) => if_ref.is_derived_write(),
+            Self::Op(op_ref) => op_ref.is_derived_write(),
         }
     }
 

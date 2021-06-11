@@ -36,6 +36,12 @@ impl Refer for IfRef {
         self.cond.is_write() || self.then.is_write() || self.or_else.is_write()
     }
 
+    fn is_derived_write(&self) -> bool {
+        self.cond.is_derived_write()
+            || self.then.is_derived_write()
+            || self.or_else.is_derived_write()
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
     }

@@ -18,8 +18,9 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             def version(self) -> tc.Number:
                 return self.rev
 
-            @tc.post_method
-            def bump(self, txn):
+            @tc.put_method
+            def bump(self, txn, _key: tc.Nil, _value: tc.Nil):
+                # TODO: remove key and value params
                 txn.rev = self.version()
                 return self.rev.set(txn.rev + 1)
 
@@ -39,14 +40,14 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             self.assertEqual(expected, actual)
 
         # test a distributed write
-        hosts[-1].post(cluster_path + "/bump")
+        hosts[-1].put(cluster_path + "/bump")
         for host in hosts:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 1)
 
         # test a commit with one failed host
         hosts[-1].stop()
-        hosts[-2].post(cluster_path + "/bump")
+        hosts[-2].put(cluster_path + "/bump")
         for host in hosts[:-1]:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 2)
@@ -57,7 +58,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         self.assertEqual(actual, 2)
 
         # test a distributed write after recovering
-        hosts[0].post(cluster_path + "/bump")
+        hosts[0].put(cluster_path + "/bump")
 
         for host in hosts:
             actual = host.get(cluster_path + "/rev")

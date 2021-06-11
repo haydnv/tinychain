@@ -207,6 +207,15 @@ impl Refer for State {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Refer::is_derived_write),
+            Self::Scalar(scalar) => scalar.is_derived_write(),
+            Self::Tuple(tuple) => tuple.iter().any(Refer::is_derived_write),
+            _ => false,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

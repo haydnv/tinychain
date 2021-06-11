@@ -39,6 +39,12 @@ impl Refer for Case {
             || self.case.iter().any(Refer::is_write)
     }
 
+    fn is_derived_write(&self) -> bool {
+        self.cond.is_derived_write()
+            || self.switch.iter().any(Refer::is_derived_write)
+            || self.case.iter().any(Refer::is_derived_write)
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
 

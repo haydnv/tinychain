@@ -27,15 +27,16 @@ class Web(tc.Cluster):
         return self.cache[name].first()["views"]
 
     @tc.put_method
-    def add_movie(self, txn, name: tc.String, metadata: tc.Map):
+    def add_movie(self, _txn, name: tc.String, metadata: tc.Map):
         db = tc.use(Database)
 
         return (
             db.movies.insert([name], [metadata["year"], metadata["description"]]),
             self.cache.insert([name, 0]))
 
-    @tc.post_method
-    def add_view(self, txn, name: tc.String):
+    @tc.put_method
+    def add_view(self, txn, name: tc.String, _value: tc.Nil):
+        # TODO: remove value param
         txn.views = self.views(name)
         return tc.After(
             self.cache[name, txn.views].delete(),
@@ -56,12 +57,12 @@ class DemoTests(unittest.TestCase):
         self.hosts[1].put("/app/web/add_movie",
             "Up", {"year": 2009, "description": "Pixar, balloons"})
 
-        self.assertEqual(self.hosts[2].get("/app/web/views", "Up"), 0)
+        self.assertEqual(self.hosts[0].get("/app/web/views", "Up"), 0)
 
         for i in range(5):
             print()
 
-        self.hosts[0].post("/app/web/add_view", {"name": "Up"})
+        self.hosts[0].put("/app/web/add_view", "Up")
         self.assertEqual(self.hosts[1].get("/app/web/views", "Up"), 1)
 
     def tearDown(self):

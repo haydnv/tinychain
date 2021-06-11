@@ -48,6 +48,10 @@ impl Refer for IdRef {
         false
     }
 
+    fn is_derived_write(&self) -> bool {
+        self.is_view() && self.is_write()
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         if self.to != SELF {
             deps.insert(self.to.clone());

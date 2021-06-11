@@ -275,6 +275,15 @@ impl Refer for Scalar {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Refer::is_derived_write),
+            Self::Ref(tc_ref) => tc_ref.is_derived_write(),
+            Self::Tuple(tuple) => tuple.iter().any(Refer::is_derived_write),
+            _ => false,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

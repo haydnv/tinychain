@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use log::{debug, warn};
+use log::debug;
 use uplock::RwLock;
 
 use tc_error::*;
@@ -60,8 +60,11 @@ pub async fn instantiate(
             Scalar::Op(op_def) => {
                 if !op_def.is_write() {
                     for provider in op_def.form() {
-                        if provider.is_write() && provider.is_view() {
-                            warn!("write to a derived view in Cluster: {}", provider);
+                        if provider.is_derived_write() {
+                            return Err(TCError::bad_request(
+                                "cannot write to a derived view in a Cluster",
+                                provider,
+                            ));
                         }
                     }
                 }

@@ -312,6 +312,10 @@ impl Refer for OpRef {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        self.is_view() && self.is_write()
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Get((subject, key)) => {
