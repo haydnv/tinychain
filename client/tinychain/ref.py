@@ -2,6 +2,7 @@
 
 from .util import *
 
+
 class Ref(object):
     """A reference to a :class:`State`."""
 
@@ -28,7 +29,7 @@ class After(Ref):
 class Case(Ref):
     """A flow control operator used to branch execution conditionally."""
 
-    __uri__  = uri(Ref) + "/case"
+    __uri__ = uri(Ref) + "/case"
 
     def __init__(self, cond, switch, case):
         self.cond = cond
@@ -41,7 +42,7 @@ class Case(Ref):
     def __ns__(self, cxt):
         deanonymize(self.cond, cxt)
         deanonymize(self.switch, cxt)
-        deanonymize(self.then, cxt)
+        deanonymize(self.case, cxt)
 
 
 class If(Ref):
@@ -63,7 +64,7 @@ class If(Ref):
         deanonymize(self.or_else, cxt)
 
 
-class OpRef(Ref):
+class Op(Ref):
     """A reference to an :class:`Op`."""
 
     __uri__ = uri(Ref) + "/op"
@@ -86,13 +87,13 @@ class OpRef(Ref):
             deanonymize(self.args, cxt)
 
 
-class GetOpRef(OpRef):
+class Get(Op):
     """A reference to an instance of :class:`Op.Get`."""
 
-    __uri__ = uri(OpRef) + "/get"
+    __uri__ = uri(Op) + "/get"
 
     def __init__(self, subject, key=None):
-        OpRef.__init__(self, subject, (key,))
+        Op.__init__(self, subject, (key,))
 
     def __json__(self):
         if isinstance(self.subject, Ref):
@@ -107,40 +108,34 @@ class GetOpRef(OpRef):
             return {str(subject): to_json(self.args)}
 
 
-class PutOpRef(OpRef):
+class Put(Op):
     """A reference to an instance of :class:`Op.Put`."""
 
-    __uri__ = uri(OpRef) + "/put"
+    __uri__ = uri(Op) + "/put"
 
     def __init__(self, subject, key, value):
-        OpRef.__init__(self, subject, (key, value))
+        Op.__init__(self, subject, (key, value))
 
 
-class PostOpRef(OpRef):
+class Post(Op):
     """A reference to an instance of :class:`Op.Post`."""
 
-    __uri__ = uri(OpRef) + "/post"
+    __uri__ = uri(Op) + "/post"
 
     def __init__(self, subject, **kwargs):
-        OpRef.__init__(self, subject, kwargs)
+        Op.__init__(self, subject, kwargs)
 
 
-class DeleteOpRef(OpRef):
+class Delete(Op):
     """A reference to an instance of :class:`Op.Delete`."""
 
-    __uri__ = uri(OpRef) + "/delete"
+    __uri__ = uri(Op) + "/delete"
 
     def __init__(self, subject, key=None):
-        OpRef.__init__(self, subject, key)
+        Op.__init__(self, subject, key)
 
     def __json__(self):
         return {str(uri(self)): to_json([self.subject, self.args])}
-
-
-OpRef.Get = GetOpRef
-OpRef.Put = PutOpRef
-OpRef.Post = PostOpRef
-OpRef.Delete = DeleteOpRef
 
 
 class MethodSubject(object):
@@ -156,8 +151,7 @@ class MethodSubject(object):
 
     def __json__(self):
         if self.__uri__ is None:
-            raise ValueError(
-                f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
+            raise ValueError(f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
 
         return to_json(uri(self))
 
@@ -166,4 +160,3 @@ class MethodSubject(object):
             return str(uri(self.subject).append(self.method_name))
         else:
             return str(uri(self))
-

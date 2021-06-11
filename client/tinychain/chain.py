@@ -1,9 +1,9 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from tinychain.ref import Ref, OpRef
-from tinychain.reflect import Meta
-from tinychain.state import State
-from tinychain.util import *
+from . import ref
+from .reflect import Meta
+from .state import State
+from .util import uri, URI
 
 
 class Chain(State, metaclass=Meta):
@@ -12,7 +12,7 @@ class Chain(State, metaclass=Meta):
     __uri__ = uri(State) + "/chain"
 
     def __new__(cls, spec):
-        if isinstance(spec, Ref) or isinstance(spec, URI):
+        if isinstance(spec, ref.Ref) or isinstance(spec, URI):
             return State.__new__(cls)
 
         elif isinstance(spec, State):
@@ -29,7 +29,7 @@ class Chain(State, metaclass=Meta):
     def set(self, value):
         """Update the value of this `Chain`."""
 
-        return OpRef.Put(uri(self), None, value)
+        return ref.Put(uri(self), None, value)
 
 
 class Block(Chain):

@@ -1,4 +1,4 @@
-from .reflect import Method, MethodStub, Op
+from .reflect import Method, MethodStub, Delete, Get, Post, Put
 
 
 def get_method(method):
@@ -23,20 +23,19 @@ def delete_method(method):
 
 def get_op(op):
     """Annotation for a callable function specifying that it is a GET :class:`Op`."""
-    return Op.Get(op)
+    return Get(op)
 
 
 def put_op(op):
     """Annotation for a callable function specifying that it is a PUT :class:`Op`."""
-    return Op.Put(op)
+    return Put(op)
 
 
 def post_op(op):
     """Annotation for a callable function specifying that it is a POST :class:`Op`."""
-    return Op.Post(op)
+    return Post(op)
 
 
 def delete_op(op):
     """Annotation for a callable function specifying that it is a DELETE :class:`Op`."""
-    return Op.Delete(op)
-
+    return Delete(op)

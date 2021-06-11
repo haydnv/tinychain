@@ -1,7 +1,7 @@
 """Tinychain `State`\s, such as `Map`, `Tuple`, and `Op`."""
 
+from . import ref
 from . import reflect
-from .ref import MethodSubject, Ref, OpRef
 from .util import *
 
 
@@ -24,7 +24,7 @@ class State(object):
 
     def __json__(self):
         form = form_of(self)
-        if isinstance(form, URI) or isinstance(form, OpRef):
+        if isinstance(form, URI) or isinstance(form, ref.Op):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}
@@ -32,7 +32,7 @@ class State(object):
     def __ns__(self, cxt):
         form = form_of(self)
 
-        if isinstance(form, OpRef):
+        if isinstance(form, ref.Op):
             deanonymize(form, cxt)
 
     def __ref__(self, name):
@@ -42,8 +42,8 @@ class State(object):
         return f"{self.__class__.__name__}({form_of(self)})"
 
     def _method(self, name):
-        if isinstance(form_of(self), OpRef):
-            return MethodSubject(self, name)
+        if isinstance(form_of(self), ref.Op):
+            return ref.MethodSubject(self, name)
 
         subject = uri(self).append(name)
         if subject.startswith("/state") and subject.path() != uri(self.__class__):
@@ -55,30 +55,28 @@ class State(object):
     def _get(self, name, key=None, rtype=None):
         subject = self._method(name)
         rtype = State if rtype is None else rtype
-        return rtype(OpRef.Get(subject, key))
+        return rtype(ref.Get(subject, key))
 
     def _put(self, name, key=None, value=None):
         from .value import Nil
 
         subject = self._method(name)
-        return Nil(OpRef.Put(subject, key, value))
+        return Nil(ref.Put(subject, key, value))
 
     def _post(self, _method_name, rtype=None, **params):
-        from .value import Nil
-
         subject = self._method(_method_name)
         rtype = State if rtype is None else rtype
-        return rtype(OpRef.Post(subject, **params))
+        return rtype(ref.Post(subject, **params))
 
     def _delete(self, name, key=None):
         from .value import Nil
 
         subject = self._method(name)
-        return Nil(OpRef.Delete(subject, key))
+        return Nil(ref.Delete(subject, key))
 
     def dtype(self):
         """Return the native :class:`Class` of this `State`."""
-        return Class(OpRef.Get(uri(self) + "/class"))
+        return Class(ref.Get(uri(self) + "/class"))
 
 
 class Map(State):
@@ -118,56 +116,6 @@ class Scalar(State):
 
     def __json__(self):
         return to_json(form_of(self))
-
-
-# User-defined Ops
-
-class Op(Scalar):
-    """A callable function."""
-
-    __uri__ = uri(Scalar) + "/op"
-
-
-class GetOp(Op):
-    """A function which can be called via a GET request."""
-
-    __uri__ = uri(Op) + "/get"
-
-    def __call__(self, key=None):
-        return OpRef.Get(self, key)
-
-
-class PutOp(Op):
-    """A function which can be called via a PUT request."""
-
-    __uri__ = uri(Op) + "/put"
-
-    def __call__(self, key=None, value=None):
-        return OpRef.Put(self, key, value)
-
-
-class PostOp(Op):
-    """A function which can be called via a POST request."""
-
-    __uri__ = uri(Op) + "/post"
-
-    def __call__(self, **params):
-        return OpRef.Post(self, **params)
-
-
-class DeleteOp(Op):
-    """A function which can be called via a DELETE request."""
-
-    __uri__ = uri(Op) + "/delete"
-
-    def __call__(self, key=None):
-        return OpRef.Delete(self, key)
-
-
-Op.Get = GetOp
-Op.Put = PutOp
-Op.Post = PostOp
-Op.Delete = DeleteOp
 
 
 # User-defined object types

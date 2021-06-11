@@ -39,7 +39,7 @@ class Context(object):
                 from .state import Class
                 return Class(URI(name))
             elif hasattr(value, "__ref__"):
-                return ref(value, name)
+                return get_ref(value, name)
             else:
                 return URI(name)
         else:
@@ -77,7 +77,7 @@ def form_of(state):
         raise ValueError(f"{state} has no form")
 
 
-def ref(subject, name):
+def get_ref(subject, name):
     """Return a named reference to the given state."""
 
     if hasattr(subject, "__ref__"):

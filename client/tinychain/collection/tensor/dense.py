@@ -1,6 +1,7 @@
 """An n-dimensional array of numbers stored as sequential blocks."""
 
-from tinychain.ref import OpRef
+import tinychain.ref as ref
+
 from tinychain.util import uri
 from tinychain.value import F32
 
@@ -19,13 +20,13 @@ class DenseTensor(Tensor):
         evenly distributed between `start` and `stop`.
         """
 
-        return cls(OpRef.Get(uri(cls) + "/range", (shape, start, stop)))
+        return cls(ref.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
     def constant(cls, shape, value):
         """Return a `DenseTensor` filled with the given `value`."""
 
-        return cls(OpRef.Get(uri(cls) + "/constant", (shape, value)))
+        return cls(ref.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
     def ones(cls, shape, dtype=F32):

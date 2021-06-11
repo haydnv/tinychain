@@ -2,10 +2,9 @@ import inspect
 
 from pydoc import locate
 
-from . import error
-from .ref import OpRef
-from .state import Class, Op as OpDef, Scalar, State
-from .util import *
+from . import op, ref
+from .state import State
+from .util import form_of, to_json, uri, Context, URI
 
 
 def gen_headers(instance):
@@ -86,7 +85,7 @@ class MethodStub(object):
 
 
 class Method(object):
-    __uri__ = uri(OpDef)
+    __uri__ = uri(op.Op)
 
     def __init__(self, header, form, name):
         self.header = header
@@ -101,13 +100,13 @@ class Method(object):
 
 
 class GetMethod(Method):
-    __uri__ = uri(OpDef.Get)
+    __uri__ = uri(op.Get)
 
     def __call__(self, key=None):
         from .value import Nil
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
-        return rtype(OpRef.Get(uri(self.header).append(self.name), key))
+        return rtype(ref.Get(uri(self.header).append(self.name), key))
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -134,10 +133,10 @@ class GetMethod(Method):
 
 
 class PutMethod(Method):
-    __uri__ = uri(OpDef.Put)
+    __uri__ = uri(op.Put)
 
     def __call__(self, key, value):
-        return OpRef.Put(uri(self.header).append(self.name), key, value)
+        return ref.Put(uri(self.header).append(self.name), key, value)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -170,14 +169,14 @@ class PutMethod(Method):
 
 
 class PostMethod(Method):
-    __uri__ = uri(OpDef.Post)
+    __uri__ = uri(op.Post)
 
     def __call__(self, **params):
         from .value import Nil
 
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
-        return rtype(OpRef.Post(uri(self.header).append(self.name), **params))
+        return rtype(ref.Post(uri(self.header).append(self.name), **params))
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -203,10 +202,10 @@ class PostMethod(Method):
 
 
 class DeleteMethod(Method):
-    __uri__ = uri(OpDef.Delete)
+    __uri__ = uri(op.Delete)
 
     def __call__(self, key=None):
-        return OpRef.Delete(uri(self.header).append(self.name), key)
+        return ref.Delete(uri(self.header).append(self.name), key)
 
     def __form__(self):
         return GetMethod.__form__(self)
@@ -219,7 +218,7 @@ Method.Delete = DeleteMethod
 
 
 class Op(object):
-    __uri__ = uri(OpDef)
+    __uri__ = uri(op.Op)
 
     def __init__(self, form):
         self.form = form
@@ -231,11 +230,11 @@ class Op(object):
         return self.__class__.__name__
 
 
-class GetOp(Op):
-    __uri__ = uri(OpDef.Get)
+class Get(Op):
+    __uri__ = uri(op.Get)
 
     def __call__(self, key=None):
-        return OpRef.Get(uri(self), key)
+        return ref.Get(uri(self), key)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -261,11 +260,11 @@ class GetOp(Op):
         return (key_name, cxt)
 
     def __ref__(self, name):
-        return OpDef.Get(URI(name))
+        return op.Get(URI(name))
 
 
-class PutOp(Op):
-    __uri__ = uri(OpDef.Put)
+class Put(Op):
+    __uri__ = uri(op.Put)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -296,11 +295,11 @@ class PutOp(Op):
         return (key_name, value_name, cxt)
 
     def __ref__(self, name):
-        return OpDef.Put(URI(name))
+        return op.Put(URI(name))
 
 
-class PostOp(Op):
-    __uri__ = uri(OpDef.Post)
+class Post(Op):
+    __uri__ = uri(op.Post)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -321,24 +320,18 @@ class PostOp(Op):
         return cxt
 
     def __ref__(self, name):
-        return OpDef.Post(URI(name))
+        return op.Post(URI(name))
 
 
-class DeleteOp(Op):
-    __uri__ = uri(OpDef.Delete)
+class Delete(Op):
+    __uri__ = uri(op.Delete)
 
     def __form__(self):
-        return GetOp.__form__(self)
+        return Get.__form__(self)
 
 
     def __ref__(self, name):
-        return OpDef.Delete(URI(name))
-
-
-Op.Get = GetOp
-Op.Put = PutOp
-Op.Post = PostOp
-Op.Delete = DeleteOp
+        return op.Delete(URI(name))
 
 
 def resolve_class(subject, annotation, default=State):

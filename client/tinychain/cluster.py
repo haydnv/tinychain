@@ -3,12 +3,12 @@
 import inspect
 import logging
 
-from .chain import Chain
+from . import ref
 from .decorators import *
-from .ref import OpRef
+from .op import Op
 from .reflect import Meta
-from .state import Op, State, Tuple
-from .util import form_of, ref as get_ref, uri, URI, to_json
+from .state import State, Tuple
+from .util import form_of, uri, URI, to_json
 
 class Cluster(object, metaclass=Meta):
     """A hosted Tinychain service."""
@@ -55,7 +55,7 @@ class Cluster(object, metaclass=Meta):
     def authorize(self, scope):
         """Raise an error if the current transaction has not been granted the given scope."""
 
-        return OpRef.Get(uri(self) + "/authorize", scope)
+        return ref.Get(uri(self) + "/authorize", scope)
 
     def grant(self, scope, op: Op, **context):
         """Execute the given `op` after granting it the given `scope`."""
@@ -68,7 +68,7 @@ class Cluster(object, metaclass=Meta):
         if context:
             params["context"] = context
 
-        return OpRef.Post(uri(self) + "/grant", **params)
+        return ref.Post(uri(self) + "/grant", **params)
 
     @put_method
     def install(self, txn, cluster_link: URI, scopes: Tuple):

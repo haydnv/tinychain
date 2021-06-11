@@ -36,7 +36,7 @@ class ClassTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.M = tc.Class(Meters)
-        cxt.m = Meters(tc.OpRef.Get(cxt.M, 2))
+        cxt.m = Meters(tc.ref.Get(cxt.M, 2))
         cxt.ft = cxt.m.feet()
 
         actual = tc.to_json(cxt)
