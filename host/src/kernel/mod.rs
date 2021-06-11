@@ -138,7 +138,34 @@ impl Kernel {
             );
 
             execute(txn, cluster, |txn, cluster| async move {
-                cluster.put(&txn, suffix, key, value).await
+                cluster
+                    .put(&txn, suffix, key.clone(), value.clone())
+                    .await?;
+
+                if suffix.is_empty() {
+                    // it's a synchronization message
+                    return Ok(());
+                } else if !txn.is_owner(cluster.path()) {
+                    debug!(
+                        "{} successfully replicated PUT {}",
+                        txn.link(cluster.path().to_vec().into()),
+                        TCPath::from(suffix)
+                    );
+
+                    return Ok(());
+                } else {
+                    debug!("replicating PUT {}", TCPath::from(suffix));
+                }
+
+                let write = |replica_link: Link| {
+                    let mut target = replica_link.clone();
+                    target.extend(suffix.to_vec());
+
+                    debug!("replicate PUT to {}", target);
+                    txn.put(target, key.clone(), value.clone())
+                };
+
+                cluster.replicate_write(txn.clone(), write).await
             })
             .await
         } else {
@@ -221,7 +248,32 @@ impl Kernel {
             );
 
             execute(txn, cluster, |txn, cluster| async move {
-                cluster.delete(&txn, suffix, key).await
+                cluster.delete(&txn, suffix, key.clone()).await?;
+
+                if suffix.is_empty() {
+                    // it's a synchronization message
+                    return Ok(());
+                } else if !txn.is_owner(cluster.path()) {
+                    debug!(
+                        "{} successfully replicated DELETE {}",
+                        txn.link(cluster.path().to_vec().into()),
+                        TCPath::from(suffix)
+                    );
+
+                    return Ok(());
+                } else {
+                    debug!("replicating DELETE {}...", TCPath::from(suffix));
+                }
+
+                let write = |replica_link: Link| {
+                    let mut target = replica_link.clone();
+                    target.extend(suffix.to_vec());
+
+                    debug!("replicate DELETE to {}", target);
+                    txn.delete(target, key.clone())
+                };
+
+                cluster.replicate_write(txn.clone(), write).await
             })
             .await
         } else if &path[0] == "error" && path.len() == 2 {
@@ -275,8 +327,10 @@ fn execute<
             let result = handler(txn.clone(), cluster).await;
 
             if result.is_ok() {
+                debug!("commit {}", cluster);
                 cluster.distribute_commit(txn).await?;
             } else {
+                debug!("rollback {}", cluster);
                 cluster.distribute_rollback(txn).await;
             }
 

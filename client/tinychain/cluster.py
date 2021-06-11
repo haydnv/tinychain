@@ -37,6 +37,9 @@ class Cluster(object, metaclass=Meta):
         return instance
 
     def __init__(self, form=None):
+        if isinstance(form, URI):
+            self.__uri__ = form
+
         self.__form__ = form if form else uri(self).path()
         self._configure()
 

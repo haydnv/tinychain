@@ -43,7 +43,6 @@ class Web(tc.Cluster):
             self.cache.insert([name, txn.views + 1]))
 
 
-@unittest.skip
 class DemoTests(unittest.TestCase):
     def setUp(self):
         self.hosts = []
@@ -59,9 +58,6 @@ class DemoTests(unittest.TestCase):
 
         self.assertEqual(self.hosts[0].get("/app/web/views", "Up"), 0)
 
-        for i in range(5):
-            print()
-
         self.hosts[0].put("/app/web/add_view", "Up")
         self.assertEqual(self.hosts[1].get("/app/web/views", "Up"), 1)
 
@@ -72,4 +68,3 @@ class DemoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

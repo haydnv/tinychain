@@ -8,7 +8,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all};
+use futures::future::{join_all, try_join_all, Future, FutureExt};
 use futures::{join, StreamExt};
 use log::{debug, info, warn};
 use safecast::TryCastFrom;
@@ -25,13 +25,13 @@ use crate::scalar::{Link, OpDef, Value};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
-mod load;
-mod owner;
-
 use owner::Owner;
 
 use futures::stream::FuturesUnordered;
 pub use load::instantiate;
+
+mod load;
+mod owner;
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
@@ -278,12 +278,66 @@ impl Cluster {
         Ok(())
     }
 
+    pub async fn replicate_write<F: Future<Output = TCResult<()>>, W: Fn(Link) -> F>(
+        &self,
+        txn: Txn,
+        write: W,
+    ) -> TCResult<()> {
+        let mut replicas = self.replicas(txn.id()).await?;
+        replicas.remove(&txn.link(self.link().path().clone()));
+        debug!("replicating write to {} replicas", replicas.len());
+
+        let max_failures = replicas.len() / 2;
+        let mut failed = HashSet::with_capacity(replicas.len());
+        let mut succeeded = HashSet::with_capacity(replicas.len());
+
+        {
+            let mut results = FuturesUnordered::from_iter(
+                replicas
+                    .into_iter()
+                    .map(|link| write(link.clone()).map(|result| (link, result))),
+            );
+
+            while let Some((replica, result)) = results.next().await {
+                match result {
+                    Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
+                    Err(ref cause) => {
+                        debug!("replica at {} failed: {}", replica, cause);
+                        failed.insert(replica);
+                    }
+                    Ok(()) => {
+                        debug!("replica at {} succeeded", replica);
+                        succeeded.insert(replica);
+                    }
+                };
+
+                if failed.len() > max_failures {
+                    assert!(result.is_err());
+                    return result;
+                }
+            }
+        }
+
+        if !failed.is_empty() {
+            let failed = Value::from_iter(failed);
+            try_join_all(
+                succeeded
+                    .into_iter()
+                    .map(|replica| txn.delete(replica.append(REPLICAS.into()), failed.clone())),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn mutate(&self, txn: &Txn, participant: Link) -> TCResult<()> {
         if participant.path() == self.link.path() {
             log::warn!(
                 "got participant message within Cluster {}",
                 self.link.path()
             );
+
             return Ok(());
         }
 

@@ -12,7 +12,7 @@ use futures::try_join;
 use log::debug;
 
 use tc_error::*;
-use tcgeneric::{NetworkTime, TCPathBuf};
+use tcgeneric::{NetworkTime, TCBoxTryFuture, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;
@@ -171,7 +171,7 @@ impl Gateway {
         link: Link,
         key: Value,
         value: State,
-    ) -> Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             debug!("PUT {}: {} <- {}", link, key, value);
 
@@ -197,13 +197,17 @@ impl Gateway {
     }
 
     /// Delete the [`State`] with the given `key` at `link`.
-    pub async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
-        debug!("DELETE {}: {}", link, key);
-        match link.host() {
-            None => self.kernel.delete(txn, link.path(), key).await,
-            Some(host) if host == self.root() => self.kernel.delete(txn, link.path(), key).await,
-            _ => self.client.delete(txn, link, key).await,
-        }
+    pub fn delete<'a>(&'a self, txn: &'a Txn, link: Link, key: Value) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            debug!("DELETE {}: {}", link, key);
+            match link.host() {
+                None => self.kernel.delete(txn, link.path(), key).await,
+                Some(host) if host == self.root() => {
+                    self.kernel.delete(txn, link.path(), key).await
+                }
+                _ => self.client.delete(txn, link, key).await,
+            }
+        })
     }
 
     /// Start this `Gateway`'s server

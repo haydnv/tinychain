@@ -83,12 +83,8 @@ pub enum Subject {
 
 impl Subject {
     fn is_view(&self) -> bool {
-        if let Self::Ref(id, path) = self {
-            if id.is_view() {
-                true
-            } else {
-                !path.is_empty()
-            }
+        if let Self::Ref(id, _path) = self {
+            id.is_view()
         } else {
             false
         }

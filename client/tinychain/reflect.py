@@ -128,8 +128,8 @@ class GetMethod(Method):
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
-        cxt._return = self.form(*args) # populate the Context
-        return (key_name, cxt)
+        cxt._return = self.form(*args)  # populate the Context
+        return key_name, cxt
 
 
 class PutMethod(Method):
@@ -143,8 +143,7 @@ class PutMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) not in [1, 2, 4]:
-            raise ValueError(f"{self.dtype()} has one, two, or four arguments: "
-                + "(self, cxt, key, value)")
+            raise ValueError(f"{self.dtype()} has one, two, or four arguments: (self, cxt, key, value)")
 
         args = [self.header]
 
@@ -165,7 +164,7 @@ class PutMethod(Method):
             args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
-        return (key_name, value_name, cxt)
+        return key_name, value_name, cxt
 
 
 class PostMethod(Method):
@@ -183,8 +182,7 @@ class PostMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) == 0:
-            raise ValueError(f"{self.dtype()} has at least one argment: "
-                + "(self, cxt, name1=val1, ...)")
+            raise ValueError(f"{self.dtype()} has at least one argment: (self, cxt, name1=val1, ...)")
 
         args = [self.header]
 
@@ -211,6 +209,7 @@ class DeleteMethod(Method):
         return GetMethod.__form__(self)
 
 
+# TODO: use a module as a namespace, not a class
 Method.Get = GetMethod
 Method.Put = PutMethod
 Method.Post = PostMethod
@@ -256,8 +255,8 @@ class Get(Op):
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
-        cxt._return = self.form(*args) # populate the Context
-        return (key_name, cxt)
+        cxt._return = self.form(*args)  # populate the Context
+        return key_name, cxt
 
     def __ref__(self, name):
         return op.Get(URI(name))
@@ -292,7 +291,7 @@ class Put(Op):
             args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
-        return (key_name, value_name, cxt)
+        return key_name, value_name, cxt
 
     def __ref__(self, name):
         return op.Put(URI(name))
