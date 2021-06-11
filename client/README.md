@@ -66,7 +66,7 @@ It's also important to keep in mind that Tinychain by default resolves all depen
 @tc.post_op
 def num_rows(txn):
     max_len = 100
-    schema = tc.Table.Schema(
+    schema = tc.schema.Table(
         [tc.Column("user_id", tc.Number)],
         [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
@@ -81,7 +81,7 @@ This Op will *always* resolve to *zero*. This may seem counterintuitive at first
 @tc.post_op
 def num_rows(txn):
     max_len = 100
-    schema = tc.Table.Schema(
+    schema = tc.schema.Table(
         [tc.Column("user_id", tc.Number)],
         [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
