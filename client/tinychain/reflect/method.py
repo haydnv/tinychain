@@ -101,7 +101,7 @@ class Post(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) == 0:
-            raise ValueError(f"{self.dtype()} has at least one argment: (self, cxt, name1=val1, ...)")
+            raise ValueError(f"{self.dtype()} has at least one argument: (self, cxt, name1=val1, ...)")
 
         args = [self.header]
 
@@ -125,4 +125,4 @@ class Delete(Method):
         return ref.Delete(uri(self.header).append(self.name), key)
 
     def __form__(self):
-        return GetMethod.__form__(self)
+        return Get.__form__(self)

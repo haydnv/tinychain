@@ -63,7 +63,7 @@ class Put(Op):
         if len(parameters) not in [0, 1, 3]:
             raise ValueError(f"{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)")
 
-        args = [self.header]
+        args = []
 
         cxt = Context()
         if len(parameters):
@@ -77,7 +77,7 @@ class Put(Op):
             args.append(dtype(URI(key_name)))
 
             value_name, param = parameters[2]
-            dtype = resolve_class(self.form, param.annotation)
+            dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
@@ -117,7 +117,6 @@ class Delete(Op):
 
     def __form__(self):
         return Get.__form__(self)
-
 
     def __ref__(self, name):
         return op.Delete(URI(name))
