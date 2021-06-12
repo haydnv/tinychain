@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
+#[cfg(debug_assertions)]
 use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -155,15 +156,6 @@ impl de::FromStream for Node {
 
 impl<'en> en::ToStream<'en> for Node {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        debug!(
-            "Node::to_stream {} {} {} {} {}",
-            self.leaf,
-            Tuple::<&NodeKey>::from_iter(&self.keys),
-            Value::from(self.parent.clone()),
-            Tuple::<&NodeId>::from_iter(&self.children),
-            self.rebalance
-        );
-
         en::IntoStream::into_stream(
             (
                 &self.leaf,
