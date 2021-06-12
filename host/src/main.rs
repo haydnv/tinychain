@@ -16,6 +16,8 @@ use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
 
+type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 fn data_size(flag: &str) -> TCResult<u64> {
     const ERR: &str = "unable to parse data size";
 
@@ -97,7 +99,7 @@ impl Config {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), TokioError> {
     let config = Config::from_args();
     let gateway_config = config.gateway();
 
@@ -173,15 +175,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::error!("server error: {}", cause);
     }
 
-    if config.workspace.exists() {
-        use futures::TryFutureExt;
-        tokio::fs::remove_dir_all(config.workspace)
-            .map_err(|e| {
-                let err: Box<dyn std::error::Error + Send + Sync + 'static> = Box::new(e);
-                err
-            })
-            .await?
+    empty_dir(config.workspace)
+}
+
+fn empty_dir(workspace: PathBuf) -> Result<(), TokioError> {
+    let contents = std::fs::read_dir(workspace)?;
+    for entry in contents {
+        let result = match entry {
+            Ok(entry) => rm_entry(entry),
+            Err(cause) => Err(cause),
+        };
+
+        if let Err(cause) = result {
+            log::error!("unable to clean up workspace: {}", cause);
+        }
     }
 
     Ok(())
+}
+
+fn rm_entry(entry: std::fs::DirEntry) -> Result<(), std::io::Error> {
+    if entry.metadata()?.is_dir() {
+        std::fs::remove_dir_all(entry.path())
+    } else {
+        std::fs::remove_file(entry.path())
+    }
 }
