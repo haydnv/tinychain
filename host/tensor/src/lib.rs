@@ -12,7 +12,7 @@ use futures::{Future, TryFutureExt};
 use log::debug;
 use number_general::{Number, NumberType};
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
@@ -23,7 +23,7 @@ use tcgeneric::{
 
 pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
-pub use sparse::{SparseAccessor, SparseTensor};
+pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 
 mod bounds;
 mod dense;
@@ -642,12 +642,21 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<
     }
 }
 
+impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<FS, D, T>>
+    From<SparseTensor<FS, D, T, A>> for Tensor<FD, FS, D, T>
+{
+    fn from(sparse: SparseTensor<FS, D, T, A>) -> Self {
+        Self::Sparse(sparse.into_inner().accessor().into())
+    }
+}
+
 #[async_trait]
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> de::FromStream
     for Tensor<FD, FS, D, T>
 where
-    <D as Dir>::FileClass: From<TensorType> + Send,
+    <D as Dir>::FileClass: From<BTreeType> + From<TensorType> + Send,
     FD: TryFrom<<D as Dir>::File, Error = TCError>,
+    FS: TryFrom<<D as Dir>::File, Error = TCError>,
 {
     type Context = T;
 
@@ -678,8 +687,9 @@ impl<FD, FS, D, T> TensorVisitor<FD, FS, D, T> {
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> de::Visitor
     for TensorVisitor<FD, FS, D, T>
 where
-    <D as Dir>::FileClass: From<TensorType> + Send,
+    <D as Dir>::FileClass: From<BTreeType> + From<TensorType> + Send,
     FD: TryFrom<<D as Dir>::File, Error = TCError>,
+    FS: TryFrom<<D as Dir>::File, Error = TCError>,
 {
     type Value = Tensor<FD, FS, D, T>;
 
@@ -702,7 +712,11 @@ where
                     .map_ok(Tensor::from)
                     .await
             }
-            TensorType::Sparse => todo!(),
+            TensorType::Sparse => {
+                map.next_value::<SparseTensor<FS, D, T, SparseTable<FS, D, T>>>(self.txn)
+                    .map_ok(Tensor::from)
+                    .await
+            }
         }
     }
 }

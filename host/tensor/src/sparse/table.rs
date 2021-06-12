@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 
 use async_trait::async_trait;
-use futures::future;
+use destream::de;
+use futures::future::{self, TryFutureExt};
 use futures::stream::TryStreamExt;
 
 use tc_btree::{BTreeType, Node};
@@ -133,6 +134,59 @@ where
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.table.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for SparseTable<F, D, T>
+where
+    F: TryFrom<D::File, Error = TCError>,
+    D::FileClass: From<BTreeType>,
+{
+    type Context = (Self, TxnId);
+
+    async fn from_stream<De: de::Decoder>(
+        context: (Self, TxnId),
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
+        let (table, txn_id) = context;
+
+        decoder
+            .decode_seq(SparseTableVisitor { table, txn_id })
+            .await
+    }
+}
+
+struct SparseTableVisitor<F: File<Node>, D: Dir, T: Transaction<D>>
+where
+    F: TryFrom<D::File>,
+    D::FileClass: From<BTreeType>,
+{
+    table: SparseTable<F, D, T>,
+    txn_id: TxnId,
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for SparseTableVisitor<F, D, T>
+where
+    F: TryFrom<D::File>,
+    D::FileClass: From<BTreeType>,
+{
+    type Value = SparseTable<F, D, T>;
+
+    fn expecting() -> &'static str {
+        "the contents of a SparseTensor"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        while let Some((coord, value)) = seq.next_element(()).await? {
+            self.table
+                .write_value(self.txn_id, coord, value)
+                .map_err(de::Error::custom)
+                .await?;
+        }
+
+        Ok(self.table)
     }
 }
 

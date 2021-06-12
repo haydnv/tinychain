@@ -41,6 +41,10 @@ pub type Tensor =
 pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<afarray::Array>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<afarray::Array>, fs::Dir, Txn>;
+#[cfg(feature = "tensor")]
+pub type SparseTensor<A> = tc_tensor::SparseTensor<fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
+#[cfg(feature = "tensor")]
+pub type SparseTable = tc_tensor::SparseTable<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -229,7 +233,10 @@ impl CollectionVisitor {
                     let tensor: DenseTensor<DenseTensorFile> = access.next_value(self.txn).await?;
                     Ok(Collection::Tensor(tensor.into()))
                 }
-                TensorType::Sparse => todo!(),
+                TensorType::Sparse => {
+                    let tensor: SparseTensor<SparseTable> = access.next_value(self.txn).await?;
+                    Ok(Collection::Tensor(tensor.into()))
+                }
             },
         }
     }
