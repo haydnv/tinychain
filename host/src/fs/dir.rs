@@ -58,6 +58,9 @@ impl FileEntry {
                 #[cfg(feature = "tensor")]
                 CollectionType::Tensor(tt) => match tt {
                     TensorType::Dense => Ok(Self::Tensor(File::new(cache, path, Array::ext()))),
+                    TensorType::Sparse => {
+                        Err(TCError::unsupported("cannot create File for SparseTensor"))
+                    }
                 },
             },
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),

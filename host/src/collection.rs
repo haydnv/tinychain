@@ -35,7 +35,8 @@ pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
-pub type Tensor = tc_tensor::Tensor<fs::File<afarray::Array>, fs::Dir, Txn>;
+pub type Tensor =
+    tc_tensor::Tensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<afarray::Array>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
@@ -225,11 +226,10 @@ impl CollectionVisitor {
             #[cfg(feature = "tensor")]
             CollectionType::Tensor(tt) => match tt {
                 TensorType::Dense => {
-                    debug!("deserialize Tensor");
-
                     let tensor: DenseTensor<DenseTensorFile> = access.next_value(self.txn).await?;
                     Ok(Collection::Tensor(tensor.into()))
                 }
+                TensorType::Sparse => todo!(),
             },
         }
     }

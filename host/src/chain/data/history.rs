@@ -155,6 +155,11 @@ impl History {
                     ))
                     .into())
                 }
+
+                #[cfg(feature = "tensor")]
+                Collection::Tensor(Tensor::Sparse(_)) => {
+                    Err(TCError::not_implemented("save sparse tensor state"))
+                }
             },
             State::Scalar(value) => Ok(value),
             other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),

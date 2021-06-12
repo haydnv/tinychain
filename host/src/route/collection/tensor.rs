@@ -51,6 +51,7 @@ impl<'a> Handler<'a> for CreateHandler {
 
                     match self.class {
                         TensorType::Dense => constant(&txn, shape.into(), dtype.zero()).await,
+                        TensorType::Sparse => Err(TCError::not_implemented("create sparse tensor")),
                     }
                 } else {
                     Err(TCError::bad_request(
