@@ -61,7 +61,21 @@ There are instructions for setting up a Cluster in the [client README](https://g
 
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
 
-To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and follow the [instructions](https://crates.io/crates/arrayfire) for ArrayFire's Rust crate to set the `AF_PATH` and `LD_LIBRARY_PATH` environment variables. Then, download the lastest `tinychain-gpu` binary or run `cargo install tinychain --features=tensor`. Please [start a discussion](https://github.com/haydnv/tinychain/discussions) if you run into any problems.
+To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and add a package config file for ArrayFire to your `$PKG_CONFIG_PATH` (example below). Then, download the lastest tinychain-gpu binary or run `cargo install tinychain --features=tensor`. Please [start a discussion](https://github.com/haydnv/tinychain/discussions) if you run into any problems.
+
+```
+# Example arrayfire.pc file
+
+prefix=/usr
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib64
+
+Name: arrayfire
+Description: the ArrayFire library
+Version: 3.8
+Libs: -L${libdir}
+```
 
 ## Key features
 
