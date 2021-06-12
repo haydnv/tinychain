@@ -592,6 +592,17 @@ impl From<u64> for Value {
     }
 }
 
+impl TryFrom<Value> for Number {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Number(number) => Ok(number),
+            other => Err(TCError::bad_request("expected Number but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for Tuple<Value> {
     type Error = TCError;
 

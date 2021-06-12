@@ -23,9 +23,11 @@ use tcgeneric::{
 
 pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
+pub use sparse::{SparseAccessor, SparseTensor};
 
 mod bounds;
 mod dense;
+mod sparse;
 #[allow(dead_code)]
 mod transform;
 
@@ -274,7 +276,7 @@ impl fmt::Display for TensorType {
 #[derive(Clone)]
 pub enum Tensor<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> {
     Dense(DenseTensor<FD, D, T, DenseAccessor<FD, D, T>>),
-    Sparse(FS),
+    Sparse(SparseTensor<FS, D, T, SparseAccessor<FS, D, T>>),
 }
 
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Tensor<FD, FS, D, T> {
