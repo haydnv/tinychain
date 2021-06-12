@@ -250,7 +250,7 @@ impl NativeClass for TensorType {
         if path.len() == 4 && &path[..3] == &PREFIX[..] {
             match path[3].as_str() {
                 "dense" => Some(Self::Dense),
-                "sparse" => todo!(),
+                "sparse" => Some(Self::Sparse),
                 _ => None,
             }
         } else {
@@ -296,28 +296,28 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorAccess
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.dtype(),
         }
     }
 
     fn ndim(&self) -> usize {
         match self {
             Self::Dense(dense) => dense.ndim(),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.ndim(),
         }
     }
 
     fn shape(&self) -> &Shape {
         match self {
             Self::Dense(dense) => dense.shape(),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.shape(),
         }
     }
 
     fn size(&self) -> u64 {
         match self {
             Self::Dense(dense) => dense.size(),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.size(),
         }
     }
 }
