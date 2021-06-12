@@ -730,8 +730,8 @@ impl<'en, FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> IntoView<'
 
     async fn into_view(self, txn: T) -> TCResult<Self::View> {
         match self {
-            Tensor::Dense(tensor) => tensor.into_view(txn).map_ok(TensorView::Dense).await,
-            Tensor::Sparse(_tensor) => todo!(),
+            Tensor::Dense(dense) => dense.into_view(txn).map_ok(TensorView::Dense).await,
+            Tensor::Sparse(sparse) => sparse.into_view(txn).map_ok(TensorView::Sparse).await,
         }
     }
 }
@@ -739,12 +739,14 @@ impl<'en, FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> IntoView<'
 /// A view of a [`Tensor`] at a given [`TxnId`], used in serialization
 pub enum TensorView<'en> {
     Dense(dense::DenseTensorView<'en>),
+    Sparse(sparse::SparseTensorView<'en>),
 }
 
 impl<'en> en::IntoStream<'en> for TensorView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Dense(view) => view.into_stream(encoder),
+            Self::Sparse(view) => view.into_stream(encoder),
         }
     }
 }

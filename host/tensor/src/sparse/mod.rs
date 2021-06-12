@@ -3,19 +3,20 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en};
 use futures::{Stream, TryFutureExt};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::Transaction;
+use tc_transact::{IntoView, Transaction};
 use tc_value::{Number, NumberType, ValueType};
 
 use super::{Coord, Shape, TensorAccess};
 
 pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
+use tcgeneric::NativeClass;
 
 mod access;
 mod table;
@@ -67,6 +68,22 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> From<A>
             dir: PhantomData,
             txn: PhantomData,
         }
+    }
+}
+
+#[async_trait]
+impl<'en, F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> IntoView<'en, D>
+    for SparseTensor<F, D, T, A>
+{
+    type Txn = T;
+    type View = SparseTensorView<'en>;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        Ok(SparseTensorView {
+            shape: self.shape().to_vec(),
+            dtype: self.dtype().into(),
+            filled: self.accessor.filled(txn).await?,
+        })
     }
 }
 
@@ -130,5 +147,19 @@ where
         } else {
             Err(de::Error::custom("invalid SparseTensor"))
         }
+    }
+}
+
+pub struct SparseTensorView<'en> {
+    shape: Vec<u64>,
+    dtype: ValueType,
+    filled: SparseStream<'en>,
+}
+
+impl<'en> en::IntoStream<'en> for SparseTensorView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let schema = (self.shape.to_vec(), self.dtype.path());
+        let filled = en::SeqStream::from(self.filled);
+        (schema, filled).into_stream(encoder)
     }
 }

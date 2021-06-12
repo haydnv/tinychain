@@ -316,7 +316,8 @@ impl<'en> en::IntoStream<'en> for CollectionView<'en> {
             Self::Table(table) => map.encode_entry(TableType::default().path(), table),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => match tensor {
-                TensorView::Dense(tensor) => map.encode_entry(TensorType::Dense.path(), tensor),
+                TensorView::Dense(dense) => map.encode_entry(TensorType::Dense.path(), dense),
+                TensorView::Sparse(sparse) => map.encode_entry(TensorType::Sparse.path(), sparse),
             },
         }?;
         map.end()

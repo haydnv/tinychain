@@ -20,7 +20,7 @@ pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
 {
     fn accessor(self) -> SparseAccessor<F, D, T>;
 
-    fn copy<'a>(&'a self, txn: &'a T) -> TCBoxTryFuture<'a, SparseTable<F, D, T>>
+    fn copy<'a>(self, txn: T) -> TCBoxTryFuture<'a, SparseTable<F, D, T>>
     where
         F: TryFrom<D::File, Error = TCError>,
         D::FileClass: From<BTreeType>,
@@ -43,7 +43,7 @@ pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
         })
     }
 
-    async fn filled<'a>(&'a self, txn: &'a T) -> TCResult<SparseStream<'a>>;
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
     async fn filled_count(&self, txn: &T) -> TCResult<u64>;
 
@@ -87,7 +87,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> SparseAccess<F, D, T> for SparseA
         self
     }
 
-    async fn filled<'a>(&'a self, txn: &'a T) -> TCResult<SparseStream<'a>> {
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         match self {
             Self::Table(table) => table.filled(txn).await,
         }

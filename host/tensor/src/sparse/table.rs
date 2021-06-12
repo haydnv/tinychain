@@ -90,8 +90,8 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> SparseAccess<F, D, T> for SparseT
         SparseAccessor::Table(self)
     }
 
-    async fn filled<'a>(&'a self, txn: &'a T) -> TCResult<SparseStream<'a>> {
-        let rows = self.table.clone().rows(*txn.id()).await?;
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let rows = self.table.rows(*txn.id()).await?;
         let filled = rows.and_then(|row| future::ready(expect_row(row)));
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
