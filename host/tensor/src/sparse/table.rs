@@ -9,14 +9,14 @@ use futures::stream::TryStreamExt;
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_table::{Column, ColumnBound, TableIndex, TableInstance, TableSchema};
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{CopyFrom, Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label};
 
-use crate::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess};
+use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
 
-use super::{SparseAccess, SparseAccessor, SparseStream};
+use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
 
 const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
@@ -24,8 +24,7 @@ const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 #[derive(Clone)]
 pub struct SparseTable<F: File<Node>, D: Dir, T: Transaction<D>> {
     table: TableIndex<F, D, T>,
-    shape: Shape,
-    dtype: NumberType,
+    schema: Schema,
 }
 
 impl<F: File<Node>, D: Dir, T: Transaction<D>> SparseTable<F, D, T>
@@ -33,54 +32,42 @@ where
     F: TryFrom<D::File, Error = TCError>,
     D::FileClass: From<BTreeType>,
 {
-    pub async fn create(
-        context: &D,
-        txn_id: TxnId,
-        shape: Shape,
-        dtype: NumberType,
-    ) -> TCResult<Self> {
-        let table = Self::create_table(context, txn_id, shape.len(), dtype).await?;
-        Ok(Self {
-            table,
-            dtype,
-            shape,
-        })
+    pub async fn create(context: &D, txn_id: TxnId, schema: Schema) -> TCResult<Self> {
+        let table_schema = Self::table_schema(&schema);
+        let table = TableIndex::create(table_schema, context, txn_id).await?;
+
+        Ok(Self { table, schema })
     }
 
-    async fn create_table(
-        context: &D,
-        txn_id: TxnId,
-        ndim: usize,
-        dtype: NumberType,
-    ) -> TCResult<TableIndex<F, D, T>> {
-        let key: Vec<Column> = Self::key(ndim);
-        let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
-        let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
-        let schema = TableSchema::new((key, value).into(), indices);
-        TableIndex::create(schema, context, txn_id).await
-    }
-
-    fn key(ndim: usize) -> Vec<Column> {
+    fn table_schema(schema: &Schema) -> TableSchema {
+        let ndim = schema.0.len();
         let u64_type = NumberType::uint64();
-        (0..ndim).map(|axis| (axis, u64_type).into()).collect()
+        let key = (0..ndim).map(|axis| (axis, u64_type).into()).collect();
+        let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(schema.1)).into()];
+        let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
+        TableSchema::new((key, value).into(), indices)
     }
 }
 
 impl<F: File<Node>, D: Dir, T: Transaction<D>> TensorAccess for SparseTable<F, D, T> {
+    #[inline]
     fn dtype(&self) -> NumberType {
-        self.dtype
+        self.schema.1
     }
 
+    #[inline]
     fn ndim(&self) -> usize {
-        self.shape.len()
+        self.schema.0.len()
     }
 
+    #[inline]
     fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+        &self.schema.0
     }
 
+    #[inline]
     fn size(&self) -> u64 {
-        self.shape.size()
+        self.schema.0.size()
     }
 }
 
@@ -118,7 +105,8 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> ReadValueAt<D> for SparseTable<F,
                 ));
             }
 
-            read_value_at(self.table, txn, coord, self.dtype).await
+            let dtype = self.dtype();
+            read_value_at(self.table, txn, coord, dtype).await
         })
     }
 }
@@ -134,6 +122,53 @@ where
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.table.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<F, D, T, A> CopyFrom<D, SparseTensor<F, D, T, A>> for SparseTable<F, D, T>
+where
+    F: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<F, D, T>,
+    D::FileClass: From<BTreeType>,
+{
+    async fn copy_from(instance: SparseTensor<F, D, T, A>, store: D, txn: T) -> TCResult<Self> {
+        let schema = (instance.shape().clone(), instance.dtype());
+        let accessor = SparseTable::create(&store, *txn.id(), schema).await?;
+
+        let txn_id = *txn.id();
+        let filled = instance.accessor.filled(txn).await?;
+
+        filled
+            .map_ok(|(coord, value)| accessor.write_value(txn_id, coord, value))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(accessor.into())
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for SparseTable<F, D, T>
+where
+    F: TryFrom<D::File, Error = TCError>,
+    D::FileClass: From<BTreeType>,
+{
+    type Schema = Schema;
+    type Store = D;
+    type Txn = T;
+
+    fn schema(&self) -> &Self::Schema {
+        &self.schema
+    }
+
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let table_schema = Self::table_schema(&schema);
+        let table = TableIndex::load(txn, table_schema, store).await?;
+        Ok(Self { table, schema })
     }
 }
 

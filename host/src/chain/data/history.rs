@@ -128,37 +128,34 @@ impl History {
                 }
 
                 #[cfg(feature = "tensor")]
-                Collection::Tensor(Tensor::Dense(tensor)) => {
+                Collection::Tensor(tensor) => {
                     let hash = tensor.hash_hex(&txn).await?.parse()?;
-                    let shape: Tuple<Value> = tensor
-                        .shape()
-                        .to_vec()
-                        .into_iter()
-                        .map(Value::from)
-                        .collect();
+                    let schema = cast_tensor_schema(&tensor);
+                    let classpath = tensor.class().path();
 
-                    let dtype = tc_value::ValueType::from(tensor.dtype()).path();
-                    let classpath = TensorType::Dense.path();
+                    match tensor {
+                        Tensor::Dense(dense) => {
+                            if !self.dir.contains(&txn_id, &hash).await? {
+                                let file = self
+                                    .dir
+                                    .create_file(txn_id, hash.clone(), TensorType::Dense)
+                                    .await?;
 
-                    if !self.dir.contains(&txn_id, &hash).await? {
-                        let file = self
-                            .dir
-                            .create_file(txn_id, hash.clone(), TensorType::Dense)
-                            .await?;
-
-                        DenseTensor::copy_from(tensor, file, txn).await?;
+                                DenseTensor::copy_from(dense, file, txn).await?;
+                            }
+                        }
+                        Tensor::Sparse(sparse) => {
+                            if !self.dir.contains(&txn_id, &hash).await? {
+                                let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
+                                SparseTensor::copy_from(sparse, dir, txn).await?;
+                            }
+                        }
                     }
 
                     Ok(OpRef::Get((
                         (hash.into(), classpath).into(),
-                        Value::Tuple(vec![shape.into(), dtype.into()].into()).into(),
-                    ))
-                    .into())
-                }
-
-                #[cfg(feature = "tensor")]
-                Collection::Tensor(Tensor::Sparse(_)) => {
-                    Err(TCError::not_implemented("save sparse tensor state"))
+                        schema.into(),
+                    )).into())
                 }
             },
             State::Scalar(value) => Ok(value),
@@ -716,4 +713,17 @@ impl<'en> en::IntoStream<'en> for MutationView<'en> {
             Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
         }
     }
+}
+
+#[cfg(feature = "tensor")]
+fn cast_tensor_schema(tensor: &Tensor) -> Value {
+    let shape: Tuple<Value> = tensor
+        .shape()
+        .to_vec()
+        .into_iter()
+        .map(Value::from)
+        .collect();
+
+    let dtype = tc_value::ValueType::from(tensor.dtype()).path();
+    Value::Tuple(vec![shape.into(), dtype.into()].into())
 }

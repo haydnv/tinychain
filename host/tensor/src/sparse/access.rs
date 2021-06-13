@@ -1,14 +1,10 @@
-use std::convert::TryFrom;
-
 use async_trait::async_trait;
-use futures::{future, TryStreamExt};
 
-use tc_btree::{BTreeType, Node};
+use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberType};
-use tcgeneric::TCBoxTryFuture;
 
 use crate::{Coord, Read, ReadValueAt, Shape, TensorAccess};
 
@@ -19,29 +15,6 @@ pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D> + TensorAccess + Send + Sync + 'static
 {
     fn accessor(self) -> SparseAccessor<F, D, T>;
-
-    fn copy<'a>(self, txn: T) -> TCBoxTryFuture<'a, SparseTable<F, D, T>>
-    where
-        F: TryFrom<D::File, Error = TCError>,
-        D::FileClass: From<BTreeType>,
-    {
-        Box::pin(async move {
-            let accessor =
-                SparseTable::create(txn.context(), *txn.id(), self.shape().clone(), self.dtype())
-                    .await?;
-
-            let txn_id = *txn.id();
-            let filled = self.filled(txn).await?;
-
-            filled
-                .map_ok(|(coord, value)| accessor.write_value(txn_id, coord, value))
-                .try_buffer_unordered(num_cpus::get())
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await?;
-
-            Ok(accessor)
-        })
-    }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
