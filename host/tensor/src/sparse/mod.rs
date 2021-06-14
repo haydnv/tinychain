@@ -4,17 +4,19 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::{Stream, TryFutureExt};
+use futures::future::{self, TryFutureExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist};
-use tc_transact::{IntoView, Transaction};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCTryStream};
 
-use super::{Coord, Schema, Shape, TensorAccess};
+use super::{Coord, Schema, Shape, TensorAccess, TensorIO};
 
+use crate::Bounds;
 pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
 
@@ -38,8 +40,12 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> SparseT
     }
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> TensorAccess
-    for SparseTensor<F, D, T, A>
+impl<F, D, T, A> TensorAccess for SparseTensor<F, D, T, A>
+where
+    F: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<F, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
@@ -55,6 +61,37 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> TensorA
 
     fn size(&self) -> u64 {
         self.accessor.size()
+    }
+}
+
+#[async_trait]
+impl<F, D, T, A> TensorIO<D> for SparseTensor<F, D, T, A>
+where
+    F: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<F, D, T>,
+{
+    type Txn = T;
+
+    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
+        self.accessor
+            .clone()
+            .read_value_at(txn, coord)
+            .map_ok(|(_, value)| value)
+            .await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        stream::iter(bounds.affected())
+            .map(|coord| self.accessor.write_value(txn_id, coord, value))
+            .buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.accessor.write_value(txn_id, coord, value).await
     }
 }
 

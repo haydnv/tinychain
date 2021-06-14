@@ -160,12 +160,15 @@ class SparseTensorTests(unittest.TestCase):
 
     def testCreate(self):
         shape = [2, 5]
+        coord = [0, 0]
+        value = 1
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.I32)
+        cxt.result = tc.After(cxt.tensor.write(coord, value), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_sparse(tc.I32, shape, [])
+        expected = expect_sparse(tc.I32, shape, [[coord, value]])
         self.assertEqual(actual, expected)
 
 

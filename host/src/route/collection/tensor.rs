@@ -230,19 +230,22 @@ where
             Box::pin(async move {
                 if key.is_none() {
                     Ok(Collection::from(self.tensor.clone()).into())
+
                 } else if key.matches::<Coord>() {
                     let coord = key.opt_cast_into().unwrap();
                     self.tensor
-                        .read_value(&txn, coord)
+                        .read_value(txn, coord)
                         .map_ok(Value::from)
                         .map_ok(State::from)
                         .await
+
                 } else if key.matches::<Bounds>() {
                     let bounds = key.opt_cast_into().unwrap();
                     self.tensor
                         .slice(bounds)
                         .map(Collection::from)
                         .map(State::from)
+
                 } else {
                     Err(TCError::bad_request("invalid tensor bounds", key))
                 }

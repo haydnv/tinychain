@@ -579,15 +579,19 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorIO<D>
-    for DenseTensor<F, D, T, B>
+impl<F, D, T, B> TensorIO<D> for DenseTensor<F, D, T, B>
+where
+    F: File<Array>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<F, D, T>,
 {
     type Txn = T;
 
-    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number> {
+    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
         self.blocks
             .clone()
-            .read_value_at(txn.clone(), coord.to_vec())
+            .read_value_at(txn, coord)
             .map_ok(|(_, val)| val)
             .await
     }

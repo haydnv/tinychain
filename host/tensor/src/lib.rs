@@ -1,7 +1,6 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::convert::TryFrom;
 use std::fmt;
-use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::pin::Pin;
 
@@ -18,7 +17,7 @@ use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
-    TCPathBuf, TCTryStream, Tuple,
+    TCPathBuf, TCTryStream,
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -127,7 +126,7 @@ pub trait TensorIO<D: Dir>: TensorAccess {
     type Txn: Transaction<D>;
 
     /// Read a single value from this [`Tensor`].
-    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number>;
+    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number>;
 
     /// Write a single value to the slice of this [`Tensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()>;
@@ -413,35 +412,33 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorCompare<D
 }
 
 #[async_trait]
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorIO<D>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
     type Txn = T;
 
-    async fn read_value(&self, txn: &Self::Txn, coord: Coord) -> TCResult<Number> {
+    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
         }
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         match self {
             Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value).await,
         }
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        debug!(
-            "Tensor::write_value_at {}, {}",
-            Tuple::<u64>::from_iter(coord.to_vec()),
-            value
-        );
-
         match self {
             Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
         }
     }
 }

@@ -12,7 +12,7 @@ use super::{SparseStream, SparseTable};
 
 #[async_trait]
 pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
-    Clone + ReadValueAt<D> + TensorAccess + Send + Sync + 'static
+    Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
     fn accessor(self) -> SparseAccessor<F, D, T>;
 
