@@ -14,7 +14,8 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label};
 
-use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
+use crate::stream::{Read, ReadValueAt};
+use crate::{Bounds, Coord, Schema, Shape, TensorAccess};
 
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
 

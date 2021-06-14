@@ -152,10 +152,7 @@ impl History {
                         }
                     }
 
-                    Ok(OpRef::Get((
-                        (hash.into(), classpath).into(),
-                        schema.into(),
-                    )).into())
+                    Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
                 }
             },
             State::Scalar(value) => Ok(value),

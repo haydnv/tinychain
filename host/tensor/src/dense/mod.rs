@@ -19,15 +19,14 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
+use super::stream::{Read, ReadValueAt};
 use super::{
-    Bounds, Coord, Read, ReadValueAt, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
-    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
-    TensorUnary,
+    Bounds, Coord, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO,
+    TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType, TensorUnary,
 };
 
 use access::*;
 
-use crate::TensorCompare;
 pub use file::BlockListFile;
 
 mod access;
@@ -1179,64 +1178,4 @@ fn encodable_c64<'en, E: en::Error + 'en>(
             dest
         })
         .map_err(en::Error::custom)
-}
-
-fn block_offsets(
-    af_indices: &af::Array<u64>,
-    af_offsets: &af::Array<u64>,
-    start: f64,
-    block_id: u64,
-) -> (af::Array<u64>, f64) {
-    assert_eq!(af_indices.elements(), af_offsets.elements());
-
-    let num_to_update = af::sum_all(&af::eq(
-        af_indices,
-        &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
-        true,
-    ))
-    .0;
-
-    if num_to_update == 0 {
-        return (af::Array::new_empty(af::Dim4::default()), start);
-    }
-
-    debug_assert!((start as usize + num_to_update as usize) <= af_offsets.elements());
-
-    let num_to_update = num_to_update as f64;
-    let block_offsets = af::index(
-        af_offsets,
-        &[af::Seq::new(start, (start + num_to_update) - 1f64, 1f64)],
-    );
-
-    (block_offsets, (start + num_to_update))
-}
-
-fn coord_block<I: Iterator<Item = Coord>>(
-    coords: I,
-    coord_bounds: &[u64],
-    per_block: usize,
-    ndim: usize,
-    num_coords: u64,
-) -> (Coord, af::Array<u64>, af::Array<u64>) {
-    let coords: Vec<u64> = coords.flatten().collect();
-    assert!(coords.len() > 0);
-    assert!(ndim > 0);
-
-    let af_per_block = af::constant(per_block as u64, af::Dim4::new(&[1, 1, 1, 1]));
-    let af_coord_bounds = af::Array::new(coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
-
-    let af_coords = af::Array::new(
-        &coords,
-        af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
-    );
-    let af_coords = af::mul(&af_coords, &af_coord_bounds, true);
-    let af_coords = af::sum(&af_coords, 0);
-
-    let af_offsets = af::modulo(&af_coords, &af_per_block, true);
-    let af_indices = af_coords / af_per_block;
-
-    let af_block_ids = af::set_unique(&af_indices, true);
-    let mut block_ids = vec![0u64; af_block_ids.elements()];
-    af_block_ids.host(&mut block_ids);
-    (block_ids, af_indices, af_offsets)
 }

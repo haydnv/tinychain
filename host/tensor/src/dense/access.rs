@@ -12,8 +12,9 @@ use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tcgeneric::{TCBoxTryFuture, TCStream, TCTryStream};
 
+use crate::stream::{Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Read, ReadValueAt, Shape, TensorAccess};
+use crate::{Bounds, Coord, Shape, TensorAccess};
 
 use super::{DenseAccess, DenseAccessor, DenseTensor};
 

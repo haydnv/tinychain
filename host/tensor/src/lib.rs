@@ -1,13 +1,13 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+
 use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 use afarray::Array;
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::{Future, TryFutureExt};
+use futures::TryFutureExt;
 use log::debug;
 use number_general::{Number, NumberType};
 
@@ -28,6 +28,8 @@ mod bounds;
 mod dense;
 mod sparse;
 #[allow(dead_code)]
+mod stream;
+#[allow(dead_code)]
 mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
@@ -35,22 +37,11 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 /// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";
 
-type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
-
 /// The schema of a [`Tensor`]
 pub type Schema = (Shape, NumberType);
 
 /// The address of an individual element in a [`Tensor`].
 pub type Coord = Vec<u64>;
-
-/// Trait defining a read operation for a single [`Tensor`] element
-pub trait ReadValueAt<D: Dir> {
-    /// The transaction context
-    type Txn: Transaction<D>;
-
-    /// Read the value of the element at the given [`Coord`].
-    fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a>;
-}
 
 /// Basic properties common to all [`Tensor`]s
 pub trait TensorAccess: Send {

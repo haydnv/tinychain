@@ -6,7 +6,8 @@ use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberType};
 
-use crate::{Coord, Read, ReadValueAt, Shape, TensorAccess};
+use crate::stream::{Read, ReadValueAt};
+use crate::{Coord, Shape, TensorAccess};
 
 use super::{SparseStream, SparseTable};
 

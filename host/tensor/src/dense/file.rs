@@ -18,11 +18,12 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
+use crate::stream::{block_offsets, coord_block, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Read, ReadValueAt, Schema, Shape, TensorAccess};
+use crate::{Bounds, Coord, Schema, Shape, TensorAccess};
 
 use super::access::BlockListTranspose;
-use super::{block_offsets, coord_block, DenseAccess, DenseAccessor, PER_BLOCK};
+use super::{DenseAccess, DenseAccessor, PER_BLOCK};
 
 const MEBIBYTE: usize = 1_048_576;
 
