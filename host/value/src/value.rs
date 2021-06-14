@@ -9,7 +9,8 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::Error as DestreamError;
-use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
+use destream::de::Visitor as DestreamVisitor;
+use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, MapAccess, ToStream};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -286,7 +287,7 @@ impl TryFrom<ValueType> for NumberType {
     fn try_from(vt: ValueType) -> TCResult<NumberType> {
         match vt {
             ValueType::Number(nt) => Ok(nt),
-            other => Err(TCError::bad_request("expected a Number type, not", other))
+            other => Err(TCError::bad_request("expected a Number type, not", other)),
         }
     }
 }
@@ -295,17 +296,8 @@ impl TryFrom<ValueType> for NumberType {
 impl FromStream for ValueType {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        let link = Link::from_stream(cxt, decoder).await?;
-        if let Some(host) = link.host() {
-            Err(DestreamError::invalid_value(
-                host,
-                "a Value type (without a host)",
-            ))
-        } else {
-            let path = link.into_path();
-            Self::from_path(&path).ok_or_else(|| DestreamError::invalid_value(path, "a Value type"))
-        }
+    async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_any(ValueTypeVisitor).await
     }
 }
 
@@ -320,6 +312,51 @@ impl fmt::Display for ValueType {
             Self::String => f.write_str("type String"),
             Self::Tuple => f.write_str("type Tuple<Value>"),
             Self::Value => f.write_str("type Value"),
+        }
+    }
+}
+
+struct ValueTypeVisitor;
+
+impl ValueTypeVisitor {
+    fn visit_path<E: DestreamError>(self, path: TCPathBuf) -> Result<ValueType, E> {
+        ValueType::from_path(&path)
+            .ok_or_else(|| DestreamError::invalid_value(path, Self::expecting()))
+    }
+}
+
+#[async_trait]
+impl DestreamVisitor for ValueTypeVisitor {
+    type Value = ValueType;
+
+    fn expecting() -> &'static str {
+        "a Value type"
+    }
+
+    fn visit_string<E: DestreamError>(self, v: String) -> Result<Self::Value, E> {
+        let path: TCPathBuf = v.parse().map_err(DestreamError::custom)?;
+        self.visit_path(path)
+    }
+
+    async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        if let Some(path) = access.next_key::<TCPathBuf>(()).await? {
+            if let Ok(list) = access.next_value::<Tuple<Value>>(()).await {
+                if list.is_empty() {
+                    self.visit_path(path)
+                } else {
+                    Err(DestreamError::invalid_value(list, "empty list"))
+                }
+            } else if let Ok(map) = access.next_value::<Map<Value>>(()).await {
+                if map.is_empty() {
+                    self.visit_path(path)
+                } else {
+                    Err(DestreamError::invalid_value(map, "empty map"))
+                }
+            } else {
+                Err(DestreamError::custom("invalid Value type"))
+            }
+        } else {
+            Err(DestreamError::invalid_length(0, Self::expecting()))
         }
     }
 }
