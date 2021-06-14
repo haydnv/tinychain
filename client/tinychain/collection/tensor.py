@@ -4,6 +4,7 @@ from tinychain import ref
 from tinychain.util import uri
 from tinychain.value import Number, F32
 
+from . import schema
 from .collection import Collection, Range
 
 
@@ -179,9 +180,25 @@ class Dense(Tensor):
     @classmethod
     def zeros(cls, shape, dtype=F32):
         """
-        Return a `DenseTensor` filled with ones.
+        Return a `DenseTensor` filled with zeros.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
         return cls.constant(shape, dtype(0))
+
+
+class Sparse(Tensor):
+    """An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values."""
+
+    __uri__ = uri(Tensor) + "/sparse"
+
+    @classmethod
+    def zeros(cls, shape, dtype=F32):
+        """
+        Return a sparse tensor with the given shape and data type.
+
+        If `dtype` is not specified, the data type will be :class:`F32`.
+        """
+
+        return cls(schema.Tensor(shape, dtype))

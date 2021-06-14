@@ -2,6 +2,8 @@ import inspect
 
 from pydoc import locate
 
+from .meta import Meta
+
 
 def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:

@@ -1,6 +1,6 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from tinychain.reflect.meta import Meta
+from tinychain.reflect import Meta
 from tinychain.state import Scalar
 from tinychain.util import uri
 

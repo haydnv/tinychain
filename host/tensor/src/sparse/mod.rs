@@ -198,12 +198,12 @@ where
             .await?;
 
         if let Some(table) = seq
-            .next_element::<SparseTable<F, D, T>>((table, txn_id))
+            .next_element::<SparseTable<F, D, T>>((table.clone(), txn_id))
             .await?
         {
             Ok(SparseTensor::from(table))
         } else {
-            Err(de::Error::custom("invalid SparseTensor"))
+            Ok(SparseTensor::from(table))
         }
     }
 }

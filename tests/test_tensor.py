@@ -21,7 +21,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
         cxt.result = tc.After(cxt.tensor.write([0, 0, 0], 0), cxt.tensor)
 
-        expected = expect(tc.F64, shape, [0] + [c] * (product(shape) - 1))
+        expected = expect_dense(tc.F64, shape, [0] + [c] * (product(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(expected, actual)
 
@@ -33,7 +33,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.result = cxt.tensor[1, 2:-1]
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect(tc.I64, [2], np.arange(1, 11).reshape([2, 5])[1, 2:-1])
+        expected = expect_dense(tc.I64, [2], np.arange(1, 11).reshape([2, 5])[1, 2:-1])
         self.assertEqual(actual, expected)
 
     def testAdd(self):
@@ -45,7 +45,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.result = cxt.left + cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect(tc.F64, shape, np.arange(1, 6, 0.5) + 2)
+        expected = expect_dense(tc.F64, shape, np.arange(1, 6, 0.5) + 2)
         self.assertEqual(actual, expected)
 
     def testDiv(self):
@@ -57,7 +57,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.result = cxt.left / cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect(tc.F64, shape, np.arange(1, 4))
+        expected = expect_dense(tc.F64, shape, np.arange(1, 4))
         self.assertEqual(actual, expected)
 
     def testMul(self):
@@ -69,7 +69,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.result = cxt.left * cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect(tc.I64, shape, np.arange(1, 11) * 2)
+        expected = expect_dense(tc.I64, shape, np.arange(1, 11) * 2)
         self.assertEqual(actual, expected)
 
     def testSub(self):
@@ -81,7 +81,7 @@ class DenseTensorTests(unittest.TestCase):
         cxt.result = cxt.left - cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect(tc.I64, shape, np.arange(-2, 4, 2))
+        expected = expect_dense(tc.I64, shape, np.arange(-2, 4, 2))
         self.assertEqual(actual, expected)
 
     def testLogic(self):
@@ -114,7 +114,7 @@ class DenseTensorTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.product(np.arange(0, 24).reshape(shape), axis)
-        self.assertEqual(actual, expect(tc.I64, [2, 4], expected.flatten()))
+        self.assertEqual(actual, expect_dense(tc.I64, [2, 4], expected.flatten()))
 
     def testProductAll(self):
         shape = [2, 3]
@@ -136,7 +136,7 @@ class DenseTensorTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.sum(np.arange(0, 120).reshape(shape), axis)
-        self.assertEqual(actual, expect(tc.F64, [4, 2, 5], expected.flatten()))
+        self.assertEqual(actual, expect_dense(tc.F64, [4, 2, 5], expected.flatten()))
 
     def testSumAll(self):
         shape = [5, 2]
@@ -152,6 +152,21 @@ class DenseTensorTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.host.stop()
 
+
+class SparseTensorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.host = start_host("test_sparse_tensor")
+
+    def testCreate(self):
+        shape = [2, 5]
+
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.I32)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_sparse(tc.I32, shape, [])
+        self.assertEqual(actual, expected)
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
@@ -178,20 +193,29 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
         for host in hosts:
             actual = host.get("/test/tensor/dense")
-            expected = expect(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
+            expected = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
             self.assertEqual(actual, expected)
 
         hosts[0].put("/test/tensor/overwrite")
-        expected = expect(tc.I32, [2, 3], [2] * 6)
+        expected = expect_dense(tc.I32, [2, 3], [2] * 6)
         actual = hosts[0].get("/test/tensor/dense")
         self.assertEqual(actual, expected)
 
 
-def expect(dtype, shape, flat):
+def expect_dense(dtype, shape, flat):
     return {
         str(tc.uri(tc.tensor.Dense)): [
             [shape, str(tc.uri(dtype))],
             list(flat),
+        ]
+    }
+
+
+def expect_sparse(dtype, shape, values):
+    return {
+        str(tc.uri(tc.tensor.Sparse)): [
+            [shape, str(tc.uri(dtype))],
+            list(values),
         ]
     }
 
