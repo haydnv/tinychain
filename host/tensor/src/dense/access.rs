@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use afarray::Array;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
@@ -14,7 +12,7 @@ use tcgeneric::{TCBoxTryFuture, TCStream, TCTryStream};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Shape, TensorAccess};
+use crate::{Bounds, Coord, Phantom, Shape, TensorAccess};
 
 use super::{DenseAccess, DenseAccessor, DenseTensor};
 
@@ -22,13 +20,7 @@ const ERR_NONBIJECTIVE_WRITE: &str = "cannot write to a derived tensor which is 
 not a bijection of its source";
 
 #[derive(Clone)]
-pub struct BlockListCombine<
-    F: File<Array>,
-    D: Dir,
-    T: Transaction<D>,
-    L: DenseAccess<F, D, T>,
-    R: DenseAccess<F, D, T>,
-> {
+pub struct BlockListCombine<F, D, T, L, R> {
     left: L,
     right: R,
     combinator: fn(&Array, &Array) -> Array,
@@ -212,7 +204,7 @@ impl<
 }
 
 #[derive(Clone)]
-pub struct BlockListBroadcast<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListBroadcast<F, D, T, B> {
     source: B,
     rebase: transform::Broadcast,
     phantom: Phantom<F, D, T>,
@@ -322,7 +314,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListCast<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListCast<F, D, T, B> {
     source: B,
     dtype: NumberType,
     phantom: Phantom<F, D, T>,
@@ -416,7 +408,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListExpand<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListExpand<F, D, T, B> {
     source: B,
     rebase: transform::Expand,
     phantom: Phantom<F, D, T>,
@@ -522,7 +514,7 @@ type Reductor<F, D, T> =
     fn(&DenseTensor<F, D, T, DenseAccessor<F, D, T>>, T) -> TCBoxTryFuture<Number>;
 
 #[derive(Clone)]
-pub struct BlockListReduce<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListReduce<F, D, T, B> {
     source: B,
     rebase: transform::Reduce,
     reductor: Reductor<F, D, T>,
@@ -639,7 +631,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListTranspose<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListTranspose<F, D, T, B> {
     source: B,
     rebase: transform::Transpose,
     phantom: Phantom<F, D, T>,
@@ -737,7 +729,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListUnary<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct BlockListUnary<F, D, T, B> {
     source: B,
     transform: fn(&Array) -> Array,
     value_transform: fn(Number) -> Number,
@@ -859,23 +851,5 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
                 .map_ok(|(coord, value)| (coord, transform(value)))
                 .await
         })
-    }
-}
-
-#[derive(Clone)]
-struct Phantom<F, D, T> {
-    file: PhantomData<F>,
-    dir: PhantomData<D>,
-    txn: PhantomData<T>,
-}
-
-impl<F, D, T> Default for Phantom<F, D, T> {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            file: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
-        }
     }
 }

@@ -1,5 +1,4 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-
 use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
@@ -264,7 +263,7 @@ impl fmt::Display for TensorType {
 
 /// An n-dimensional array of numbers which supports basic math and logic operations
 #[derive(Clone)]
-pub enum Tensor<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> {
+pub enum Tensor<FD, FS, D, T> {
     Dense(DenseTensor<FD, D, T, DenseAccessor<FD, D, T>>),
     Sparse(SparseTensor<FS, D, T, SparseAccessor<FS, D, T>>),
 }
@@ -795,4 +794,22 @@ pub fn broadcast<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>(
     };
 
     Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
+}
+
+#[derive(Clone)]
+struct Phantom<F, D, T> {
+    file: PhantomData<F>,
+    dir: PhantomData<D>,
+    txn: PhantomData<T>,
+}
+
+impl<F, D, T> Default for Phantom<F, D, T> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            file: PhantomData,
+            dir: PhantomData,
+            txn: PhantomData,
+        }
+    }
 }

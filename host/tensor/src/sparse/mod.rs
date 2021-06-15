@@ -14,9 +14,8 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCTryStream};
 
-use super::{Coord, Schema, Shape, TensorAccess, TensorIO};
+use super::{Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO};
 
-use crate::Bounds;
 pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
 
@@ -27,11 +26,9 @@ pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
 
 #[derive(Clone)]
-pub struct SparseTensor<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> {
+pub struct SparseTensor<F, D, T, A> {
     accessor: A,
-    file: PhantomData<F>,
-    dir: PhantomData<D>,
-    txn: PhantomData<T>,
+    phantom: Phantom<F, D, T>,
 }
 
 impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> SparseTensor<F, D, T, A> {
@@ -157,9 +154,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<F, D, T>> From<A>
     fn from(accessor: A) -> Self {
         Self {
             accessor,
-            file: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
+            phantom: Phantom::default(),
         }
     }
 }

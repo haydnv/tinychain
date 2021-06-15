@@ -23,7 +23,7 @@ const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[derive(Clone)]
-pub struct SparseTable<F: File<Node>, D: Dir, T: Transaction<D>> {
+pub struct SparseTable<F, D, T> {
     table: TableIndex<F, D, T>,
     schema: Schema,
 }

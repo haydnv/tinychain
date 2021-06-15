@@ -25,7 +25,7 @@ pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
 }
 
 #[derive(Clone)]
-pub enum SparseAccessor<F: File<Node>, D: Dir, T: Transaction<D>> {
+pub enum SparseAccessor<F, D, T> {
     Table(SparseTable<F, D, T>),
 }
 

@@ -25,7 +25,7 @@ use super::{
 const PRIMARY_INDEX: Label = label("primary");
 
 #[derive(Clone)]
-pub struct Index<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct Index<F, D, Txn> {
     btree: BTreeFile<F, D, Txn>,
     schema: IndexSchema,
 }
@@ -389,7 +389,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<ReadOnly<F, D, Txn>> for T
     }
 }
 
-struct Inner<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+struct Inner<F, D, Txn> {
     schema: TableSchema,
     primary: Index<F, D, Txn>,
     auxiliary: Vec<(Id, Index<F, D, Txn>)>,
@@ -397,7 +397,7 @@ struct Inner<F: File<Node>, D: Dir, Txn: Transaction<D>> {
 
 /// The base type of a [`Table`].
 #[derive(Clone)]
-pub struct TableIndex<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct TableIndex<F, D, Txn> {
     inner: Arc<Inner<F, D, Txn>>,
 }
 

@@ -100,7 +100,7 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
 
 /// A generic enum which can contain any [`DenseAccess`] impl
 #[derive(Clone)]
-pub enum DenseAccessor<F: File<Array>, D: Dir, T: Transaction<D>> {
+pub enum DenseAccessor<F, D, T> {
     File(BlockListFile<F, D, T>),
     Slice(file::BlockListFileSlice<F, D, T>),
     Broadcast(Box<BlockListBroadcast<F, D, T, Self>>),
@@ -310,7 +310,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> From<BlockListFile<F, D, T>>
 
 /// A `Tensor` stored as a [`File`] of dense [`Array`] blocks
 #[derive(Clone)]
-pub struct DenseTensor<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> {
+pub struct DenseTensor<F, D, T, B> {
     blocks: B,
     file: PhantomData<F>,
     dir: PhantomData<D>,
