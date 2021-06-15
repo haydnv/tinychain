@@ -39,6 +39,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
     Table(SparseTable<FD, FS, D, T>),
+    Unary(Box<SparseUnary<FD, FS, D, T>>),
 }
 
 impl<FD, FS, D, T> TensorAccess for SparseAccessor<FD, FS, D, T>
@@ -56,6 +57,7 @@ where
             Self::Combine(combine) => combine.dtype(),
             Self::Expand(expand) => expand.dtype(),
             Self::Table(table) => table.dtype(),
+            Self::Unary(unary) => unary.dtype(),
         }
     }
 
@@ -66,6 +68,7 @@ where
             Self::Combine(combine) => combine.ndim(),
             Self::Expand(expand) => expand.ndim(),
             Self::Table(table) => table.ndim(),
+            Self::Unary(unary) => unary.ndim(),
         }
     }
 
@@ -76,6 +79,7 @@ where
             Self::Combine(combine) => combine.shape(),
             Self::Expand(expand) => expand.shape(),
             Self::Table(table) => table.shape(),
+            Self::Unary(unary) => unary.shape(),
         }
     }
 
@@ -86,6 +90,7 @@ where
             Self::Combine(combine) => combine.size(),
             Self::Expand(expand) => expand.size(),
             Self::Table(table) => table.size(),
+            Self::Unary(unary) => unary.size(),
         }
     }
 }
@@ -110,6 +115,7 @@ where
             Self::Combine(combine) => combine.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
+            Self::Unary(unary) => unary.filled(txn).await,
         }
     }
 
@@ -120,6 +126,7 @@ where
             Self::Combine(combine) => combine.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
+            Self::Unary(unary) => unary.filled_count(txn).await,
         }
     }
 
@@ -130,6 +137,7 @@ where
             Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
             Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
+            Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
         }
     }
 }
@@ -151,6 +159,7 @@ where
             Self::Combine(combine) => combine.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
+            Self::Unary(unary) => unary.read_value_at(txn, coord),
         }
     }
 }
@@ -623,6 +632,102 @@ where
             .source
             .read_value_at(txn, source_coord)
             .map_ok(|(_, val)| (coord, val));
+        Box::pin(read)
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseUnary<FD, FS, D, T> {
+    source: SparseAccessor<FD, FS, D, T>, // TODO: can this be a type parameter A: SparseAccess?
+    dtype: NumberType,
+    transform: fn(Number) -> Number,
+}
+
+impl<FD, FS, D, T> SparseUnary<FD, FS, D, T> {
+    pub fn new(
+        source: SparseAccessor<FD, FS, D, T>,
+        transform: fn(Number) -> Number,
+        dtype: NumberType,
+    ) -> Self {
+        Self {
+            source,
+            dtype,
+            transform,
+        }
+    }
+}
+
+impl<FD, FS, D, T> TensorAccess for SparseUnary<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    fn dtype(&self) -> NumberType {
+        self.dtype
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseUnary<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Unary(Box::new(self))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let transform = self.transform;
+        let filled = self.source.filled(txn).await?;
+        let cast = filled.map_ok(move |(coord, value)| (coord, transform(value)));
+        Ok(Box::pin(cast))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.source.filled_count(txn).await
+    }
+
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
+    }
+}
+
+impl<FD, FS, D, T> ReadValueAt<D> for SparseUnary<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        let dtype = self.dtype;
+        let read = self
+            .source
+            .read_value_at(txn, coord)
+            .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
+
         Box::pin(read)
     }
 }
