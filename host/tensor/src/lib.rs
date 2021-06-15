@@ -61,7 +61,7 @@ pub trait TensorAccess: Send {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync {
+pub trait TensorInstance<D: Dir> {
     /// A dense representation of this [`Tensor`]
     type Dense: TensorInstance<D>;
 
@@ -70,7 +70,7 @@ pub trait TensorInstance<D: Dir>: TensorIO<D> + TensorTransform<D> + Send + Sync
 }
 
 /// [`Tensor`] boolean operations.
-pub trait TensorBoolean<D: Dir, O>: TensorAccess {
+pub trait TensorBoolean<D: Dir, O> {
     /// The result type of a boolean operation.
     type Combine: TensorInstance<D>;
 
@@ -86,7 +86,10 @@ pub trait TensorBoolean<D: Dir, O>: TensorAccess {
 
 /// Tensor comparison operations
 #[async_trait]
-pub trait TensorCompare<D: Dir, O>: TensorIO<D> {
+pub trait TensorCompare<D: Dir, O> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
     /// The result of a comparison operation
     type Compare: TensorInstance<D>;
 
@@ -114,8 +117,8 @@ pub trait TensorCompare<D: Dir, O>: TensorIO<D> {
 
 /// [`Tensor`] I/O operations
 #[async_trait]
-pub trait TensorIO<D: Dir>: TensorAccess {
-    /// Transaction context type
+pub trait TensorIO<D: Dir> {
+    /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
     /// Read a single value from this [`Tensor`].
@@ -130,17 +133,19 @@ pub trait TensorIO<D: Dir>: TensorAccess {
 
 /// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
 #[async_trait]
-pub trait TensorDualIO<D: Dir, O>: TensorIO<D> {
+pub trait TensorDualIO<D: Dir, O> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
     /// Zero out the elements of this [`Tensor`] where the corresponding element of `value` is nonzero.
-    async fn mask(self, txn: <Self as TensorIO<D>>::Txn, value: O) -> TCResult<()>;
+    async fn mask(self, txn: Self::Txn, value: O) -> TCResult<()>;
 
     /// Overwrite the slice of this [`Tensor`] given by [`Bounds`] with the given `value`.
-    async fn write(self, txn: <Self as TensorIO<D>>::Txn, bounds: Bounds, value: O)
-        -> TCResult<()>;
+    async fn write(self, txn: Self::Txn, bounds: Bounds, value: O) -> TCResult<()>;
 }
 
 /// [`Tensor`] math operations
-pub trait TensorMath<D: Dir, O>: TensorAccess {
+pub trait TensorMath<D: Dir, O> {
     /// The result type of a math operation
     type Combine: TensorInstance<D>;
 
@@ -158,7 +163,10 @@ pub trait TensorMath<D: Dir, O>: TensorAccess {
 }
 
 /// [`Tensor`] reduction operations
-pub trait TensorReduce<D: Dir>: TensorIO<D> {
+pub trait TensorReduce<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
     /// The result type of a reduce operation
     type Reduce: TensorInstance<D>;
 
@@ -166,17 +174,20 @@ pub trait TensorReduce<D: Dir>: TensorIO<D> {
     fn product(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the product of all elements in this [`Tensor`].
-    fn product_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+    fn product_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
 
     /// Return the sum of this [`Tensor`] along the given `axis`.
     fn sum(self, axis: usize) -> TCResult<Self::Reduce>;
 
     /// Return the sum of all elements in this [`Tensor`].
-    fn sum_all(&self, txn: <Self as TensorIO<D>>::Txn) -> TCBoxTryFuture<Number>;
+    fn sum_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
 }
 
 /// [`Tensor`] transforms
-pub trait TensorTransform<D: Dir>: TensorAccess {
+pub trait TensorTransform<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
     /// A broadcast [`Tensor`]
     type Broadcast: TensorInstance<D>;
 
@@ -211,7 +222,10 @@ pub trait TensorTransform<D: Dir>: TensorAccess {
 
 /// Unary [`Tensor`] operations
 #[async_trait]
-pub trait TensorUnary<D: Dir>: TensorIO<D> {
+pub trait TensorUnary<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
     /// The return type of a unary operation
     type Unary: TensorInstance<D>;
 
@@ -268,7 +282,7 @@ impl fmt::Display for TensorType {
 #[derive(Clone)]
 pub enum Tensor<FD, FS, D, T> {
     Dense(DenseTensor<FD, D, T, DenseAccessor<FD, D, T>>),
-    Sparse(SparseTensor<FD, FS, D, T, SparseAccessor<FS, D, T>>),
+    Sparse(SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>),
 }
 
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Tensor<FD, FS, D, T> {
@@ -282,8 +296,13 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Te
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorAccess
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorAccess for Tensor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         match self {
@@ -355,9 +374,14 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorBoolean<D
 }
 
 #[async_trait]
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorCompare<D, Self>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorCompare<D, Self> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
+    type Txn = T;
     type Compare = Self;
     type Dense = Self;
 
@@ -407,10 +431,11 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorCompare<D
 #[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -437,9 +462,15 @@ where
 }
 
 #[async_trait]
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorDualIO<D, Self>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorDualIO<D, Self> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
+    type Txn = T;
+
     async fn mask(self, txn: T, other: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.mask(txn, other).await,
@@ -491,9 +522,14 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorMath<D, S
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorReduce<D>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorReduce<D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
+    type Txn = T;
     type Reduce = Self;
 
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
@@ -525,9 +561,15 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorReduce<D>
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorTransform<D>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorTransform<D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
+    type Txn = T;
     type Broadcast = Self;
     type Cast = Self;
     type Expand = Self;
@@ -575,9 +617,14 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorTransform
 }
 
 #[async_trait]
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorUnary<D>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorUnary<D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
+    type Txn = T;
     type Unary = Self;
 
     fn abs(&self) -> TCResult<Self> {
@@ -632,8 +679,13 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<FS, D, T>>
-    From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T, A> From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     fn from(sparse: SparseTensor<FD, FS, D, T, A>) -> Self {
         Self::Sparse(sparse.into_inner().accessor().into())
@@ -703,7 +755,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                map.next_value::<SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>>(self.txn)
+                map.next_value::<SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>>(self.txn)
                     .map_ok(Tensor::from)
                     .await
             }
@@ -712,8 +764,13 @@ where
 }
 
 #[async_trait]
-impl<'en, FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> IntoView<'en, D>
-    for Tensor<FD, FS, D, T>
+impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
     type View = TensorView<'en>;
@@ -749,10 +806,17 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> fmt::Display
     }
 }
 
-pub fn broadcast<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>(
+pub fn broadcast<FD, FS, D, T>(
     left: Tensor<FD, FS, D, T>,
     right: Tensor<FD, FS, D, T>,
-) -> TCResult<(Tensor<FD, FS, D, T>, Tensor<FD, FS, D, T>)> {
+) -> TCResult<(Tensor<FD, FS, D, T>, Tensor<FD, FS, D, T>)>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
     if left.shape() == right.shape() {
         return Ok((left, right));
     }

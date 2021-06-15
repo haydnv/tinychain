@@ -216,9 +216,10 @@ struct TensorHandler<T> {
 
 impl<'a, T: 'a> Handler<'a> for TensorHandler<T>
 where
-    T: TensorIO<fs::Dir, Txn = Txn>
-        + TensorDualIO<fs::Dir, Tensor>
-        + TensorTransform<fs::Dir>
+    T: TensorAccess
+        + TensorIO<fs::Dir, Txn = Txn>
+        + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorTransform<fs::Dir, Txn = Txn>
         + Clone
         + Send
         + Sync,
@@ -350,14 +351,15 @@ impl Route for Tensor {
 
 fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
-    T: TensorIO<fs::Dir, Txn = Txn>
-        + TensorCompare<fs::Dir, Tensor, Compare = Tensor, Dense = Tensor>
+    T: TensorAccess
+        + TensorIO<fs::Dir, Txn = Txn>
+        + TensorCompare<fs::Dir, Tensor, Compare = Tensor, Dense = Tensor, Txn = Txn>
         + TensorBoolean<fs::Dir, Tensor, Combine = Tensor>
-        + TensorDualIO<fs::Dir, Tensor>
+        + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
-        + TensorReduce<fs::Dir>
-        + TensorTransform<fs::Dir>
-        + TensorUnary<fs::Dir>
+        + TensorReduce<fs::Dir, Txn = Txn>
+        + TensorTransform<fs::Dir, Txn = Txn>
+        + TensorUnary<fs::Dir, Txn = Txn>
         + Clone
         + Send
         + Sync,
@@ -432,7 +434,7 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
         .await
 }
 
-async fn write<T: TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor>>(
+async fn write<T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>>(
     tensor: T,
     txn: Txn,
     key: Scalar,

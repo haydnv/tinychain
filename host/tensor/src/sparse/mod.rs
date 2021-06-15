@@ -15,7 +15,7 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCTryStream};
 
-use super::{Bounds, Coord, Schema, Shape, TensorAccess, TensorIO};
+use super::{Bounds, Coord, Schema, Shape, TensorAccess, TensorIO, TensorType};
 
 pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
@@ -44,7 +44,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
@@ -70,7 +70,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -96,13 +96,13 @@ where
 
 #[async_trait]
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>>
-    for SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>
+    for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Array>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<BTreeType>,
 {
     async fn copy_from(
@@ -123,7 +123,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Item = SparseRow;
     type Txn = T;
@@ -134,8 +134,9 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>
+impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
+    FD: File<Array>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
@@ -156,13 +157,7 @@ where
     }
 }
 
-impl<FD, FS, D, T, A> From<A> for SparseTensor<FD, FS, D, T, A>
-where
-    FS: File<Node>,
-    D: Dir,
-    T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
-{
+impl<FD, FS, D, T, A> From<A> for SparseTensor<FD, FS, D, T, A> {
     fn from(accessor: A) -> Self {
         Self {
             accessor,
@@ -174,11 +169,12 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T, A> IntoView<'en, D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
     type View = SparseTensorView<'en>;
@@ -193,7 +189,7 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>
+impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Array>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
@@ -235,7 +231,7 @@ where
     T: Transaction<D>,
     D::FileClass: From<BTreeType>,
 {
-    type Value = SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>;
+    type Value = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
 
     fn expecting() -> &'static str {
         "a SparseTensor"
@@ -253,7 +249,7 @@ where
             .await?;
 
         if let Some(table) = seq
-            .next_element::<SparseTable<FS, D, T>>((table.clone(), txn_id))
+            .next_element::<SparseTable<FD, FS, D, T>>((table.clone(), txn_id))
             .await?
         {
             Ok(SparseTensor::from(table))

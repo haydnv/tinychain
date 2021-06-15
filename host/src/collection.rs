@@ -45,7 +45,8 @@ pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<afarray::Array>, fs
 pub type SparseTensor<A> =
     tc_tensor::SparseTensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
-pub type SparseTable = tc_tensor::SparseTable<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type SparseTable =
+    tc_tensor::SparseTable<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 

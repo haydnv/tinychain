@@ -18,10 +18,10 @@ use crate::{Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 use super::{Phantom, SparseStream, SparseTable};
 
 #[async_trait]
-pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
+pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
-    fn accessor(self) -> SparseAccessor<F, D, T>;
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
@@ -31,66 +31,96 @@ pub trait SparseAccess<F: File<Node>, D: Dir, T: Transaction<D>>:
 }
 
 #[derive(Clone)]
-pub enum SparseAccessor<F, D, T> {
-    Table(SparseTable<F, D, T>),
+pub enum SparseAccessor<FD, FS, D, T> {
+    Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),
+    Table(SparseTable<FD, FS, D, T>),
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> TensorAccess for SparseAccessor<F, D, T> {
+impl<FD, FS, D, T> TensorAccess for SparseAccessor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
     fn dtype(&self) -> NumberType {
         match self {
+            Self::Broadcast(broadcast) => broadcast.dtype(),
             Self::Table(table) => table.dtype(),
         }
     }
 
     fn ndim(&self) -> usize {
         match self {
+            Self::Broadcast(broadcast) => broadcast.ndim(),
             Self::Table(table) => table.ndim(),
         }
     }
 
     fn shape(&self) -> &Shape {
         match self {
+            Self::Broadcast(broadcast) => broadcast.shape(),
             Self::Table(table) => table.shape(),
         }
     }
 
     fn size(&self) -> u64 {
         match self {
+            Self::Broadcast(broadcast) => broadcast.size(),
             Self::Table(table) => table.size(),
         }
     }
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> SparseAccess<F, D, T> for SparseAccessor<F, D, T> {
-    fn accessor(self) -> SparseAccessor<F, D, T> {
+impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         self
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         match self {
+            Self::Broadcast(broadcast) => broadcast.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
         }
     }
 
     async fn filled_count(&self, txn: &T) -> TCResult<u64> {
         match self {
+            Self::Broadcast(broadcast) => broadcast.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
         }
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
+            Self::Broadcast(broadcast) => broadcast.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
         }
     }
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> ReadValueAt<D> for SparseAccessor<F, D, T> {
+impl<FD, FS, D, T> ReadValueAt<D> for SparseAccessor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         match self {
+            Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
         }
     }
@@ -109,7 +139,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
     async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
@@ -129,7 +159,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -149,22 +179,21 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, A> SparseAccess<FS, D, T> for SparseBroadcast<FD, FS, D, T, A>
+impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseBroadcast<FD, FS, D, T, A>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    fn accessor(self) -> SparseAccessor<FS, D, T> {
-        // SparseAccessor::Broadcast(Box::new(SparseBroadcast {
-        //     source: self.source.accessor(),
-        //     rebase: self.rebase,
-        //     phantom: Phantom::default(),
-        // }))
-        todo!()
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Broadcast(Box::new(SparseBroadcast {
+            source: self.source.accessor(),
+            rebase: self.rebase,
+            phantom: Phantom::default(),
+        }))
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
@@ -199,11 +228,12 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseBroadcast<FD, FS, D, T, A>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FS, D, T>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
