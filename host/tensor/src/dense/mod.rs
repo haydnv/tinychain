@@ -587,9 +587,8 @@ where
 {
     type Txn = T;
 
-    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
+    async fn read_value(self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
         self.blocks
-            .clone()
             .read_value_at(txn, coord)
             .map_ok(|(_, val)| val)
             .await

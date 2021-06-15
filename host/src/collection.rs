@@ -42,7 +42,8 @@ pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<afarray::Array>, fs::D
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<afarray::Array>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
-pub type SparseTensor<A> = tc_tensor::SparseTensor<fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
+pub type SparseTensor<A> =
+    tc_tensor::SparseTensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
 pub type SparseTable = tc_tensor::SparseTable<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 

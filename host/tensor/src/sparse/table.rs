@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 
+use afarray::Array;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
@@ -127,15 +128,20 @@ where
 }
 
 #[async_trait]
-impl<F, D, T, A> CopyFrom<D, SparseTensor<F, D, T, A>> for SparseTable<F, D, T>
+impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>> for SparseTable<FS, D, T>
 where
-    F: File<Node> + TryFrom<D::File, Error = TCError>,
+    FD: File<Array>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<F, D, T>,
+    A: SparseAccess<FS, D, T>,
     D::FileClass: From<BTreeType>,
 {
-    async fn copy_from(instance: SparseTensor<F, D, T, A>, store: D, txn: T) -> TCResult<Self> {
+    async fn copy_from(
+        instance: SparseTensor<FD, FS, D, T, A>,
+        store: D,
+        txn: T,
+    ) -> TCResult<Self> {
         let schema = (instance.shape().clone(), instance.dtype());
         let accessor = SparseTable::create(&store, *txn.id(), schema).await?;
 

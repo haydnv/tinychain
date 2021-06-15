@@ -116,7 +116,7 @@ pub trait TensorIO<D: Dir>: TensorAccess {
     type Txn: Transaction<D>;
 
     /// Read a single value from this [`Tensor`].
-    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number>;
+    async fn read_value(self, txn: Self::Txn, coord: Coord) -> TCResult<Number>;
 
     /// Write a single value to the slice of this [`Tensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()>;
@@ -265,7 +265,7 @@ impl fmt::Display for TensorType {
 #[derive(Clone)]
 pub enum Tensor<FD, FS, D, T> {
     Dense(DenseTensor<FD, D, T, DenseAccessor<FD, D, T>>),
-    Sparse(SparseTensor<FS, D, T, SparseAccessor<FS, D, T>>),
+    Sparse(SparseTensor<FD, FS, D, T, SparseAccessor<FS, D, T>>),
 }
 
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Tensor<FD, FS, D, T> {
@@ -411,7 +411,7 @@ where
 {
     type Txn = T;
 
-    async fn read_value(&self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
+    async fn read_value(self, txn: Self::Txn, coord: Coord) -> TCResult<Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord).await,
             Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
@@ -630,9 +630,9 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<
 }
 
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, A: SparseAccess<FS, D, T>>
-    From<SparseTensor<FS, D, T, A>> for Tensor<FD, FS, D, T>
+    From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
 {
-    fn from(sparse: SparseTensor<FS, D, T, A>) -> Self {
+    fn from(sparse: SparseTensor<FD, FS, D, T, A>) -> Self {
         Self::Sparse(sparse.into_inner().accessor().into())
     }
 }
@@ -700,7 +700,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                map.next_value::<SparseTensor<FS, D, T, SparseTable<FS, D, T>>>(self.txn)
+                map.next_value::<SparseTensor<FD, FS, D, T, SparseTable<FS, D, T>>>(self.txn)
                     .map_ok(Tensor::from)
                     .await
             }
