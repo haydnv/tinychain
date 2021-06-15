@@ -14,7 +14,7 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 
 use crate::stream::{sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
+use crate::{Bounds, Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
 use super::combine::SparseCombine;
 use super::table::{SparseTable, SparseTableSlice};
@@ -24,11 +24,15 @@ use super::{Phantom, SparseStream};
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
+    type Slice: SparseAccess<FD, FS, D, T>;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
     async fn filled_count(self, txn: T) -> TCResult<u64>;
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
@@ -110,6 +114,8 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
+    type Slice = Self;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         self
     }
@@ -135,6 +141,18 @@ where
             Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
+        }
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.slice(bounds).map(SparseAccess::accessor),
+            Self::Cast(cast) => cast.slice(bounds).map(SparseAccess::accessor),
+            Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
+            Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
+            Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
+            Self::Slice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
+            Self::Unary(unary) => unary.slice(bounds).map(SparseAccess::accessor),
         }
     }
 
@@ -190,6 +208,15 @@ where
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
+    fn new(source: A, shape: Shape) -> TCResult<Self> {
+        let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
+        Ok(Self {
+            source,
+            rebase,
+            phantom: Phantom::default(),
+        })
+    }
+
     async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
         self,
         txn: T,
@@ -236,6 +263,8 @@ where
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
+    type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Broadcast(Box::new(SparseBroadcast {
             source: self.source.accessor(),
@@ -267,6 +296,15 @@ where
                 future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
             })
             .await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let shape = bounds.to_shape();
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(source_bounds)?;
+        SparseBroadcast::new(source, shape)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -347,6 +385,8 @@ where
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
+    type Slice = SparseCast<FD, FS, D, T, A::Slice>;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Cast(Box::new(SparseCast::new(
             self.source.accessor(),
@@ -364,6 +404,14 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        Ok(SparseCast {
+            source: self.source.slice(bounds)?,
+            dtype: self.dtype,
+            phantom: self.phantom,
+        })
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -490,6 +538,8 @@ where
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
+    type Slice = SparseCombinator<FD, FS, D, T, L::Slice, R::Slice>;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Combine(Box::new(SparseCombinator {
             left: self.left.accessor(),
@@ -513,6 +563,20 @@ where
         count
             .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
             .await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let left = self.left.slice(bounds.clone())?;
+        let right = self.right.slice(bounds)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            dtype: self.dtype,
+            phantom: self.phantom,
+        })
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -601,6 +665,8 @@ where
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
+    type Slice = A::Slice;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Expand(Box::new(SparseExpand {
             source: self.source.accessor(),
@@ -618,6 +684,13 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(source_bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -701,6 +774,8 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
+    type Slice = Self;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Unary(Box::new(self))
     }
@@ -714,6 +789,15 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let source = self.source.slice(bounds)?;
+        Ok(SparseUnary {
+            source: source.accessor(),
+            dtype: self.dtype,
+            transform: self.transform,
+        })
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {

@@ -13,12 +13,12 @@ use tc_error::*;
 use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSchema};
 use tc_transact::fs::{CopyFrom, Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberType, UInt, Value, ValueType};
+use tc_value::{Bound, Number, NumberClass, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Schema, Shape, TensorAccess};
+use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess};
 
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
 
@@ -91,6 +91,8 @@ where
     D: Dir,
     T: Transaction<D>,
 {
+    type Slice = SparseTableSlice<FD, FS, D, T>;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Table(self)
     }
@@ -104,6 +106,16 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let table = slice_table(self.table.clone(), &bounds)?;
+        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
+        Ok(SparseTableSlice {
+            source: self,
+            table,
+            rebase,
+        })
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -268,6 +280,8 @@ where
     D: Dir,
     T: Transaction<D>,
 {
+    type Slice = Self;
+
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Slice(self)
     }
@@ -285,6 +299,12 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(source_bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -356,6 +376,31 @@ where
 
         Ok(self.table)
     }
+}
+
+fn slice_table<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(
+    table: T,
+    bounds: &Bounds,
+) -> TCResult<T::Slice> {
+    use AxisBounds::*;
+
+    let mut table_bounds = HashMap::new();
+    for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
+        let axis: Id = axis.into();
+        let column_bound = match axis_bound {
+            At(x) => ColumnBound::Is(u64_into_value(x)),
+            In(range) => {
+                let start = Bound::In(u64_into_value(range.start));
+                let end = Bound::Ex(u64_into_value(range.end));
+                (start, end).into()
+            }
+            _ => todo!(),
+        };
+
+        table_bounds.insert(axis, column_bound);
+    }
+
+    table.slice(table_bounds.into())
 }
 
 async fn read_value_at<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(

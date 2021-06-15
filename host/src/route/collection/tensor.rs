@@ -434,7 +434,9 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
         .await
 }
 
-async fn write<T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>>(
+async fn write<
+    T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>,
+>(
     tensor: T,
     txn: Txn,
     key: Scalar,
