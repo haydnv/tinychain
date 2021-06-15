@@ -28,7 +28,6 @@ pub struct SparseCombine<'a> {
 }
 
 impl<'a> SparseCombine<'a> {
-    #[allow(dead_code)]
     pub fn new(
         shape: &Shape,
         left: SparseStream<'a>,

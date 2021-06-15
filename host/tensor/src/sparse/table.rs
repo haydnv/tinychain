@@ -107,8 +107,8 @@ where
         Ok(filled)
     }
 
-    async fn filled_count(&self, txn: &T) -> TCResult<u64> {
-        self.table.clone().count(*txn.id()).await
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.table.count(*txn.id()).await
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
