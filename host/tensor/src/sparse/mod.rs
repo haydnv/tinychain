@@ -21,6 +21,7 @@ pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
 
 mod access;
+mod combine;
 mod table;
 
 pub type SparseRow = (Coord, Number);
