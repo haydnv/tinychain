@@ -37,6 +37,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),
     Cast(Box<SparseCast<FD, FS, D, T, Self>>),
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
+    Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
     Table(SparseTable<FD, FS, D, T>),
 }
 
@@ -53,6 +54,7 @@ where
             Self::Broadcast(broadcast) => broadcast.dtype(),
             Self::Cast(cast) => cast.dtype(),
             Self::Combine(combine) => combine.dtype(),
+            Self::Expand(expand) => expand.dtype(),
             Self::Table(table) => table.dtype(),
         }
     }
@@ -62,6 +64,7 @@ where
             Self::Broadcast(broadcast) => broadcast.ndim(),
             Self::Cast(cast) => cast.ndim(),
             Self::Combine(combine) => combine.ndim(),
+            Self::Expand(expand) => expand.ndim(),
             Self::Table(table) => table.ndim(),
         }
     }
@@ -71,6 +74,7 @@ where
             Self::Broadcast(broadcast) => broadcast.shape(),
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
+            Self::Expand(expand) => expand.shape(),
             Self::Table(table) => table.shape(),
         }
     }
@@ -80,6 +84,7 @@ where
             Self::Broadcast(broadcast) => broadcast.size(),
             Self::Cast(cast) => cast.size(),
             Self::Combine(combine) => combine.size(),
+            Self::Expand(expand) => expand.size(),
             Self::Table(table) => table.size(),
         }
     }
@@ -103,6 +108,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled(txn).await,
             Self::Cast(cast) => cast.filled(txn).await,
             Self::Combine(combine) => combine.filled(txn).await,
+            Self::Expand(expand) => expand.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
         }
     }
@@ -112,6 +118,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled_count(txn).await,
             Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Combine(combine) => combine.filled_count(txn).await,
+            Self::Expand(expand) => expand.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
         }
     }
@@ -121,6 +128,7 @@ where
             Self::Broadcast(broadcast) => broadcast.write_value(txn_id, coord, value).await,
             Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
             Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
+            Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
         }
     }
@@ -141,6 +149,7 @@ where
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::Expand(expand) => expand.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
         }
     }
@@ -511,5 +520,109 @@ where
             let value = (self.combinator)(left, right);
             Ok((coord, value))
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseExpand<FD, FS, D, T, A> {
+    source: A,
+    rebase: transform::Expand,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, A> SparseExpand<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    pub fn new(source: A, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Expand::new(source.shape().clone(), axis)?;
+        Ok(Self {
+            source,
+            rebase,
+            phantom: Phantom::default(),
+        })
+    }
+}
+
+impl<FD, FS, D, T, A> TensorAccess for SparseExpand<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim() + 1
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.shape().size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseExpand<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Expand(Box::new(SparseExpand {
+            source: self.source.accessor(),
+            rebase: self.rebase,
+            phantom: Phantom::default(),
+        }))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let rebase = self.rebase;
+        let filled = self.source.filled(txn).await?;
+        let filled = filled.map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.source.filled_count(txn).await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        let coord = self.rebase.invert_coord(&coord);
+        self.source.write_value(txn_id, coord, value).await
+    }
+}
+
+impl<FD, FS, D, T, A> ReadValueAt<D> for SparseExpand<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        let source_coord = self.rebase.invert_coord(&coord);
+        let read = self
+            .source
+            .read_value_at(txn, source_coord)
+            .map_ok(|(_, val)| (coord, val));
+        Box::pin(read)
     }
 }
