@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::pin::Pin;
 
 use afarray::Array;
 use async_trait::async_trait;
@@ -11,6 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tcgeneric::{GroupStream, TCBoxTryFuture};
 
 use crate::stream::{sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
@@ -18,7 +20,9 @@ use crate::{Bounds, Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRI
 
 use super::combine::SparseCombine;
 use super::table::{SparseTable, SparseTableSlice};
-use super::{Phantom, SparseStream};
+use super::{Phantom, SparseStream, SparseTensor};
+
+type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
@@ -44,6 +48,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
     Slice(SparseTableSlice<FD, FS, D, T>),
+    Reduce(Box<SparseReduce<FD, FS, D, T>>),
     Table(SparseTable<FD, FS, D, T>),
     Unary(Box<SparseUnary<FD, FS, D, T>>),
 }
@@ -63,6 +68,7 @@ where
             Self::Combine(combine) => combine.dtype(),
             Self::Expand(expand) => expand.dtype(),
             Self::Slice(slice) => slice.dtype(),
+            Self::Reduce(reduce) => reduce.dtype(),
             Self::Table(table) => table.dtype(),
             Self::Unary(unary) => unary.dtype(),
         }
@@ -75,6 +81,7 @@ where
             Self::Combine(combine) => combine.ndim(),
             Self::Expand(expand) => expand.ndim(),
             Self::Slice(slice) => slice.ndim(),
+            Self::Reduce(reduce) => reduce.ndim(),
             Self::Table(table) => table.ndim(),
             Self::Unary(unary) => unary.ndim(),
         }
@@ -86,6 +93,7 @@ where
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
             Self::Expand(expand) => expand.shape(),
+            Self::Reduce(reduce) => reduce.shape(),
             Self::Slice(slice) => slice.shape(),
             Self::Table(table) => table.shape(),
             Self::Unary(unary) => unary.shape(),
@@ -99,6 +107,7 @@ where
             Self::Combine(combine) => combine.size(),
             Self::Expand(expand) => expand.size(),
             Self::Slice(slice) => slice.size(),
+            Self::Reduce(reduce) => reduce.size(),
             Self::Table(table) => table.size(),
             Self::Unary(unary) => unary.size(),
         }
@@ -126,6 +135,7 @@ where
             Self::Cast(cast) => cast.filled(txn).await,
             Self::Combine(combine) => combine.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
+            Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Slice(slice) => slice.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
@@ -138,6 +148,7 @@ where
             Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Combine(combine) => combine.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
+            Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
@@ -150,6 +161,7 @@ where
             Self::Cast(cast) => cast.slice(bounds).map(SparseAccess::accessor),
             Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
+            Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
             Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
             Self::Slice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
             Self::Unary(unary) => unary.slice(bounds).map(SparseAccess::accessor),
@@ -162,6 +174,7 @@ where
             Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
             Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
             Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
+            Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
             Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
             Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
@@ -185,6 +198,7 @@ where
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
+            Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
             Self::Unary(unary) => unary.read_value_at(txn, coord),
@@ -716,6 +730,154 @@ where
             .read_value_at(txn, source_coord)
             .map_ok(|(_, val)| (coord, val));
         Box::pin(read)
+    }
+}
+
+type Reductor<FD, FS, D, T> =
+    fn(&SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>, T) -> TCBoxTryFuture<Number>;
+
+#[derive(Clone)]
+pub struct SparseReduce<FD, FS, D, T> {
+    source: SparseAccessor<FD, FS, D, T>,
+    rebase: transform::Reduce,
+    reductor: Reductor<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T> SparseReduce<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    pub fn new(
+        source: SparseAccessor<FD, FS, D, T>,
+        axis: usize,
+        reductor: Reductor<FD, FS, D, T>,
+    ) -> TCResult<Self> {
+        transform::Reduce::new(source.shape().clone(), axis).map(|rebase| SparseReduce {
+            source,
+            rebase,
+            reductor,
+        })
+    }
+
+    async fn filled_at<'a>(self, txn: T) -> TCResult<CoordStream<'a>> {
+        let reduce_axis = self.rebase.axis();
+        let source = self.source.filled(txn).await?;
+
+        let filled_at = source.map_ok(move |(mut coord, _)| {
+            coord.remove(reduce_axis);
+            coord
+        });
+
+        let filled_at: CoordStream<'a> = Box::pin(GroupStream::from(filled_at));
+        Ok(filled_at)
+    }
+}
+
+impl<FD, FS, D, T> TensorAccess for SparseReduce<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.shape().len()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.shape().size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseReduce<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    type Slice = SparseReduce<FD, FS, D, T>;
+
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Reduce(Box::new(self))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let filled = self.clone().filled_at(txn.clone()).await?;
+
+        let rebase = self.rebase;
+        let reductor = self.reductor;
+        let source = self.source;
+
+        let filled = filled.and_then(move |coord| {
+            let source_bounds = rebase.invert_coord(&coord);
+            let source = source.clone();
+            let txn = txn.clone();
+            Box::pin(async move {
+                let slice = source.slice(source_bounds)?;
+                let value = reductor(&slice.into(), txn).await?;
+                Ok((coord, value))
+            })
+        });
+
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        let filled = self.filled(txn).await?;
+
+        filled
+            .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+            .await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let reduce_axis = self.rebase.reduce_axis(&bounds);
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(source_bounds)?;
+        SparseReduce::new(source.into(), reduce_axis, self.reductor)
+    }
+
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
+    }
+}
+
+impl<FD, FS, D, T> ReadValueAt<D> for SparseReduce<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            let source_bounds = self.rebase.invert_coord(&coord);
+            let reductor = self.reductor;
+            let slice = self.source.slice(source_bounds)?;
+            let value = reductor(&slice.into(), txn).await?;
+            Ok((coord, value))
+        })
     }
 }
 
