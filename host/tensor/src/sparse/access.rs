@@ -29,6 +29,7 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
     type Slice: SparseAccess<FD, FS, D, T>;
+    type Transpose: SparseAccess<FD, FS, D, T>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
 
@@ -37,6 +38,8 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     async fn filled_count(self, txn: T) -> TCResult<u64>;
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
@@ -50,13 +53,14 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Slice(SparseTableSlice<FD, FS, D, T>),
     Reduce(Box<SparseReduce<FD, FS, D, T>>),
     Table(SparseTable<FD, FS, D, T>),
+    Transpose(Box<SparseTranspose<FD, FS, D, T, Self>>),
     Unary(Box<SparseUnary<FD, FS, D, T>>),
 }
 
 impl<FD, FS, D, T> TensorAccess for SparseAccessor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -70,6 +74,7 @@ where
             Self::Slice(slice) => slice.dtype(),
             Self::Reduce(reduce) => reduce.dtype(),
             Self::Table(table) => table.dtype(),
+            Self::Transpose(transpose) => transpose.dtype(),
             Self::Unary(unary) => unary.dtype(),
         }
     }
@@ -83,6 +88,7 @@ where
             Self::Slice(slice) => slice.ndim(),
             Self::Reduce(reduce) => reduce.ndim(),
             Self::Table(table) => table.ndim(),
+            Self::Transpose(transpose) => transpose.ndim(),
             Self::Unary(unary) => unary.ndim(),
         }
     }
@@ -96,6 +102,7 @@ where
             Self::Reduce(reduce) => reduce.shape(),
             Self::Slice(slice) => slice.shape(),
             Self::Table(table) => table.shape(),
+            Self::Transpose(transpose) => transpose.shape(),
             Self::Unary(unary) => unary.shape(),
         }
     }
@@ -109,6 +116,7 @@ where
             Self::Slice(slice) => slice.size(),
             Self::Reduce(reduce) => reduce.size(),
             Self::Table(table) => table.size(),
+            Self::Transpose(transpose) => transpose.size(),
             Self::Unary(unary) => unary.size(),
         }
     }
@@ -118,12 +126,13 @@ where
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
+    type Transpose = Self;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         self
@@ -138,6 +147,7 @@ where
             Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Slice(slice) => slice.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
+            Self::Transpose(transpose) => transpose.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
         }
     }
@@ -151,6 +161,7 @@ where
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
+            Self::Transpose(transpose) => transpose.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
         }
     }
@@ -162,9 +173,30 @@ where
             Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
             Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
-            Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
             Self::Slice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
+            Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
+            Self::Transpose(transpose) => transpose.slice(bounds).map(SparseAccess::accessor),
             Self::Unary(unary) => unary.slice(bounds).map(SparseAccess::accessor),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => {
+                broadcast.transpose(permutation).map(SparseAccess::accessor)
+            }
+            Self::Cast(cast) => cast.transpose(permutation).map(SparseAccess::accessor),
+            Self::Combine(combinator) => combinator
+                .transpose(permutation)
+                .map(SparseAccess::accessor),
+            Self::Expand(expand) => expand.transpose(permutation).map(SparseAccess::accessor),
+            Self::Reduce(reduce) => reduce.transpose(permutation).map(SparseAccess::accessor),
+            Self::Table(table) => table.transpose(permutation).map(SparseAccess::accessor),
+            Self::Slice(slice) => slice.transpose(permutation).map(SparseAccess::accessor),
+            Self::Transpose(transpose) => {
+                transpose.transpose(permutation).map(SparseAccess::accessor)
+            }
+            Self::Unary(unary) => unary.transpose(permutation).map(SparseAccess::accessor),
         }
     }
 
@@ -177,6 +209,7 @@ where
             Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
             Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
+            Self::Transpose(transpose) => transpose.write_value(txn_id, coord, value).await,
             Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
         }
     }
@@ -185,7 +218,7 @@ where
 impl<FD, FS, D, T> ReadValueAt<D> for SparseAccessor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -201,6 +234,7 @@ where
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
+            Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
             Self::Unary(unary) => unary.read_value_at(txn, coord),
         }
     }
@@ -278,6 +312,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
+    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Broadcast(Box::new(SparseBroadcast {
@@ -319,6 +354,10 @@ where
         let source_bounds = self.rebase.invert_bounds(bounds);
         let source = self.source.slice(source_bounds)?;
         SparseBroadcast::new(source, shape)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -400,6 +439,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseCast<FD, FS, D, T, A::Slice>;
+    type Transpose = SparseCast<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Cast(Box::new(SparseCast::new(
@@ -423,6 +463,15 @@ where
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         Ok(SparseCast {
             source: self.source.slice(bounds)?,
+            dtype: self.dtype,
+            phantom: self.phantom,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let source = self.source.transpose(permutation)?;
+        Ok(SparseCast {
+            source,
             dtype: self.dtype,
             phantom: self.phantom,
         })
@@ -553,6 +602,7 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseCombinator<FD, FS, D, T, L::Slice, R::Slice>;
+    type Transpose = SparseCombinator<FD, FS, D, T, L::Transpose, R::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Combine(Box::new(SparseCombinator {
@@ -582,6 +632,20 @@ where
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let left = self.left.slice(bounds.clone())?;
         let right = self.right.slice(bounds)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            dtype: self.dtype,
+            phantom: self.phantom,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let left = self.left.transpose(permutation.clone())?;
+        let right = self.right.transpose(permutation)?;
         assert_eq!(left.shape(), right.shape());
 
         Ok(SparseCombinator {
@@ -680,6 +744,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = A::Slice;
+    type Transpose = SparseExpand<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Expand(Box::new(SparseExpand {
@@ -705,6 +770,25 @@ where
 
         let source_bounds = self.rebase.invert_bounds(bounds);
         self.source.slice(source_bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let expand_axis = if let Some(permutation) = &permutation {
+            if permutation.len() != self.ndim() {
+                return Err(TCError::unsupported(format!(
+                    "Invalid permutation for tensor of shape {}: {:?}",
+                    self.shape(),
+                    permutation
+                )));
+            }
+
+            permutation[self.rebase.expand_axis()]
+        } else {
+            self.ndim() - self.rebase.expand_axis()
+        };
+
+        let source = self.source.transpose(permutation)?;
+        SparseExpand::new(source, expand_axis)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -746,7 +830,7 @@ pub struct SparseReduce<FD, FS, D, T> {
 impl<FD, FS, D, T> SparseReduce<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -780,7 +864,7 @@ where
 impl<FD, FS, D, T> TensorAccess for SparseReduce<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -806,12 +890,13 @@ where
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseReduce<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseReduce<FD, FS, D, T>;
+    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Reduce(Box::new(self))
@@ -855,6 +940,10 @@ where
         SparseReduce::new(source.into(), reduce_axis, self.reductor)
     }
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
+    }
+
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
@@ -863,7 +952,7 @@ where
 impl<FD, FS, D, T> ReadValueAt<D> for SparseReduce<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -878,6 +967,132 @@ where
             let value = reductor(&slice.into(), txn).await?;
             Ok((coord, value))
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseTranspose<FD, FS, D, T, A> {
+    source: A,
+    rebase: transform::Transpose,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, A> SparseTranspose<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    pub fn new(source: A, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        transform::Transpose::new(source.shape().clone(), permutation).map(|rebase| Self {
+            source,
+            rebase,
+            phantom: Phantom::default(),
+        })
+    }
+}
+
+impl<FD, FS, D, T, A> TensorAccess for SparseTranspose<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseTranspose<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    A::Slice: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Slice = <A::Slice as SparseAccess<FD, FS, D, T>>::Transpose;
+    type Transpose = A::Transpose;
+
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Transpose(Box::new(SparseTranspose {
+            source: self.source.accessor(),
+            rebase: self.rebase,
+            phantom: self.phantom,
+        }))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let rebase = self.rebase.clone();
+        let num_coords = self.clone().filled_count(txn.clone()).await?;
+        let coords = self.source.clone().filled(txn.clone()).await?;
+        let coords = coords.map_ok(move |(coord, _)| rebase.map_coord(coord));
+        let filled = sorted_values::<FD, T, D, _, _>(txn, self, coords, num_coords).await?;
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.source.filled_count(txn).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let slice_permutation = self.rebase.invert_permutation(&bounds);
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(source_bounds)?;
+        source.transpose(Some(slice_permutation))
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let permutation = permutation.map(|axes| self.rebase.invert_axes(&axes));
+        self.source.transpose(permutation)
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.source
+            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
+            .await
+    }
+}
+
+impl<FD, FS, D, T, A> ReadValueAt<D> for SparseTranspose<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        let source_coord = self.rebase.invert_coord(&coord);
+        let read = self
+            .source
+            .read_value_at(txn, source_coord)
+            .map_ok(|(_, val)| (coord, val));
+
+        Box::pin(read)
     }
 }
 
@@ -905,7 +1120,7 @@ impl<FD, FS, D, T> SparseUnary<FD, FS, D, T> {
 impl<FD, FS, D, T> TensorAccess for SparseUnary<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -931,12 +1146,13 @@ where
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseUnary<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
+    type Transpose = Self;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Unary(Box::new(self))
@@ -962,6 +1178,15 @@ where
         })
     }
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let source = self.source.transpose(permutation)?;
+        Ok(SparseUnary {
+            source: source.accessor(),
+            dtype: self.dtype,
+            transform: self.transform,
+        })
+    }
+
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
@@ -970,7 +1195,7 @@ where
 impl<FD, FS, D, T> ReadValueAt<D> for SparseUnary<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,

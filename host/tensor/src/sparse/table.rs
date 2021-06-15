@@ -18,8 +18,9 @@ use tcgeneric::{label, Id, Label};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess};
+use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
+use super::access::SparseTranspose;
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
 
 const VALUE: Label = label("value");
@@ -34,7 +35,7 @@ pub struct SparseTable<FD, FS, D, T> {
 
 impl<FD, FS, D, T> SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
@@ -86,12 +87,14 @@ impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Slice = SparseTableSlice<FD, FS, D, T>;
+    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Table(self)
@@ -118,6 +121,10 @@ where
         })
     }
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
+    }
+
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         upsert_value(&self.table, txn_id, coord, value).await
     }
@@ -125,10 +132,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -168,12 +176,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
@@ -199,11 +207,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Schema = Schema;
     type Store = D;
@@ -227,11 +235,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for SparseTable<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = (Self, TxnId);
 
@@ -275,12 +283,14 @@ impl<FD, FS, D, T> TensorAccess for SparseTableSlice<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTableSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Slice = Self;
+    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Slice(self)
@@ -307,6 +317,10 @@ where
         self.source.slice(source_bounds)
     }
 
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
+    }
+
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.rebase.invert_coord(&coord);
@@ -316,10 +330,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseTableSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -354,11 +369,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for SparseTableVisitor<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node> + TryFrom<D::File>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = SparseTable<FD, FS, D, T>;
 

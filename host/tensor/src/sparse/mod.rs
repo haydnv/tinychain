@@ -99,12 +99,12 @@ where
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>>
     for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
@@ -137,11 +137,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Schema = Schema;
     type Store = D;
@@ -192,11 +192,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = T;
 
@@ -226,11 +226,11 @@ impl<FD, FS, D, T> SparseTensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for SparseTensorVisitor<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
 

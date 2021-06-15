@@ -299,7 +299,7 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Te
 impl<FD, FS, D, T> TensorAccess for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -432,7 +432,7 @@ where
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -564,7 +564,7 @@ where
 impl<FD, FS, D, T> TensorTransform<D> for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -767,7 +767,7 @@ where
 impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
@@ -812,7 +812,7 @@ pub fn broadcast<FD, FS, D, T>(
 ) -> TCResult<(Tensor<FD, FS, D, T>, Tensor<FD, FS, D, T>)>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
