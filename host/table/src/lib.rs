@@ -24,6 +24,7 @@ use view::*;
 pub use bounds::*;
 pub use index::TableIndex;
 pub use schema::*;
+pub use view::Merged;
 
 mod bounds;
 mod index;

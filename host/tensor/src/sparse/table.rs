@@ -10,13 +10,14 @@ use futures::stream::TryStreamExt;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_table::{Column, ColumnBound, TableIndex, TableInstance, TableSchema};
+use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSchema};
 use tc_transact::fs::{CopyFrom, Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label};
 
 use crate::stream::{Read, ReadValueAt};
+use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Schema, Shape, TensorAccess};
 
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
@@ -60,13 +61,7 @@ where
     }
 }
 
-impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T>
-where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
-    T: Transaction<D>,
-{
+impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T> {
     #[inline]
     fn dtype(&self) -> NumberType {
         self.schema.1
@@ -237,6 +232,90 @@ where
         decoder
             .decode_seq(SparseTableVisitor { table, txn_id })
             .await
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseTableSlice<FD, FS, D, T> {
+    source: SparseTable<FD, FS, D, T>,
+    table: Merged<FS, D, T>,
+    rebase: transform::Slice,
+}
+
+impl<FD, FS, D, T> TensorAccess for SparseTableSlice<FD, FS, D, T> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.rebase.ndim()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.rebase.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTableSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Slice(self)
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let rebase = self.rebase;
+        let rows = self.table.rows(*txn.id()).await?;
+        let filled = rows
+            .and_then(|row| future::ready(expect_row(row)))
+            .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
+
+        let filled: SparseStream<'a> = Box::pin(filled);
+        Ok(filled)
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.table.count(*txn.id()).await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.shape().validate_coord(&coord)?;
+        let source_coord = self.rebase.invert_coord(&coord);
+        self.source.write_value(txn_id, source_coord, value).await
+    }
+}
+
+impl<FD, FS, D, T> ReadValueAt<D> for SparseTableSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(TCError::bad_request(
+                    "Coordinate out of bounds",
+                    Bounds::from(coord),
+                ));
+            }
+
+            let dtype = self.dtype();
+            let source_coord = self.rebase.invert_coord(&coord);
+            read_value_at(self.table, txn, source_coord, dtype).await
+        })
     }
 }
 

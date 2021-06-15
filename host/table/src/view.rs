@@ -107,7 +107,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
             schema: aggregate.source.schema,
             columns: aggregate.source.columns,
             indices: aggregate.source.indices,
-            phantom: PhantomFDT::default(),
+            phantom: Phantom::default(),
         };
 
         Table::Aggregate(Box::new(Aggregate {
@@ -118,7 +118,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
 }
 
 #[derive(Clone)]
-pub struct IndexSlice<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct IndexSlice<F, D, Txn> {
     source: BTreeFile<F, D, Txn>,
     schema: IndexSchema,
     bounds: Bounds,
@@ -414,7 +414,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<Limited<F, D, Txn>> for Ta
 }
 
 #[derive(Clone)]
-pub enum MergeSource<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub enum MergeSource<F, D, Txn> {
     Table(TableSlice<F, D, Txn>),
     Merge(Box<Merged<F, D, Txn>>),
 }
@@ -476,7 +476,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
 }
 
 #[derive(Clone)]
-pub struct Merged<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct Merged<F, D, Txn> {
     key_columns: Vec<Column>,
     left: MergeSource<F, D, Txn>,
     right: IndexSlice<F, D, Txn>,
@@ -527,7 +527,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
             schema: self.keys.schema.clone(),
             columns: key_names,
             indices: self.keys.indices.clone(),
-            phantom: PhantomFDT::default(),
+            phantom: Phantom::default(),
         };
 
         Merged {
@@ -676,12 +676,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<Merged<F, D, Txn>> for Tab
 }
 
 #[derive(Clone)]
-pub struct Selection<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>> {
+pub struct Selection<F, D, Txn, T> {
     source: T,
     schema: IndexSchema,
     columns: Vec<Id>,
     indices: Vec<usize>,
-    phantom: PhantomFDT<F, D, Txn>,
+    phantom: Phantom<F, D, Txn>,
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
@@ -721,7 +721,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
             schema,
             columns,
             indices,
-            phantom: PhantomFDT::default(),
+            phantom: Phantom::default(),
         })
     }
 }
@@ -783,7 +783,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
             schema: self.schema,
             columns: self.columns,
             indices: self.indices,
-            phantom: PhantomFDT::default(),
+            phantom: Phantom::default(),
         })
     }
 
@@ -856,13 +856,13 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
             schema: selection.schema,
             columns: selection.columns,
             indices: selection.indices,
-            phantom: PhantomFDT::default(),
+            phantom: Phantom::default(),
         }))
     }
 }
 
 #[derive(Clone)]
-pub struct TableSlice<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct TableSlice<F, D, Txn> {
     table: TableIndex<F, D, Txn>,
     slice: IndexSlice<F, D, Txn>,
 }
@@ -1038,13 +1038,13 @@ pub fn group_by<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, 
 }
 
 #[derive(Clone)]
-struct PhantomFDT<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+struct Phantom<F, D, Txn> {
     file: PhantomData<F>,
     dir: PhantomData<D>,
     txn: PhantomData<Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Default for PhantomFDT<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Default for Phantom<F, D, Txn> {
     fn default() -> Self {
         Self {
             file: PhantomData,

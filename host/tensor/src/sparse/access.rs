@@ -17,7 +17,8 @@ use crate::transform::{self, Rebase};
 use crate::{Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
 use super::combine::SparseCombine;
-use super::{Phantom, SparseStream, SparseTable};
+use super::table::{SparseTable, SparseTableSlice};
+use super::{Phantom, SparseStream};
 
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
@@ -38,6 +39,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Cast(Box<SparseCast<FD, FS, D, T, Self>>),
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
+    Slice(SparseTableSlice<FD, FS, D, T>),
     Table(SparseTable<FD, FS, D, T>),
     Unary(Box<SparseUnary<FD, FS, D, T>>),
 }
@@ -56,6 +58,7 @@ where
             Self::Cast(cast) => cast.dtype(),
             Self::Combine(combine) => combine.dtype(),
             Self::Expand(expand) => expand.dtype(),
+            Self::Slice(slice) => slice.dtype(),
             Self::Table(table) => table.dtype(),
             Self::Unary(unary) => unary.dtype(),
         }
@@ -67,6 +70,7 @@ where
             Self::Cast(cast) => cast.ndim(),
             Self::Combine(combine) => combine.ndim(),
             Self::Expand(expand) => expand.ndim(),
+            Self::Slice(slice) => slice.ndim(),
             Self::Table(table) => table.ndim(),
             Self::Unary(unary) => unary.ndim(),
         }
@@ -78,6 +82,7 @@ where
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
             Self::Expand(expand) => expand.shape(),
+            Self::Slice(slice) => slice.shape(),
             Self::Table(table) => table.shape(),
             Self::Unary(unary) => unary.shape(),
         }
@@ -89,6 +94,7 @@ where
             Self::Cast(cast) => cast.size(),
             Self::Combine(combine) => combine.size(),
             Self::Expand(expand) => expand.size(),
+            Self::Slice(slice) => slice.size(),
             Self::Table(table) => table.size(),
             Self::Unary(unary) => unary.size(),
         }
@@ -114,6 +120,7 @@ where
             Self::Cast(cast) => cast.filled(txn).await,
             Self::Combine(combine) => combine.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
+            Self::Slice(slice) => slice.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
         }
@@ -125,6 +132,7 @@ where
             Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Combine(combine) => combine.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
+            Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
         }
@@ -136,6 +144,7 @@ where
             Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
             Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
             Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
+            Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
             Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
         }
@@ -158,6 +167,7 @@ where
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
+            Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
             Self::Unary(unary) => unary.read_value_at(txn, coord),
         }

@@ -46,7 +46,7 @@ pub type Schema = (Shape, NumberType);
 pub type Coord = Vec<u64>;
 
 /// Basic properties common to all [`Tensor`]s
-pub trait TensorAccess: Send {
+pub trait TensorAccess {
     /// The datatype of this [`Tensor`]
     fn dtype(&self) -> NumberType;
 
