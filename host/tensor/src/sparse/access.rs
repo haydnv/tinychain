@@ -9,7 +9,7 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Number, NumberType};
+use tc_value::{Number, NumberInstance, NumberType};
 
 use crate::stream::{sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
@@ -33,6 +33,7 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
 #[derive(Clone)]
 pub enum SparseAccessor<FD, FS, D, T> {
     Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),
+    Cast(Box<SparseCast<FD, FS, D, T, Self>>),
     Table(SparseTable<FD, FS, D, T>),
 }
 
@@ -47,6 +48,7 @@ where
     fn dtype(&self) -> NumberType {
         match self {
             Self::Broadcast(broadcast) => broadcast.dtype(),
+            Self::Cast(cast) => cast.dtype(),
             Self::Table(table) => table.dtype(),
         }
     }
@@ -54,6 +56,7 @@ where
     fn ndim(&self) -> usize {
         match self {
             Self::Broadcast(broadcast) => broadcast.ndim(),
+            Self::Cast(cast) => cast.ndim(),
             Self::Table(table) => table.ndim(),
         }
     }
@@ -61,6 +64,7 @@ where
     fn shape(&self) -> &Shape {
         match self {
             Self::Broadcast(broadcast) => broadcast.shape(),
+            Self::Cast(cast) => cast.shape(),
             Self::Table(table) => table.shape(),
         }
     }
@@ -68,6 +72,7 @@ where
     fn size(&self) -> u64 {
         match self {
             Self::Broadcast(broadcast) => broadcast.size(),
+            Self::Cast(cast) => cast.size(),
             Self::Table(table) => table.size(),
         }
     }
@@ -89,6 +94,7 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         match self {
             Self::Broadcast(broadcast) => broadcast.filled(txn).await,
+            Self::Cast(cast) => cast.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
         }
     }
@@ -96,6 +102,7 @@ where
     async fn filled_count(&self, txn: &T) -> TCResult<u64> {
         match self {
             Self::Broadcast(broadcast) => broadcast.filled_count(txn).await,
+            Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
         }
     }
@@ -103,6 +110,7 @@ where
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
             Self::Broadcast(broadcast) => broadcast.write_value(txn_id, coord, value).await,
+            Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
         }
     }
@@ -121,6 +129,7 @@ where
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         match self {
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
+            Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
         }
     }
@@ -243,6 +252,102 @@ where
             .source
             .read_value_at(txn, source_coord)
             .map_ok(|(_, val)| (coord, val));
+
+        Box::pin(read)
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseCast<FD, FS, D, T, A> {
+    source: A,
+    dtype: NumberType,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, A> SparseCast<FD, FS, D, T, A> {
+    pub fn new(source: A, dtype: NumberType) -> Self {
+        Self {
+            source,
+            dtype,
+            phantom: Phantom::default(),
+        }
+    }
+}
+
+impl<FD, FS, D, T, A> TensorAccess for SparseCast<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.dtype
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseCast<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Cast(Box::new(SparseCast::new(
+            self.source.accessor(),
+            self.dtype,
+        )))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let dtype = self.dtype;
+
+        let filled = self.source.filled(txn).await?;
+        let cast = filled.map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
+        Ok(Box::pin(cast))
+    }
+
+    async fn filled_count(&self, txn: &T) -> TCResult<u64> {
+        self.source.filled_count(txn).await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.source.write_value(txn_id, coord, value).await
+    }
+}
+
+impl<FD, FS, D, T, A> ReadValueAt<D> for SparseCast<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        let dtype = self.dtype;
+        let read = self
+            .source
+            .read_value_at(txn, coord)
+            .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
 
         Box::pin(read)
     }
