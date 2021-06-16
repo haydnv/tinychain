@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
@@ -21,7 +22,7 @@ use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
 use crate::stream::{block_offsets, coord_block, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Schema, Shape, TensorAccess};
+use crate::{Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
 use super::{DenseAccess, DenseAccessor, PER_BLOCK};
@@ -205,10 +206,11 @@ impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -329,10 +331,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -808,10 +811,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Slice = Self;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -897,10 +901,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 

@@ -15,9 +15,10 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCTryStream};
 
-use crate::Phantom;
-
-use super::{Bounds, Coord, Schema, Shape, TensorAccess, TensorIO, TensorType};
+use super::dense::{BlockListSparse, DenseTensor};
+use super::{
+    Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO, TensorInstance, TensorType,
+};
 
 pub use access::{SparseAccess, SparseAccessor};
 pub use table::SparseTable;
@@ -63,6 +64,22 @@ where
 
     fn size(&self) -> u64 {
         self.accessor.size()
+    }
+}
+
+impl<FD, FS, D, T, A> TensorInstance<D> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Dense = DenseTensor<FD, FS, D, T, BlockListSparse<FD, FS, D, T, A>>;
+
+    fn into_dense(self) -> Self::Dense {
+        BlockListSparse::from(self.into_inner()).into()
     }
 }
 
