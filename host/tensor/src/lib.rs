@@ -524,28 +524,28 @@ where
     fn add(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.add(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.add(other),
         }
     }
 
     fn div(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.div(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.div(other),
         }
     }
 
     fn mul(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.mul(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.mul(other),
         }
     }
 
     fn sub(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.sub(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.sub(other),
         }
     }
 }

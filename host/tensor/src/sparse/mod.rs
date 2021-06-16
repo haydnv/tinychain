@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
+use std::ops::{Add, Div, Mul, Sub};
 use std::pin::Pin;
 
 use afarray::Array;
@@ -17,8 +18,8 @@ use tcgeneric::{NativeClass, TCTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO, TensorInstance, TensorTransform,
-    TensorType,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorIO, TensorInstance,
+    TensorMath, TensorTransform, TensorType,
 };
 
 use access::*;
@@ -41,6 +42,37 @@ pub struct SparseTensor<FD, FS, D, T, A> {
 impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A> {
     pub fn into_inner(self) -> A {
         self.accessor
+    }
+}
+
+impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn combine<R: SparseAccess<FD, FS, D, T>>(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
+    ) -> TCResult<SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, A, R>>> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "Cannot combine Tensors of different shapes: {}, {}",
+                self.shape(),
+                other.shape()
+            )));
+        }
+
+        let accessor = SparseCombinator::new(self.accessor, other.accessor, combinator, dtype)?;
+
+        Ok(SparseTensor {
+            accessor,
+            phantom: self.phantom,
+        })
     }
 }
 
@@ -110,6 +142,79 @@ where
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.accessor.write_value(txn_id, coord, value).await
+    }
+}
+
+impl<FD, FS, D, T, L, R> TensorMath<D, SparseTensor<FD, FS, D, T, R>>
+    for SparseTensor<FD, FS, D, T, L>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    type Combine = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
+
+    fn add(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, Number::add, dtype)
+    }
+
+    fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, Number::div, dtype)
+    }
+
+    fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, Number::mul, dtype)
+    }
+
+    fn sub(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, Number::sub, dtype)
+    }
+}
+
+impl<FD, FS, D, T, A> TensorMath<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Combine = Tensor<FD, FS, D, T>;
+
+    fn add(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Sparse(sparse) => self.add(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.into_dense().add(dense).map(Tensor::from),
+        }
+    }
+
+    fn div(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Sparse(sparse) => self.div(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.into_dense().div(dense).map(Tensor::from),
+        }
+    }
+
+    fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Sparse(sparse) => self.mul(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.into_dense().mul(dense).map(Tensor::from),
+        }
+    }
+
+    fn sub(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Sparse(sparse) => self.sub(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.into_dense().sub(dense).map(Tensor::from),
+        }
     }
 }
 
