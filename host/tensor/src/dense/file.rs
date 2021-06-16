@@ -12,6 +12,7 @@ use log::debug;
 use number_general::{Number, NumberClass, NumberInstance, NumberType};
 use strided::Stride;
 
+use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
@@ -29,16 +30,23 @@ const MEBIBYTE: usize = 1_048_576;
 
 /// A wrapper around a `DenseTensor` [`File`]
 #[derive(Clone)]
-pub struct BlockListFile<F, D, T> {
-    file: F,
+pub struct BlockListFile<FD, FS, D, T> {
+    file: FD,
     schema: Schema,
+    sparse: PhantomData<FS>,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
+impl<FD, FS, D, T> BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     /// Construct a new `BlockListFile` with the given [`Shape`], filled with the given `value`.
-    pub async fn constant(file: F, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
+    pub async fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
         if !file.is_empty(&txn_id).await? {
             return Err(TCError::unsupported(
                 "cannot create new tensor: file is not empty",
@@ -64,7 +72,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
 
     /// Construct a new `BlockListFile` from the given `Stream` of [`Array`] blocks.
     pub async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
-        file: F,
+        file: FD,
         txn_id: TxnId,
         shape: Shape,
         dtype: NumberType,
@@ -81,6 +89,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         Ok(BlockListFile {
             file,
             schema: (shape, dtype),
+            sparse: PhantomData,
             dir: PhantomData,
             txn: PhantomData,
         })
@@ -88,7 +97,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
 
     /// Construct a new `BlockListFile` from the given `Stream` of elements.
     pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
-        file: F,
+        file: FD,
         txn_id: TxnId,
         shape: Shape,
         dtype: NumberType,
@@ -106,6 +115,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
         Ok(BlockListFile {
             file,
             schema: (shape, dtype),
+            sparse: PhantomData,
             dir: PhantomData,
             txn: PhantomData,
         })
@@ -113,7 +123,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
 
     /// Construct a new `BlockListFile` of elements evenly distributed between `start` and `stop`.
     pub async fn range(
-        file: F,
+        file: FD,
         txn_id: TxnId,
         shape: Shape,
         start: Number,
@@ -174,7 +184,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFile<F, D, T> {
     }
 }
 
-impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
+impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS, D, T> {
     fn dtype(&self) -> NumberType {
         self.schema.1
     }
@@ -193,11 +203,17 @@ impl<F: Send, D: Send, T: Send> TensorAccess for BlockListFile<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockListFile<F, D, T> {
-    type Slice = BlockListFileSlice<F, D, T>;
-    type Transpose = BlockListTranspose<F, D, T, Self>;
+impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
+    type Slice = BlockListFileSlice<FD, FS, D, T>;
+    type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         DenseAccessor::File(self)
     }
 
@@ -311,7 +327,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for BlockLi
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFile<F, D, T> {
+impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
@@ -354,7 +376,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFile
 }
 
 #[async_trait]
-impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact for BlockListFile<F, D, T> {
+impl<FD, FS, D, T> Transact for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array> + Transact,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     async fn commit(&self, txn_id: &TxnId) {
         self.file.commit(txn_id).await
     }
@@ -365,10 +393,15 @@ impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact for BlockLis
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> CopyFrom<D, B>
-    for BlockListFile<F, D, T>
+impl<FD, FS, D, T, B> CopyFrom<D, B> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    async fn copy_from(other: B, file: F, txn: T) -> TCResult<Self> {
+    async fn copy_from(other: B, file: FD, txn: T) -> TCResult<Self> {
         let txn_id = *txn.id();
         let dtype = other.dtype();
         let shape = other.shape().clone();
@@ -378,9 +411,15 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> CopyFro
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D> for BlockListFile<F, D, T> {
+impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Schema = Schema;
-    type Store = F;
+    type Store = FD;
     type Txn = T;
 
     fn schema(&self) -> &Schema {
@@ -391,6 +430,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D> for BlockListFile<F, 
         Ok(Self {
             file,
             schema,
+            sparse: PhantomData,
             dir: PhantomData,
             txn: PhantomData,
         })
@@ -398,7 +438,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D> for BlockListFile<F, 
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D> for BlockListFile<F, D, T> {
+impl<FD, FS, D, T> Restore<D> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.schema.0 != backup.schema.0 {
             return Err(TCError::bad_request(
@@ -420,11 +466,17 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D> for BlockListFile<F, 
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T> {
-    type Context = (TxnId, F, Schema);
+impl<FD, FS, D, T> de::FromStream for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: Send,
+    D: Send,
+    T: Send,
+{
+    type Context = (TxnId, FD, Schema);
 
     async fn from_stream<De: de::Decoder>(
-        cxt: (TxnId, F, Schema),
+        cxt: (TxnId, FD, Schema),
         decoder: &mut De,
     ) -> Result<Self, De::Error> {
         let (txn_id, file, (shape, dtype)) = cxt;
@@ -482,6 +534,7 @@ impl<F: File<Array>, D: Send, T: Send> de::FromStream for BlockListFile<F, D, T>
             Ok(Self {
                 file,
                 schema: (shape, dtype),
+                sparse: PhantomData,
                 dir: PhantomData,
                 txn: PhantomData,
             })
@@ -710,19 +763,31 @@ impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
 
 /// A slice of a [`BlockListFile`]
 #[derive(Clone)]
-pub struct BlockListFileSlice<F, D, T> {
-    source: BlockListFile<F, D, T>,
+pub struct BlockListFileSlice<FD, FS, D, T> {
+    source: BlockListFile<FD, FS, D, T>,
     rebase: transform::Slice,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> BlockListFileSlice<F, D, T> {
-    fn new(source: BlockListFile<F, D, T>, bounds: Bounds) -> TCResult<Self> {
+impl<FD, FS, D, T> BlockListFileSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
+    fn new(source: BlockListFile<FD, FS, D, T>, bounds: Bounds) -> TCResult<Self> {
         let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
         Ok(Self { source, rebase })
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for BlockListFileSlice<F, D, T> {
+impl<FD, FS, D, T> TensorAccess for BlockListFileSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -741,13 +806,17 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for BlockListFileSl
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
-    for BlockListFileSlice<F, D, T>
+impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
     type Slice = Self;
-    type Transpose = BlockListTranspose<F, D, T, Self>;
+    type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         DenseAccessor::Slice(self)
     }
 
@@ -826,7 +895,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for BlockListFileSlice<F, D, T> {
+impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {

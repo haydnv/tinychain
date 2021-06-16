@@ -15,6 +15,8 @@ use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCTryStream};
 
+use crate::Phantom;
+
 use super::{Bounds, Coord, Schema, Shape, TensorAccess, TensorIO, TensorType};
 
 pub use access::{SparseAccess, SparseAccessor};
@@ -271,25 +273,5 @@ impl<'en> en::IntoStream<'en> for SparseTensorView<'en> {
         let schema = (self.shape.to_vec(), self.dtype.path());
         let filled = en::SeqStream::from(self.filled);
         (schema, filled).into_stream(encoder)
-    }
-}
-
-#[derive(Clone)]
-struct Phantom<FD, FS, D, T> {
-    dense: PhantomData<FD>,
-    sparse: PhantomData<FS>,
-    dir: PhantomData<D>,
-    txn: PhantomData<T>,
-}
-
-impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            dense: PhantomData,
-            sparse: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
-        }
     }
 }

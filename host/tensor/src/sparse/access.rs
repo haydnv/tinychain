@@ -16,11 +16,11 @@ use tcgeneric::{GroupStream, TCBoxTryFuture};
 
 use crate::stream::{sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
+use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
 use super::combine::SparseCombine;
 use super::table::{SparseTable, SparseTableSlice};
-use super::{Phantom, SparseStream, SparseTensor};
+use super::{SparseStream, SparseTensor};
 
 type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
@@ -271,7 +271,7 @@ where
         coords: S,
         num_coords: u64,
     ) -> TCResult<SparseStream<'a>> {
-        let broadcast = sorted_values::<FD, T, D, _, _>(txn, self, coords, num_coords).await?;
+        let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_coords).await?;
         Ok(Box::pin(broadcast))
     }
 }
@@ -1046,7 +1046,7 @@ where
         let num_coords = self.clone().filled_count(txn.clone()).await?;
         let coords = self.source.clone().filled(txn.clone()).await?;
         let coords = coords.map_ok(move |(coord, _)| rebase.map_coord(coord));
-        let filled = sorted_values::<FD, T, D, _, _>(txn, self, coords, num_coords).await?;
+        let filled = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_coords).await?;
         Ok(Box::pin(filled))
     }
 

@@ -5,6 +5,7 @@ use futures::{Future, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
+use tc_btree::Node;
 use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
@@ -335,8 +336,8 @@ where
     }
 }
 
-impl<B: DenseAccess<fs::File<Array>, fs::Dir, Txn>> Route
-    for DenseTensor<fs::File<Array>, fs::Dir, Txn, B>
+impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
+    for DenseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, B>
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)

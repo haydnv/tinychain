@@ -5,6 +5,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use number_general::*;
 
+use tc_btree::*;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
@@ -20,22 +21,23 @@ const ERR_NONBIJECTIVE_WRITE: &str = "cannot write to a derived tensor which is 
 not a bijection of its source";
 
 #[derive(Clone)]
-pub struct BlockListCombine<F, D, T, L, R> {
+pub struct BlockListCombine<FD, FS, D, T, L, R> {
     left: L,
     right: R,
     combinator: fn(&Array, &Array) -> Array,
     value_combinator: fn(Number, Number) -> Number,
     dtype: NumberType,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<
-        F: File<Array>,
-        D: Dir,
-        T: Transaction<D>,
-        L: DenseAccess<F, D, T>,
-        R: DenseAccess<F, D, T>,
-    > BlockListCombine<F, D, T, L, R>
+impl<FD, FS, D, T, L, R> BlockListCombine<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: DenseAccess<FD, FS, D, T>,
+    R: DenseAccess<FD, FS, D, T>,
 {
     pub fn new(
         left: L,
@@ -62,13 +64,14 @@ impl<
     }
 }
 
-impl<
-        F: File<Array>,
-        D: Dir,
-        T: Transaction<D>,
-        L: DenseAccess<F, D, T>,
-        R: DenseAccess<F, D, T>,
-    > TensorAccess for BlockListCombine<F, D, T, L, R>
+impl<FD, FS, D, T, L, R> TensorAccess for BlockListCombine<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: DenseAccess<FD, FS, D, T>,
+    R: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.dtype
@@ -88,32 +91,19 @@ impl<
 }
 
 #[async_trait]
-impl<
-        F: File<Array>,
-        D: Dir,
-        T: Transaction<D>,
-        L: DenseAccess<F, D, T>,
-        R: DenseAccess<F, D, T>,
-    > DenseAccess<F, D, T> for BlockListCombine<F, D, T, L, R>
+impl<FD, FS, D, T, L, R> DenseAccess<FD, FS, D, T> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    Self: Clone,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: DenseAccess<FD, FS, D, T>,
+    R: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListCombine<
-        F,
-        D,
-        T,
-        <L as DenseAccess<F, D, T>>::Slice,
-        <R as DenseAccess<F, D, T>>::Slice,
-    >;
-    type Transpose = BlockListCombine<
-        F,
-        D,
-        T,
-        <L as DenseAccess<F, D, T>>::Transpose,
-        <R as DenseAccess<F, D, T>>::Transpose,
-    >;
+    type Slice = BlockListCombine<FD, FS, D, T, L::Slice, R::Slice>;
+    type Transpose = BlockListCombine<FD, FS, D, T, L::Transpose, R::Transpose>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let left = self.left.accessor();
         let right = self.right.accessor();
         let combine = BlockListCombine {
@@ -122,7 +112,7 @@ where
             combinator: self.combinator,
             value_combinator: self.value_combinator,
             dtype: self.dtype,
-            phantom: Phantom::default(),
+            phantom: self.phantom,
         };
 
         DenseAccessor::Combine(Box::new(combine))
@@ -182,13 +172,14 @@ where
     }
 }
 
-impl<
-        F: File<Array>,
-        D: Dir,
-        T: Transaction<D>,
-        L: DenseAccess<F, D, T>,
-        R: DenseAccess<F, D, T>,
-    > ReadValueAt<D> for BlockListCombine<F, D, T, L, R>
+impl<FD, FS, D, T, L, R> ReadValueAt<D> for BlockListCombine<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: DenseAccess<FD, FS, D, T>,
+    R: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -204,14 +195,19 @@ impl<
 }
 
 #[derive(Clone)]
-pub struct BlockListBroadcast<F, D, T, B> {
+pub struct BlockListBroadcast<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Broadcast,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    BlockListBroadcast<F, D, T, B>
+impl<FD, FS, D, T, B> BlockListBroadcast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     pub fn new(source: B, shape: Shape) -> TCResult<Self> {
         let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
@@ -223,8 +219,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListBroadcast<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListBroadcast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -244,13 +245,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListBroadcast<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListBroadcast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListBroadcast<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
-    type Transpose = BlockListTranspose<F, D, T, Self>;
+    type Slice = BlockListBroadcast<FD, FS, D, T, B::Slice>;
+    type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let source = self.source.accessor();
         let broadcast = BlockListBroadcast {
             source,
@@ -297,8 +303,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListBroadcast<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListBroadcast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -314,13 +325,20 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListCast<F, D, T, B> {
+pub struct BlockListCast<FD, FS, D, T, B> {
     source: B,
     dtype: NumberType,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> BlockListCast<F, D, T, B> {
+impl<FD, FS, D, T, B> BlockListCast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
     pub fn new(source: B, dtype: NumberType) -> Self {
         Self {
             source,
@@ -330,8 +348,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> BlockLi
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListCast<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListCast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -351,13 +374,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListCast<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListCast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListCast<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
-    type Transpose = BlockListCast<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
+    type Slice = BlockListCast<FD, FS, D, T, B::Slice>;
+    type Transpose = BlockListCast<FD, FS, D, T, B::Transpose>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let cast = BlockListCast::new(self.source.accessor(), self.dtype);
         DenseAccessor::Cast(Box::new(cast))
     }
@@ -391,8 +419,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListCast<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListCast<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -408,14 +441,19 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListExpand<F, D, T, B> {
+pub struct BlockListExpand<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Expand,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    BlockListExpand<F, D, T, B>
+impl<FD, FS, D, T, B> BlockListExpand<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     pub fn new(source: B, axis: usize) -> TCResult<Self> {
         let rebase = transform::Expand::new(source.shape().clone(), axis)?;
@@ -427,8 +465,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListExpand<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListExpand<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -448,13 +491,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListExpand<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListExpand<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = <B as DenseAccess<F, D, T>>::Slice;
-    type Transpose = <B as DenseAccess<F, D, T>>::Transpose;
+    type Slice = B::Slice;
+    type Transpose = B::Transpose;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let expand = BlockListExpand {
             source: self.source.accessor(),
             rebase: self.rebase,
@@ -493,8 +541,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListExpand<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListExpand<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -510,20 +563,25 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 // TODO: &Txn, not Txn
-type Reductor<F, D, T> =
-    fn(&DenseTensor<F, D, T, DenseAccessor<F, D, T>>, T) -> TCBoxTryFuture<Number>;
+type Reductor<FD, FS, D, T> =
+    fn(&DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>, T) -> TCBoxTryFuture<Number>;
 
 #[derive(Clone)]
-pub struct BlockListReduce<F, D, T, B> {
+pub struct BlockListReduce<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Reduce,
-    reductor: Reductor<F, D, T>,
+    reductor: Reductor<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    BlockListReduce<F, D, T, B>
+impl<FD, FS, D, T, B> BlockListReduce<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    pub fn new(source: B, axis: usize, reductor: Reductor<F, D, T>) -> TCResult<Self> {
+    pub fn new(source: B, axis: usize, reductor: Reductor<FD, FS, D, T>) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
 
         Ok(BlockListReduce {
@@ -534,8 +592,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListReduce<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListReduce<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -555,13 +618,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListReduce<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReduce<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListReduce<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
-    type Transpose = BlockListReduce<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
+    type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
+    type Transpose = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Transpose>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let reduce = BlockListReduce {
             source: self.source.accessor(),
             rebase: self.rebase,
@@ -613,8 +681,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListReduce<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReduce<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -631,14 +704,19 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListTranspose<F, D, T, B> {
+pub struct BlockListTranspose<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Transpose,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    BlockListTranspose<F, D, T, B>
+impl<FD, FS, D, T, B> BlockListTranspose<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     pub fn new(source: B, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         let rebase = transform::Transpose::new(source.shape().clone(), permutation)?;
@@ -650,8 +728,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListTranspose<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListTranspose<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -671,13 +754,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListTranspose<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListTranspose<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListTranspose<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
+    type Slice = BlockListTranspose<FD, FS, D, T, B::Slice>;
     type Transpose = Self;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let accessor = BlockListTranspose {
             source: self.source.accessor(),
             rebase: self.rebase,
@@ -712,8 +800,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListTranspose<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListTranspose<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -729,16 +822,21 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadVal
 }
 
 #[derive(Clone)]
-pub struct BlockListUnary<F, D, T, B> {
+pub struct BlockListUnary<FD, FS, D, T, B> {
     source: B,
     transform: fn(&Array) -> Array,
     value_transform: fn(Number) -> Number,
     dtype: NumberType,
-    phantom: Phantom<F, D, T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    BlockListUnary<F, D, T, B>
+impl<FD, FS, D, T, B> BlockListUnary<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     pub fn new(
         source: B,
@@ -756,8 +854,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for BlockListUnary<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for BlockListUnary<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.dtype
@@ -777,13 +880,18 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAccess<F, D, T>
-    for BlockListUnary<F, D, T, B>
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListUnary<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListUnary<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
-    type Transpose = BlockListUnary<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
+    type Slice = BlockListUnary<FD, FS, D, T, B::Slice>;
+    type Transpose = BlockListUnary<FD, FS, D, T, B::Transpose>;
 
-    fn accessor(self) -> DenseAccessor<F, D, T> {
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let unary = BlockListUnary::new(
             self.source.accessor(),
             self.transform,
@@ -838,8 +946,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> ReadValueAt<D>
-    for BlockListUnary<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListUnary<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 

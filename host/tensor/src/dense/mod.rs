@@ -21,8 +21,9 @@ use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::stream::{Read, ReadValueAt};
 use super::{
-    Bounds, Coord, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO,
-    TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType, TensorUnary,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
+    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorUnary,
 };
 
 use access::*;
@@ -37,24 +38,23 @@ pub const PER_BLOCK: usize = 131_072;
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
-pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
+pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
 {
     /// The type returned by `slice`
-    type Slice: DenseAccess<F, D, T>;
+    type Slice: DenseAccess<FD, FS, D, T>;
 
     /// The type returned by `transpose`
-    type Transpose: DenseAccess<F, D, T>;
+    type Transpose: DenseAccess<FD, FS, D, T>;
 
     /// Return a [`DenseAccessor`] enum which contains this accessor.
-    fn accessor(self) -> DenseAccessor<F, D, T>;
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T>;
 
     /// Return a stream of the [`Array`]s which this [`DenseTensor`] comprises.
     fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
-            let blocks = self
-                .value_stream(txn)
-                .await?
+            let blocks = self.value_stream(txn).await?;
+            let blocks = blocks
                 .chunks(PER_BLOCK)
                 .map(|values| values.into_iter().collect::<TCResult<Vec<Number>>>())
                 .map_ok(Array::from);
@@ -100,19 +100,25 @@ pub trait DenseAccess<F: File<Array>, D: Dir, T: Transaction<D>>:
 
 /// A generic enum which can contain any [`DenseAccess`] impl
 #[derive(Clone)]
-pub enum DenseAccessor<F, D, T> {
-    File(BlockListFile<F, D, T>),
-    Slice(file::BlockListFileSlice<F, D, T>),
-    Broadcast(Box<BlockListBroadcast<F, D, T, Self>>),
-    Cast(Box<BlockListCast<F, D, T, Self>>),
-    Combine(Box<BlockListCombine<F, D, T, Self, Self>>),
-    Expand(Box<BlockListExpand<F, D, T, Self>>),
-    Reduce(Box<BlockListReduce<F, D, T, Self>>),
-    Transpose(Box<BlockListTranspose<F, D, T, Self>>),
-    Unary(Box<BlockListUnary<F, D, T, Self>>),
+pub enum DenseAccessor<FD, FS, D, T> {
+    File(BlockListFile<FD, FS, D, T>),
+    Slice(file::BlockListFileSlice<FD, FS, D, T>),
+    Broadcast(Box<BlockListBroadcast<FD, FS, D, T, Self>>),
+    Cast(Box<BlockListCast<FD, FS, D, T, Self>>),
+    Combine(Box<BlockListCombine<FD, FS, D, T, Self, Self>>),
+    Expand(Box<BlockListExpand<FD, FS, D, T, Self>>),
+    Reduce(Box<BlockListReduce<FD, FS, D, T, Self>>),
+    Transpose(Box<BlockListTranspose<FD, FS, D, T, Self>>),
+    Unary(Box<BlockListUnary<FD, FS, D, T, Self>>),
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F, D, T> {
+impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     fn dtype(&self) -> NumberType {
         match self {
             Self::File(file) => file.dtype(),
@@ -171,7 +177,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> TensorAccess for DenseAccessor<F
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAccessor<F, D, T> {
+impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Slice = Self;
     type Transpose = Self;
 
@@ -282,7 +294,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseAccess<F, D, T> for DenseAc
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for DenseAccessor<F, D, T> {
+impl<FD, FS, D, T> ReadValueAt<D> for DenseAccessor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
@@ -300,36 +318,45 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> ReadValueAt<D> for DenseAccessor
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> From<BlockListFile<F, D, T>>
-    for DenseAccessor<F, D, T>
+impl<FD, FS, D, T> From<BlockListFile<FD, FS, D, T>> for DenseAccessor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
-    fn from(file: BlockListFile<F, D, T>) -> Self {
+    fn from(file: BlockListFile<FD, FS, D, T>) -> Self {
         Self::File(file)
     }
 }
 
 /// A `Tensor` stored as a [`File`] of dense [`Array`] blocks
 #[derive(Clone)]
-pub struct DenseTensor<F, D, T, B> {
+pub struct DenseTensor<FD, FS, D, T, B> {
     blocks: B,
-    file: PhantomData<F>,
-    dir: PhantomData<D>,
-    txn: PhantomData<T>,
+    phantom: Phantom<FD, FS, D, T>,
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTensor<F, D, T, B> {
+impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
     /// Consume this `DenseTensor` handle and return its underlying [`DenseAccessor`]
     pub fn into_inner(self) -> B {
         self.blocks
     }
 
-    fn combine<OT: DenseAccess<F, D, T>>(
+    fn combine<OT: DenseAccess<FD, FS, D, T>>(
         self,
-        other: DenseTensor<F, D, T, OT>,
+        other: DenseTensor<FD, FS, D, T, OT>,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<DenseTensor<F, D, T, BlockListCombine<F, D, T, B, OT>>> {
+    ) -> TCResult<DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, OT>>> {
         if self.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
                 "Cannot combine tensors with different shapes: {}, {}",
@@ -350,9 +377,15 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> DenseTe
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFile<F, D, T>> {
+impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     /// Create a new `DenseTensor` with the given [`Schema`].
-    pub async fn create(file: F, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
+    pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         let (shape, dtype) = schema;
         BlockListFile::constant(file, txn_id, shape, dtype.zero())
             .map_ok(Self::from)
@@ -360,7 +393,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
     }
 
     /// Create a new `DenseTensor` filled with the given `value`.
-    pub async fn constant<S>(file: F, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
+    pub async fn constant<S>(file: FD, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
     where
         Shape: From<S>,
     {
@@ -371,7 +404,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
 
     /// Create a new `DenseTensor` filled with a range evenly distributed between `start` and `stop`.
     pub async fn range<S>(
-        file: F,
+        file: FD,
         txn_id: TxnId,
         shape: S,
         start: Number,
@@ -386,8 +419,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> DenseTensor<F, D, T, BlockListFi
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorAccess
-    for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorAccess for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
@@ -406,8 +444,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorA
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorInstance<D>
-    for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorInstance<D> for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Dense = Self;
 
@@ -416,31 +459,38 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> TensorI
     }
 }
 
-impl<F, D, T, B, O> TensorBoolean<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B, O> TensorBoolean<D, DenseTensor<FD, FS, D, T, O>>
+    for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
-    O: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
+    O: DenseAccess<FD, FS, D, T>,
 {
-    type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+    type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
-    fn and(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn and(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
-    fn or(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn or(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
-    fn xor(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn xor(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<FD, D, T>>
-    TensorBoolean<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, D, T, B>
+impl<FD, FS, D, T, B> TensorBoolean<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
 
@@ -467,19 +517,25 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<
 }
 
 #[async_trait]
-impl<F, D, T, B, O> TensorCompare<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B, O> TensorCompare<D, DenseTensor<FD, FS, D, T, O>>
+    for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
-    O: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
+    O: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
-    type Compare = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
-    type Dense = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+    type Compare = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
+    type Dense = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
-    async fn eq(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+    async fn eq(
+        self,
+        other: DenseTensor<FD, FS, D, T, O>,
+        _txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
         fn eq(l: Number, r: Number) -> Number {
             Number::from(l == r)
         }
@@ -487,7 +543,7 @@ where
         self.combine(other, Array::eq, eq, NumberType::Bool)
     }
 
-    fn gt(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+    fn gt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
         fn gt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -495,7 +551,11 @@ where
         self.combine(other, Array::gt, gt, NumberType::Bool)
     }
 
-    async fn gte(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+    async fn gte(
+        self,
+        other: DenseTensor<FD, FS, D, T, O>,
+        _txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
         fn gte(l: Number, r: Number) -> Number {
             Number::from(l >= r)
         }
@@ -503,7 +563,7 @@ where
         self.combine(other, Array::gte, gte, NumberType::Bool)
     }
 
-    fn lt(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+    fn lt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
         fn lt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -511,7 +571,11 @@ where
         self.combine(other, Array::lt, lt, NumberType::Bool)
     }
 
-    async fn lte(self, other: DenseTensor<F, D, T, O>, _txn: Self::Txn) -> TCResult<Self::Dense> {
+    async fn lte(
+        self,
+        other: DenseTensor<FD, FS, D, T, O>,
+        _txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
         fn lte(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -519,7 +583,7 @@ where
         self.combine(other, Array::lte, lte, NumberType::Bool)
     }
 
-    fn ne(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Compare> {
+    fn ne(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
         fn ne(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -529,13 +593,13 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, B> TensorCompare<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, D, T, B>
+impl<FD, FS, D, T, B> TensorCompare<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
     type Compare = Tensor<FD, FS, D, T>;
@@ -585,12 +649,13 @@ where
 }
 
 #[async_trait]
-impl<F, D, T, B> TensorIO<D> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorIO<D> for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -611,21 +676,28 @@ where
 }
 
 #[async_trait]
-impl<F, D, T, B, O> TensorDualIO<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B, O> TensorDualIO<D, DenseTensor<FD, FS, D, T, O>>
+    for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
-    O: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
+    O: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
-    async fn mask(self, _txn: T, _other: DenseTensor<F, D, T, O>) -> TCResult<()> {
+    async fn mask(self, _txn: T, _other: DenseTensor<FD, FS, D, T, O>) -> TCResult<()> {
         Err(TCError::not_implemented("DenseTensor::mask"))
     }
 
-    async fn write(self, txn: T, bounds: Bounds, other: DenseTensor<F, D, T, O>) -> TCResult<()> {
+    async fn write(
+        self,
+        txn: T,
+        bounds: Bounds,
+        other: DenseTensor<FD, FS, D, T, O>,
+    ) -> TCResult<()> {
         debug!("write dense tensor to dense {}", bounds);
 
         let dtype = self.dtype();
@@ -650,13 +722,13 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, B> TensorDualIO<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, D, T, B>
+impl<FD, FS, D, T, B> TensorDualIO<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -677,17 +749,19 @@ where
     }
 }
 
-impl<F, D, T, B, O> TensorMath<D, DenseTensor<F, D, T, O>> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B, O> TensorMath<D, DenseTensor<FD, FS, D, T, O>>
+    for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
-    O: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
+    O: DenseAccess<FD, FS, D, T>,
 {
-    type Combine = DenseTensor<F, D, T, BlockListCombine<F, D, T, B, O>>;
+    type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
-    fn add(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn add(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn add_array(l: &Array, r: &Array) -> Array {
             l + r
         }
@@ -696,7 +770,7 @@ where
         self.combine(other, add_array, Add::add, dtype)
     }
 
-    fn div(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn div(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn div_array(l: &Array, r: &Array) -> Array {
             l / r
         }
@@ -705,7 +779,7 @@ where
         self.combine(other, div_array, Div::div, dtype)
     }
 
-    fn mul(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn mul(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn mul_array(l: &Array, r: &Array) -> Array {
             l * r
         }
@@ -714,7 +788,7 @@ where
         self.combine(other, mul_array, Mul::mul, dtype)
     }
 
-    fn sub(self, other: DenseTensor<F, D, T, O>) -> TCResult<Self::Combine> {
+    fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn sub_array(l: &Array, r: &Array) -> Array {
             l - r
         }
@@ -724,13 +798,13 @@ where
     }
 }
 
-impl<FD, FS, D, T, B> TensorMath<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, D, T, B>
+impl<FD, FS, D, T, B> TensorMath<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
 
@@ -763,12 +837,13 @@ where
     }
 }
 
-impl<F, D, T, B> ReadValueAt<D> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> ReadValueAt<D> for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -777,15 +852,16 @@ where
     }
 }
 
-impl<F, D, T, B> TensorReduce<D> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorReduce<D> for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
-    type Reduce = DenseTensor<F, D, T, BlockListReduce<F, D, T, B>>;
+    type Reduce = DenseTensor<FD, FS, D, T, BlockListReduce<FD, FS, D, T, B>>;
 
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
         BlockListReduce::new(self.blocks, axis, DenseTensor::product_all).map(DenseTensor::from)
@@ -828,19 +904,20 @@ where
     }
 }
 
-impl<F, D, T, B> TensorTransform<D> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorTransform<D> for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
-    type Broadcast = DenseTensor<F, D, T, BlockListBroadcast<F, D, T, B>>;
-    type Cast = DenseTensor<F, D, T, BlockListCast<F, D, T, B>>;
-    type Expand = DenseTensor<F, D, T, BlockListExpand<F, D, T, B>>;
-    type Slice = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Slice>;
-    type Transpose = DenseTensor<F, D, T, <B as DenseAccess<F, D, T>>::Transpose>;
+    type Broadcast = DenseTensor<FD, FS, D, T, BlockListBroadcast<FD, FS, D, T, B>>;
+    type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
+    type Expand = DenseTensor<FD, FS, D, T, BlockListExpand<FD, FS, D, T, B>>;
+    type Slice = DenseTensor<FD, FS, D, T, B::Slice>;
+    type Transpose = DenseTensor<FD, FS, D, T, B::Transpose>;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
         let blocks = BlockListCast::new(self.blocks, dtype);
@@ -869,15 +946,16 @@ where
 }
 
 #[async_trait]
-impl<F, D, T, B> TensorUnary<D> for DenseTensor<F, D, T, B>
+impl<FD, FS, D, T, B> TensorUnary<D> for DenseTensor<FD, FS, D, T, B>
 where
-    F: File<Array>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<F, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
-    type Unary = DenseTensor<F, D, T, BlockListUnary<F, D, T, B>>;
+    type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
 
     fn abs(&self) -> TCResult<Self::Unary> {
         let blocks = BlockListUnary::new(
@@ -926,8 +1004,12 @@ where
 }
 
 #[async_trait]
-impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact
-    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+impl<FD, FS, D, T> Transact for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array> + Transact,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
     async fn commit(&self, txn_id: &TxnId) {
         self.blocks.commit(txn_id).await
@@ -939,8 +1021,13 @@ impl<F: File<Array> + Transact, D: Dir, T: Transaction<D>> Transact
 }
 
 #[async_trait]
-impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Hash<'en, D>
-    for DenseTensor<F, D, T, B>
+impl<'en, FD, FS, D, T, B> Hash<'en, D> for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Item = Array;
     type Txn = T;
@@ -951,10 +1038,16 @@ impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> Ha
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
-    CopyFrom<D, DenseTensor<F, D, T, B>> for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+impl<FD, FS, D, T, B> CopyFrom<D, DenseTensor<FD, FS, D, T, B>>
+    for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
-    async fn copy_from(instance: DenseTensor<F, D, T, B>, file: F, txn: T) -> TCResult<Self> {
+    async fn copy_from(instance: DenseTensor<FD, FS, D, T, B>, file: FD, txn: T) -> TCResult<Self> {
         BlockListFile::copy_from(instance.blocks, file, txn)
             .map_ok(Self::from)
             .await
@@ -962,11 +1055,15 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>>
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D>
-    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+impl<FD, FS, D, T> Persist<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
     type Schema = Schema;
-    type Store = F;
+    type Store = FD;
     type Txn = T;
 
     fn schema(&self) -> &Self::Schema {
@@ -981,33 +1078,35 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> Persist<D>
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> Restore<D>
-    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+impl<FD, FS, D, T> Restore<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.blocks.restore(&backup.blocks, txn_id).await
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> From<B>
-    for DenseTensor<F, D, T, B>
-{
+impl<FD, FS, D, T, B> From<B> for DenseTensor<FD, FS, D, T, B> {
     fn from(blocks: B) -> Self {
         Self {
             blocks,
-            file: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
+            phantom: Phantom::default(),
         }
     }
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> de::FromStream
-    for DenseTensor<F, D, T, BlockListFile<F, D, T>>
+impl<FD, FS, D, T> de::FromStream for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
+    FD: File<Array> + TryFrom<<D as Dir>::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
     <D as Dir>::FileClass: From<TensorType> + Send,
-    F: TryFrom<<D as Dir>::File, Error = TCError>,
 {
     type Context = T;
 
@@ -1025,26 +1124,26 @@ where
     }
 }
 
-impl<F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> fmt::Display
-    for DenseTensor<F, D, T, B>
-{
+impl<FD, FS, D, T, B> fmt::Display for DenseTensor<FD, FS, D, T, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a dense Tensor")
     }
 }
 
-struct DenseTensorVisitor<F, D, T> {
+struct DenseTensorVisitor<FD, FS, D, T> {
     txn_id: TxnId,
-    file: F,
+    file: FD,
+    sparse: PhantomData<FS>,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
 
-impl<F, D, T> DenseTensorVisitor<F, D, T> {
-    fn new(txn_id: TxnId, file: F) -> Self {
+impl<FD, FS, D, T> DenseTensorVisitor<FD, FS, D, T> {
+    fn new(txn_id: TxnId, file: FD) -> Self {
         Self {
             txn_id,
             file,
+            sparse: PhantomData,
             dir: PhantomData,
             txn: PhantomData,
         }
@@ -1052,8 +1151,14 @@ impl<F, D, T> DenseTensorVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisitor<F, D, T> {
-    type Value = DenseTensor<F, D, T, BlockListFile<F, D, T>>;
+impl<FD, FS, D, T> de::Visitor for DenseTensorVisitor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
+    type Value = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
 
     fn expecting() -> &'static str {
         "a dense tensor"
@@ -1078,7 +1183,7 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisit
 
         let cxt = (self.txn_id, self.file, (shape.into(), dtype));
         let blocks = seq
-            .next_element::<BlockListFile<F, D, T>>(cxt)
+            .next_element::<BlockListFile<FD, FS, D, T>>(cxt)
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "dense tensor data"))?;
 
@@ -1087,8 +1192,13 @@ impl<F: File<Array>, D: Dir, T: Transaction<D>> de::Visitor for DenseTensorVisit
 }
 
 #[async_trait]
-impl<'en, F: File<Array>, D: Dir, T: Transaction<D>, B: DenseAccess<F, D, T>> IntoView<'en, D>
-    for DenseTensor<F, D, T, B>
+impl<'en, FD, FS, D, T, B> IntoView<'en, D> for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
     type View = DenseTensorView<'en>;

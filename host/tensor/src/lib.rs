@@ -281,7 +281,7 @@ impl fmt::Display for TensorType {
 /// An n-dimensional array of numbers which supports basic math and logic operations
 #[derive(Clone)]
 pub enum Tensor<FD, FS, D, T> {
-    Dense(DenseTensor<FD, D, T, DenseAccessor<FD, D, T>>),
+    Dense(DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>),
     Sparse(SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>),
 }
 
@@ -671,10 +671,10 @@ impl<'en, FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Hash<'en, 
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<FD, D, T>>
-    From<DenseTensor<FD, D, T, B>> for Tensor<FD, FS, D, T>
+impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>, B: DenseAccess<FD, FS, D, T>>
+    From<DenseTensor<FD, FS, D, T, B>> for Tensor<FD, FS, D, T>
 {
-    fn from(dense: DenseTensor<FD, D, T, B>) -> Self {
+    fn from(dense: DenseTensor<FD, FS, D, T, B>) -> Self {
         Self::Dense(dense.into_inner().accessor().into())
     }
 }
@@ -750,7 +750,7 @@ where
 
         match class {
             TensorType::Dense => {
-                map.next_value::<DenseTensor<FD, D, T, BlockListFile<FD, D, T>>>(self.txn)
+                map.next_value::<DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>>(self.txn)
                     .map_ok(Tensor::from)
                     .await
             }
@@ -864,17 +864,19 @@ where
 }
 
 #[derive(Clone)]
-struct Phantom<F, D, T> {
-    file: PhantomData<F>,
+struct Phantom<FD, FS, D, T> {
+    dense: PhantomData<FD>,
+    sparse: PhantomData<FS>,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
 
-impl<F, D, T> Default for Phantom<F, D, T> {
+impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
     #[inline]
     fn default() -> Self {
         Self {
-            file: PhantomData,
+            dense: PhantomData,
+            sparse: PhantomData,
             dir: PhantomData,
             txn: PhantomData,
         }
