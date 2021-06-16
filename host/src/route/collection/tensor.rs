@@ -336,6 +336,38 @@ where
     }
 }
 
+struct WriteHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for WriteHandler<T>
+where
+    T: TensorAccess
+        + TensorIO<fs::Dir, Txn = Txn>
+        + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + Send
+        + Sync
+        + 'a,
+{
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(move |txn, key, value| {
+            Box::pin(write(self.tensor, txn, key.into(), value))
+        }))
+    }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(move |txn, mut params| {
+            Box::pin(async move {
+                let bounds = params.or_default(&label("bounds").into())?;
+                let value = params.require(&label("value").into())?;
+                write(self.tensor, txn, bounds, value)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
 impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
     for DenseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, B>
 {
@@ -418,6 +450,8 @@ where
                 TensorReduce::sum_all,
             ))),
 
+            "write" => Some(Box::new(WriteHandler { tensor: cloned })),
+
             _ => None,
         }
     } else {
@@ -435,14 +469,10 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
         .await
 }
 
-async fn write<
+async fn write<T>(tensor: T, txn: Txn, key: Scalar, value: State) -> TCResult<()>
+where
     T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>,
->(
-    tensor: T,
-    txn: Txn,
-    key: Scalar,
-    value: State,
-) -> TCResult<()> {
+{
     if key.matches::<Coord>() {
         let value =
             Value::try_cast_from(value, |v| TCError::bad_request("invalid tensor element", v))?;
@@ -496,6 +526,14 @@ pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
     match scalar {
         none if none.is_none() => Ok(Bounds::all(shape)),
         Scalar::Tuple(bounds) => {
+            if bounds.len() > shape.len() {
+                return Err(TCError::unsupported(format!(
+                    "tensor of shape {} does not support bounds with {} axes",
+                    shape,
+                    bounds.len()
+                )));
+            }
+
             let mut axes = Vec::with_capacity(shape.len());
 
             for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
@@ -504,13 +542,13 @@ pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
                     let start = match range.start {
                         Bound::Un => 0,
                         Bound::In(start) => cast_bound(shape[axis], start)?,
-                        Bound::Ex(start) => cast_bound(shape[1], start)? + 1,
+                        Bound::Ex(start) => cast_bound(shape[axis], start)? + 1,
                     };
 
                     let end = match range.end {
                         Bound::Un => shape[axis],
-                        Bound::In(end) => cast_bound(shape[axis], end)?,
-                        Bound::Ex(end) => cast_bound(shape[1], end)?,
+                        Bound::In(end) => cast_bound(shape[axis], end)? + 1,
+                        Bound::Ex(end) => cast_bound(shape[axis], end)?,
                     };
 
                     AxisBounds::In(start..end)

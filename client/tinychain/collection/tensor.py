@@ -2,7 +2,7 @@
 
 from tinychain import ref
 from tinychain.util import uri
-from tinychain.value import Number, F32
+from tinychain.value import F32, Nil, Number
 
 from . import schema
 from .collection import Collection, Range
@@ -22,6 +22,17 @@ class Tensor(Collection):
             else x for x in bounds]
 
         return self._post("", Tensor, bounds=bounds)
+
+    def __setitem__(self, bounds, value):
+        if bounds is not None:
+            if not isinstance(bounds, tuple):
+                bounds = tuple(bounds)
+
+            bounds = [
+                Range.from_slice(x) if isinstance(x, slice)
+                else x for x in bounds]
+
+        return self._post("write", Nil, bounds=bounds, value=value)
 
     def __add__(self, other):
         return self.add(other)
@@ -115,10 +126,7 @@ class Tensor(Collection):
         return self._post("ne", Tensor, r=other)
 
     def product(self, axis=None):
-        """
-        Calculate the product of this `Tensor` along the given `axis`,
-        or the total product if no axis is given.
-        """
+        """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
 
         rtype = Number if axis is None else Tensor
         return self._get("product", axis, rtype)
@@ -129,10 +137,7 @@ class Tensor(Collection):
         return self._post("sub", Tensor, r=other)
 
     def sum(self, axis=None):
-        """
-        Calculate the sum of this `Tensor` along the given `axis`,
-        or the total sum if no axis is given.
-        """
+        """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
         return self._get("sum", axis, rtype)
@@ -141,10 +146,10 @@ class Tensor(Collection):
         """
         Write a `Tensor` or `Number` to the given slice of this one.
 
-        If `bounds` is `None`, this entire `Tensor` will be overwritten.
+        If `bounds` is `None`, this entire `Tensor` will be overwritten, broadcasting the `value` if necessary.
         """
 
-        return self._put("", bounds, value)
+        return self.__setitem__(bounds, value)
 
 
 class Dense(Tensor):

@@ -8,7 +8,7 @@ from testutils import PORT, start_host, PersistenceTest
 ENDPOINT = "/transact/hypothetical"
 
 
-class DenseTensorTests(unittest.TestCase):
+class DenseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_dense_tensor")
@@ -153,7 +153,7 @@ class DenseTensorTests(unittest.TestCase):
         cls.host.stop()
 
 
-class SparseTensorTests(unittest.TestCase):
+class SparseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_sparse_tensor")
@@ -171,15 +171,15 @@ class SparseTensorTests(unittest.TestCase):
         expected = expect_sparse(tc.I32, shape, [[coord, value]])
         self.assertEqual(actual, expected)
 
-    def testSlice(self):
+    def testWriteAndSlice(self):
         shape = [2, 5]
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
-        cxt.result = cxt.tensor[1, 2:-1]
+        cxt.result = tc.After(cxt.tensor.write([None, slice(2, -1)], 1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_sparse(tc.F32, [2], [])
+        expected = expect_sparse(tc.F32, [2, 5], [[[0, 2], 1], [[0, 3], 1]])
         self.assertEqual(actual, expected)
 
 
