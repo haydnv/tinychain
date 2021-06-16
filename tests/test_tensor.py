@@ -171,6 +171,17 @@ class SparseTensorTests(unittest.TestCase):
         expected = expect_sparse(tc.I32, shape, [[coord, value]])
         self.assertEqual(actual, expected)
 
+    def testSlice(self):
+        shape = [2, 5]
+
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Sparse.zeros(shape)
+        cxt.result = cxt.tensor[1, 2:-1]
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_sparse(tc.F32, [2], [])
+        self.assertEqual(actual, expected)
+
 
 class ChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 4

@@ -378,7 +378,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    fn new(source: A, shape: Shape) -> TCResult<Self> {
+    pub fn new(source: A, shape: Shape) -> TCResult<Self> {
         let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
         Ok(Self {
             source,

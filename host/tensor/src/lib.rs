@@ -190,10 +190,7 @@ pub trait TensorReduce<D: Dir> {
 }
 
 /// [`Tensor`] transforms
-pub trait TensorTransform<D: Dir> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<D>;
-
+pub trait TensorTransform {
     /// A broadcast [`Tensor`]
     type Broadcast: TensorInstance;
 
@@ -209,11 +206,11 @@ pub trait TensorTransform<D: Dir> {
     /// A transposed [`Tensor`]
     type Transpose: TensorInstance;
 
-    /// Cast this [`Tensor`] to the given `dtype`.
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
-
     /// Broadcast this [`Tensor`] to the given `shape`.
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast>;
+
+    /// Cast this [`Tensor`] to the given `dtype`.
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
 
     /// Insert a new dimension of size 1 at the given `axis`.
     fn expand_dims(self, axis: usize) -> TCResult<Self::Expand>;
@@ -593,7 +590,7 @@ where
     }
 }
 
-impl<FD, FS, D, T> TensorTransform<D> for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorTransform for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
@@ -601,19 +598,11 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
-    type Txn = T;
     type Broadcast = Self;
     type Cast = Self;
     type Expand = Self;
     type Slice = Self;
     type Transpose = Self;
-
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self> {
-        match self {
-            Self::Dense(dense) => dense.cast_into(dtype).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
-        }
-    }
 
     fn broadcast(self, shape: Shape) -> TCResult<Self> {
         if &shape == self.shape() {
@@ -622,28 +611,35 @@ where
 
         match self {
             Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.broadcast(shape).map(Self::from),
+        }
+    }
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.cast_into(dtype).map(Self::from),
+            Self::Sparse(sparse) => sparse.cast_into(dtype).map(Self::from),
         }
     }
 
     fn expand_dims(self, axis: usize) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.expand_dims(axis).map(Self::from),
         }
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.slice(bounds).map(Self::from),
         }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
         }
     }
 }

@@ -220,12 +220,12 @@ where
     T: TensorAccess
         + TensorIO<fs::Dir, Txn = Txn>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
-        + TensorTransform<fs::Dir, Txn = Txn>
+        + TensorTransform
         + Clone
         + Send
         + Sync,
     Collection: From<T>,
-    Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
+    Collection: From<<T as TensorTransform>::Slice>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
@@ -359,7 +359,7 @@ where
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
-        + TensorTransform<fs::Dir, Txn = Txn>
+        + TensorTransform
         + TensorUnary<fs::Dir, Txn = Txn>
         + Clone
         + Send
@@ -367,7 +367,7 @@ where
     Tensor: From<T>,
     Collection: From<T>,
     Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
-    Collection: From<<T as TensorTransform<fs::Dir>>::Slice>,
+    Collection: From<<T as TensorTransform>::Slice>,
 {
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor.clone())))

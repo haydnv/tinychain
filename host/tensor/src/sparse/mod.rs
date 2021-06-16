@@ -17,9 +17,11 @@ use tcgeneric::{NativeClass, TCTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO, TensorInstance, TensorType,
+    Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO, TensorInstance, TensorTransform,
+    TensorType,
 };
 
+use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor};
 pub use table::SparseTable;
 
@@ -108,6 +110,47 @@ where
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.accessor.write_value(txn_id, coord, value).await
+    }
+}
+
+impl<FD, FS, D, T, A> TensorTransform for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Broadcast = SparseTensor<FD, FS, D, T, SparseBroadcast<FD, FS, D, T, A>>;
+    type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
+    type Expand = SparseTensor<FD, FS, D, T, SparseExpand<FD, FS, D, T, A>>;
+    type Slice = SparseTensor<FD, FS, D, T, A::Slice>;
+    type Transpose = SparseTensor<FD, FS, D, T, A::Transpose>;
+
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        let accessor = SparseBroadcast::new(self.accessor, shape)?;
+        Ok(accessor.into())
+    }
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        let accessor = SparseCast::new(self.accessor, dtype);
+        Ok(accessor.into())
+    }
+
+    fn expand_dims(self, axis: usize) -> TCResult<Self::Expand> {
+        let accessor = SparseExpand::new(self.accessor, axis)?;
+        Ok(accessor.into())
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let accessor = self.accessor.slice(bounds)?;
+        Ok(accessor.into())
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let accessor = self.accessor.transpose(permutation)?;
+        Ok(accessor.into())
     }
 }
 

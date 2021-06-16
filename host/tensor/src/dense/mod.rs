@@ -623,7 +623,7 @@ where
     }
 }
 
-impl<FD, FS, D, T, B> TensorTransform<D> for DenseTensor<FD, FS, D, T, B>
+impl<FD, FS, D, T, B> TensorTransform for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
@@ -632,20 +632,19 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Txn = T;
     type Broadcast = DenseTensor<FD, FS, D, T, BlockListBroadcast<FD, FS, D, T, B>>;
     type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
     type Expand = DenseTensor<FD, FS, D, T, BlockListExpand<FD, FS, D, T, B>>;
     type Slice = DenseTensor<FD, FS, D, T, B::Slice>;
     type Transpose = DenseTensor<FD, FS, D, T, B::Transpose>;
 
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
-        let blocks = BlockListCast::new(self.blocks, dtype);
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        let blocks = BlockListBroadcast::new(self.blocks, shape)?;
         Ok(DenseTensor::from(blocks))
     }
 
-    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
-        let blocks = BlockListBroadcast::new(self.blocks, shape)?;
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        let blocks = BlockListCast::new(self.blocks, dtype);
         Ok(DenseTensor::from(blocks))
     }
 
