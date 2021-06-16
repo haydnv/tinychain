@@ -4,7 +4,7 @@ use std::pin::Pin;
 use afarray::Array;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, Stream, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use tc_btree::Node;
@@ -14,6 +14,7 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{GroupStream, TCBoxTryFuture};
 
+use crate::dense::{DenseAccess, DenseAccessor};
 use crate::stream::{sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
@@ -49,6 +50,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),
     Cast(Box<SparseCast<FD, FS, D, T, Self>>),
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
+    Dense(Box<DenseToSparse<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
     Slice(SparseTableSlice<FD, FS, D, T>),
     Reduce(Box<SparseReduce<FD, FS, D, T>>),
@@ -70,6 +72,7 @@ where
             Self::Broadcast(broadcast) => broadcast.dtype(),
             Self::Cast(cast) => cast.dtype(),
             Self::Combine(combine) => combine.dtype(),
+            Self::Dense(dense) => dense.dtype(),
             Self::Expand(expand) => expand.dtype(),
             Self::Slice(slice) => slice.dtype(),
             Self::Reduce(reduce) => reduce.dtype(),
@@ -84,6 +87,7 @@ where
             Self::Broadcast(broadcast) => broadcast.ndim(),
             Self::Cast(cast) => cast.ndim(),
             Self::Combine(combine) => combine.ndim(),
+            Self::Dense(dense) => dense.ndim(),
             Self::Expand(expand) => expand.ndim(),
             Self::Slice(slice) => slice.ndim(),
             Self::Reduce(reduce) => reduce.ndim(),
@@ -98,6 +102,7 @@ where
             Self::Broadcast(broadcast) => broadcast.shape(),
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
+            Self::Dense(dense) => dense.shape(),
             Self::Expand(expand) => expand.shape(),
             Self::Reduce(reduce) => reduce.shape(),
             Self::Slice(slice) => slice.shape(),
@@ -112,6 +117,7 @@ where
             Self::Broadcast(broadcast) => broadcast.size(),
             Self::Cast(cast) => cast.size(),
             Self::Combine(combine) => combine.size(),
+            Self::Dense(dense) => dense.size(),
             Self::Expand(expand) => expand.size(),
             Self::Slice(slice) => slice.size(),
             Self::Reduce(reduce) => reduce.size(),
@@ -143,6 +149,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled(txn).await,
             Self::Cast(cast) => cast.filled(txn).await,
             Self::Combine(combine) => combine.filled(txn).await,
+            Self::Dense(dense) => dense.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
             Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Slice(slice) => slice.filled(txn).await,
@@ -157,6 +164,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled_count(txn).await,
             Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Combine(combine) => combine.filled_count(txn).await,
+            Self::Dense(dense) => dense.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Slice(slice) => slice.filled_count(txn).await,
@@ -171,6 +179,7 @@ where
             Self::Broadcast(broadcast) => broadcast.slice(bounds).map(SparseAccess::accessor),
             Self::Cast(cast) => cast.slice(bounds).map(SparseAccess::accessor),
             Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
+            Self::Dense(dense) => dense.slice(bounds).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
             Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
             Self::Slice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
@@ -189,6 +198,7 @@ where
             Self::Combine(combinator) => combinator
                 .transpose(permutation)
                 .map(SparseAccess::accessor),
+            Self::Dense(dense) => dense.transpose(permutation).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.transpose(permutation).map(SparseAccess::accessor),
             Self::Reduce(reduce) => reduce.transpose(permutation).map(SparseAccess::accessor),
             Self::Table(table) => table.transpose(permutation).map(SparseAccess::accessor),
@@ -205,6 +215,7 @@ where
             Self::Broadcast(broadcast) => broadcast.write_value(txn_id, coord, value).await,
             Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
             Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
+            Self::Dense(dense) => dense.write_value(txn_id, coord, value).await,
             Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
             Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
             Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
@@ -230,12 +241,123 @@ where
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::Dense(dense) => dense.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
             Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
             Self::Unary(unary) => unary.read_value_at(txn, coord),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseToSparse<FD, FS, D, T, B> {
+    source: B,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, B> TensorAccess for DenseToSparse<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> SparseAccess<FD, FS, D, T> for DenseToSparse<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Slice = DenseToSparse<FD, FS, D, T, B::Slice>;
+    type Transpose = DenseToSparse<FD, FS, D, T, B::Transpose>;
+
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Dense(Box::new(DenseToSparse {
+            source: self.source.accessor(),
+            phantom: self.phantom,
+        }))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let zero = self.dtype().zero();
+        let bounds = Bounds::all(self.shape());
+
+        let values = self.source.value_stream(txn).await?;
+        let filled = stream::iter(bounds.affected())
+            .zip(values)
+            .map(|(coord, r)| r.map(|value| (coord, value)))
+            .try_filter(move |(_, value)| future::ready(value != &zero));
+
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        let zero = self.dtype().zero();
+        let values = self.source.value_stream(txn).await?;
+
+        values
+            .try_filter(move |value| future::ready(value != &zero))
+            .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+            .await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.source.slice(bounds).map(DenseToSparse::from)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        self.source.transpose(permutation).map(DenseToSparse::from)
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.source.write_value(txn_id, coord.into(), value).await
+    }
+}
+
+impl<FD, FS, D, T, B> ReadValueAt<D> for DenseToSparse<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        self.source.read_value_at(txn, coord)
+    }
+}
+
+impl<FD, FS, D, T, B> From<B> for DenseToSparse<FD, FS, D, T, B> {
+    fn from(source: B) -> Self {
+        Self {
+            source,
+            phantom: Phantom::default(),
         }
     }
 }

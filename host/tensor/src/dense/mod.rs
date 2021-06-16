@@ -19,6 +19,7 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::ValueType;
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
+use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
@@ -44,6 +45,13 @@ pub struct DenseTensor<FD, FS, D, T, B> {
     phantom: Phantom<FD, FS, D, T>,
 }
 
+impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B> {
+    /// Consume this `DenseTensor` handle and return its underlying [`DenseAccessor`]
+    pub fn into_inner(self) -> B {
+        self.blocks
+    }
+}
+
 impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -52,11 +60,6 @@ where
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    /// Consume this `DenseTensor` handle and return its underlying [`DenseAccessor`]
-    pub fn into_inner(self) -> B {
-        self.blocks
-    }
-
     fn combine<OT: DenseAccess<FD, FS, D, T>>(
         self,
         other: DenseTensor<FD, FS, D, T, OT>,
@@ -151,22 +154,20 @@ where
     }
 }
 
-impl<FD, FS, D, T, B> TensorInstance<D> for DenseTensor<FD, FS, D, T, B>
-where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
-{
+impl<FD, FS, D, T, B> TensorInstance for DenseTensor<FD, FS, D, T, B> {
     type Dense = Self;
+    type Sparse = SparseTensor<FD, FS, D, T, DenseToSparse<FD, FS, D, T, B>>;
 
     fn into_dense(self) -> Self::Dense {
         self
     }
+
+    fn into_sparse(self) -> Self::Sparse {
+        DenseToSparse::from(self.into_inner()).into()
+    }
 }
 
-impl<FD, FS, D, T, B, O> TensorBoolean<D, DenseTensor<FD, FS, D, T, O>>
+impl<FD, FS, D, T, B, O> TensorBoolean<DenseTensor<FD, FS, D, T, O>>
     for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -192,7 +193,7 @@ where
     }
 }
 
-impl<FD, FS, D, T, B> TensorBoolean<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
+impl<FD, FS, D, T, B> TensorBoolean<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,

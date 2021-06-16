@@ -61,18 +61,24 @@ pub trait TensorAccess {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance<D: Dir> {
+pub trait TensorInstance {
     /// A dense representation of this [`Tensor`]
-    type Dense: TensorInstance<D>;
+    type Dense: TensorInstance;
+
+    /// A sparse representation of this [`Tensor`]
+    type Sparse: TensorInstance;
 
     /// Return a dense representation of this [`Tensor`].
     fn into_dense(self) -> Self::Dense;
+
+    /// Return a sparse representation of this [`Tensor`].
+    fn into_sparse(self) -> Self::Sparse;
 }
 
 /// [`Tensor`] boolean operations.
-pub trait TensorBoolean<D: Dir, O> {
+pub trait TensorBoolean<O> {
     /// The result type of a boolean operation.
-    type Combine: TensorInstance<D>;
+    type Combine: TensorInstance;
 
     /// Logical and
     fn and(self, other: O) -> TCResult<Self::Combine>;
@@ -91,10 +97,10 @@ pub trait TensorCompare<D: Dir, O> {
     type Txn: Transaction<D>;
 
     /// The result of a comparison operation
-    type Compare: TensorInstance<D>;
+    type Compare: TensorInstance;
 
     /// The result of a comparison operation which can only return a dense [`Tensor`]
-    type Dense: TensorInstance<D>;
+    type Dense: TensorInstance;
 
     /// Element-wise equality
     async fn eq(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
@@ -147,7 +153,7 @@ pub trait TensorDualIO<D: Dir, O> {
 /// [`Tensor`] math operations
 pub trait TensorMath<D: Dir, O> {
     /// The result type of a math operation
-    type Combine: TensorInstance<D>;
+    type Combine: TensorInstance;
 
     /// Add two tensors together.
     fn add(self, other: O) -> TCResult<Self::Combine>;
@@ -168,7 +174,7 @@ pub trait TensorReduce<D: Dir> {
     type Txn: Transaction<D>;
 
     /// The result type of a reduce operation
-    type Reduce: TensorInstance<D>;
+    type Reduce: TensorInstance;
 
     /// Return the product of this [`Tensor`] along the given `axis`.
     fn product(self, axis: usize) -> TCResult<Self::Reduce>;
@@ -189,19 +195,19 @@ pub trait TensorTransform<D: Dir> {
     type Txn: Transaction<D>;
 
     /// A broadcast [`Tensor`]
-    type Broadcast: TensorInstance<D>;
+    type Broadcast: TensorInstance;
 
     /// A type-cast [`Tensor`]
-    type Cast: TensorInstance<D>;
+    type Cast: TensorInstance;
 
     /// A [`Tensor`] with an expanded dimension
-    type Expand: TensorInstance<D>;
+    type Expand: TensorInstance;
 
     /// A [`Tensor`] slice
-    type Slice: TensorInstance<D>;
+    type Slice: TensorInstance;
 
     /// A transposed [`Tensor`]
-    type Transpose: TensorInstance<D>;
+    type Transpose: TensorInstance;
 
     /// Cast this [`Tensor`] to the given `dtype`.
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
@@ -227,7 +233,7 @@ pub trait TensorUnary<D: Dir> {
     type Txn: Transaction<D>;
 
     /// The return type of a unary operation
-    type Unary: TensorInstance<D>;
+    type Unary: TensorInstance;
 
     /// Element-wise absolute value
     fn abs(&self) -> TCResult<Self::Unary>;
@@ -333,20 +339,33 @@ where
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> TensorInstance<D>
-    for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorInstance for Tensor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
 {
     type Dense = Self;
+    type Sparse = Self;
 
     fn into_dense(self) -> Self {
         match self {
             Self::Dense(dense) => Self::Dense(dense),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => Self::Dense(sparse.into_dense().into_inner().accessor().into()),
+        }
+    }
+
+    fn into_sparse(self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Sparse(dense.into_sparse().into_inner().accessor().into()),
+            Self::Sparse(sparse) => Self::Sparse(sparse),
         }
     }
 }
 
-impl<FD, FS, D, T> TensorBoolean<D, Self> for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorBoolean<Self> for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,

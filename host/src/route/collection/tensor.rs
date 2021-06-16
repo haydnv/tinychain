@@ -355,7 +355,7 @@ where
     T: TensorAccess
         + TensorIO<fs::Dir, Txn = Txn>
         + TensorCompare<fs::Dir, Tensor, Compare = Tensor, Dense = Tensor, Txn = Txn>
-        + TensorBoolean<fs::Dir, Tensor, Combine = Tensor>
+        + TensorBoolean<Tensor, Combine = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>

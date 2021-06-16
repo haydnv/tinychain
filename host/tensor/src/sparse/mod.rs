@@ -20,7 +20,7 @@ use super::{
     Bounds, Coord, Phantom, Schema, Shape, TensorAccess, TensorIO, TensorInstance, TensorType,
 };
 
-pub use access::{SparseAccess, SparseAccessor};
+pub use access::{DenseToSparse, SparseAccess, SparseAccessor};
 pub use table::SparseTable;
 
 mod access;
@@ -67,19 +67,16 @@ where
     }
 }
 
-impl<FD, FS, D, T, A> TensorInstance<D> for SparseTensor<FD, FS, D, T, A>
-where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
-{
+impl<FD, FS, D, T, A> TensorInstance for SparseTensor<FD, FS, D, T, A> {
     type Dense = DenseTensor<FD, FS, D, T, BlockListSparse<FD, FS, D, T, A>>;
+    type Sparse = Self;
 
     fn into_dense(self) -> Self::Dense {
         BlockListSparse::from(self.into_inner()).into()
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        self
     }
 }
 
