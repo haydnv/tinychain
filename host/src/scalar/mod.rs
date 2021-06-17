@@ -980,9 +980,12 @@ impl de::Visitor for ScalarVisitor {
         if key.starts_with('/') {
             if let Ok(path) = TCPathBuf::from_str(&key) {
                 if let Some(class) = ScalarType::from_path(&path) {
+                    debug!("decode instance of {}", class);
                     if let Ok(scalar) = Self::visit_map_value(class, &mut access).await {
                         return Ok(scalar);
                     }
+                } else {
+                    debug!("not a scalar classpath: {}", path);
                 }
             }
         }

@@ -16,12 +16,12 @@ use crate::scalar::{Scalar, Scope};
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{Refer, TCRef};
+use super::Refer;
 
 /// Struct to delay resolving another reference(s) until some preliminary reference is resolved.
 #[derive(Clone, Eq, PartialEq)]
 pub struct After {
-    when: TCRef,
+    when: Scalar,
     then: Scalar,
 }
 
@@ -57,7 +57,7 @@ impl Refer for After {
 
 impl TryCastFrom<Scalar> for After {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        scalar.matches::<(TCRef, Scalar)>()
+        scalar.matches::<(Scalar, Scalar)>()
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
@@ -73,7 +73,7 @@ impl de::FromStream for After {
 
     async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
         let (when, then) =
-            <(TCRef, Scalar) as de::FromStream>::from_stream(context, decoder).await?;
+            <(Scalar, Scalar) as de::FromStream>::from_stream(context, decoder).await?;
 
         Ok(Self { when, then })
     }

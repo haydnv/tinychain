@@ -188,7 +188,7 @@ class SparseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
-        cxt.result = tc.After(cxt.big.write([1], 1), cxt.big + cxt.small)
+        cxt.result = tc.After([cxt.big.write([1], 1)], cxt.big + cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.F32, shape, [
