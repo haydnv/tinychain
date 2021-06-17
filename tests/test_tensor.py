@@ -205,6 +205,28 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.F32, shape, expected)
         self.assertEqual(actual, expected)
 
+    def testDiv(self):
+        shape = [3, 2, 4]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape)
+        cxt.small = tc.tensor.Sparse.zeros([1, 1])
+        cxt.result = tc.After([
+            cxt.big.write([slice(2)], 1),
+            cxt.small.write([0], -2),
+        ], cxt.big / cxt.small)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        big = np.zeros(shape)
+        big[:2] = 1.
+        small = np.zeros([1, 1])
+        small[0] = -2.
+        expected = big / small
+
+        expected = expect_sparse(tc.F32, shape, expected)
+        self.assertEqual(actual, expected)
+
     def testMul(self):
         shape = [3, 5, 2]
 
@@ -225,6 +247,28 @@ class SparseTests(unittest.TestCase):
         expected = big * small
 
         expected = expect_sparse(tc.F32, shape, expected)
+        self.assertEqual(actual, expected)
+
+    def testSub(self):
+        shape = [3, 5, 2]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape, tc.I16)
+        cxt.small = tc.tensor.Sparse.zeros([5, 2], tc.U32)
+        cxt.result = tc.After([
+            cxt.big.write([None, slice(1, -2)], 2),
+            cxt.small.write([1], 3),
+        ], cxt.small - cxt.big)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        big = np.zeros(shape)
+        big[:, 1:-2] = 2
+        small = np.zeros([5, 2])
+        small[1] = 3
+        expected = small - big
+
+        expected = expect_sparse(tc.I16, shape, expected)
         self.assertEqual(actual, expected)
 
 
@@ -272,7 +316,7 @@ def expect_dense(dtype, shape, flat):
 
 def expect_sparse(dtype, shape, values):
     if isinstance(values, np.ndarray):
-        values = nparray_to_sparse(values)
+        values = nparray_to_sparse(values, dtype)
 
     return {
         str(tc.uri(tc.tensor.Sparse)): [
@@ -290,7 +334,8 @@ def product(seq):
     return p
 
 
-def nparray_to_sparse(arr, dtype=int):
+def nparray_to_sparse(arr, dtype):
+    dtype = float if issubclass(dtype, tc.Float) else int
     zero = dtype(0)
     coords = itertools.product(*[range(dim) for dim in arr.shape])
     sparse = [[list(coord), n] for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten())) if n != zero]
