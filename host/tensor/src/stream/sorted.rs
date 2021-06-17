@@ -103,7 +103,7 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Coord>>>(
         .map(|block| block.into_iter().collect::<TCResult<Vec<Coord>>>())
         .map_ok(move |block| {
             let num_coords = block.len();
-            let block = block.into_iter().flatten().collect::<Coord>();
+            let block = block.into_iter().flatten().collect::<Vec<u64>>();
             af::Array::new(&block, af::Dim4::new(&[ndim, num_coords as u64, 1, 1]))
         })
         .map_ok(move |block| {

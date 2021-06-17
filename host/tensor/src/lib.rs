@@ -469,6 +469,8 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        debug!("Tensor::write_value {} {}", bounds, value);
+
         match self {
             Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
             Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value).await,

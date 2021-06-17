@@ -447,6 +447,10 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let rebase = self.rebase.clone();
         let num_coords = self.source.clone().filled_count(txn.clone()).await?;
+        if num_coords == 0 {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let filled = self.source.clone().filled(txn.clone()).await?;
 
         let filled = filled

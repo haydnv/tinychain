@@ -473,14 +473,6 @@ async fn write<T>(tensor: T, txn: Txn, key: Scalar, value: State) -> TCResult<()
 where
     T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>,
 {
-    if key.matches::<Coord>() {
-        let value =
-            Value::try_cast_from(value, |v| TCError::bad_request("invalid tensor element", v))?;
-        let value = value.try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
-        let coord = key.opt_cast_into().unwrap();
-        return tensor.write_value_at(*txn.id(), coord, value).await;
-    }
-
     let bounds = cast_bounds(tensor.shape(), key.into())?;
 
     match value {

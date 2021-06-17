@@ -39,6 +39,18 @@ pub struct BlockListFile<FD, FS, D, T> {
     txn: PhantomData<T>,
 }
 
+impl<FD, FS, D, T> BlockListFile<FD, FS, D, T> {
+    fn new(file: FD, schema: Schema) -> Self {
+        Self {
+            file,
+            schema,
+            sparse: PhantomData,
+            dir: PhantomData,
+            txn: PhantomData,
+        }
+    }
+}
+
 impl<FD, FS, D, T> BlockListFile<FD, FS, D, T>
 where
     FD: File<Array>,
@@ -63,11 +75,9 @@ where
         let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
             let blocks = blocks.chain(iter::once(Ok(Array::constant(value.clone(), trailing_len))));
-            BlockListFile::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks))
-                .await
+            Self::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks)).await
         } else {
-            BlockListFile::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks))
-                .await
+            Self::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks)).await
         }
     }
 
@@ -79,21 +89,24 @@ where
         dtype: NumberType,
         blocks: S,
     ) -> TCResult<Self> {
+        debug!("BlockListFile::from_blocks {}", shape);
+
         blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
+            .inspect_ok(|(id, block)| debug!("block {} has {} elements", id, block.len()))
             .map_ok(|(id, block)| file.create_block(txn_id, id, block))
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
-        Ok(BlockListFile {
-            file,
-            schema: (shape, dtype),
-            sparse: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
-        })
+        if file.is_empty(&txn_id).await? {
+            return Err(TCError::unsupported(
+                "tried to create a dense tensor from an empty block list",
+            ));
+        }
+
+        Ok(Self::new(file, (shape, dtype)))
     }
 
     /// Construct a new `BlockListFile` from the given `Stream` of elements.
@@ -113,13 +126,7 @@ where
             i += 1;
         }
 
-        Ok(BlockListFile {
-            file,
-            schema: (shape, dtype),
-            sparse: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
-        })
+        Ok(Self::new(file, (shape, dtype)))
     }
 
     /// Construct a new `BlockListFile` of elements evenly distributed between `start` and `stop`.
@@ -158,7 +165,7 @@ where
     /// Sort the elements in this `BlockListFile`.
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
-        if num_blocks == 1 {
+        if num_blocks <= 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
             block.sort(true)?;
@@ -430,13 +437,7 @@ where
     }
 
     async fn load(_txn: &T, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
-        Ok(Self {
-            file,
-            schema,
-            sparse: PhantomData,
-            dir: PhantomData,
-            txn: PhantomData,
-        })
+        Ok(Self::new(file, schema))
     }
 }
 
@@ -534,13 +535,7 @@ where
         }?;
 
         if size == shape.size() {
-            Ok(Self {
-                file,
-                schema: (shape, dtype),
-                sparse: PhantomData,
-                dir: PhantomData,
-                txn: PhantomData,
-            })
+            Ok(Self::new(file, (shape, dtype)))
         } else {
             Err(de::Error::custom(format!(
                 "tensor data has the wrong number of elements ({}) for shape {}",

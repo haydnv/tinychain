@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -132,8 +133,10 @@ where
             .await
     }
 
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
+        bounds.normalize(self.shape());
         stream::iter(bounds.affected())
+            .inspect(|coord| debug!("SparseTensor::write_value {:?} <- {}", coord, value))
             .map(|coord| self.accessor.write_value(txn_id, coord, value))
             .buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))

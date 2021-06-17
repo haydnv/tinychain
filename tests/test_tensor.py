@@ -182,6 +182,25 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.F32, [2, 5], [[[0, 2], 1], [[0, 3], 1]])
         self.assertEqual(actual, expected)
 
+    def testAdd(self):
+        shape = [5, 2, 3]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape)
+        cxt.small = tc.tensor.Sparse.zeros([3])
+        cxt.result = tc.After(cxt.big.write([1], 1), cxt.big + cxt.small)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_sparse(tc.F32, shape, [
+            [[1, 0, 0], 1],
+            [[1, 0, 1], 1],
+            [[1, 0, 2], 1],
+            [[1, 1, 0], 1],
+            [[1, 1, 1], 1],
+            [[1, 1, 2], 1]
+        ])
+        self.assertEqual(actual, expected)
+
 
 class ChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 4

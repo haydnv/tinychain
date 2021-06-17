@@ -167,7 +167,7 @@ impl IndexSchema {
         if key.len() != self.key.len() {
             let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
             return Err(TCError::bad_request(
-                format!("Invalid key {}, expected", Value::Tuple(key.into())),
+                format!("invalid key {}, expected", Value::Tuple(key.into())),
                 format!("[{}]", key_columns.join(", ")),
             ));
         }
