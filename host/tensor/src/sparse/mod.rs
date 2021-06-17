@@ -135,6 +135,7 @@ where
 
     async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
         bounds.normalize(self.shape());
+        debug!("SparseTensor::write_value {} to bounds, {}", value, bounds);
         stream::iter(bounds.affected())
             .inspect(|coord| debug!("SparseTensor::write_value {:?} <- {}", coord, value))
             .map(|coord| self.accessor.write_value(txn_id, coord, value))

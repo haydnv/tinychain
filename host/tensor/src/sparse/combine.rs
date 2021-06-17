@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::task::{self, Poll};
 
 use futures::stream::{Fuse, Stream, StreamExt};
+use log::debug;
 use pin_project::pin_project;
 
 use tc_error::*;
@@ -82,26 +83,35 @@ impl<'a> Stream for SparseCombine<'a> {
 
         let left_done = if this.left.is_done() {
             true
-        } else {
+        } else if this.pending_left.is_none() {
             match Self::poll_inner(this.left, this.coord_bounds, this.pending_left, cxt) {
                 Err(cause) => return Poll::Ready(Some(Err(cause))),
                 Ok(done) => done,
             }
+        } else {
+            false
         };
 
         let right_done = if this.right.is_done() {
             true
-        } else {
+        } else if this.pending_right.is_none() {
             match Self::poll_inner(this.right, this.coord_bounds, this.pending_right, cxt) {
                 Err(cause) => return Poll::Ready(Some(Err(cause))),
                 Ok(done) => done,
             }
+        } else {
+            false
         };
 
+        debug!(
+            "SparseCombine::poll {:?} {:?}",
+            this.pending_left, this.pending_right
+        );
         if this.pending_left.is_some() && this.pending_right.is_some() {
             let (l_offset, _) = this.pending_left.as_ref().unwrap();
             let (r_offset, _) = this.pending_right.as_ref().unwrap();
 
+            debug!("offsets: {}, {}", l_offset, r_offset);
             match l_offset.cmp(r_offset) {
                 Ordering::Equal => {
                     let (l_coord, l_value) = Self::swap_value(this.pending_left);

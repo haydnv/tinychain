@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import tinychain as tc
 import unittest
@@ -179,7 +180,7 @@ class SparseTests(unittest.TestCase):
         cxt.result = tc.After(cxt.tensor.write([None, slice(2, -1)], 1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_sparse(tc.F32, [2, 5], [[[0, 2], 1], [[0, 3], 1]])
+        expected = expect_sparse(tc.F32, shape, [[[0, 2], 1], [[0, 3], 1], [[1, 2], 1], [[1, 3], 1]])
         self.assertEqual(actual, expected)
 
     def testAdd(self):
@@ -188,17 +189,20 @@ class SparseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
-        cxt.result = tc.After([cxt.big.write([1], 1)], cxt.big + cxt.small)
+        cxt.result = tc.After([
+            cxt.big.write([1], 1),
+            cxt.small.write([1], 2),
+        ], cxt.big + cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_sparse(tc.F32, shape, [
-            [[1, 0, 0], 1],
-            [[1, 0, 1], 1],
-            [[1, 0, 2], 1],
-            [[1, 1, 0], 1],
-            [[1, 1, 1], 1],
-            [[1, 1, 2], 1]
-        ])
+
+        big = np.zeros(shape)
+        big[1] = 1
+        small = np.zeros([3])
+        small[1] = 2
+        expected = big + small
+
+        expected = expect_sparse(tc.F32, shape, expected)
         self.assertEqual(actual, expected)
 
 
@@ -245,6 +249,9 @@ def expect_dense(dtype, shape, flat):
 
 
 def expect_sparse(dtype, shape, values):
+    if isinstance(values, np.ndarray):
+        values = nparray_to_sparse(values)
+
     return {
         str(tc.uri(tc.tensor.Sparse)): [
             [shape, str(tc.uri(dtype))],
@@ -259,6 +266,13 @@ def product(seq):
         p *= n
 
     return p
+
+
+def nparray_to_sparse(arr, dtype=int):
+    zero = dtype(0)
+    coords = itertools.product(*[range(dim) for dim in arr.shape])
+    sparse = [[list(coord), n] for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten())) if n != zero]
+    return sparse
 
 
 if __name__ == "__main__":

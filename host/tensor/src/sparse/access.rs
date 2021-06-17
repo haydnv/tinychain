@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
+use log::debug;
 
 use tc_btree::Node;
 use tc_error::*;
@@ -675,9 +676,12 @@ where
 
         let combined =
             SparseCombine::new(self.shape(), left, right).try_filter_map(move |(coord, l, r)| {
-                let l = l.unwrap_or_else(|| left_zero.clone());
-                let r = r.unwrap_or_else(|| right_zero.clone());
+                debug!("combine values at {:?}: {:?}, {:?}", coord, l, r);
+                let l = l.unwrap_or(left_zero);
+                let r = r.unwrap_or(right_zero);
                 let value = combinator(l, r);
+                debug!("combinator({}, {}) = {}", l, r, value);
+
                 let row = if value == value.class().zero() {
                     None
                 } else {
@@ -748,9 +752,9 @@ where
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
-        let count = self.filled(txn).await?;
+        let filled = self.filled(txn).await?;
 
-        count
+        filled
             .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
             .await
     }

@@ -529,7 +529,9 @@ pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
             let mut axes = Vec::with_capacity(shape.len());
 
             for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
-                let bound = if bound.matches::<Range>() {
+                let bound = if bound.is_none() {
+                    AxisBounds::all(shape[axis])
+                } else if bound.matches::<Range>() {
                     let range = Range::opt_cast_from(bound).unwrap();
                     let start = match range.start {
                         Bound::Un => 0,
@@ -564,6 +566,7 @@ pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
             let mut axes = Vec::with_capacity(shape.len());
             for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
                 let bound = match bound {
+                    Value::None => AxisBounds::all(shape[axis]),
                     Value::Tuple(indices) => {
                         let indices = shape[..]
                             .iter()
