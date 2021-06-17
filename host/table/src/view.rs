@@ -28,13 +28,14 @@ const ERR_LIMITED_REVERSE: &str = "Cannot reverse a limited selection. \
 Consider reversing a slice before limiting";
 
 #[derive(Clone)]
-pub struct Aggregate<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>> {
+pub struct Aggregate<F, D, Txn, T> {
     source: Selection<F, D, Txn, T>,
-    phantom_file: PhantomData<F>,
+    file: PhantomData<F>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>> Instance
-    for Aggregate<F, D, Txn, T>
+impl<F, D, Txn, T> Instance for Aggregate<F, D, Txn, T>
+where
+    Self: Send + Sync,
 {
     type Class = TableType;
 
@@ -71,15 +72,15 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         let source = self.source.order_by(columns, reverse)?;
         Ok(Aggregate {
             source,
-            phantom_file: PhantomData,
+            file: PhantomData,
         })
     }
 
     fn reversed(self) -> TCResult<Self::Reverse> {
-        let phantom_file = self.phantom_file;
+        let phantom_file = self.file;
         self.source.reversed().map(|source| Aggregate {
             source,
-            phantom_file,
+            file: phantom_file,
         })
     }
 
@@ -112,7 +113,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
 
         Table::Aggregate(Box::new(Aggregate {
             source,
-            phantom_file: aggregate.phantom_file,
+            file: aggregate.file,
         }))
     }
 }
@@ -212,7 +213,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for IndexSlice<F, D, Txn> {
+impl<F, D, Txn> Instance for IndexSlice<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -221,8 +225,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for IndexSlice<F, D, T
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
-    for IndexSlice<F, D, Txn>
+impl<F, D, Txn> TableInstance<F, D, Txn> for IndexSlice<F, D, Txn>
+where
+    F: File<Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type OrderBy = Self;
     type Reverse = Self;
@@ -307,25 +314,28 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<IndexSlice<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<IndexSlice<F, D, Txn>> for Table<F, D, Txn> {
     fn from(slice: IndexSlice<F, D, Txn>) -> Self {
         Self::IndexSlice(slice)
     }
 }
 
 #[derive(Clone)]
-pub struct Limited<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct Limited<F, D, Txn> {
     source: Table<F, D, Txn>,
     limit: u64,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Limited<F, D, Txn> {
+impl<F, D, Txn> Limited<F, D, Txn> {
     pub fn new(source: Table<F, D, Txn>, limit: u64) -> Self {
         Limited { source, limit }
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Limited<F, D, Txn> {
+impl<F, D, Txn> Instance for Limited<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -407,7 +417,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<Limited<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<Limited<F, D, Txn>> for Table<F, D, Txn> {
     fn from(limited: Limited<F, D, Txn>) -> Self {
         Table::Limit(Box::new(limited))
     }
@@ -548,7 +558,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Merged<F, D, Txn> {
+impl<F, D, Txn> Instance for Merged<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -669,7 +682,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<Merged<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<Merged<F, D, Txn>> for Table<F, D, Txn> {
     fn from(merged: Merged<F, D, Txn>) -> Self {
         Self::Merge(merged)
     }
@@ -726,8 +739,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>> Instance
-    for Selection<F, D, Txn, T>
+impl<F, D, Txn, T> Instance for Selection<F, D, Txn, T>
+where
+    Self: Send + Sync,
 {
     type Class = TableType;
 
@@ -737,8 +751,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>> In
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
-    TableInstance<F, D, Txn> for Selection<F, D, Txn, T>
+impl<F, D, Txn, T> TableInstance<F, D, Txn> for Selection<F, D, Txn, T>
+where
+    F: File<Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    T: TableInstance<F, D, Txn>,
 {
     type OrderBy = Selection<F, D, Txn, <T as TableInstance<F, D, Txn>>::OrderBy>;
     type Reverse = Selection<F, D, Txn, <T as TableInstance<F, D, Txn>>::Reverse>;
@@ -847,8 +865,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
-    From<Selection<F, D, Txn, T>> for Table<F, D, Txn>
+impl<F, D, Txn, T> From<Selection<F, D, Txn, T>> for Table<F, D, Txn>
+where
+    F: File<Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    T: TableInstance<F, D, Txn>,
 {
     fn from(selection: Selection<F, D, Txn, T>) -> Self {
         Table::Selection(Box::new(Selection {
@@ -911,7 +933,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn> {
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for TableSlice<F, D, Txn> {
+impl<F, D, Txn> Instance for TableSlice<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -920,8 +945,11 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for TableSlice<F, D, T
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
-    for TableSlice<F, D, Txn>
+impl<F, D, Txn> TableInstance<F, D, Txn> for TableSlice<F, D, Txn>
+where
+    F: File<Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type OrderBy = Merged<F, D, Txn>;
     type Reverse = TableSlice<F, D, Txn>;
@@ -1019,7 +1047,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<TableSlice<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<TableSlice<F, D, Txn>> for Table<F, D, Txn> {
     fn from(slice: TableSlice<F, D, Txn>) -> Self {
         Self::TableSlice(slice)
     }
@@ -1033,7 +1061,7 @@ pub fn group_by<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, 
     let source = source.select(columns)?;
     Ok(Aggregate {
         source,
-        phantom_file: PhantomData,
+        file: PhantomData,
     })
 }
 

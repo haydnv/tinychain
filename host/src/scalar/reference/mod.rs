@@ -360,6 +360,18 @@ impl<'en> IntoStream<'en> for TCRef {
     }
 }
 
+impl fmt::Debug for TCRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::After(after) => fmt::Debug::fmt(after, f),
+            Self::Case(case) => fmt::Debug::fmt(case, f),
+            Self::Id(id_ref) => fmt::Debug::fmt(id_ref, f),
+            Self::If(if_ref) => fmt::Debug::fmt(if_ref, f),
+            Self::Op(op_ref) => fmt::Debug::fmt(op_ref, f),
+        }
+    }
+}
+
 impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

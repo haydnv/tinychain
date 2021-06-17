@@ -117,6 +117,16 @@ impl<'en> IntoView<'en, Dir> for Object {
 }
 
 #[async_trait]
+impl fmt::Debug for Object {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Class(ict) => fmt::Debug::fmt(ict, f),
+            Self::Instance(ic) => fmt::Debug::fmt(ic, f),
+        }
+    }
+}
+
+#[async_trait]
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

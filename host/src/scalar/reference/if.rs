@@ -113,6 +113,16 @@ impl<'en> en::ToStream<'en> for IfRef {
     }
 }
 
+impl fmt::Debug for IfRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "if {:?} then {:?} else {:?}",
+            self.cond, self.then, self.or_else
+        )
+    }
+}
+
 impl fmt::Display for IfRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

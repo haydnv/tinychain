@@ -117,6 +117,12 @@ impl From<IdRef> for Id {
     }
 }
 
+impl fmt::Debug for IdRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "${:?}", self.to)
+    }
+}
+
 impl fmt::Display for IdRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "${}", self.to)

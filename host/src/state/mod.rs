@@ -732,6 +732,19 @@ impl TryCastFrom<State> for Number {
     }
 }
 
+impl fmt::Debug for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Collection(collection) => fmt::Debug::fmt(collection, f),
+            Self::Chain(chain) => fmt::Debug::fmt(chain, f),
+            Self::Map(map) => fmt::Debug::fmt(map, f),
+            Self::Object(object) => fmt::Debug::fmt(object, f),
+            Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
+            Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
+        }
+    }
+}
+
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

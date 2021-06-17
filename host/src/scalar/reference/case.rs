@@ -131,6 +131,12 @@ impl<'en> en::ToStream<'en> for Case {
     }
 }
 
+impl fmt::Debug for Case {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "switch ({:?})...", self.cond)
+    }
+}
+
 impl fmt::Display for Case {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "switch ({})...", self.cond)

@@ -251,6 +251,12 @@ impl<'en> IntoStream<'en> for OpDef {
     }
 }
 
+impl fmt::Debug for OpDef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for OpDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

@@ -516,6 +516,12 @@ where
     }
 }
 
+impl<F, D, T> fmt::Debug for BTree<F, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl<F, D, T> fmt::Display for BTree<F, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {

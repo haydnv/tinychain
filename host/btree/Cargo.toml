@@ -22,5 +22,5 @@ safecast = "0.1"
 tc-error = "~0.2.2"
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
-tcgeneric = "~0.1.7"
+tcgeneric = { path = "../generic" }
 uuid = "0.8"

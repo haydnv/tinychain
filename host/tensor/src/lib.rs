@@ -843,11 +843,18 @@ impl<'en> en::IntoStream<'en> for TensorView<'en> {
     }
 }
 
-impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> fmt::Display
-    for Tensor<FD, FS, D, T>
-{
+impl<FD, FS, D, T> fmt::Debug for Tensor<FD, FS, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tensor")
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Sparse(_) => f.write_str("a sparse tensor"),
+            Self::Dense(_) => f.write_str("a dense tensor"),
+        }
     }
 }
 

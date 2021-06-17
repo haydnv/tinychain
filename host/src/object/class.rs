@@ -89,6 +89,12 @@ impl From<InstanceClass> for Link {
     }
 }
 
+impl fmt::Debug for InstanceClass {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(link) = &self.extends {

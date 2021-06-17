@@ -1057,12 +1057,25 @@ impl<'en> en::IntoStream<'en> for Scalar {
     }
 }
 
+impl fmt::Debug for Scalar {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Scalar::Map(map) => fmt::Debug::fmt(map, f),
+            Scalar::Op(op) => fmt::Debug::fmt(op, f),
+            Scalar::Range(range) => fmt::Debug::fmt(range, f),
+            Scalar::Ref(tc_ref) => fmt::Debug::fmt(tc_ref, f),
+            Scalar::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
+            Scalar::Value(value) => fmt::Debug::fmt(value, f),
+        }
+    }
+}
+
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Scalar::Map(map) => fmt::Display::fmt(map, f),
             Scalar::Op(op) => fmt::Display::fmt(op, f),
-            Scalar::Range(_) => unimplemented!(),
+            Scalar::Range(range) => fmt::Display::fmt(range, f),
             Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
             Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
             Scalar::Value(value) => fmt::Display::fmt(value, f),

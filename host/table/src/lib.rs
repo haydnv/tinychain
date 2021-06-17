@@ -199,7 +199,7 @@ impl fmt::Display for TableType {
 
 /// An ordered collection of [`Row`]s which supports `BTree`-based indexing
 #[derive(Clone)]
-pub enum Table<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub enum Table<F, D, Txn> {
     Index(Index<F, D, Txn>),
     ROIndex(ReadOnly<F, D, Txn>),
     Table(TableIndex<F, D, Txn>),
@@ -211,7 +211,10 @@ pub enum Table<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     TableSlice(TableSlice<F, D, Txn>),
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Table<F, D, Txn> {
+impl<F, D, Txn> Instance for Table<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -230,7 +233,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Table<F, D, Txn> {
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Table<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Table<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type OrderBy = Self;
     type Reverse = Self;
     type Slice = Self;
@@ -523,7 +529,19 @@ impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> fmt::Display for Table<F, D, Txn> {
+impl<F, D, Txn> fmt::Debug for Table<F, D, Txn>
+where
+    Self: Send + Sync,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl<F, D, Txn> fmt::Display for Table<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "an instance of {}", self.class())
     }

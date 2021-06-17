@@ -293,6 +293,17 @@ impl<'en> IntoView<'en, fs::Dir> for Collection {
     }
 }
 
+impl fmt::Debug for Collection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(btree) => fmt::Debug::fmt(btree, f),
+            Self::Table(table) => fmt::Debug::fmt(table, f),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => fmt::Debug::fmt(tensor, f),
+        }
+    }
+}
+
 impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

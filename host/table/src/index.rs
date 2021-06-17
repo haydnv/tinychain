@@ -94,7 +94,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn> {
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for Index<F, D, Txn> {
+impl<F, D, Txn> Instance for Index<F, D, Txn>
+where
+    Self: Send + Sync,
+{
     type Class = TableType;
 
     fn class(&self) -> TableType {
@@ -256,14 +259,14 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<Index<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<Index<F, D, Txn>> for Table<F, D, Txn> {
     fn from(index: Index<F, D, Txn>) -> Self {
         Table::Index(index)
     }
 }
 
 #[derive(Clone)]
-pub struct ReadOnly<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+pub struct ReadOnly<F, D, Txn> {
     index: IndexSlice<F, D, Txn>,
 }
 

@@ -91,6 +91,12 @@ impl<'en> en::ToStream<'en> for After {
     }
 }
 
+impl fmt::Debug for After {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "after {:?} then {:?}", self.when, self.then)
+    }
+}
+
 impl fmt::Display for After {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "after {} then {}", self.when, self.then)

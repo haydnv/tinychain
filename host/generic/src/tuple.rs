@@ -204,6 +204,20 @@ where
     }
 }
 
+impl<T: Clone + fmt::Debug> fmt::Debug for Tuple<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "({})",
+            self.inner
+                .iter()
+                .map(|item| format!("{:?}", item))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
+
 impl<T: Clone + fmt::Display> fmt::Display for Tuple<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

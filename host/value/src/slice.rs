@@ -76,6 +76,16 @@ impl From<Bound> for ops::Bound<Value> {
     }
 }
 
+impl fmt::Debug for Bound {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::In(value) => write!(f, "include({:?})", value),
+            Self::Ex(value) => write!(f, "exclude({:?})", value),
+            Self::Un => write!(f, "unbounded"),
+        }
+    }
+}
+
 impl fmt::Display for Bound {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -260,6 +270,24 @@ impl<'en> en::ToStream<'en> for Range {
 impl From<Range> for (ops::Bound<Value>, ops::Bound<Value>) {
     fn from(range: Range) -> Self {
         (range.start.into(), range.end.into())
+    }
+}
+
+impl fmt::Debug for Range {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match (&self.start, &self.end) {
+            (Bound::Ex(start), Bound::Ex(end)) => write!(f, "({:?}, {:?})", start, end),
+            (Bound::Ex(start), Bound::In(end)) => write!(f, "({:?}, {:?}]", start, end),
+            (Bound::Ex(start), Bound::Un) => write!(f, "({:?}...]", start),
+
+            (Bound::In(start), Bound::Ex(end)) => write!(f, "[{:?}, {:?})", start, end),
+            (Bound::In(start), Bound::In(end)) => write!(f, "[{:?}, {:?}]", start, end),
+            (Bound::In(start), Bound::Un) => write!(f, "[{:?}...]", start),
+
+            (Bound::Un, Bound::Ex(end)) => write!(f, "[...{:?})", end),
+            (Bound::Un, Bound::In(end)) => write!(f, "[...{:?}]", end),
+            (Bound::Un, Bound::Un) => f.write_str("[...]"),
+        }
     }
 }
 

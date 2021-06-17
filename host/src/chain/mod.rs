@@ -411,6 +411,12 @@ impl NativeClass for ChainType {
     }
 }
 
+impl fmt::Debug for ChainType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for ChainType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
@@ -537,6 +543,12 @@ impl<'en> IntoView<'en, fs::Dir> for Chain {
         }?;
 
         Ok(ChainView { class, data })
+    }
+}
+
+impl fmt::Debug for Chain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "instance of {}", self.class())
     }
 }
 
