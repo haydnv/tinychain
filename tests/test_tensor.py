@@ -271,6 +271,20 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.I16, shape, expected)
         self.assertEqual(actual, expected)
 
+    def testSum(self):
+        shape = [2, 4, 3, 5]
+        axis = 2
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape)
+        cxt.result = tc.After(cxt.big.write([0, slice(1, 3)], 2), cxt.big.sum(axis))
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.zeros(shape)
+        expected[0, 1:3] = 2
+        expected = expected.sum(axis)
+        self.assertEqual(actual, expect_sparse(tc.F32, [2, 4, 5], expected))
+
 
 class ChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 4

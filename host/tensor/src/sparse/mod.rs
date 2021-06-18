@@ -14,15 +14,16 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Number, NumberType, ValueType};
-use tcgeneric::{NativeClass, TCTryStream};
+use tc_value::{Number, NumberClass, NumberType, ValueType};
+use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorIO, TensorInstance,
-    TensorMath, TensorTransform, TensorType,
+    TensorMath, TensorReduce, TensorTransform, TensorType,
 };
 
+use crate::dense::PER_BLOCK;
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor};
 pub use table::SparseTable;
@@ -219,6 +220,63 @@ where
             Tensor::Sparse(sparse) => self.sub(sparse).map(Tensor::from),
             Tensor::Dense(dense) => self.into_dense().sub(dense).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> TensorReduce<D> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+    Self: TensorInstance,
+    <Self as TensorInstance>::Dense: TensorReduce<D, Txn = T> + Send + Sync,
+{
+    type Txn = T;
+    type Reduce = SparseTensor<FD, FS, D, T, SparseReduce<FD, FS, D, T>>;
+
+    fn product(self, axis: usize) -> TCResult<Self::Reduce> {
+        let accessor = SparseReduce::new(
+            self.accessor.accessor(),
+            axis,
+            SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::product_all,
+        )?;
+
+        Ok(SparseTensor::from(accessor))
+    }
+
+    fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
+        Box::pin(async move { self.clone().into_dense().product_all(txn).await })
+    }
+
+    fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
+        let accessor = SparseReduce::new(
+            self.accessor.accessor(),
+            axis,
+            SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::sum_all,
+        )?;
+
+        Ok(SparseTensor::from(accessor))
+    }
+
+    fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            let mut sum = self.dtype().zero();
+            let mut filled = self.accessor.clone().filled(txn).await?;
+            let mut buffer = Vec::with_capacity(PER_BLOCK);
+            while let Some((_coord, value)) = filled.try_next().await? {
+                buffer.push(value);
+
+                if buffer.len() == PER_BLOCK {
+                    sum += Array::from(buffer.to_vec()).sum();
+                    buffer.clear()
+                }
+            }
+
+            Ok(sum)
+        })
     }
 }
 

@@ -566,28 +566,28 @@ where
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.product(axis).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
         }
     }
 
     fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.product_all(txn),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.product_all(txn),
         }
     }
 
     fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.sum(axis).map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.sum(axis).map(Self::from),
         }
     }
 
     fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.sum_all(txn),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.sum_all(txn),
         }
     }
 }

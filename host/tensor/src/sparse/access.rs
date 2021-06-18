@@ -1035,20 +1035,23 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let filled = self.clone().filled_at(txn.clone()).await?;
 
+        let zero = self.dtype().zero();
         let rebase = self.rebase;
         let reductor = self.reductor;
         let source = self.source;
 
-        let filled = filled.and_then(move |coord| {
-            let source_bounds = rebase.invert_coord(&coord);
-            let source = source.clone();
-            let txn = txn.clone();
-            Box::pin(async move {
-                let slice = source.slice(source_bounds)?;
-                let value = reductor(&slice.into(), txn).await?;
-                Ok((coord, value))
+        let filled = filled
+            .and_then(move |coord| {
+                let source_bounds = rebase.invert_coord(&coord);
+                let source = source.clone();
+                let txn = txn.clone();
+                Box::pin(async move {
+                    let slice = source.slice(source_bounds)?;
+                    let value = reductor(&slice.into(), txn).await?;
+                    Ok((coord, value))
+                })
             })
-        });
+            .try_filter(move |(_coord, value)| future::ready(value != &zero));
 
         Ok(Box::pin(filled))
     }
