@@ -1,5 +1,4 @@
 use std::convert::TryFrom;
-use std::pin::Pin;
 
 use afarray::Array;
 use async_trait::async_trait;
@@ -13,7 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{GroupStream, TCBoxTryFuture};
+use tcgeneric::TCBoxTryFuture;
 
 use crate::dense::{DenseAccess, DenseAccessor};
 use crate::stream::{sorted_values, Read, ReadValueAt};
@@ -22,9 +21,7 @@ use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJE
 
 use super::combine::SparseCombine;
 use super::table::{SparseTable, SparseTableSlice};
-use super::{SparseStream, SparseTensor};
-
-type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
+use super::{CoordStream, SparseStream, SparseTensor};
 
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
@@ -36,6 +33,8 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>>;
 
     async fn filled_count(self, txn: T) -> TCResult<u64>;
 
@@ -157,6 +156,21 @@ where
             Self::Table(table) => table.filled(txn).await,
             Self::Transpose(transpose) => transpose.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
+        }
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.filled_at(txn, axes).await,
+            Self::Cast(cast) => cast.filled_at(txn, axes).await,
+            Self::Combine(combine) => combine.filled_at(txn, axes).await,
+            Self::Dense(dense) => dense.filled_at(txn, axes).await,
+            Self::Expand(expand) => expand.filled_at(txn, axes).await,
+            Self::Reduce(reduce) => reduce.filled_at(txn, axes).await,
+            Self::Slice(slice) => slice.filled_at(txn, axes).await,
+            Self::Table(table) => table.filled_at(txn, axes).await,
+            Self::Transpose(transpose) => transpose.filled_at(txn, axes).await,
+            Self::Unary(unary) => unary.filled_at(txn, axes).await,
         }
     }
 
@@ -316,6 +330,10 @@ where
         Ok(Box::pin(filled))
     }
 
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("DenseToSparse::filled_at"))
+    }
+
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         let zero = self.dtype().zero();
         let values = self.source.value_stream(txn).await?;
@@ -463,6 +481,10 @@ where
         self.broadcast_coords(txn, filled, num_coords).await
     }
 
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("SparseBroadcast::filled_at"))
+    }
+
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         let rebase = self.rebase;
         let filled = self.source.filled(txn).await?;
@@ -581,6 +603,10 @@ where
         let filled = self.source.filled(txn).await?;
         let cast = filled.map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
         Ok(Box::pin(cast))
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        self.source.filled_at(txn, axes).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -751,6 +777,10 @@ where
         Ok(self.filled_inner(left, right))
     }
 
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("SparseCombinator::filled_at"))
+    }
+
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         let filled = self.filled(txn).await?;
 
@@ -891,6 +921,10 @@ where
         Ok(Box::pin(filled))
     }
 
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("SparseExpand::filled_at"))
+    }
+
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
@@ -976,20 +1010,6 @@ where
             reductor,
         })
     }
-
-    // TODO: DELETE
-    async fn filled_at<'a>(self, txn: T) -> TCResult<CoordStream<'a>> {
-        let reduce_axis = self.rebase.axis();
-        let source = self.source.filled(txn).await?;
-
-        let filled_at = source.map_ok(move |(mut coord, _)| {
-            coord.remove(reduce_axis);
-            coord
-        });
-
-        let filled_at: CoordStream<'a> = Box::pin(GroupStream::from(filled_at));
-        Ok(filled_at)
-    }
 }
 
 impl<FD, FS, D, T> TensorAccess for SparseReduce<FD, FS, D, T>
@@ -1034,7 +1054,8 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        let filled = self.clone().filled_at(txn.clone()).await?;
+        let (source_axes, _) = self.rebase.invert_axes(Some((0..self.ndim()).collect()));
+        let filled = self.clone().filled_at(txn.clone(), source_axes).await?;
 
         let zero = self.dtype().zero();
         let rebase = self.rebase;
@@ -1055,6 +1076,10 @@ where
             .try_filter(move |(_coord, value)| future::ready(value != &zero));
 
         Ok(Box::pin(filled))
+    }
+
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("SparseReduce::filled_at"))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1184,6 +1209,10 @@ where
         Ok(Box::pin(filled))
     }
 
+    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        Err(TCError::not_implemented("SparseTranspose::filled_at"))
+    }
+
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
@@ -1297,6 +1326,10 @@ where
         let filled = self.source.filled(txn).await?;
         let cast = filled.map_ok(move |(coord, value)| (coord, transform(value)));
         Ok(Box::pin(cast))
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        self.source.filled_at(txn, axes).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {

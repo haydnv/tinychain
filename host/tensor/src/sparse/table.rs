@@ -6,7 +6,7 @@ use afarray::Array;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
-use futures::stream::TryStreamExt;
+use futures::stream::{StreamExt, TryStreamExt};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -21,7 +21,7 @@ use crate::transform::{self, Rebase};
 use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::SparseTranspose;
-use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
+use super::{CoordStream, SparseAccess, SparseAccessor, SparseStream, SparseTensor};
 
 const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
@@ -105,6 +105,19 @@ where
         let filled = rows.and_then(|row| future::ready(expect_row(row)));
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let columns: Vec<Id> = axes.into_iter().map(Id::from).collect();
+        let filled_at = self
+            .table
+            .order_by(columns.to_vec(), false)?
+            .select(columns)?
+            .rows(*txn.id())
+            .await?;
+
+        let filled_at = filled_at.map(|r| r.and_then(|coord| expect_coord(&coord)));
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -305,6 +318,19 @@ where
 
         let filled: SparseStream<'a> = Box::pin(filled);
         Ok(filled)
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let columns: Vec<Id> = axes.into_iter().map(Id::from).collect();
+        let filled_at = self
+            .table
+            .order_by(columns.to_vec(), false)?
+            .select(columns)?
+            .rows(*txn.id())
+            .await?;
+
+        let filled_at = filled_at.map(|r| r.and_then(|coord| expect_coord(&coord)));
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
