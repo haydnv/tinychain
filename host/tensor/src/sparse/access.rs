@@ -977,6 +977,7 @@ where
         })
     }
 
+    // TODO: DELETE
     async fn filled_at<'a>(self, txn: T) -> TCResult<CoordStream<'a>> {
         let reduce_axis = self.rebase.axis();
         let source = self.source.filled(txn).await?;

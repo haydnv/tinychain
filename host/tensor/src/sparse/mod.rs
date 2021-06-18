@@ -275,6 +275,10 @@ where
                 }
             }
 
+            if !buffer.is_empty() {
+                sum += Array::from(buffer).sum();
+            }
+
             Ok(sum)
         })
     }

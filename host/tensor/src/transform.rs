@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::iter;
 
-use log::debug;
-
 use tc_error::*;
 
 use crate::bounds::{AxisBounds, Bounds, Shape};
@@ -282,7 +280,6 @@ pub struct Slice {
 
 impl Slice {
     pub fn new(source_shape: Shape, bounds: Bounds) -> TCResult<Slice> {
-        debug!("Slice::new {}[{}]", source_shape, bounds);
         source_shape.validate_bounds(&bounds)?;
 
         let mut shape: Coord = Vec::with_capacity(bounds.len());
