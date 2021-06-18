@@ -154,8 +154,8 @@ impl Expand {
         self.expand
     }
 
-    pub fn invert_axes(&self, _axes: Vec<usize>) -> Vec<usize> {
-        unimplemented!()
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.into_iter().map(|x| self.inverted_axes[x]).collect()
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {

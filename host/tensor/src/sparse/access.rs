@@ -921,8 +921,21 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("SparseExpand::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let expand_axis = self.rebase.expand_axis();
+        let expand = axes.contains(&expand_axis);
+        let source_axes = self.rebase.invert_axes(axes);
+        let transpose = coord_transpose(source_axes.to_vec());
+        let filled_at = self.source.filled_at(txn, source_axes).await?;
+        let filled_at = filled_at.map_ok(transpose).map_ok(move |mut coord| {
+            if expand {
+                coord.insert(expand_axis, 0);
+            }
+
+            coord
+        });
+
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1377,5 +1390,12 @@ where
             .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
 
         Box::pin(read)
+    }
+}
+
+fn coord_transpose(axes: Vec<usize>) -> impl Fn(Coord) -> Coord {
+    move |coord| {
+        debug_assert_eq!(coord.len(), axes.len());
+        axes.iter().map(|x| coord[*x]).collect()
     }
 }
