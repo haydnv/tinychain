@@ -740,13 +740,16 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                     }
 
                     merge_source = MergeSource::Merge(Box::new(merged));
+                    break;
                 } else {
+                    let mut supported = false;
                     for (name, index) in self.inner.auxiliary.iter() {
                         debug!("checking index {} with schema {}", name, index.schema());
 
                         match index.validate_bounds(&subset) {
                             Ok(()) => {
                                 debug!("index {} can slice {}", name, subset);
+                                supported = true;
                                 let index_slice = index.clone().index_slice(subset)?;
                                 let merged = Merged::new(merge_source, index_slice)?;
 
@@ -762,6 +765,10 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                                 debug!("index {} cannot slice {}: {}", name, subset, cause);
                             }
                         }
+                    }
+
+                    if supported {
+                        break;
                     }
                 };
 
