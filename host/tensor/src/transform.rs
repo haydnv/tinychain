@@ -228,13 +228,13 @@ impl Reduce {
         &self.shape
     }
 
-    pub fn invert_axes(&self, _permutation: Option<Vec<usize>>) -> (Vec<usize>, usize) {
-        unimplemented!()
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.into_iter().map(|x| if x >= self.axis { x + 1 } else { x }).collect()
     }
 
     pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
         let mut reduce_axis = self.axis;
-        for bound in bounds.iter() {
+        for bound in bounds[..self.axis].iter() {
             if bound.is_index() {
                 reduce_axis -= 1;
             }

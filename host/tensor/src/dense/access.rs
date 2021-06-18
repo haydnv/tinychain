@@ -987,7 +987,9 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let (source_axes, reduce_axis) = self.rebase.invert_axes(permutation);
+        let permutation = permutation.unwrap_or_else(|| (0..self.ndim()).rev().collect());
+        let reduce_axis = self.rebase.reduce_axis(&Bounds::all(self.shape()));
+        let source_axes = self.rebase.invert_axes(permutation);
         let source = self.source.transpose(Some(source_axes))?;
         BlockListReduce::new(source, reduce_axis, self.reductor)
     }

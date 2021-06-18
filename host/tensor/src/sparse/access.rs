@@ -990,6 +990,7 @@ where
             .source
             .read_value_at(txn, source_coord)
             .map_ok(|(_, val)| (coord, val));
+
         Box::pin(read)
     }
 }
@@ -1067,7 +1068,7 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        let (source_axes, _) = self.rebase.invert_axes(Some((0..self.ndim()).collect()));
+        let source_axes = self.rebase.invert_axes((0..self.ndim()).collect());
         let filled = self.clone().filled_at(txn.clone(), source_axes).await?;
 
         let zero = self.dtype().zero();
@@ -1091,8 +1092,11 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("SparseReduce::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let source_axes = self.rebase.invert_axes(axes);
+        let transpose = coord_transpose(source_axes.to_vec());
+        let filled_at = self.source.filled_at(txn, source_axes).await?;
+        Ok(Box::pin(filled_at.map_ok(transpose)))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
