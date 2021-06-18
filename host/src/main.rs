@@ -107,10 +107,12 @@ async fn main() -> Result<(), TokioError> {
         .init();
 
     if !config.workspace.exists() {
-        panic!(
-            "{:?} does not exist--create it or provide a different path for the --workspace flag",
+        log::info!(
+            "workspace directory {:?} does not exist, attempting to create it...",
             config.workspace
         );
+
+        std::fs::create_dir_all(&config.workspace)?;
     }
 
     if let Some(data_dir) = &config.data_dir {
