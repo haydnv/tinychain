@@ -1226,8 +1226,11 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("SparseTranspose::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let source_axes = self.rebase.invert_axes(axes);
+        let transpose = coord_transpose(source_axes.to_vec());
+        let filled_at = self.source.filled_at(txn, source_axes).await?;
+        Ok(Box::pin(filled_at.map_ok(transpose)))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1244,7 +1247,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let permutation = permutation.map(|axes| self.rebase.invert_axes(&axes));
+        let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
         self.source.transpose(permutation)
     }
 

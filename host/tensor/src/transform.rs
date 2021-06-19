@@ -229,7 +229,9 @@ impl Reduce {
     }
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.into_iter().map(|x| if x >= self.axis { x + 1 } else { x }).collect()
+        axes.into_iter()
+            .map(|x| if x >= self.axis { x + 1 } else { x })
+            .collect()
     }
 
     pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
@@ -462,8 +464,8 @@ impl Transpose {
         })
     }
 
-    pub fn invert_axes(&self, axes: &[usize]) -> Vec<usize> {
-        axes.iter().map(|x| self.permutation[*x]).collect()
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.into_iter().map(|x| self.permutation[x]).collect()
     }
 
     pub fn invert_permutation(&self, _bounds: &Bounds) -> Vec<usize> {
