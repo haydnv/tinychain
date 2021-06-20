@@ -142,6 +142,7 @@ fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(
         .try_flatten()
 }
 
+#[inline]
 pub fn coord_bounds(shape: &Shape) -> Coord {
     (0..shape.len())
         .map(|axis| shape[axis + 1..].iter().product())

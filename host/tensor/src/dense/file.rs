@@ -20,7 +20,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
-use crate::stream::{block_offsets, coord_block, Read, ReadValueAt};
+use crate::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
@@ -911,13 +911,6 @@ where
             self.source.read_value_at(txn, coord).await
         })
     }
-}
-
-#[inline]
-fn coord_bounds(shape: &Shape) -> Coord {
-    (0..shape.len())
-        .map(|axis| shape[axis + 1..].iter().product())
-        .collect()
 }
 
 #[inline]

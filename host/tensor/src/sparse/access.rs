@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use log::debug;
 
 use tc_btree::Node;
 use tc_error::*;
@@ -15,13 +14,13 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::TCBoxTryFuture;
 
 use crate::dense::{DenseAccess, DenseAccessor};
-use crate::stream::{sorted_values, Read, ReadValueAt};
+use crate::stream::{coord_bounds, sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
-use super::combine::SparseCombine;
+use super::combine::{coord_to_offset, SparseCombine};
 use super::table::{SparseTable, SparseTableSlice};
-use super::{CoordStream, SparseStream, SparseTensor};
+use super::{CoordStream, SparseRow, SparseStream, SparseTensor};
 
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
@@ -696,26 +695,26 @@ where
     }
 
     fn filled_inner<'a>(self, left: SparseStream<'a>, right: SparseStream<'a>) -> SparseStream<'a> {
+        let coord_bounds = coord_bounds(self.shape());
         let combinator = self.combinator;
         let left_zero = self.left.dtype().zero();
         let right_zero = self.right.dtype().zero();
+        let zero = left_zero * right_zero;
 
-        let combined =
-            SparseCombine::new(self.shape(), left, right).try_filter_map(move |(coord, l, r)| {
-                debug!("combine values at {:?}: {:?}, {:?}", coord, l, r);
-                let l = l.unwrap_or(left_zero);
-                let r = r.unwrap_or(right_zero);
-                let value = combinator(l, r);
-                debug!("combinator({}, {}) = {}", l, r, value);
-
-                let row = if value == value.class().zero() {
-                    None
-                } else {
-                    Some((coord, value))
-                };
-
-                future::ready(Ok(row))
-            });
+        let offset = move |row: &SparseRow| coord_to_offset(&row.0, &coord_bounds);
+        let combined = SparseCombine::new(left, right, offset)
+            .map_ok(move |(l, r)| match (l, r) {
+                (Some((l_coord, l)), Some((r_coord, r))) => {
+                    debug_assert_eq!(l_coord, r_coord);
+                    (l_coord, combinator(l, r))
+                }
+                (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
+                (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
+                (None, None) => {
+                    panic!("expected a coordinate and value from one sparse tensor stream")
+                }
+            })
+            .try_filter(move |(_, value)| future::ready(value != &zero));
 
         Box::pin(combined)
     }
@@ -777,8 +776,25 @@ where
         Ok(self.filled_inner(left, right))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("SparseCombinator::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let coord_bounds = coord_bounds(self.shape());
+        let offset = move |coord: &Vec<u64>| coord_to_offset(coord, &coord_bounds);
+        let left = self.left.filled_at(txn.clone(), axes.to_vec());
+        let right = self.right.filled_at(txn, axes);
+        let (left, right) = try_join!(left, right)?;
+        let filled_at = SparseCombine::new(left, right, offset).map_ok(|(l, r)| match (l, r) {
+            (Some(l), Some(r)) => {
+                debug_assert_eq!(l, r);
+                l
+            }
+            (Some(l), None) => l,
+            (None, Some(r)) => r,
+            (None, None) => {
+                panic!("expected a source coordinate from one sparse coordinate stream")
+            }
+        });
+
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
