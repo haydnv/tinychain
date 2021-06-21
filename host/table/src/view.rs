@@ -444,14 +444,14 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
         }
     }
 
-    fn into_reversed(self) -> MergeSource<F, D, Txn> {
+    fn reversed(self) -> TCResult<MergeSource<F, D, Txn>> {
         match self {
-            Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
-            Self::Merge(merged) => Self::Merge(Box::new(merged.into_reversed())),
+            Self::Table(table_slice) => table_slice.reversed().map(Self::Table),
+            Self::Merge(merged) => merged.reversed().map(Box::new).map(Self::Merge),
         }
     }
 
-    pub async fn slice_rows<'a>(
+    async fn slice_rows<'a>(
         self,
         txn_id: TxnId,
         bounds: Bounds,
@@ -487,66 +487,22 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
 
 #[derive(Clone)]
 pub struct Merged<F, D, Txn> {
-    key_columns: Vec<Column>,
     left: MergeSource<F, D, Txn>,
     right: IndexSlice<F, D, Txn>,
     bounds: Bounds,
-    keys: Selection<F, D, Txn, IndexSlice<F, D, Txn>>,
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
     pub fn new(left: MergeSource<F, D, Txn>, right: IndexSlice<F, D, Txn>) -> TCResult<Self> {
-        let key_columns = left.key().to_vec();
-        let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
-        let keys = right.clone().select(key_names)?;
-
-        left.source()
-            .merge_bounds(vec![left.bounds().clone(), right.bounds().clone()])
-            .map(|bounds| Merged {
-                key_columns,
-                left,
-                right,
-                bounds,
-                keys,
-            })
-    }
-
-    pub async fn slice_rows<'a>(
-        self,
-        txn_id: TxnId,
-        bounds: Bounds,
-        reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
-        let bounds = self
+        let bounds = left
             .source()
-            .merge_bounds(vec![self.bounds.clone(), bounds])?;
+            .merge_bounds(vec![left.bounds().clone(), right.bounds().clone()])?;
 
-        self.into_source().slice_rows(txn_id, bounds, reverse).await
-    }
-
-    fn into_reversed(self) -> Self {
-        let key_names = self
-            .key_columns
-            .iter()
-            .map(|col| col.name())
-            .cloned()
-            .collect();
-
-        let keys = Selection {
-            source: self.right.clone().into_reversed(),
-            schema: self.keys.schema.clone(),
-            columns: key_names,
-            indices: self.keys.indices.clone(),
-            phantom: Phantom::default(),
-        };
-
-        Merged {
-            key_columns: self.key_columns.to_vec(),
-            left: self.left.into_reversed(),
-            right: self.right.into_reversed(),
-            bounds: self.bounds.clone(),
-            keys,
-        }
+        Ok(Self {
+            left,
+            right,
+            bounds,
+        })
     }
 
     fn source(&'_ self) -> &'_ TableIndex<F, D, Txn> {
@@ -555,6 +511,18 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
 
     fn into_source(self) -> TableIndex<F, D, Txn> {
         self.left.into_source()
+    }
+
+    pub async fn slice_rows<'a>(
+        self,
+        txn_id: TxnId,
+        bounds: Bounds,
+        reverse: bool,
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        let these_bounds = self.bounds;
+        let source = self.left.into_source();
+        let bounds = source.merge_bounds(vec![these_bounds, bounds])?;
+        source.slice_rows(txn_id, bounds, reverse).await
     }
 }
 
@@ -620,31 +588,33 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
     }
 
     fn reversed(self) -> TCResult<Self::Reverse> {
-        Ok(self.into_reversed())
+        Ok(Merged {
+            left: self.left.reversed()?,
+            right: self.right.reversed()?,
+            bounds: self.bounds,
+        })
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let bounds = self
-            .source()
-            .merge_bounds(vec![self.bounds.clone(), bounds])?;
-
-        self.left.into_source().slice(bounds)
+        let source = self.left.into_source();
+        let bounds = source.merge_bounds(vec![self.bounds, bounds])?;
+        source.slice(bounds)
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        let key_columns = self.key().to_vec();
+        let key_names = key_columns.iter().map(|col| &col.name).cloned().collect();
+        let keys = self.right.select(key_names)?.rows(txn_id).await?;
+
         let left = self.left;
         let left_clone = left.clone();
-        let key_columns = self.key_columns;
-        let keys = self.keys.clone().rows(txn_id).await?;
-
-        let rows = keys
+        let merge = keys
             .map_ok(move |key| Bounds::from_key(key, &key_columns))
             .try_filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
             .and_then(move |bounds| Box::pin(left_clone.clone().slice_rows(txn_id, bounds, false)))
             .try_flatten();
 
-        let rows: TCTryStream<Vec<Value>> = Box::pin(rows);
-        Ok(rows)
+        Ok(Box::pin(merge))
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -710,13 +680,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         }
 
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
-        let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
 
-        let source_columns = [source.key(), source.values()].concat();
+        let source_columns = source.schema().primary().columns();
         let source_indices: HashMap<&Id, usize> = source_columns
             .iter()
             .enumerate()
-            .map(|(i, col)| (col.name(), i))
+            .map(|(i, col)| (&col.name, i))
             .collect();
 
         for name in columns.iter() {
@@ -725,10 +694,24 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
                 .ok_or(TCError::not_found(format!("Column {}", name)))?;
 
             indices.push(index);
-            schema.push(source_columns[index].clone());
         }
 
-        let schema = (vec![], schema).into();
+        let key = source
+            .key()
+            .iter()
+            .filter(|col| column_set.contains(&col.name))
+            .cloned()
+            .collect();
+
+        let values = source
+            .values()
+            .iter()
+            .filter(|col| column_set.contains(&col.name))
+            .cloned()
+            .collect();
+
+        let schema = (key, values).into();
+
         Ok(Selection {
             source,
             schema,
@@ -908,12 +891,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn> {
         self.slice.slice_index(bounds)
     }
 
-    pub fn source(&'_ self) -> &'_ TableIndex<F, D, Txn> {
-        &self.table
-    }
-
     pub fn into_source(self) -> TableIndex<F, D, Txn> {
         self.table
+    }
+
+    pub fn source(&'_ self) -> &'_ TableIndex<F, D, Txn> {
+        &self.table
     }
 
     pub async fn slice_rows<'a>(
@@ -923,13 +906,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn> {
         reverse: bool,
     ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.slice.slice_rows(txn_id, bounds, reverse).await
-    }
-
-    fn into_reversed(self) -> Self {
-        TableSlice {
-            table: self.table,
-            slice: self.slice.into_reversed(),
-        }
     }
 }
 
@@ -1001,13 +977,11 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Merged<F, D, Txn>> {
-        let bounds = self
-            .source()
-            .merge_bounds(vec![self.slice.bounds().clone(), bounds])?;
-
-        self.validate_bounds(&bounds)?;
-
-        self.into_source().slice(bounds)
+        let slice_bounds = self.slice.bounds().clone();
+        let source = self.into_source();
+        let bounds = source.merge_bounds(vec![slice_bounds, bounds])?;
+        source.validate_bounds(&bounds)?;
+        source.slice(bounds)
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
@@ -1015,8 +989,6 @@ where
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        debug!("Table::validate_bounds {}", bounds);
-
         let index = self.source().supporting_index(self.slice.bounds())?;
         index
             .validate_slice_bounds(self.slice.bounds().clone(), bounds.clone())

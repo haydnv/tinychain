@@ -88,7 +88,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn> {
         reverse: bool,
     ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.validate_bounds(&bounds)?;
-
         let range = bounds.into_btree_range(&self.schema.columns())?;
         self.btree.slice(range, reverse)?.keys(txn_id).await
     }
@@ -605,92 +604,42 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         self.validate_order(&columns)?;
 
         let selection = TableSlice::new(self.clone(), Bounds::default())?;
-        let mut merge_source = MergeSource::Table(selection);
+        let merge_source = MergeSource::Table(selection);
 
-        let mut columns = &columns[..];
-        loop {
-            let initial = columns.to_vec();
+        if self.primary().validate_order(&columns).is_ok() {
+            debug!("primary key can order by {}", Tuple::from(columns.clone()));
 
-            let mut i = columns.len();
-            while i > 0 {
-                let subset = &columns[..i];
-
-                if self.inner.primary.validate_order(subset).is_ok() {
-                    columns = &columns[i..];
-
+            let index_slice = self.primary().clone().index_slice(Bounds::default())?;
+            let merged = Merged::new(merge_source, index_slice)?;
+            return if reverse {
+                merged.reversed()
+            } else {
+                Ok(merged.into())
+            };
+        } else {
+            for (name, index) in &self.inner.auxiliary {
+                if index.validate_order(&columns).is_ok() {
                     debug!(
-                        "primary key supports order {}",
-                        Value::from_iter(subset.to_vec())
+                        "index {} can order by {}",
+                        name,
+                        Tuple::from(columns.clone())
                     );
 
-                    let index_slice = self.inner.primary.clone().index_slice(Bounds::default())?;
+                    let index_slice = index.clone().index_slice(Bounds::default())?;
                     let merged = Merged::new(merge_source, index_slice)?;
-
-                    if columns.is_empty() {
-                        return if reverse {
-                            merged.reversed()
-                        } else {
-                            Ok(merged.into())
-                        };
-                    }
-
-                    merge_source = MergeSource::Merge(Box::new(merged));
-                    break;
-                } else {
-                    debug!(
-                        "primary key does not support order {}",
-                        Value::from_iter(subset.to_vec())
-                    );
-
-                    let mut supported = false;
-                    for (name, index) in self.inner.auxiliary.iter() {
-                        if index.validate_order(subset).is_ok() {
-                            supported = true;
-                            columns = &columns[i..];
-
-                            debug!(
-                                "index {} supports order {}",
-                                name,
-                                Value::from_iter(subset.to_vec())
-                            );
-
-                            let index_slice = index.clone().index_slice(Bounds::default())?;
-                            let merged = Merged::new(merge_source, index_slice)?;
-
-                            if columns.is_empty() {
-                                return if reverse {
-                                    merged.reversed()
-                                } else {
-                                    Ok(merged.into())
-                                };
-                            }
-
-                            merge_source = MergeSource::Merge(Box::new(merged));
-                            break;
-                        } else {
-                            debug!(
-                                "index {} does not support order {}",
-                                name,
-                                Value::from_iter(subset.to_vec())
-                            );
-                        }
-                    }
-
-                    if supported {
-                        break;
+                    return if reverse {
+                        merged.reversed()
                     } else {
-                        i = i - 1;
-                    }
+                        Ok(merged.into())
+                    };
                 }
             }
-
-            if columns == &initial[..] {
-                return Err(TCError::bad_request(
-                    "This table has no index to support the order",
-                    Value::from_iter(columns.to_vec()),
-                ));
-            }
         }
+
+        Err(TCError::bad_request(
+            "table has no index to order by",
+            Tuple::<Id>::from_iter(columns),
+        ))
     }
 
     fn reversed(self) -> TCResult<Self::Reverse> {
@@ -750,6 +699,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                             Ok(()) => {
                                 debug!("index {} can slice {}", name, subset);
                                 supported = true;
+
                                 let index_slice = index.clone().index_slice(subset)?;
                                 let merged = Merged::new(merge_source, index_slice)?;
 
