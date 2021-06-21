@@ -52,7 +52,7 @@ impl<'a, T, S: Stream<Item = TCResult<T>>, O: Fn(&T) -> u64> SparseCombine<T, S,
     }
 
     fn swap_value(pending: &mut Option<(u64, T)>) -> T {
-        assert!(pending.is_some());
+        debug_assert!(pending.is_some());
 
         let mut value: Option<(u64, T)> = None;
         mem::swap(pending, &mut value);

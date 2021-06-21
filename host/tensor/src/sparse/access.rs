@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use afarray::Array;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use tc_btree::Node;
@@ -11,10 +11,10 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::TCBoxTryFuture;
+use tcgeneric::{GroupStream, TCBoxTryFuture};
 
 use crate::dense::{DenseAccess, DenseAccessor};
-use crate::stream::{coord_bounds, sorted_values, Read, ReadValueAt};
+use crate::stream::{coord_bounds, sorted_coords, sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
 use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
@@ -405,14 +405,17 @@ where
         })
     }
 
-    async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
-        self,
-        txn: T,
-        coords: S,
-        num_coords: u64,
-    ) -> TCResult<SparseStream<'a>> {
-        let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_coords).await?;
-        Ok(Box::pin(broadcast))
+    async fn num_filled(self, txn: T) -> TCResult<u64> {
+        let multiplier = self
+            .rebase
+            .map_coord(self.source.shape().origin())
+            .affected()
+            .count() as u64;
+
+        self.source
+            .filled_count(txn)
+            .map_ok(|count| count * multiplier)
+            .await
     }
 }
 
@@ -463,25 +466,41 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        // TODO: remove the need to calculate the number of filled coordinates before sorting them
+        let num_filled = self.clone().num_filled(txn.clone()).await?;
+
         let rebase = self.rebase.clone();
-        let num_coords = self.source.clone().filled_count(txn.clone()).await?;
-        if num_coords == 0 {
-            return Ok(Box::pin(stream::empty()));
-        }
-
         let filled = self.source.clone().filled(txn.clone()).await?;
-
-        let filled = filled
+        let coords = filled
             .map_ok(move |(coord, _)| {
                 stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok))
             })
             .try_flatten();
 
-        self.broadcast_coords(txn, filled, num_coords).await
+        let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_filled).await?;
+        Ok(Box::pin(broadcast))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("SparseBroadcast::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let shape = Shape::from({
+            let shape = self.shape();
+            axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>()
+        });
+
+        // TODO: remove the need to calculate the number of filled coordinates before sorting them
+        let num_filled = self.clone().num_filled(txn.clone()).await?;
+
+        let rebase = self.rebase;
+        let filled = self.source.filled(txn.clone()).await?;
+        let coords = filled
+            .map_ok(move |(coord, _)| {
+                stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok))
+            })
+            .try_flatten()
+            .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect());
+
+        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, &shape, coords, num_filled).await?;
+        Ok(Box::pin(GroupStream::from(coords)))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1084,8 +1103,10 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        let source_axes = self.rebase.invert_axes((0..self.ndim()).collect());
-        let filled = self.clone().filled_at(txn.clone(), source_axes).await?;
+        let filled = self
+            .clone()
+            .filled_at(txn.clone(), (0..self.ndim()).collect())
+            .await?;
 
         let zero = self.dtype().zero();
         let rebase = self.rebase;
@@ -1110,9 +1131,8 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
         let source_axes = self.rebase.invert_axes(axes);
-        let transpose = coord_transpose(source_axes.to_vec());
         let filled_at = self.source.filled_at(txn, source_axes).await?;
-        Ok(Box::pin(filled_at.map_ok(transpose)))
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1417,8 +1437,5 @@ where
 }
 
 fn coord_transpose(axes: Vec<usize>) -> impl Fn(Coord) -> Coord {
-    move |coord| {
-        debug_assert_eq!(coord.len(), axes.len());
-        axes.iter().map(|x| coord[*x]).collect()
-    }
+    move |coord| axes.iter().map(|x| coord[*x]).collect()
 }

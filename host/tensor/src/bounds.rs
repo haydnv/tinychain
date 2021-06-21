@@ -391,6 +391,11 @@ impl Shape {
         self.0
     }
 
+    /// Return the origin [`Coord`] of this `Shape`.
+    pub fn origin(&self) -> Coord {
+        iter::repeat(0).take(self.len()).collect()
+    }
+
     /// Return the number of elements contained within this `Shape`.
     pub fn size(&self) -> u64 {
         self.0.iter().product()

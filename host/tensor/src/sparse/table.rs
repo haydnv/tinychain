@@ -109,14 +109,9 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
         let columns: Vec<Id> = axes.into_iter().map(Id::from).collect();
-        let filled_at = self
-            .table
-            .order_by(columns.to_vec(), false)?
-            .select(columns)?
-            .rows(*txn.id())
-            .await?;
-
+        let filled_at = self.table.group_by(columns)?.rows(*txn.id()).await?;
         let filled_at = filled_at.map(|r| r.and_then(|coord| expect_coord(&coord)));
+
         Ok(Box::pin(filled_at))
     }
 
@@ -127,11 +122,7 @@ where
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let table = slice_table(self.table.clone(), &bounds)?;
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        Ok(SparseTableSlice {
-            source: self,
-            table,
-            rebase,
-        })
+        Ok(SparseTableSlice::new(self, table, rebase))
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -273,6 +264,20 @@ pub struct SparseTableSlice<FD, FS, D, T> {
     source: SparseTable<FD, FS, D, T>,
     table: Merged<FS, D, T>,
     rebase: transform::Slice,
+}
+
+impl<FD, FS, D, T> SparseTableSlice<FD, FS, D, T> {
+    fn new(
+        source: SparseTable<FD, FS, D, T>,
+        table: Merged<FS, D, T>,
+        rebase: transform::Slice,
+    ) -> Self {
+        Self {
+            source,
+            table,
+            rebase,
+        }
+    }
 }
 
 impl<FD, FS, D, T> TensorAccess for SparseTableSlice<FD, FS, D, T> {
