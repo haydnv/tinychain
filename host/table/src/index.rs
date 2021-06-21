@@ -611,15 +611,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         loop {
             let initial = columns.to_vec();
 
-            let mut i = 0;
-            while i < columns.len() {
-                let subset = &columns[i..];
-                let mut supported = false;
+            let mut i = columns.len();
+            while i > 0 {
+                let subset = &columns[..i];
 
                 if self.inner.primary.validate_order(subset).is_ok() {
-                    supported = true;
-                    columns = &columns[..i];
-                    i = 0;
+                    columns = &columns[i..];
 
                     debug!(
                         "primary key supports order {}",
@@ -638,17 +635,18 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                     }
 
                     merge_source = MergeSource::Merge(Box::new(merged));
+                    break;
                 } else {
                     debug!(
                         "primary key does not support order {}",
                         Value::from_iter(subset.to_vec())
                     );
 
+                    let mut supported = false;
                     for (name, index) in self.inner.auxiliary.iter() {
                         if index.validate_order(subset).is_ok() {
                             supported = true;
-                            columns = &columns[..i];
-                            i = 0;
+                            columns = &columns[i..];
 
                             debug!(
                                 "index {} supports order {}",
@@ -677,10 +675,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
                             );
                         }
                     }
-                }
 
-                if !supported {
-                    i = i + 1;
+                    if supported {
+                        break;
+                    } else {
+                        i = i - 1;
+                    }
                 }
             }
 

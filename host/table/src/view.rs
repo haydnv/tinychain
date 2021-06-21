@@ -1059,6 +1059,7 @@ pub fn group_by<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, 
 ) -> TCResult<Aggregate<F, D, Txn, <T as TableInstance<F, D, Txn>>::OrderBy>> {
     let source = source.order_by(columns.to_vec(), false)?;
     let source = source.select(columns)?;
+
     Ok(Aggregate {
         source,
         file: PhantomData,
