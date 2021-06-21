@@ -13,10 +13,13 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{GroupStream, TCBoxTryFuture};
 
-use crate::dense::{DenseAccess, DenseAccessor};
+use crate::dense::{DenseAccess, DenseAccessor, DenseTensor};
 use crate::stream::{coord_bounds, sorted_coords, sorted_values, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
-use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
+use crate::{
+    AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, TensorUnary,
+    ERR_NONBIJECTIVE_WRITE,
+};
 
 use super::combine::{coord_to_offset, SparseCombine};
 use super::table::{SparseTable, SparseTableSlice};
@@ -300,11 +303,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> SparseAccess<FD, FS, D, T> for DenseToSparse<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
 {
     type Slice = DenseToSparse<FD, FS, D, T, B::Slice>;
     type Transpose = DenseToSparse<FD, FS, D, T, B::Transpose>;
@@ -329,8 +333,41 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, _txn: T, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        Err(TCError::not_implemented("DenseToSparse::filled_at"))
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        let bounds = Bounds::all(self.source.shape());
+
+        let affected = {
+            let shape = self.source.shape();
+            let shape = Shape::from(axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>());
+            Bounds::all(&shape).affected()
+        };
+
+        let source = self.source;
+        let filled_at = stream::iter(affected)
+            .map(move |coord| {
+                let mut bounds = bounds.clone();
+                for (x, i) in axes.iter().zip(&coord) {
+                    bounds[*x] = AxisBounds::At(*i);
+                }
+
+                (coord, bounds)
+            })
+            .then(move |(coord, bounds)| {
+                let slice = source
+                    .clone()
+                    .slice(bounds)
+                    .map(DenseTensor::from)
+                    .map(|slice| (coord, slice));
+
+                future::ready(slice)
+            })
+            .and_then(move |(coord, slice)| slice.any(txn.clone()).map_ok(|any| (coord, any)))
+            .try_filter_map(|(coord, any)| {
+                let coord = if any { Some(coord) } else { None };
+                future::ready(Ok(coord))
+            });
+
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {

@@ -691,8 +691,8 @@ where
     async fn all(self, txn: T) -> TCResult<bool> {
         let mut blocks = self.blocks.block_stream(txn).await?;
 
-        while let Some(array) = blocks.next().await {
-            if !array?.all() {
+        while let Some(array) = blocks.try_next().await? {
+            if !array.all() {
                 return Ok(false);
             }
         }
@@ -702,8 +702,8 @@ where
 
     async fn any(self, txn: T) -> TCResult<bool> {
         let mut blocks = self.blocks.block_stream(txn).await?;
-        while let Some(array) = blocks.next().await {
-            if array?.any() {
+        while let Some(array) = blocks.try_next().await? {
+            if array.any() {
                 return Ok(true);
             }
         }
