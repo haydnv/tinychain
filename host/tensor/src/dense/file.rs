@@ -75,9 +75,23 @@ where
         let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
             let blocks = blocks.chain(iter::once(Ok(Array::constant(value.clone(), trailing_len))));
-            Self::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks)).await
+            Self::from_blocks(
+                file,
+                txn_id,
+                Some(shape),
+                value.class(),
+                stream::iter(blocks),
+            )
+            .await
         } else {
-            Self::from_blocks(file, txn_id, shape, value.class(), stream::iter(blocks)).await
+            Self::from_blocks(
+                file,
+                txn_id,
+                Some(shape),
+                value.class(),
+                stream::iter(blocks),
+            )
+            .await
         }
     }
 
@@ -85,19 +99,20 @@ where
     pub async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
         file: FD,
         txn_id: TxnId,
-        shape: Shape,
+        shape: Option<Shape>,
         dtype: NumberType,
         blocks: S,
     ) -> TCResult<Self> {
-        debug!("BlockListFile::from_blocks {}", shape);
-
-        blocks
+        let size = blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
             .inspect_ok(|(id, block)| debug!("block {} has {} elements", id, block.len()))
-            .map_ok(|(id, block)| file.create_block(txn_id, id, block))
+            .map_ok(|(id, block)| {
+                let len = block.len() as u64;
+                file.create_block(txn_id, id, block).map_ok(move |_| len)
+            })
             .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
+            .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
             .await?;
 
         if file.is_empty(&txn_id).await? {
@@ -105,6 +120,21 @@ where
                 "tried to create a dense tensor from an empty block list",
             ));
         }
+
+        let shape = if let Some(shape) = shape {
+            if shape.size() != size {
+                return Err(TCError::unsupported(format!(
+                    "dense tensor of shape {} requires {} elements but found {}",
+                    shape,
+                    shape.size(),
+                    size
+                )));
+            }
+
+            shape
+        } else {
+            vec![size].into()
+        };
 
         Ok(Self::new(file, (shape, dtype)))
     }
@@ -416,7 +446,7 @@ where
         let dtype = other.dtype();
         let shape = other.shape().clone();
         let blocks = other.block_stream(txn).await?;
-        Self::from_blocks(file, txn_id, shape, dtype, blocks).await
+        Self::from_blocks(file, txn_id, Some(shape), dtype, blocks).await
     }
 }
 

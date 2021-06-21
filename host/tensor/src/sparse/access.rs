@@ -441,19 +441,6 @@ where
             phantom: Phantom::default(),
         })
     }
-
-    async fn num_filled(self, txn: T) -> TCResult<u64> {
-        let multiplier = self
-            .rebase
-            .map_coord(self.source.shape().origin())
-            .affected()
-            .count() as u64;
-
-        self.source
-            .filled_count(txn)
-            .map_ok(|count| count * multiplier)
-            .await
-    }
 }
 
 impl<FD, FS, D, T, A> TensorAccess for SparseBroadcast<FD, FS, D, T, A>
@@ -503,9 +490,6 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        // TODO: remove the need to calculate the number of filled coordinates before sorting them
-        let num_filled = self.clone().num_filled(txn.clone()).await?;
-
         let rebase = self.rebase.clone();
         let filled = self.source.clone().filled(txn.clone()).await?;
         let coords = filled
@@ -514,7 +498,7 @@ where
             })
             .try_flatten();
 
-        let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_filled).await?;
+        let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords).await?;
         Ok(Box::pin(broadcast))
     }
 
@@ -523,9 +507,6 @@ where
             let shape = self.shape();
             axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>()
         });
-
-        // TODO: remove the need to calculate the number of filled coordinates before sorting them
-        let num_filled = self.clone().num_filled(txn.clone()).await?;
 
         let rebase = self.rebase;
         let filled = self.source.filled(txn.clone()).await?;
@@ -536,7 +517,7 @@ where
             .try_flatten()
             .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect());
 
-        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, &shape, coords, num_filled).await?;
+        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, &shape, coords).await?;
         Ok(Box::pin(GroupStream::from(coords)))
     }
 
@@ -1292,10 +1273,9 @@ where
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let rebase = self.rebase.clone();
-        let num_coords = self.clone().filled_count(txn.clone()).await?;
         let coords = self.source.clone().filled(txn.clone()).await?;
         let coords = coords.map_ok(move |(coord, _)| rebase.map_coord(coord));
-        let filled = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords, num_coords).await?;
+        let filled = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords).await?;
         Ok(Box::pin(filled))
     }
 

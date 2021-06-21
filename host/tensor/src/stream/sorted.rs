@@ -19,7 +19,6 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     txn: &T,
     shape: &Shape,
     coords: C,
-    num_coords: u64,
 ) -> TCResult<impl Stream<Item = TCResult<Coord>> + Unpin>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -35,7 +34,7 @@ where
         .create_file_tmp(txn_id, TensorType::Dense)
         .await?;
 
-    let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, num_coords, shape).await?;
+    let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape).await?;
     let coords = offsets_to_coords(shape, offsets.into_stream(txn_id));
     Ok(coords)
 }
@@ -44,7 +43,6 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     txn: T,
     source: A,
     coords: C,
-    num_coords: u64,
 ) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Coord>>, D, T, A>>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -55,8 +53,7 @@ where
     A: TensorAccess + ReadValueAt<D> + 'a,
     D::FileClass: From<TensorType>,
 {
-    let sorted_coords =
-        sorted_coords::<FD, FS, D, T, C>(&txn, source.shape(), coords, num_coords).await?;
+    let sorted_coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape(), coords).await?;
     Ok(ValueReader::new(sorted_coords, txn, source))
 }
 
@@ -64,7 +61,6 @@ async fn sort_coords<FD, FS, D, T, S>(
     file: FD,
     txn_id: TxnId,
     coords: S,
-    num_coords: u64,
     shape: &Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
@@ -76,14 +72,9 @@ where
 {
     let blocks = coords_to_offsets(shape, coords).map_ok(|block| ArrayExt::from(block).into());
 
-    let block_list = BlockListFile::from_blocks(
-        file,
-        txn_id,
-        Shape::from(vec![num_coords]),
-        UIntType::U64.into(),
-        Box::pin(blocks),
-    )
-    .await?;
+    let block_list =
+        BlockListFile::from_blocks(file, txn_id, None, UIntType::U64.into(), Box::pin(blocks))
+            .await?;
 
     block_list.merge_sort(txn_id).await?;
     Ok(block_list)
