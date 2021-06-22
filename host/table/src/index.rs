@@ -404,6 +404,7 @@ pub struct TableIndex<F, D, Txn> {
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
+    /// Create a new `TableIndex` with the given [`TableSchema`].
     pub async fn create(
         context: &D,
         schema: TableSchema,
@@ -466,10 +467,14 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         Ok(Index { btree, schema })
     }
 
+    /// Return `true` if this table has zero rows.
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         self.inner.primary.is_empty(txn).await
     }
 
+    /// Merge the given list of `Bounds` into a single `Bounds` instance.
+    ///
+    /// Returns an error in the case that later [`Bounds`] are larger than earlier [`Bounds`].
     pub fn merge_bounds(&self, all_bounds: Vec<Bounds>) -> TCResult<Bounds> {
         let collator = self.inner.primary.btree().collator();
 
@@ -481,10 +486,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         Ok(merged)
     }
 
+    /// Borrow the primary `Index` of this `TableIndex`.
     pub fn primary(&self) -> &Index<F, D, Txn> {
         &self.inner.primary
     }
 
+    /// Return an index which supports the given [`Bounds`], or an error if there is none.
     pub fn supporting_index(&self, bounds: &Bounds) -> TCResult<Index<F, D, Txn>> {
         if self.inner.primary.validate_bounds(bounds).is_ok() {
             return Ok(self.inner.primary.clone());
@@ -502,10 +509,12 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         ))
     }
 
+    /// Return a single row in this table with the given primary `key`, or `None` if there is none.
     pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
         self.inner.primary.get(txn_id, key).await
     }
 
+    /// Insert a new row into this `TableIndex`, or update the row at the given `key` with `values`.
     pub async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         let primary = &self.inner.primary;
 
@@ -527,6 +536,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         Ok(())
     }
 
+    /// Stream the rows within the given [`Bounds`] from the primary index of this `TableIndex`.
     pub async fn slice_rows<'a>(
         self,
         txn_id: TxnId,

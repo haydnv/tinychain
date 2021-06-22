@@ -838,6 +838,10 @@ impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T> {
     }
 }
 
+/// Broadcast the given `left` and `right` tensors into the same shape.
+///
+/// For rules of broadcasting, see:
+/// [https://pytorch.org/docs/stable/notes/broadcasting.html](https://pytorch.org/docs/stable/notes/broadcasting.html)
 pub fn broadcast<FD, FS, D, T>(
     left: Tensor<FD, FS, D, T>,
     right: Tensor<FD, FS, D, T>,

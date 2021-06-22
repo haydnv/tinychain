@@ -1,4 +1,4 @@
-//! Delay resolving a [`TCRef`] until a given dependency is resolved.
+//! Delay resolving a `TCRef` until a given dependency is resolved.
 
 use std::collections::HashSet;
 use std::fmt;

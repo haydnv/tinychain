@@ -41,6 +41,7 @@ pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Sen
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
 convert to a DenseTensor first.";
 
+/// A `Tensor` stored as a `Table` of [`Coord`]s and [`Number`] values
 #[derive(Clone)]
 pub struct SparseTensor<FD, FS, D, T, A> {
     accessor: A,
@@ -48,6 +49,7 @@ pub struct SparseTensor<FD, FS, D, T, A> {
 }
 
 impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A> {
+    /// Consume this [`SparseTensor`] and return its accessor.
     pub fn into_inner(self) -> A {
         self.accessor
     }
@@ -144,6 +146,7 @@ where
     T: Transaction<D>,
     D::FileClass: From<BTreeType>,
 {
+    /// Create a new `SparseTensor` with the given schema
     pub async fn create(dir: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         SparseTable::create(dir, schema, txn_id)
             .map_ok(Self::from)

@@ -25,28 +25,42 @@ use super::combine::{coord_to_offset, SparseCombine};
 use super::table::{SparseTable, SparseTableSlice};
 use super::{CoordStream, SparseRow, SparseStream, SparseTensor};
 
+/// Access methods for [`SparseTensor`] data
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
+    /// The type of a slice of this accessor
     type Slice: SparseAccess<FD, FS, D, T>;
+
+    /// The type of a transpose of this accessor
     type Transpose: SparseAccess<FD, FS, D, T>;
 
+    /// Return this accessor as a [`SparseAccessor`].
     fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
 
+    /// Return this [`SparseTensor`]'s contents as an ordered stream of ([`Coord`], [`Number`]) pairs.
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
+    /// Return an ordered stream of unique [`Coord`]s on the given axes with nonzero values.
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>>;
 
+    /// Return the number of nonzero values in this [`SparseTensor`].
     async fn filled_count(self, txn: T) -> TCResult<u64>;
 
+    /// Return a slice of this accessor with the given [`Bounds`].
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
+    /// Return this accessor as transposed according to the given `permutation`.
+    ///
+    /// If no permutation is given, this accessor's axes will be reversed.
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
+    /// Write the given `value` at the given `coord` of this [`SparseTensor`].
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
+/// A generic [`SparseAccess`] type
 #[derive(Clone)]
 pub enum SparseAccessor<FD, FS, D, T> {
     Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),

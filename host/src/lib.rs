@@ -2,7 +2,7 @@
 //! cross-service transactions across an ensemble of microservices which implement the
 //! Tinychain protocol. Tinychain itself is also a Turing-complete application platform.
 //!
-//! Tinychain currently supports `BlockChain`, `BTree`, and `Table` collection types,
+//! Tinychain currently supports `BlockChain`, `BTree`, `Table`, and `Tensor` collection types,
 //! with more planned for the future.
 //!
 //! Tinychain is intended to be used as an executable binary (i.e., with `cargo install`) via its
@@ -15,6 +15,8 @@ pub use kernel::*;
 pub use tc_btree as btree;
 pub use tc_error as error;
 pub use tc_table as table;
+#[cfg(feature = "tensor")]
+pub use tc_tensor as tensor;
 pub use tc_transact as transact;
 pub use tc_value as value;
 pub use tcgeneric as generic;

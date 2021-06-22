@@ -26,6 +26,7 @@ use super::{CoordStream, SparseAccess, SparseAccessor, SparseStream, SparseTenso
 const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
+/// The base accessor type of [`SparseTensor`], implementing [`SparseAccess`] for a [`TableIndex`].
 #[derive(Clone)]
 pub struct SparseTable<FD, FS, D, T> {
     table: TableIndex<FS, D, T>,
@@ -41,6 +42,7 @@ where
     T: Transaction<D>,
     D::FileClass: From<BTreeType>,
 {
+    /// Create a new `SparseTable` with the given [`Schema`].
     pub async fn create(context: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         let table_schema = Self::table_schema(&schema);
         let table = TableIndex::create(context, table_schema, txn_id).await?;

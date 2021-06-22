@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
-use log::debug;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio_util::io::StreamReader;

@@ -485,6 +485,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
     }
 }
 
+/// A merge of multiple table indexes
 #[derive(Clone)]
 pub struct Merged<F, D, Txn> {
     left: MergeSource<F, D, Txn>,
@@ -493,6 +494,7 @@ pub struct Merged<F, D, Txn> {
 }
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
+    /// Create a new merge of the given `IndexSlice` with the given `MergeSource`.
     pub fn new(left: MergeSource<F, D, Txn>, right: IndexSlice<F, D, Txn>) -> TCResult<Self> {
         let bounds = left
             .source()
@@ -513,6 +515,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
         self.left.into_source()
     }
 
+    /// Stream the rows within the given [`Bounds`] of this merge
     pub async fn slice_rows<'a>(
         self,
         txn_id: TxnId,
@@ -550,7 +553,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(txn_id, row))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
