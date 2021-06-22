@@ -210,8 +210,42 @@ where
         self.combine(other, Number::or, NumberType::Bool)
     }
 
-    fn xor(self, _other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        Err(TCError::unsupported(ERR_NOT_SPARSE))
+    fn xor(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        self.combine(other, Number::xor, NumberType::Bool)
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorBoolean<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Combine = Tensor<FD, FS, D, T>;
+
+    fn and(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.and(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.and(other).map(Tensor::from),
+        }
+    }
+
+    fn or(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.or(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.or(other).map(Tensor::from),
+        }
+    }
+
+    fn xor(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(other) => self.xor(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.xor(other).map(Tensor::from),
+        }
     }
 }
 
