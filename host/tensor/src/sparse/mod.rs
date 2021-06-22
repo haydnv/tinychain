@@ -293,6 +293,63 @@ where
 }
 
 #[async_trait]
+impl<FD, FS, D, T, A> TensorCompare<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+    type Compare = Tensor<FD, FS, D, T>;
+    type Dense = Tensor<FD, FS, D, T>;
+
+    async fn eq(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.into_dense().eq(other, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(other) => self.eq(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn gt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.gt(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.gt(other).map(Tensor::from),
+        }
+    }
+
+    async fn gte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.into_dense().gte(other, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(other) => self.gte(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn lt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.gt(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.gt(other).map(Tensor::from),
+        }
+    }
+
+    async fn lte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+        match other {
+            Tensor::Dense(other) => self.into_dense().lte(other, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(other) => self.lte(other, txn).map_ok(Tensor::from).await,
+        }
+    }
+
+    fn ne(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
+        match other {
+            Tensor::Dense(other) => self.ne(other.into_sparse()).map(Tensor::from),
+            Tensor::Sparse(other) => self.ne(other).map(Tensor::from),
+        }
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T, A, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, B>>
     for SparseTensor<FD, FS, D, T, A>
 where
