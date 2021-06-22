@@ -1,4 +1,5 @@
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
 use std::pin::Pin;
@@ -12,8 +13,8 @@ use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
 
@@ -76,6 +77,21 @@ where
             accessor,
             phantom: self.phantom,
         })
+    }
+}
+
+impl<FD, FS, D, T> SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<BTreeType>,
+{
+    pub async fn create(dir: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
+        SparseTable::create(dir, schema, txn_id)
+            .map_ok(Self::from)
+            .await
     }
 }
 
@@ -389,12 +405,47 @@ where
     }
 }
 
+#[async_trait]
+impl<FD, FS, D, T> Restore<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+{
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        self.accessor.restore(&backup.accessor, txn_id).await
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> Transact for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
+where
+    Self: Send + Sync,
+    SparseTable<FD, FS, D, T>: Transact + Send + Sync,
+{
+    async fn commit(&self, txn_id: &TxnId) {
+        self.accessor.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.accessor.finalize(txn_id).await
+    }
+}
+
 impl<FD, FS, D, T, A> From<A> for SparseTensor<FD, FS, D, T, A> {
     fn from(accessor: A) -> Self {
         Self {
             accessor,
             phantom: Phantom::default(),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseTensor<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sparse Tensor")
     }
 }
 
@@ -476,7 +527,7 @@ where
         let dtype = dtype.try_into().map_err(de::Error::custom)?;
 
         let txn_id = *self.txn.id();
-        let table = SparseTable::create(self.txn.context(), txn_id, (shape, dtype))
+        let table = SparseTable::create(self.txn.context(), (shape, dtype), txn_id)
             .map_err(de::Error::custom)
             .await?;
 

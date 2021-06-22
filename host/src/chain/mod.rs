@@ -18,7 +18,9 @@ use crate::collection::{
     BTree, BTreeFile, Collection, CollectionType, Table, TableIndex, TableType,
 };
 #[cfg(feature = "tensor")]
-use crate::collection::{DenseTensor, DenseTensorFile, Tensor, TensorType};
+use crate::collection::{
+    DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType,
+};
 use crate::fs;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
 use crate::state::{State, StateView};
@@ -50,7 +52,9 @@ pub enum Schema {
     BTree(tc_btree::RowSchema),
     Table(tc_table::TableSchema),
     #[cfg(feature = "tensor")]
-    Tensor(tc_tensor::Schema),
+    Dense(tc_tensor::Schema),
+    #[cfg(feature = "tensor")]
+    Sparse(tc_tensor::Schema),
     Value(Value),
 }
 
@@ -86,13 +90,18 @@ impl Schema {
                             }
 
                             #[cfg(feature = "tensor")]
-                            CollectionType::Tensor(_) => {
+                            CollectionType::Tensor(tt) => {
                                 let (shape, dtype): (Vec<u64>, ValueType) =
                                     schema.try_cast_into(|s| {
                                         TCError::bad_request("invalid Tensor schema", s)
                                     })?;
 
-                                Ok(Self::Tensor((shape.into(), dtype.try_into()?)))
+                                let schema = (shape.into(), dtype.try_into()?);
+
+                                match tt {
+                                    TensorType::Dense => Ok(Self::Dense(schema)),
+                                    TensorType::Sparse => Ok(Self::Sparse(schema)),
+                                }
                             }
                         }
                     }
@@ -132,7 +141,7 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.end()
             }
             #[cfg(feature = "tensor")]
-            Self::Tensor((shape, dtype)) => {
+            Self::Dense((shape, dtype)) | Self::Sparse((shape, dtype)) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(
                     TensorType::Dense.path(),
@@ -151,7 +160,9 @@ pub enum Subject {
     BTree(BTreeFile),
     Table(TableIndex),
     #[cfg(feature = "tensor")]
-    Tensor(DenseTensor<DenseTensorFile>),
+    Dense(DenseTensor<DenseTensorFile>),
+    #[cfg(feature = "tensor")]
+    Sparse(SparseTensor<SparseTable>),
     Value(fs::File<Value>),
 }
 
@@ -169,18 +180,25 @@ impl Subject {
                     .await
             }
             Schema::Table(schema) => {
-                TableIndex::create(schema, dir, txn_id)
+                TableIndex::create(dir, schema, txn_id)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
-            Schema::Tensor(schema) => {
+            Schema::Dense(schema) => {
                 let file = dir
                     .create_file(txn_id, SUBJECT.into(), TensorType::Dense)
                     .await?;
 
                 DenseTensor::create(file, schema, txn_id)
-                    .map_ok(Self::Tensor)
+                    .map_ok(Self::Dense)
+                    .await
+            }
+            #[cfg(feature = "tensor")]
+            Schema::Sparse(schema) => {
+                let dir = dir.create_dir(txn_id, SUBJECT.into()).await?;
+                SparseTensor::create(&dir, schema, txn_id)
+                    .map_ok(Self::Sparse)
                     .await
             }
             Schema::Value(value) => {
@@ -215,13 +233,23 @@ impl Subject {
                 }
             }
             #[cfg(feature = "tensor")]
-            Schema::Tensor(schema) => {
+            Schema::Dense(schema) => {
                 if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
                     DenseTensor::load(txn, schema, file)
-                        .map_ok(Self::Tensor)
+                        .map_ok(Self::Dense)
                         .await
                 } else {
-                    Self::create(Schema::Tensor(schema), dir, *txn.id()).await
+                    Self::create(Schema::Dense(schema), dir, *txn.id()).await
+                }
+            }
+            #[cfg(feature = "tensor")]
+            Schema::Sparse(schema) => {
+                if let Some(dir) = dir.get_dir(txn.id(), &SUBJECT.into()).await? {
+                    SparseTensor::load(txn, schema, dir)
+                        .map_ok(Self::Sparse)
+                        .await
+                } else {
+                    Self::create(Schema::Sparse(schema), dir, *txn.id()).await
                 }
             }
             Schema::Value(value) => {
@@ -250,7 +278,7 @@ impl Subject {
                 other => Err(TCError::bad_request("cannot restore a Table from", other)),
             },
             #[cfg(feature = "tensor")]
-            Self::Tensor(tensor) => match backup {
+            Self::Dense(tensor) => match backup {
                 State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
                     let file = txn
                         .context()
@@ -264,6 +292,19 @@ impl Subject {
                 }
                 other => Err(TCError::bad_request(
                     "cannot restore a dense Tensor from",
+                    other,
+                )),
+            },
+            #[cfg(feature = "tensor")]
+            Self::Sparse(tensor) => match backup {
+                State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
+                    let dir = txn.context().create_dir_tmp(txn_id).await?;
+                    let backup =
+                        tc_transact::fs::CopyFrom::copy_from(backup, dir, txn.clone()).await?;
+                    tensor.restore(&backup, txn_id).await
+                }
+                other => Err(TCError::bad_request(
+                    "cannot restore a sparse Tensor from",
                     other,
                 )),
             },
@@ -284,7 +325,9 @@ impl Transact for Subject {
             Self::BTree(btree) => btree.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Tensor(tensor) => tensor.commit(txn_id).await,
+            Self::Dense(tensor) => tensor.commit(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Sparse(tensor) => tensor.commit(txn_id).await,
             Self::Value(file) => file.commit(txn_id).await,
         }
     }
@@ -294,7 +337,9 @@ impl Transact for Subject {
             Self::BTree(btree) => btree.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
+            Self::Dense(tensor) => tensor.finalize(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Sparse(tensor) => tensor.finalize(txn_id).await,
             Self::Value(file) => file.finalize(txn_id).await,
         }
     }
@@ -334,7 +379,9 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
             }
             Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,
             #[cfg(feature = "tensor")]
-            Self::Tensor(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
+            Self::Dense(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
+            #[cfg(feature = "tensor")]
+            Self::Sparse(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
             Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
         }
     }
@@ -346,7 +393,9 @@ impl fmt::Display for Subject {
             Self::BTree(btree) => write!(f, "chain Subject, {}", btree.class()),
             Self::Table(table) => write!(f, "chain Subject, {}", table.class()),
             #[cfg(feature = "tensor")]
-            Self::Tensor(_) => write!(f, "chain Subject, {}", TensorType::Dense),
+            Self::Dense(_) => write!(f, "chain Subject, {}", TensorType::Dense),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(_) => write!(f, "chain Subject, {}", TensorType::Sparse),
             Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
         }
     }

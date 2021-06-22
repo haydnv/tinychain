@@ -376,6 +376,14 @@ impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
     }
 }
 
+impl<A: SparseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
+    for SparseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, A>
+{
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        None // TODO
+    }
+}
+
 impl Route for Tensor {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)

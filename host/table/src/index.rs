@@ -405,8 +405,8 @@ pub struct TableIndex<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
     pub async fn create(
-        schema: TableSchema,
         context: &D,
+        schema: TableSchema,
         txn_id: TxnId,
     ) -> TCResult<TableIndex<F, D, Txn>>
     where
@@ -988,7 +988,7 @@ where
         let txn_id = *txn.id();
         let schema = source.schema();
         let key_len = schema.primary().key().len();
-        let table = Self::create(schema, &dir, txn_id).await?;
+        let table = Self::create(&dir, schema, txn_id).await?;
 
         let rows = source.rows(txn_id).await?;
 

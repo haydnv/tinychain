@@ -39,7 +39,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::BTree(btree) => btree.get(&txn, self.path, key).await,
                     Subject::Table(table) => Public::get(table, &txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
-                    Subject::Tensor(tensor) => tensor.get(&txn, self.path, key).await,
+                    Subject::Dense(tensor) => tensor.get(&txn, self.path, key).await,
+                    #[cfg(feature = "tensor")]
+                    Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
                     Subject::Value(file) => {
                         let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
                         if self.path.is_empty() {
@@ -60,7 +62,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::BTree(btree) => btree.put(&txn, self.path, key, value).await,
                     Subject::Table(table) => table.put(&txn, self.path, key, value).await,
                     #[cfg(feature = "tensor")]
-                    Subject::Tensor(tensor) => tensor.put(&txn, self.path, key, value).await,
+                    Subject::Dense(tensor) => tensor.put(&txn, self.path, key, value).await,
+                    #[cfg(feature = "tensor")]
+                    Subject::Sparse(tensor) => tensor.put(&txn, self.path, key, value).await,
                     Subject::Value(file) if self.path.is_empty() => {
                         let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
 
@@ -92,7 +96,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::BTree(btree) => btree.post(&txn, self.path, params).await,
                     Subject::Table(table) => table.post(&txn, self.path, params).await,
                     #[cfg(feature = "tensor")]
-                    Subject::Tensor(tensor) => tensor.post(&txn, self.path, params).await,
+                    Subject::Dense(tensor) => tensor.post(&txn, self.path, params).await,
+                    #[cfg(feature = "tensor")]
+                    Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
                         subject.post(&txn, self.path, params).await
@@ -109,7 +115,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::BTree(btree) => btree.delete(&txn, self.path, key).await,
                     Subject::Table(table) => Public::delete(table, &txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
-                    Subject::Tensor(tensor) => tensor.delete(&txn, self.path, key).await,
+                    Subject::Dense(tensor) => tensor.delete(&txn, self.path, key).await,
+                    #[cfg(feature = "tensor")]
+                    Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
                     Subject::Value(file) if self.path.is_empty() => {
                         let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
                         *subject = Value::None;

@@ -31,7 +31,7 @@ impl<'a> Handler<'a> for CreateHandler {
                 })?;
 
                 let dir = txn.context().create_dir_tmp(*txn.id()).await?;
-                TableIndex::create(schema, &dir, *txn.id())
+                TableIndex::create(&dir, schema, *txn.id())
                     .map_ok(Collection::from)
                     .map_ok(State::from)
                     .await

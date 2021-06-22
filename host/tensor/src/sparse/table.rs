@@ -11,7 +11,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSchema};
-use tc_transact::fs::{CopyFrom, Dir, File, Persist};
+use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, GroupStream, Id, Label};
@@ -41,9 +41,9 @@ where
     T: Transaction<D>,
     D::FileClass: From<BTreeType>,
 {
-    pub async fn create(context: &D, txn_id: TxnId, schema: Schema) -> TCResult<Self> {
+    pub async fn create(context: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::create(table_schema, context, txn_id).await?;
+        let table = TableIndex::create(context, table_schema, txn_id).await?;
 
         Ok(Self {
             table,
@@ -191,7 +191,7 @@ where
         txn: T,
     ) -> TCResult<Self> {
         let schema = (instance.shape().clone(), instance.dtype());
-        let accessor = SparseTable::create(&store, *txn.id(), schema).await?;
+        let accessor = SparseTable::create(&store, schema, *txn.id()).await?;
 
         let txn_id = *txn.id();
         let filled = instance.accessor.filled(txn).await?;
@@ -231,6 +231,20 @@ where
             schema,
             dense: PhantomData,
         })
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> Restore<D> for SparseTable<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+{
+    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+        self.table.restore(&backup.table, txn_id).await
     }
 }
 

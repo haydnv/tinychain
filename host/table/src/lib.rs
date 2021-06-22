@@ -571,7 +571,7 @@ where
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a Table schema"))?;
-        let table = TableIndex::create(schema, self.txn.context(), *self.txn.id())
+        let table = TableIndex::create(self.txn.context(), schema, *self.txn.id())
             .map_err(de::Error::custom)
             .await?;
 
