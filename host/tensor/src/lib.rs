@@ -11,12 +11,12 @@ use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Hash};
+use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
-    TCPathBuf, TCTryStream,
+    TCPathBuf,
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -375,21 +375,21 @@ where
     fn and(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.and(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.and(other),
         }
     }
 
     fn or(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.or(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.or(other),
         }
     }
 
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(dense) => dense.xor(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.xor(other),
         }
     }
 }
@@ -410,42 +410,42 @@ where
     async fn eq(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.eq(other, txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.eq(other, txn).await,
         }
     }
 
     fn gt(self, other: Self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.gt(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.gt(other),
         }
     }
 
     async fn gte(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.gte(other, txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.gte(other, txn).await,
         }
     }
 
     fn lt(self, other: Self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.lt(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.lt(other),
         }
     }
 
     async fn lte(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.lte(other, txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.lte(other, txn).await,
         }
     }
 
     fn ne(self, other: Self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.ne(other),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.ne(other),
         }
     }
 }
@@ -499,7 +499,7 @@ where
     async fn mask(self, txn: T, other: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.mask(txn, other).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.mask(txn, other).await,
         }
     }
 
@@ -508,7 +508,7 @@ where
 
         match self {
             Self::Dense(this) => this.write(txn, bounds, value).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(this) => this.write(txn, bounds, value).await,
         }
     }
 }
@@ -661,48 +661,28 @@ where
     fn abs(&self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.abs().map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.abs().map(Self::from),
         }
     }
 
     async fn all(self, txn: T) -> TCResult<bool> {
         match self {
             Self::Dense(dense) => dense.all(txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.all(txn).await,
         }
     }
 
     async fn any(self, txn: T) -> TCResult<bool> {
         match self {
             Self::Dense(dense) => dense.any(txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.any(txn).await,
         }
     }
 
     fn not(&self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.not().map(Self::from),
-            Self::Sparse(_sparse) => todo!(),
-        }
-    }
-}
-
-#[async_trait]
-impl<'en, FD, FS, D, T> Hash<'en, D> for Tensor<FD, FS, D, T>
-where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    D::FileClass: From<TensorType>,
-{
-    type Item = Array;
-    type Txn = T;
-
-    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
-        match self {
-            Self::Dense(dense) => dense.hashable(txn).await,
-            Self::Sparse(_sparse) => todo!(),
+            Self::Sparse(sparse) => sparse.not().map(Self::from),
         }
     }
 }

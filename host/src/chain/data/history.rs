@@ -129,12 +129,13 @@ impl History {
 
                 #[cfg(feature = "tensor")]
                 Collection::Tensor(tensor) => {
-                    let hash = tensor.hash_hex(&txn).await?.parse()?;
                     let schema = cast_tensor_schema(&tensor);
                     let classpath = tensor.class().path();
 
-                    match tensor {
+                    let hash = match tensor {
                         Tensor::Dense(dense) => {
+                            let hash = dense.hash_hex(&txn).await?.parse()?;
+
                             if !self.dir.contains(&txn_id, &hash).await? {
                                 let file = self
                                     .dir
@@ -143,14 +144,20 @@ impl History {
 
                                 DenseTensor::copy_from(dense, file, txn).await?;
                             }
+
+                            hash
                         }
                         Tensor::Sparse(sparse) => {
+                            let hash = sparse.hash_hex(&txn).await?.parse()?;
+
                             if !self.dir.contains(&txn_id, &hash).await? {
                                 let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
                                 SparseTensor::copy_from(sparse, dir, txn).await?;
                             }
+
+                            hash
                         }
-                    }
+                    };
 
                     Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
                 }

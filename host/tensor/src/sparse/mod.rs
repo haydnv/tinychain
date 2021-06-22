@@ -236,14 +236,14 @@ where
 
     fn or(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.or(other.into_sparse()).map(Tensor::from),
+            Tensor::Dense(other) => self.into_dense().or(other).map(Tensor::from),
             Tensor::Sparse(other) => self.or(other).map(Tensor::from),
         }
     }
 
     fn xor(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.xor(other.into_sparse()).map(Tensor::from),
+            Tensor::Dense(other) => self.into_dense().xor(other).map(Tensor::from),
             Tensor::Sparse(other) => self.xor(other).map(Tensor::from),
         }
     }
