@@ -15,13 +15,13 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberType, ValueType};
+use tc_value::{Number, NumberClass, NumberInstance, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
 
-use super::dense::{BlockListSparse, DenseTensor};
+use super::dense::{BlockListFile, BlockListSparse, DenseTensor};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorIO, TensorInstance,
-    TensorMath, TensorReduce, TensorTransform, TensorType,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorCompare, TensorIO,
+    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
 };
 
 use crate::dense::PER_BLOCK;
@@ -80,6 +80,58 @@ where
     }
 }
 
+impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    fn condense<'a, R>(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        txn: T,
+        default: Number,
+        condensor: fn(Number, Number) -> Number,
+    ) -> TCBoxTryFuture<'a, DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>>
+    where
+        R: SparseAccess<FD, FS, D, T>,
+    {
+        Box::pin(async move {
+            if self.shape() != other.shape() {
+                return Err(TCError::unsupported(format!(
+                    "cannot condense sparse Tensor of size {} with another of size {}",
+                    self.shape(),
+                    other.shape()
+                )));
+            }
+
+            let shape = self.shape().clone();
+            let accessor =
+                SparseCombinator::new(self.accessor, other.accessor, condensor, default.class())?;
+
+            let txn_id = *txn.id();
+            let file = txn
+                .context()
+                .create_file_tmp(txn_id, TensorType::Dense)
+                .await?;
+
+            let condensed = DenseTensor::constant(file, txn_id, shape, default).await?;
+            let filled = accessor.filled(txn).await?;
+
+            filled
+                .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
+                .try_buffer_unordered(num_cpus::get())
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+
+            Ok(condensed)
+        })
+    }
+}
+
 impl<FD, FS, D, T> SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -130,6 +182,83 @@ impl<FD, FS, D, T, A> TensorInstance for SparseTensor<FD, FS, D, T, A> {
 
     fn into_sparse(self) -> Self::Sparse {
         self
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, L, R> TensorCompare<D, SparseTensor<FD, FS, D, T, R>>
+    for SparseTensor<FD, FS, D, T, L>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+    type Compare = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
+    type Dense = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    async fn eq(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
+        fn eq(l: Number, r: Number) -> Number {
+            (l == r).into()
+        }
+
+        self.condense(other, txn, true.into(), eq).await
+    }
+
+    fn gt(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {
+        fn gt(l: Number, r: Number) -> Number {
+            (l > r).into()
+        }
+
+        self.combine(other, gt, NumberType::Bool)
+    }
+
+    async fn gte(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
+        fn gte(l: Number, r: Number) -> Number {
+            (l >= r).into()
+        }
+
+        self.condense(other, txn, true.into(), gte).await
+    }
+
+    fn lt(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {
+        fn lt(l: Number, r: Number) -> Number {
+            (l < r).into()
+        }
+
+        self.combine(other, lt, NumberType::Bool)
+    }
+
+    async fn lte(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        txn: Self::Txn,
+    ) -> TCResult<Self::Dense> {
+        fn lte(l: Number, r: Number) -> Number {
+            (l <= r).into()
+        }
+
+        self.condense(other, txn, true.into(), lte).await
+    }
+
+    fn ne(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {
+        fn ne(l: Number, r: Number) -> Number {
+            (l != r).into()
+        }
+
+        self.combine(other, ne, NumberType::Bool)
     }
 }
 
