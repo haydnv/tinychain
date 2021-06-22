@@ -1,3 +1,4 @@
+import itertools
 import random
 import tinychain as tc
 import unittest
@@ -79,7 +80,6 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
 
         result = self.host.post(ENDPOINT, cxt)
-        print(result)
         self.assertEqual(result, {
             str(tc.uri(tc.Table)): [
                 [[[], [['views', str(tc.uri(tc.UInt))]]], []],
@@ -177,6 +177,10 @@ class TableTests(unittest.TestCase):
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(list([[num2words(i), i] for i in range(10, 20)])))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.stop()
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
