@@ -20,8 +20,8 @@ use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
 
 use super::dense::{BlockListFile, BlockListSparse, DenseTensor};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorCompare, TensorIO,
-    TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
+    TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
 };
 
 use crate::dense::PER_BLOCK;
@@ -36,6 +36,9 @@ mod table;
 type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
+
+const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
+convert to a DenseTensor first.";
 
 #[derive(Clone)]
 pub struct SparseTensor<FD, FS, D, T, A> {
@@ -182,6 +185,32 @@ impl<FD, FS, D, T, A> TensorInstance for SparseTensor<FD, FS, D, T, A> {
 
     fn into_sparse(self) -> Self::Sparse {
         self
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, L, R> TensorBoolean<SparseTensor<FD, FS, D, T, R>>
+    for SparseTensor<FD, FS, D, T, L>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    type Combine = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
+
+    fn and(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        self.combine(other, Number::and, NumberType::Bool)
+    }
+
+    fn or(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        self.combine(other, Number::or, NumberType::Bool)
+    }
+
+    fn xor(self, _other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        Err(TCError::unsupported(ERR_NOT_SPARSE))
     }
 }
 
