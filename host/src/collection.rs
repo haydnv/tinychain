@@ -26,8 +26,7 @@ pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
 
 #[cfg(feature = "tensor")]
-pub use tc_tensor::{DenseAccess, TensorType};
-use tc_tensor::SparseAccess;
+pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
 
 pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
@@ -184,7 +183,9 @@ impl<B: DenseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir,
 }
 
 #[cfg(feature = "tensor")]
-impl<A: SparseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> From<SparseTensor<A>> for Collection {
+impl<A: SparseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
+    From<SparseTensor<A>> for Collection
+{
     fn from(tensor: SparseTensor<A>) -> Self {
         Self::Tensor(tensor.into())
     }

@@ -302,6 +302,7 @@ class SparseTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
+    CACHE_SIZE = "10M"
     NUM_HOSTS = 4
     NAME = "tensor"
 
@@ -329,9 +330,11 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             self.assertEqual(actual, expected)
 
         hosts[0].put("/test/tensor/overwrite")
+
         expected = expect_dense(tc.I32, [2, 3], [2] * 6)
-        actual = hosts[0].get("/test/tensor/dense")
-        self.assertEqual(actual, expected)
+        for host in hosts:
+            actual = host.get("/test/tensor/dense")
+            self.assertEqual(actual, expected)
 
 
 def expect_dense(dtype, shape, flat):

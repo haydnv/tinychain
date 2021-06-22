@@ -1,5 +1,6 @@
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
+use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -9,7 +10,7 @@ use futures::TryFutureExt;
 use tc_transact::fs::BlockData;
 use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
-use tcgeneric::TCPathBuf;
+use tcgeneric::{TCPathBuf, Tuple};
 
 use crate::chain::{BLOCK_SIZE, EXT};
 use crate::scalar::{Scalar, Value};
@@ -45,6 +46,15 @@ impl<'en> en::IntoStream<'en> for Mutation {
         match self {
             Self::Delete(path, key) => (path, key).into_stream(encoder),
             Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+        }
+    }
+}
+
+impl fmt::Debug for Mutation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Delete(path, key) => write!(f, "DELETE {}: {:?}", path, key),
+            Self::Put(path, key, value) => write!(f, "PUT {}: {:?} <- {:?}", path, key, value),
         }
     }
 }
@@ -215,12 +225,29 @@ impl<'en> en::ToStream<'en> for ChainBlock {
 
 impl fmt::Debug for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
+        writeln!(f, "chain block:")?;
+        writeln!(f, "\thash: {}", hex::encode(&self.hash))?;
+        writeln!(f, "\tentries: {}", self.contents.len())?;
+        for (txn_id, mutations) in &self.contents {
+            writeln!(
+                f,
+                "\t\t{}: {:?}",
+                txn_id,
+                Tuple::<&Mutation>::from_iter(mutations)
+            )?;
+        }
+
+        Ok(())
     }
 }
 
 impl fmt::Display for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("(chain block)")
+        write!(
+            f,
+            "(a Chain block starting at hash {} with {} entries)",
+            hex::encode(&self.hash),
+            self.contents.len()
+        )
     }
 }

@@ -72,10 +72,14 @@ impl History {
         let txn_id = *txn.id();
         let value = self.save_state(txn, value).await?;
 
-        debug!("History::append_put {} {} {} {}", txn_id, path, key, value);
+        debug!(
+            "History::append_put {} {} {:?} {:?}",
+            txn_id, path, key, value
+        );
 
         let mut block = self.write_latest(txn_id).await?;
         block.append_put(txn_id, path, key, value);
+
         Ok(())
     }
 
@@ -331,6 +335,9 @@ impl History {
 
             let (source_hash, dest_hash) = try_join!(source.hash(), dest.hash())?;
             if source_hash != dest_hash {
+                debug!("source {:?}", &*source);
+                debug!("dest {:?}", &*dest);
+
                 return Err(TCError::bad_request(
                     "error replicating chain",
                     format!("hashes diverge at block {}", i),
@@ -338,6 +345,7 @@ impl History {
             }
 
             i += 1;
+
             if other.contains_block(txn.id(), i).await? {
                 self.create_next_block(*txn.id()).await?;
             } else {

@@ -8,7 +8,7 @@ TC_PATH = "host/target/debug/tinychain"
 PORT = 8702
 
 
-def start_host(name, clusters=[], overwrite=True, host_uri=None):
+def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"):
     port = PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -34,7 +34,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
         clusters=config,
         port=port,
         log_level="debug",
-        cache_size="5K",
+        cache_size=cache_size,
         force_create=True)
 
     print(f"start host on port {port}")
@@ -43,6 +43,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
 
 
 class PersistenceTest(object):
+    CACHE_SIZE = "5K"
     NUM_HOSTS = 4
     NAME = "persistence"
 
@@ -67,7 +68,7 @@ class PersistenceTest(object):
         for i in range(self.NUM_HOSTS):
             port = PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.uri(cluster).path()
-            host = start_host(f"test_{name}_{i}", [cluster], host_uri=tc.URI(host_uri))
+            host = start_host(f"test_{name}_{i}", [cluster], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
             hosts.append(host)
             printlines(5)
 

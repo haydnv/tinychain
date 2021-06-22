@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
+use log::debug;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio_util::io::StreamReader;
@@ -53,7 +54,7 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
         Self: en::ToStream<'en>,
     {
         let encoded = tbon::en::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
+            .map_err(|e| TCError::internal(format!("unable to serialize block: {}", e)))?;
 
         let mut reader = StreamReader::new(
             encoded
