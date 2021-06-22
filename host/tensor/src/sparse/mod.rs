@@ -18,10 +18,10 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
 
-use super::dense::{BlockListFile, BlockListSparse, DenseTensor};
+use super::dense::{BlockListFile, BlockListSparse, DenseAccess, DenseTensor};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
 };
 
 use crate::dense::PER_BLOCK;
@@ -68,7 +68,7 @@ where
     ) -> TCResult<SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, A, R>>> {
         if self.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
-                "Cannot combine Tensors of different shapes: {}, {}",
+                "cannot combine Tensors of different shapes: {}, {}",
                 self.shape(),
                 other.shape()
             )));
@@ -288,6 +288,128 @@ where
         }
 
         self.combine(other, ne, NumberType::Bool)
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, B>>
+    for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    B: DenseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    async fn mask(self, txn: Self::Txn, other: DenseTensor<FD, FS, D, T, B>) -> TCResult<()> {
+        let other = other.into_sparse();
+        self.mask(txn, other).await
+    }
+
+    async fn write(
+        self,
+        txn: Self::Txn,
+        bounds: Bounds,
+        other: DenseTensor<FD, FS, D, T, B>,
+    ) -> TCResult<()> {
+        let other = other.into_sparse();
+        self.write(txn, bounds, other).await
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, L, R> TensorDualIO<D, SparseTensor<FD, FS, D, T, R>>
+    for SparseTensor<FD, FS, D, T, L>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    async fn mask(self, txn: T, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<()> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot use a Tensor with shape {} as a mask for a Tensor with shape {}",
+                other.shape(),
+                self.shape(),
+            )));
+        }
+
+        let zero = self.dtype().zero();
+        let txn_id = *txn.id();
+
+        let filled = other.accessor.filled(txn).await?;
+
+        filled
+            .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn write(
+        self,
+        txn: T,
+        bounds: Bounds,
+        other: SparseTensor<FD, FS, D, T, R>,
+    ) -> TCResult<()> {
+        let slice = self.slice(bounds)?;
+        if slice.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot write Tensor with shape {} to slice with shape {}",
+                other.shape(),
+                slice.shape()
+            )));
+        }
+
+        let txn_id = *txn.id();
+        let filled = other.accessor.filled(txn).await?;
+        filled
+            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorDualIO<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    async fn mask(self, txn: Self::Txn, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
+        match other {
+            Tensor::Dense(other) => self.mask(txn, other).await,
+            Tensor::Sparse(other) => self.mask(txn, other).await,
+        }
+    }
+
+    async fn write(
+        self,
+        txn: Self::Txn,
+        bounds: Bounds,
+        other: Tensor<FD, FS, D, T>,
+    ) -> TCResult<()> {
+        match other {
+            Tensor::Dense(other) => self.write(txn, bounds, other).await,
+            Tensor::Sparse(other) => self.write(txn, bounds, other).await,
+        }
     }
 }
 
