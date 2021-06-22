@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
-use number_general::*;
 
 use tc_btree::*;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
+use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCStream, TCTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
@@ -1206,7 +1206,6 @@ where
             let zero = self.dtype().zero();
             let filled = self.source.filled(txn).await?;
             let values = SparseValueStream::new(filled, bounds, zero).await?;
-
             let values: TCTryStream<'a, Number> = Box::pin(values);
             Ok(values)
         })

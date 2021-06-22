@@ -57,8 +57,13 @@ impl<S: Stream<Item = TCResult<(Coord, Number)>>> Stream for SparseValueStream<S
                 };
             } else {
                 match ready!(this.filled.as_mut().poll_next(cxt)) {
-                    Some(Ok((coord, value))) => {
-                        *(this.next) = Some((coord, value));
+                    Some(Ok((filled_coord, value))) => {
+                        break if next_coord == filled_coord {
+                            Some(Ok(value))
+                        } else {
+                            *(this.next) = Some((filled_coord, value));
+                            Some(Ok(*this.zero))
+                        }
                     }
                     None => {}
                     Some(Err(cause)) => break Some(Err(cause)),

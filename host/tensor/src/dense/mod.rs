@@ -10,13 +10,12 @@ use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::debug;
-use number_general::{Number, NumberClass, NumberInstance, NumberType};
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::ValueType;
+use tc_value::{Number, NumberClass, NumberInstance, NumberType, ValueType};
 use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
@@ -965,7 +964,7 @@ struct BlockStreamView<'en> {
 
 impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use number_general::{
+        use tc_value::{
             ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
         };
 

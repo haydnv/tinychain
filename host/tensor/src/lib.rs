@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
-use number_general::{Number, NumberType};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
+use tc_value::{Number, NumberType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, TCTryStream,

@@ -10,14 +10,13 @@ use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, try_join, TryFutureExt};
 use log::debug;
-use number_general::{Number, NumberClass, NumberInstance, NumberType};
 use strided::Stride;
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::Value;
+use tc_value::{Number, NumberClass, NumberInstance, NumberType, Value};
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
 use crate::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
@@ -516,7 +515,7 @@ where
         let (txn_id, file, (shape, dtype)) = cxt;
         let visitor = BlockListVisitor::new(txn_id, &file);
 
-        use number_general::{
+        use tc_value::{
             ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
         };
 
