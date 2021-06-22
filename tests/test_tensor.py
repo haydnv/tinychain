@@ -271,7 +271,6 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.I16, shape, expected)
         self.assertEqual(actual, expected)
 
-    @unittest.skip
     def testSum(self):
         shape = [2, 4, 3, 5]
         axis = 1

@@ -457,6 +457,13 @@ impl From<Vec<u64>> for Shape {
     }
 }
 
+impl FromIterator<u64> for Shape {
+    fn from_iter<I: IntoIterator<Item = u64>>(iter: I) -> Self {
+        let dims = Vec::<u64>::from_iter(iter);
+        Self(dims)
+    }
+}
+
 impl TryCastFrom<Value> for Shape {
     fn can_cast_from(value: &Value) -> bool {
         value.matches::<Vec<u64>>()

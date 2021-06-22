@@ -338,7 +338,7 @@ where
 
         let affected = {
             let shape = self.source.shape();
-            let shape = Shape::from(axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>());
+            let shape = axes.iter().map(|x| shape[*x]).collect();
             Bounds::all(&shape).affected()
         };
 

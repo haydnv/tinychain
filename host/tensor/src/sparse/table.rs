@@ -14,9 +14,9 @@ use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSche
 use tc_transact::fs::{CopyFrom, Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberType, UInt, Value, ValueType};
-use tcgeneric::{label, Id, Label};
+use tcgeneric::{label, GroupStream, Id, Label};
 
-use crate::stream::{Read, ReadValueAt};
+use crate::stream::{sorted_coords, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
 use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
@@ -108,11 +108,9 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        let columns: Vec<Id> = axes.into_iter().map(Id::from).collect();
-        let filled_at = self.table.group_by(columns)?.rows(*txn.id()).await?;
-        let filled_at = filled_at.map(|r| r.and_then(|coord| expect_coord(&coord)));
-
-        Ok(Box::pin(filled_at))
+        let shape = self.shape();
+        let shape = axes.iter().map(|x| shape[*x]).collect();
+        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -326,16 +324,9 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        let columns: Vec<Id> = axes.into_iter().map(Id::from).collect();
-        let filled_at = self
-            .table
-            .order_by(columns.to_vec(), false)?
-            .select(columns)?
-            .rows(*txn.id())
-            .await?;
-
-        let filled_at = filled_at.map(|r| r.and_then(|coord| expect_coord(&coord)));
-        Ok(Box::pin(filled_at))
+        let shape = self.shape();
+        let shape = axes.iter().map(|x| shape[*x]).collect();
+        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -424,6 +415,27 @@ where
     }
 }
 
+async fn filled_at<'a, FD, FS, D, Txn, T>(
+    txn: &Txn,
+    shape: Shape,
+    axes: Vec<usize>,
+    table: T,
+) -> TCResult<CoordStream<'a>>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    T: TableInstance<FS, D, Txn>,
+    D::FileClass: From<TensorType>,
+{
+    let coords = table.select(axes.into_iter().map(Id::from).collect())?;
+    let coords = coords.rows(*txn.id()).await?;
+    let coords = coords.map(|r| r.and_then(expect_coord));
+    let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, &shape, coords).await?;
+    Ok(Box::pin(GroupStream::from(coords)))
+}
+
 fn slice_table<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(
     table: T,
     bounds: &Bounds,
@@ -493,24 +505,24 @@ fn u64_into_value(u: u64) -> Value {
 }
 
 #[inline]
-fn expect_coord(coord: &[Value]) -> TCResult<Coord> {
-    coord.iter().map(|val| expect_u64(val)).collect()
+fn expect_coord(coord: Vec<Value>) -> TCResult<Coord> {
+    coord.into_iter().map(|val| expect_u64(val)).collect()
 }
 
 #[inline]
 fn expect_row(mut row: Vec<Value>) -> TCResult<(Coord, Number)> {
-    let coord = expect_coord(&row[0..row.len() - 1])?;
     if let Some(value) = row.pop() {
-        Ok((coord, value.try_into()?))
+        let value = value.try_into()?;
+        expect_coord(row).map(|coord| (coord, value))
     } else {
         Err(TCError::internal(ERR_CORRUPT))
     }
 }
 
 #[inline]
-fn expect_u64(value: &Value) -> TCResult<u64> {
+fn expect_u64(value: Value) -> TCResult<u64> {
     if let Value::Number(Number::UInt(UInt::U64(unwrapped))) = value {
-        Ok(*unwrapped)
+        Ok(unwrapped)
     } else {
         Err(TCError::bad_request("Expected u64 but found", value))
     }
