@@ -22,6 +22,7 @@ use super::dense::{BlockListFile, BlockListSparse, DenseAccess, DenseTensor};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
     TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
+    TensorUnary,
 };
 
 use crate::dense::PER_BLOCK;
@@ -619,6 +620,54 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let accessor = self.accessor.transpose(permutation)?;
         Ok(accessor.into())
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorUnary<D> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+    type Unary = SparseTensor<FD, FS, D, T, SparseUnary<FD, FS, D, T>>;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
+        let source = self.accessor.clone().accessor();
+        let transform = <Number as NumberInstance>::abs;
+
+        let accessor = SparseUnary::new(source, transform, self.dtype());
+        Ok(SparseTensor::from(accessor))
+    }
+
+    async fn all(self, txn: Self::Txn) -> TCResult<bool> {
+        let affected = stream::iter(Bounds::all(self.shape()).affected());
+        let filled = self.accessor.filled(txn).await?;
+
+        let mut coords = filled
+            .map_ok(|(coord, _)| coord)
+            .zip(affected)
+            .map(|(r, expected)| r.map(|actual| (actual, expected)));
+
+        while let Some((actual, expected)) = coords.try_next().await? {
+            if actual != expected {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    async fn any(self, txn: Self::Txn) -> TCResult<bool> {
+        let mut filled = self.accessor.filled(txn).await?;
+        Ok(filled.next().await.is_some())
+    }
+
+    fn not(&self) -> TCResult<Self::Unary> {
+        Err(TCError::unsupported(ERR_NOT_SPARSE))
     }
 }
 
