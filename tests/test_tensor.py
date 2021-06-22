@@ -313,6 +313,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             def _configure(self):
                 schema = tc.schema.Tensor([2, 3], tc.I32)
                 self.dense = chain_type(tc.tensor.Dense(schema))
+                self.sparse = chain_type(tc.tensor.Sparse(schema))
 
             @tc.put_method
             def overwrite(self, txn):
@@ -323,18 +324,26 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def execute(self, hosts):
         hosts[0].put("/test/tensor/dense", [0, 0], 1)
+        hosts[1].put("/test/tensor/sparse", [0, 0], 1)
 
+        dense = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
+        sparse = expect_sparse(tc.I32, [2, 3], [[[0, 0], 1]])
         for host in hosts:
             actual = host.get("/test/tensor/dense")
-            expected = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, dense)
+
+            actual = host.get("/test/tensor/sparse")
+            self.assertEqual(actual, sparse)
 
         hosts[0].put("/test/tensor/overwrite")
 
-        expected = expect_dense(tc.I32, [2, 3], [2] * 6)
+        dense = expect_dense(tc.I32, [2, 3], [2] * 6)
         for host in hosts:
             actual = host.get("/test/tensor/dense")
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, dense)
+
+            actual = host.get("/test/tensor/sparse")
+            self.assertEqual(actual, sparse)
 
 
 def expect_dense(dtype, shape, flat):
