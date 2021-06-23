@@ -206,21 +206,21 @@ where
     fn and(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.and(dense).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Sparse(sparse) => self.into_sparse().and(sparse).map(Tensor::from),
         }
     }
 
     fn or(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.or(dense).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Sparse(sparse) => self.or(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     fn xor(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.xor(dense).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Sparse(sparse) => self.and(sparse.into_dense()).map(Tensor::from),
         }
     }
 }
@@ -318,43 +318,56 @@ where
 
     async fn eq(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(other) => self.eq(other, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.eq(dense, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(sparse) => {
+                self.into_sparse()
+                    .eq(sparse, txn)
+                    .map_ok(Tensor::from)
+                    .await
+            }
         }
     }
 
     fn gt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
         match other {
-            Tensor::Dense(other) => self.gt(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.gt(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.gt(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     async fn gte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(other) => self.gte(other, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.gte(dense, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(sparse) => {
+                self.gte(sparse.into_dense(), txn)
+                    .map_ok(Tensor::from)
+                    .await
+            }
         }
     }
 
     fn lt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
         match other {
-            Tensor::Dense(other) => self.lt(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.lt(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.lt(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     async fn lte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(other) => self.lte(other, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.lte(dense, txn).map_ok(Tensor::from).await,
+            Tensor::Sparse(sparse) => {
+                self.lte(sparse.into_dense(), txn)
+                    .map_ok(Tensor::from)
+                    .await
+            }
         }
     }
 
     fn ne(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
         match other {
-            Tensor::Dense(other) => self.ne(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.ne(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.ne(sparse.into_dense()).map(Tensor::from),
         }
     }
 }
@@ -449,7 +462,7 @@ where
     async fn mask(self, txn: T, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
         match other {
             Tensor::Dense(dense) => self.mask(txn, dense).await,
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Sparse(sparse) => self.mask(txn, sparse.into_dense()).await,
         }
     }
 
@@ -458,7 +471,7 @@ where
 
         match other {
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Sparse(sparse) => self.write(txn, bounds, sparse.into_dense()).await,
         }
     }
 }
@@ -526,29 +539,29 @@ where
 
     fn add(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.add(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.add(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.add(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     fn div(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.div(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.div(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.div(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.mul(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.mul(sparse.into_dense()).map(Tensor::from),
         }
     }
 
     fn sub(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
-            Tensor::Dense(other) => self.sub(other).map(Tensor::from),
-            Tensor::Sparse(_other) => todo!(),
+            Tensor::Dense(dense) => self.sub(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.sub(sparse.into_dense()).map(Tensor::from),
         }
     }
 }

@@ -345,14 +345,14 @@ where
 
     async fn eq(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(other) => self.into_dense().eq(other, txn).map_ok(Tensor::from).await,
+            Tensor::Dense(other) => self.eq(other.into_sparse(), txn).map_ok(Tensor::from).await,
             Tensor::Sparse(other) => self.eq(other, txn).map_ok(Tensor::from).await,
         }
     }
 
     fn gt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
         match other {
-            Tensor::Dense(other) => self.gt(other.into_sparse()).map(Tensor::from),
+            Tensor::Dense(other) => self.into_dense().gt(other).map(Tensor::from),
             Tensor::Sparse(other) => self.gt(other).map(Tensor::from),
         }
     }
@@ -366,7 +366,7 @@ where
 
     fn lt(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Compare> {
         match other {
-            Tensor::Dense(other) => self.gt(other.into_sparse()).map(Tensor::from),
+            Tensor::Dense(other) => self.into_dense().gt(other).map(Tensor::from),
             Tensor::Sparse(other) => self.gt(other).map(Tensor::from),
         }
     }
