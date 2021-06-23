@@ -82,11 +82,29 @@ pub enum Subject {
 }
 
 impl Subject {
-    fn is_view(&self) -> bool {
-        if let Self::Ref(id, _path) = self {
-            id.is_view()
-        } else {
-            false
+    fn dereference_self(self, mut path: TCPathBuf) -> Self {
+        match self {
+            Self::Ref(id_ref, suffix) if id_ref.id() == &SELF => {
+                path.extend(suffix);
+                Self::Link(path.into())
+            }
+            other => other,
+        }
+    }
+
+    fn is_self(&self) -> bool {
+        match self {
+            Self::Ref(id_ref, _) => id_ref.id() == &SELF,
+            _ => false,
+        }
+    }
+
+    fn reference_self(self, path: TCPathBuf) -> Self {
+        match self {
+            Self::Link(link) if link.path().starts_with(&path) => {
+                Self::Ref(IdRef::from(SELF), link.path()[path.len()..].to_vec().into())
+            }
+            other => other,
         }
     }
 
@@ -269,12 +287,39 @@ pub enum OpRef {
 }
 
 impl OpRef {
-    fn subject(&self) -> &Subject {
+    pub fn dereference_self(self, path: TCPathBuf) -> Self {
         match self {
-            Self::Get((subject, _)) => subject,
-            Self::Put((subject, _, _)) => subject,
-            Self::Post((subject, _)) => subject,
-            Self::Delete((subject, _)) => subject,
+            Self::Get((subject, key)) if subject.is_self() => {
+                Self::Get((subject.dereference_self(path), key))
+            }
+            Self::Put((subject, key, value)) if subject.is_self() => {
+                Self::Put((subject.dereference_self(path), key, value))
+            }
+            Self::Post((subject, params)) if subject.is_self() => {
+                Self::Post((subject.dereference_self(path), params))
+            }
+            Self::Delete((subject, key)) if subject.is_self() => {
+                Self::Delete((subject.dereference_self(path), key))
+            }
+            op_ref => op_ref,
+        }
+    }
+
+    pub fn reference_self(self, path: TCPathBuf) -> Self {
+        match self {
+            Self::Get((subject, key)) if subject.is_self() => {
+                Self::Get((subject.reference_self(path), key))
+            }
+            Self::Put((subject, key, value)) if subject.is_self() => {
+                Self::Put((subject.reference_self(path), key, value))
+            }
+            Self::Post((subject, params)) if subject.is_self() => {
+                Self::Post((subject.reference_self(path), params))
+            }
+            Self::Delete((subject, key)) if subject.is_self() => {
+                Self::Delete((subject.reference_self(path), key))
+            }
+            op_ref => op_ref,
         }
     }
 }
@@ -295,23 +340,6 @@ impl Instance for OpRef {
 
 #[async_trait]
 impl Refer for OpRef {
-    fn is_view(&self) -> bool {
-        self.subject().is_view()
-    }
-
-    fn is_write(&self) -> bool {
-        match self {
-            Self::Get(_) => false,
-            Self::Put(_) => true,
-            Self::Post(_) => false,
-            Self::Delete(_) => true,
-        }
-    }
-
-    fn is_derived_write(&self) -> bool {
-        self.is_view() && self.is_write()
-    }
-
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Get((subject, key)) => {

@@ -257,33 +257,6 @@ impl Instance for Scalar {
 
 #[async_trait]
 impl Refer for Scalar {
-    fn is_view(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Refer::is_view),
-            Self::Ref(tc_ref) => tc_ref.is_view(),
-            Self::Tuple(tuple) => tuple.iter().any(Refer::is_view),
-            _ => false,
-        }
-    }
-
-    fn is_write(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Refer::is_write),
-            Self::Ref(tc_ref) => tc_ref.is_write(),
-            Self::Tuple(tuple) => tuple.iter().any(Refer::is_write),
-            _ => false,
-        }
-    }
-
-    fn is_derived_write(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Refer::is_derived_write),
-            Self::Ref(tc_ref) => tc_ref.is_derived_write(),
-            Self::Tuple(tuple) => tuple.iter().any(Refer::is_derived_write),
-            _ => false,
-        }
-    }
-
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

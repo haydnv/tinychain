@@ -11,7 +11,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tcgeneric::{Id, Instance};
+use tcgeneric::{Id, Instance, Label};
 
 use crate::route::Public;
 use crate::scalar::{Scope, Value, SELF};
@@ -40,18 +40,6 @@ impl IdRef {
 
 #[async_trait]
 impl Refer for IdRef {
-    fn is_view(&self) -> bool {
-        self.to != SELF
-    }
-
-    fn is_write(&self) -> bool {
-        false
-    }
-
-    fn is_derived_write(&self) -> bool {
-        self.is_view() && self.is_write()
-    }
-
     fn requires(&self, deps: &mut HashSet<Id>) {
         if self.to != SELF {
             deps.insert(self.to.clone());
@@ -74,9 +62,15 @@ impl PartialEq<Id> for IdRef {
     }
 }
 
+impl From<Label> for IdRef {
+    fn from(to: Label) -> Self {
+        Self { to: to.into() }
+    }
+}
+
 impl From<Id> for IdRef {
-    fn from(to: Id) -> IdRef {
-        IdRef { to }
+    fn from(to: Id) -> Self {
+        Self { to }
     }
 }
 
@@ -84,7 +78,7 @@ impl FromStr for IdRef {
     type Err = TCError;
 
     #[inline]
-    fn from_str(to: &str) -> TCResult<IdRef> {
+    fn from_str(to: &str) -> TCResult<Self> {
         if !to.starts_with('$') || to.len() < 2 {
             Err(TCError::bad_request("Invalid Ref", to))
         } else {
