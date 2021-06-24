@@ -65,7 +65,7 @@ impl<S: Stream<Item = TCResult<(Coord, Number)>>> Stream for SparseValueStream<S
                             Some(Ok(*this.zero))
                         }
                     }
-                    None => {}
+                    None => break Some(Ok(*this.zero)),
                     Some(Err(cause)) => break Some(Err(cause)),
                 }
             }
