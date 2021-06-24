@@ -17,6 +17,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::Refer;
+use crate::generic::{PathSegment, TCPathBuf};
 
 /// Struct to delay resolving another reference(s) until some preliminary reference is resolved.
 #[derive(Clone, Eq, PartialEq)]
@@ -27,6 +28,25 @@ pub struct After {
 
 #[async_trait]
 impl Refer for After {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            when: self.when.dereference_self(path),
+            then: self.then.dereference_self(path),
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        self.when.is_inter_service_write(cluster_path)
+            || self.then.is_inter_service_write(cluster_path)
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            when: self.when.reference_self(path),
+            then: self.then.reference_self(path),
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.when.requires(deps);
         self.then.requires(deps);

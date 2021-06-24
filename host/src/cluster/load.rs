@@ -13,7 +13,7 @@ use tcgeneric::*;
 use crate::chain::{self, Chain, ChainType, Schema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::scalar::{Link, LinkHost, OpRef, Scalar, Value};
+use crate::scalar::{Link, LinkHost, OpRef, Refer, Scalar, Value};
 use crate::txn::{Actor, Txn, TxnId};
 
 use super::Cluster;
@@ -60,11 +60,23 @@ pub async fn instantiate(
             Scalar::Op(op_def) => {
                 let op_def = if op_def.is_write() {
                     // make sure not to replicate ops internal to this OpDef
-                    op_def.reference_self(link.path().clone())
+                    let op_def = op_def.reference_self(link.path());
+
+                    // make sure not to duplicate requests to other clusters
+                    for (id, provider) in op_def.form() {
+                        if provider.is_inter_service_write(link.path()) {
+                            return Err(TCError::unsupported(format!(
+                                "replicated op {} may not perform inter-service writes: {}",
+                                id, provider
+                            )));
+                        }
+                    }
+
+                    op_def
                 } else {
                     // make sure to replicate all write ops internal to this OpDef
                     // by routing them through the kernel
-                    op_def.dereference_self(link.path().clone())
+                    op_def.dereference_self(link.path())
                 };
 
                 cluster_proto.insert(id, Scalar::Op(op_def));

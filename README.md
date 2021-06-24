@@ -191,12 +191,12 @@ The flow of operations within a single transaction is:
 
 1. A replica *R* of cluster *C* with *N* total replicas receives a new transaction request *T*
 1. *R* claims ownership of the transaction
-1. For every write operation which is part of *T*, *R* notifies all other replica hosts
+1. For PUT and DELETE operations, the request *T* itself is replicated; for user-defined GET and POST requests, write operations which are part of *T* are replicated to all other hosts in *C*
 1. If any replica responds with error 409: conflict, the transaction is rolled back and error 409 is returned to the host.
 1. Otherwise, if at least (*N* / 2) + 1 replicas respond with success, *R* removes the unsuccessful replicas from *C*, commits the transaction, and responds to the end-user
 1. Otherwise, the transaction is rolled back and an error is returned to the end-user
 
-*Important note*: the Tinychain protocol does not support trustless replication. Do not allow untrusted replicas to join your cluster. A single malicious replica can significantly degrade performance, or even halt all updates entirely, by creating extra work to reach consensus; it can also lie to your clients and introduce false information into the network as a whole.
+*Important note*: the Tinychain protocol does not support trustless replication. Do not allow untrusted replicas to join your cluster. A single malicious replica can significantly degrade performance, or even halt all updates entirely, by creating extra work to reach consensus; it can also report false information to your clients and the network as a whole.
 
 ### Authentication
 

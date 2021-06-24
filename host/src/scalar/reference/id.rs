@@ -19,6 +19,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::Refer;
+use crate::generic::{PathSegment, TCPathBuf};
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -40,6 +41,22 @@ impl IdRef {
 
 #[async_trait]
 impl Refer for IdRef {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        if self.to == SELF {
+            panic!("cannot dereference {} to {}", self, path);
+        } else {
+            self
+        }
+    }
+
+    fn is_inter_service_write(&self, _cluster_path: &[PathSegment]) -> bool {
+        false
+    }
+
+    fn reference_self(self, _path: &TCPathBuf) -> Self {
+        self
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         if self.to != SELF {
             deps.insert(self.to.clone());

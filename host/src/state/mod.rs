@@ -189,6 +189,68 @@ impl State {
 
 #[async_trait]
 impl Refer for State {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, state)| (id, state.dereference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
+            Self::Scalar(scalar) => Self::Scalar(scalar.dereference_self(path)),
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|state| state.dereference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
+            other => other,
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        match self {
+            Self::Map(map) => map
+                .values()
+                .any(|state| state.is_inter_service_write(cluster_path)),
+
+            Self::Scalar(scalar) => scalar.is_inter_service_write(cluster_path),
+
+            Self::Tuple(tuple) => tuple
+                .iter()
+                .any(|state| state.is_inter_service_write(cluster_path)),
+
+            _ => false,
+        }
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, state)| (id, state.reference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
+            Self::Scalar(scalar) => Self::Scalar(scalar.reference_self(path)),
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|state| state.reference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
+            other => other,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

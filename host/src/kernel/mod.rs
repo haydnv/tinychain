@@ -142,20 +142,30 @@ impl Kernel {
                     .put(&txn, suffix, key.clone(), value.clone())
                     .await?;
 
+                let txn = if !txn.has_leader(cluster.path()) {
+                    cluster.lead(txn).await?
+                } else {
+                    txn
+                };
+
+                let self_link = txn.link(cluster.path().to_vec().into());
                 if suffix.is_empty() {
                     // it's a synchronization message
                     return Ok(());
-                } else if !txn.is_owner(cluster.path()) {
+                } else if !txn.is_leader(cluster.path()) {
                     debug!(
                         "{} successfully replicated PUT {}",
-                        txn.link(cluster.path().to_vec().into()),
+                        self_link,
                         TCPath::from(suffix)
                     );
-
                     return Ok(());
-                } else {
-                    debug!("replicating PUT {}", TCPath::from(suffix));
                 }
+
+                debug!(
+                    "{} is leading replication of PUT {}",
+                    self_link,
+                    TCPath::from(suffix)
+                );
 
                 let write = |replica_link: Link| {
                     let mut target = replica_link.clone();
@@ -250,21 +260,31 @@ impl Kernel {
             execute(txn, cluster, |txn, cluster| async move {
                 cluster.delete(&txn, suffix, key.clone()).await?;
 
+                let txn = if !txn.has_leader(cluster.path()) {
+                    cluster.lead(txn).await?
+                } else {
+                    txn
+                };
+
+                let self_link = txn.link(cluster.path().to_vec().into());
                 if suffix.is_empty() {
                     // it's a synchronization message
                     return Ok(());
-                } else if !txn.is_owner(cluster.path()) {
+                } else if !txn.is_leader(cluster.path()) {
                     debug!(
                         "{} successfully replicated DELETE {}",
-                        txn.link(cluster.path().to_vec().into()),
+                        self_link,
                         TCPath::from(suffix)
                     );
 
                     return Ok(());
-                } else {
-                    debug!("replicating DELETE {}...", TCPath::from(suffix));
                 }
 
+                debug!(
+                    "{} is leading replication of DELETE {}...",
+                    self_link,
+                    TCPath::from(suffix)
+                );
                 let write = |replica_link: Link| {
                     let mut target = replica_link.clone();
                     target.extend(suffix.to_vec());
@@ -309,15 +329,12 @@ fn execute<
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
-        if let Some(owner) = txn.owner() {
-            if cluster.path() == &owner.path()[..] {
-                debug!(
-                    "{} owns this transaction, no need to notify",
-                    TCPath::from(cluster.path())
-                );
+        if let Some(owner) = txn.owner().cloned() {
+            let self_link = txn.link(cluster.path().to_vec().into());
+            if owner != self_link {
+                txn.put(owner, Value::None, self_link.into()).await?;
             } else {
-                txn.put(owner.clone(), Value::None, cluster.link().clone().into())
-                    .await?;
+                debug!("{} owns this transaction, no need to notify", self_link);
             }
 
             handler(txn.clone(), cluster).await

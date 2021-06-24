@@ -37,6 +37,19 @@ const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 /// Trait defining dependencies and a resolution method for a [`TCRef`].
 #[async_trait]
 pub trait Refer {
+    /// Replace references to "$self" with the given relative path.
+    ///
+    /// This is used to control whether or not an OpDef will be replicated.
+    fn dereference_self(self, path: &TCPathBuf) -> Self;
+
+    /// Return `true` if this references a write operation to a cluster other than the path given.
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool;
+
+    /// Replace the given relative path with "$self".
+    ///
+    /// This is used to control whether or not an OpDef will be replicated.
+    fn reference_self(self, path: &TCPathBuf) -> Self;
+
     /// Add the dependency [`Id`]s of this reference to the given set.
     fn requires(&self, deps: &mut HashSet<Id>);
 
@@ -127,6 +140,54 @@ impl Instance for TCRef {
 
 #[async_trait]
 impl Refer for TCRef {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::After(after) => {
+                let after = after.dereference_self(path);
+                Self::After(Box::new(after))
+            }
+            Self::Case(case) => {
+                let case = case.dereference_self(path);
+                Self::Case(Box::new(case))
+            }
+            Self::Id(id_ref) => Self::Id(id_ref.dereference_self(path)),
+            Self::If(if_ref) => {
+                let if_ref = if_ref.dereference_self(path);
+                Self::If(Box::new(if_ref))
+            }
+            Self::Op(op_ref) => Self::Op(op_ref.dereference_self(path)),
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        match self {
+            Self::After(after) => after.is_inter_service_write(cluster_path),
+            Self::Case(case) => case.is_inter_service_write(cluster_path),
+            Self::Id(id_ref) => id_ref.is_inter_service_write(cluster_path),
+            Self::If(if_ref) => if_ref.is_inter_service_write(cluster_path),
+            Self::Op(op_ref) => op_ref.is_inter_service_write(cluster_path),
+        }
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::After(after) => {
+                let after = after.reference_self(path);
+                Self::After(Box::new(after))
+            }
+            Self::Case(case) => {
+                let case = case.reference_self(path);
+                Self::Case(Box::new(case))
+            }
+            Self::Id(id_ref) => Self::Id(id_ref.reference_self(path)),
+            Self::If(if_ref) => {
+                let if_ref = if_ref.reference_self(path);
+                Self::If(Box::new(if_ref))
+            }
+            Self::Op(op_ref) => Self::Op(op_ref.reference_self(path)),
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::After(after) => after.requires(deps),

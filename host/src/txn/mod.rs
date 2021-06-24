@@ -18,12 +18,12 @@ use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
 use crate::state::State;
 
-mod request;
-mod server;
-
 pub use request::*;
 pub use server::*;
 pub use tc_transact::TxnId;
+
+mod request;
+mod server;
 
 struct Active {
     expires: NetworkTime,
@@ -73,7 +73,11 @@ impl Txn {
 
     /// Claim ownership of this transaction.
     pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
-        debug!("{} claims transaction {}", cluster_path, self.id());
+        debug!(
+            "{} claims ownership of transaction {}",
+            cluster_path,
+            self.id()
+        );
 
         if actor.id().is_some() {
             return Err(TCError::bad_request(
@@ -125,6 +129,22 @@ impl Txn {
         })
     }
 
+    /// Check if this transaction has a leader for the given cluster.
+    pub fn has_leader(&self, cluster_path: &[PathSegment]) -> bool {
+        self.leader(cluster_path).is_some()
+    }
+
+    /// Check if this host is leading the transaction for the specified cluster.
+    pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
+        if let Some(host) = self.leader(cluster_path) {
+            // TODO: validate transaction claim formats on receipt
+            let hostname = host.host().as_ref().expect("txn leader hostname");
+            hostname == self.gateway.root() && host.path().as_slice() == cluster_path
+        } else {
+            false
+        }
+    }
+
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(host) = self.owner() {
@@ -135,15 +155,62 @@ impl Txn {
         }
     }
 
-    /// Return the owner of this transaction, if there is one.
-    pub fn owner(&self) -> Option<&Link> {
-        for (host, _actor_id, scopes) in self.request.scopes().iter() {
-            if scopes.contains(self.active.scope()) {
-                return Some(host);
-            }
+    /// Claim leadership of this transaction for the given cluster.
+    pub async fn lead(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+        debug!(
+            "{} claim leadership of transaction {}",
+            cluster_path,
+            self.id()
+        );
+
+        if actor.id().is_some() {
+            return Err(TCError::bad_request(
+                "cluster ID must be None, not",
+                actor.id(),
+            ));
         }
 
-        None
+        if self.leader(&cluster_path).is_none() {
+            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
+                .await
+        } else {
+            Err(TCError::forbidden(
+                "transaction received duplicate leadership claim",
+                self.id(),
+            ))
+        }
+    }
+
+    /// Return the leader of this transaction for the given cluster, if there is one.
+    pub fn leader(&self, cluster_path: &[PathSegment]) -> Option<&Link> {
+        let active_scope = self.active.scope();
+        self.request
+            .scopes()
+            .iter()
+            .filter_map(|(host, _actor_id, scopes)| {
+                if host.path().starts_with(cluster_path) && scopes.contains(active_scope) {
+                    Some(host)
+                } else {
+                    None
+                }
+            })
+            .next()
+    }
+
+    /// Return the owner of this transaction, if there is one.
+    pub fn owner(&self) -> Option<&Link> {
+        let active_scope = self.active.scope();
+        self.request
+            .scopes()
+            .iter()
+            .filter_map(|(host, _actor_id, scopes)| {
+                if scopes.contains(active_scope) {
+                    Some(host)
+                } else {
+                    None
+                }
+            })
+            .fold(None, |_, host| Some(host))
     }
 
     /// Return a link to the given path on this host.

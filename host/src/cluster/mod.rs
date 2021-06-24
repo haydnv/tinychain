@@ -98,15 +98,7 @@ impl Cluster {
 
     /// Claim ownership of the given [`Txn`].
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
-        let last_commit = self.confirmed.read().await;
-        if txn.id() <= &*last_commit {
-            return Err(TCError::unsupported(format!(
-                "cluster at {} cannot claim transaction {} because the last commit is at {}",
-                self.link,
-                txn.id(),
-                *last_commit
-            )));
-        }
+        self.validate_txn_id(txn.id()).await?;
 
         let mut owned = self.owned.write().await;
         if owned.contains_key(txn.id()) {
@@ -195,6 +187,12 @@ impl Cluster {
         Ok(())
     }
 
+    /// Claim leadership of the given [`Txn`].
+    pub async fn lead(&self, txn: Txn) -> TCResult<Txn> {
+        self.validate_txn_id(txn.id()).await?;
+        txn.lead(&self.actor, self.link.path().clone()).await
+    }
+
     /// Add a replica to this cluster.
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
         let self_link = txn.link(self.link.path().clone());
@@ -263,6 +261,18 @@ impl Cluster {
         }
 
         Ok(())
+    }
+
+    async fn validate_txn_id(&self, txn_id: &TxnId) -> TCResult<()> {
+        let last_commit = self.confirmed.read().await;
+        if txn_id <= &*last_commit {
+            Err(TCError::unsupported(format!(
+                "cluster at {} cannot claim transaction {} because the last commit is at {}",
+                self.link, txn_id, *last_commit
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     async fn replicate(&self, txn: &Txn) -> TCResult<()> {

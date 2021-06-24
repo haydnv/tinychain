@@ -5,7 +5,7 @@ from testutils import PORT, start_host
 
 
 class Database(tc.Cluster):
-    __uri__ = tc.URI("/app/db")
+    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/db")
 
     def _configure(self):
         schema = tc.schema.Table(
@@ -13,6 +13,10 @@ class Database(tc.Cluster):
             [tc.Column("year", tc.UInt), tc.Column("description", tc.String, 1000)])
 
         self.movies = tc.chain.Block(tc.Table(schema))
+
+    @tc.get_method
+    def has_movie(self, _txn, name: tc.String):
+        return self.movies.contains([name])
 
 
 class Web(tc.Cluster):
@@ -26,12 +30,12 @@ class Web(tc.Cluster):
     def views(self, _txn, name: tc.String) -> tc.UInt:
         return self.cache[name].first()["views"]
 
-    @tc.put_method
-    def add_movie(self, _txn, name: tc.String, metadata: tc.Map):
+    @tc.post_method
+    def add_movie(self, _txn, name: tc.String, year: tc.U32, description: tc.String):
         db = tc.use(Database)
 
         return (
-            db.movies.insert([name], [metadata["year"], metadata["description"]]),
+            db.movies.insert([name], [year, description]),
             self.cache.insert([name, 0]))
 
     @tc.put_method
@@ -53,8 +57,10 @@ class DemoTests(unittest.TestCase):
             self.hosts.append(host)
 
     def testCache(self):
-        self.hosts[1].put("/app/web/add_movie",
-            "Up", {"year": 2009, "description": "Pixar, balloons"})
+        self.hosts[1].post("/app/web/add_movie", {"name": "Up", "year": 2009, "description": "Pixar, balloons"})
+
+        for host in self.hosts:
+            self.assertTrue(host.get("/app/db/has_movie", "Up"))
 
         self.assertEqual(self.hosts[0].get("/app/web/views", "Up"), 0)
 

@@ -9,7 +9,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tcgeneric::{Id, Instance};
+use tcgeneric::{Id, Instance, TCPathBuf};
 
 use crate::route::Public;
 use crate::scalar::{Number, Scalar, Scope, Value};
@@ -17,6 +17,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
+use crate::generic::PathSegment;
 
 /// A conditional reference.
 #[derive(Clone, Eq, PartialEq)]
@@ -28,6 +29,28 @@ pub struct IfRef {
 
 #[async_trait]
 impl Refer for IfRef {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            cond: self.cond.dereference_self(path),
+            then: self.then.dereference_self(path),
+            or_else: self.or_else.dereference_self(path),
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        self.cond.is_inter_service_write(cluster_path)
+            || self.then.is_inter_service_write(cluster_path)
+            || self.or_else.is_inter_service_write(cluster_path)
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            cond: self.cond.reference_self(path),
+            then: self.then.reference_self(path),
+            or_else: self.or_else.reference_self(path),
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
     }

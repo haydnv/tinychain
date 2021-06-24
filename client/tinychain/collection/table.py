@@ -7,7 +7,7 @@ from tinychain.value import Bool, UInt, Nil
 from .collection import Collection
 from .bound import Range
 
-# TODO: add `update` method
+
 class Table(Collection):
     """A `Table` defined by a primary key, values, and optional indices."""
 
@@ -16,12 +16,12 @@ class Table(Collection):
     def __getitem__(self, key):
         """Return the row with the given key, or a :class:`NotFound` error."""
 
-        return Map(self._get("", key))
+        return self._get("", key, rtype=Map)
 
     def contains(self, key):
         """Return `True` if this `Table` contains the given key."""
 
-        return Bool(self._get("contains", key))
+        return self._get("contains", key, rtype=Bool)
 
     def count(self):
         """

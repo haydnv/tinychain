@@ -82,9 +82,10 @@ pub enum Subject {
 }
 
 impl Subject {
-    fn dereference_self(self, mut path: TCPathBuf) -> Self {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Ref(id_ref, suffix) if id_ref.id() == &SELF => {
+                let mut path = path.clone();
                 path.extend(suffix);
                 Self::Link(path.into())
             }
@@ -99,9 +100,9 @@ impl Subject {
         }
     }
 
-    fn reference_self(self, path: TCPathBuf) -> Self {
+    fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
-            Self::Link(link) if link.path().starts_with(&path) => {
+            Self::Link(link) if link.path().starts_with(path) => {
                 Self::Ref(IdRef::from(SELF), link.path()[path.len()..].to_vec().into())
             }
             other => other,
@@ -286,8 +287,23 @@ pub enum OpRef {
     Delete(DeleteRef),
 }
 
-impl OpRef {
-    pub fn dereference_self(self, path: TCPathBuf) -> Self {
+impl Instance for OpRef {
+    type Class = OpRefType;
+
+    fn class(&self) -> OpRefType {
+        use OpRefType as ORT;
+        match self {
+            Self::Get(_) => ORT::Get,
+            Self::Put(_) => ORT::Put,
+            Self::Post(_) => ORT::Post,
+            Self::Delete(_) => ORT::Delete,
+        }
+    }
+}
+
+#[async_trait]
+impl Refer for OpRef {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((subject, key)) if subject.is_self() => {
                 Self::Get((subject.dereference_self(path), key))
@@ -305,7 +321,21 @@ impl OpRef {
         }
     }
 
-    pub fn reference_self(self, path: TCPathBuf) -> Self {
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        let subject = match self {
+            Self::Put((Subject::Link(link), _, _)) => Some(link),
+            Self::Delete((Subject::Link(link), _)) => Some(link),
+            _ => None,
+        };
+
+        if let Some(link) = subject {
+            !link.path().starts_with(cluster_path)
+        } else {
+            false
+        }
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((subject, key)) if subject.is_self() => {
                 Self::Get((subject.reference_self(path), key))
@@ -322,24 +352,7 @@ impl OpRef {
             op_ref => op_ref,
         }
     }
-}
 
-impl Instance for OpRef {
-    type Class = OpRefType;
-
-    fn class(&self) -> OpRefType {
-        use OpRefType as ORT;
-        match self {
-            Self::Get(_) => ORT::Get,
-            Self::Put(_) => ORT::Put,
-            Self::Post(_) => ORT::Post,
-            Self::Delete(_) => ORT::Delete,
-        }
-    }
-}
-
-#[async_trait]
-impl Refer for OpRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Get((subject, key)) => {

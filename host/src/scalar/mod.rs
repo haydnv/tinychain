@@ -257,6 +257,74 @@ impl Instance for Scalar {
 
 #[async_trait]
 impl Refer for Scalar {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, scalar)| (id, scalar.dereference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
+            Self::Op(op_def) => Self::Op(op_def.dereference_self(path)),
+            Self::Ref(tc_ref) => {
+                let tc_ref = tc_ref.dereference_self(path);
+                Self::Ref(Box::new(tc_ref))
+            }
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|scalar| scalar.dereference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
+            other => other,
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        match self {
+            Self::Map(map) => map
+                .values()
+                .any(|scalar| scalar.is_inter_service_write(cluster_path)),
+            Self::Op(op_def) => op_def.is_inter_service_write(cluster_path),
+            Self::Ref(tc_ref) => tc_ref.is_inter_service_write(cluster_path),
+            Self::Tuple(tuple) => tuple
+                .iter()
+                .any(|scalar| scalar.is_inter_service_write(cluster_path)),
+            _ => false,
+        }
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, scalar)| (id, scalar.reference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
+            Self::Op(op_def) => Self::Op(op_def.reference_self(path)),
+            Self::Ref(tc_ref) => {
+                let tc_ref = tc_ref.reference_self(path);
+                Self::Ref(Box::new(tc_ref))
+            }
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|scalar| scalar.reference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
+            other => other,
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {

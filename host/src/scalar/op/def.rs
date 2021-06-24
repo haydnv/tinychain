@@ -11,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tcgeneric::*;
 
-use crate::scalar::{Executor, OpRef, Scalar, TCRef};
+use crate::scalar::{Executor, Refer, Scalar};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -96,7 +96,7 @@ pub enum OpDef {
 }
 
 impl OpDef {
-    pub fn dereference_self(self, path: TCPathBuf) -> Self {
+    pub fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((key_name, form)) => Self::Get((key_name, dereference_self(form, path))),
             Self::Put((key_name, value_name, form)) => {
@@ -109,7 +109,7 @@ impl OpDef {
         }
     }
 
-    pub fn form(&self) -> impl Iterator<Item = &Scalar> {
+    pub fn form(&self) -> impl Iterator<Item = &(Id, Scalar)> {
         match self {
             Self::Get((_, form)) => form,
             Self::Put((_, _, form)) => form,
@@ -117,7 +117,12 @@ impl OpDef {
             Self::Delete((_, form)) => form,
         }
         .iter()
-        .map(|(_id, scalar)| scalar)
+    }
+
+    pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        self.form()
+            .map(|(_, provider)| provider)
+            .any(|provider| provider.is_inter_service_write(cluster_path))
     }
 
     pub fn into_form(self) -> Vec<(Id, Scalar)> {
@@ -138,7 +143,7 @@ impl OpDef {
         }
     }
 
-    pub fn reference_self(self, path: TCPathBuf) -> Self {
+    pub fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((key_name, form)) => Self::Get((key_name, reference_self(form, path))),
             Self::Put((key_name, value_name, form)) => {
@@ -292,26 +297,14 @@ impl fmt::Display for OpDef {
     }
 }
 
-fn dereference_self(form: Vec<(Id, Scalar)>, path: TCPathBuf) -> Vec<(Id, Scalar)> {
-    map_form(form, |op_ref| op_ref.dereference_self(path.clone()))
-}
-
-fn reference_self(form: Vec<(Id, Scalar)>, path: TCPathBuf) -> Vec<(Id, Scalar)> {
-    map_form(form, |op_ref| op_ref.reference_self(path.clone()))
-}
-
-fn map_form<M: Fn(OpRef) -> OpRef>(form: Vec<(Id, Scalar)>, map: M) -> Vec<(Id, Scalar)> {
+fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
-        .map(|(name, provider)| {
-            let provider = match provider {
-                Scalar::Ref(tc_ref) => match *tc_ref {
-                    TCRef::Op(op_ref) => Scalar::Ref(Box::new(TCRef::Op(map(op_ref)))),
-                    other => Scalar::Ref(Box::new(other)),
-                },
-                other => other,
-            };
+        .map(|(id, scalar)| (id, scalar.dereference_self(path)))
+        .collect()
+}
 
-            (name, provider)
-        })
+fn reference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
+    form.into_iter()
+        .map(|(id, scalar)| (id, scalar.reference_self(path)))
         .collect()
 }

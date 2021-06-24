@@ -16,6 +16,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
+use crate::generic::{PathSegment, TCPathBuf};
 
 /// A switch-case flow control
 #[derive(Clone, Eq, PartialEq)]
@@ -27,6 +28,54 @@ pub struct Case {
 
 #[async_trait]
 impl Refer for Case {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            cond: self.cond.dereference_self(path),
+
+            switch: self
+                .switch
+                .into_iter()
+                .map(|scalar| scalar.dereference_self(path))
+                .collect(),
+
+            case: self
+                .case
+                .into_iter()
+                .map(|scalar| scalar.dereference_self(path))
+                .collect(),
+        }
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        self.cond.is_inter_service_write(cluster_path)
+            || self
+                .switch
+                .iter()
+                .any(|scalar| scalar.is_inter_service_write(cluster_path))
+            || self
+                .case
+                .iter()
+                .any(|scalar| scalar.is_inter_service_write(cluster_path))
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        Self {
+            cond: self.cond.reference_self(path),
+
+            switch: self
+                .switch
+                .into_iter()
+                .map(|scalar| scalar.reference_self(path))
+                .collect(),
+
+            case: self
+                .case
+                .into_iter()
+                .map(|scalar| scalar.reference_self(path))
+                .collect(),
+        }
+    }
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
 
