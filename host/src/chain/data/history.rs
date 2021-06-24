@@ -7,7 +7,7 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
-use log::debug;
+use log::{debug, error};
 use safecast::*;
 
 use tc_btree::BTreeInstance;
@@ -99,13 +99,16 @@ impl History {
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
-                    if !self.dir.contains(&txn_id, &hash).await? {
+                    if self.dir.contains(&txn_id, &hash).await? {
+                        debug!("BTree with hash {} is already saved", hash);
+                    } else {
                         let file = self
                             .dir
                             .create_file(txn_id, hash.clone(), btree.class())
                             .await?;
 
                         BTreeFile::copy_from(btree, file, txn).await?;
+                        debug!("saved BTree with hash {}", hash);
                     }
 
                     Ok(OpRef::Get((
@@ -119,9 +122,12 @@ impl History {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
-                    if !self.dir.contains(&txn_id, &hash).await? {
+                    if self.dir.contains(&txn_id, &hash).await? {
+                        debug!("Table with hash {} is already saved", hash);
+                    } else {
                         let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
                         TableIndex::copy_from(table, dir, txn).await?;
+                        debug!("saved Table with hash {}", hash);
                     }
 
                     Ok(OpRef::Get((
@@ -140,13 +146,16 @@ impl History {
                         Tensor::Dense(dense) => {
                             let hash = dense.hash_hex(&txn).await?.parse()?;
 
-                            if !self.dir.contains(&txn_id, &hash).await? {
+                            if self.dir.contains(&txn_id, &hash).await? {
+                                debug!("Tensor with hash {} is already saved", hash);
+                            } else {
                                 let file = self
                                     .dir
                                     .create_file(txn_id, hash.clone(), TensorType::Dense)
                                     .await?;
 
                                 DenseTensor::copy_from(dense, file, txn).await?;
+                                debug!("saved Tensor with hash {}", hash);
                             }
 
                             hash
@@ -154,9 +163,12 @@ impl History {
                         Tensor::Sparse(sparse) => {
                             let hash = sparse.hash_hex(&txn).await?.parse()?;
 
-                            if !self.dir.contains(&txn_id, &hash).await? {
+                            if self.dir.contains(&txn_id, &hash).await? {
+                                debug!("Tensor with hash {} is already saved", hash);
+                            } else {
                                 let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
                                 SparseTensor::copy_from(sparse, dir, txn).await?;
+                                debug!("saved Tensor with hash {}", hash);
                             }
 
                             hash
@@ -305,22 +317,14 @@ impl History {
                             subject.delete(txn, &path, key).await
                         }
                         Mutation::Put(path, key, value) => {
-                            other
-                                .resolve(txn, value)
-                                .and_then(|state| self.save_state(txn.clone(), state))
-                                .and_then(|value| {
-                                    if append {
-                                        dest.append_put(
-                                            *past_txn_id,
-                                            path.clone(),
-                                            key.clone(),
-                                            value.clone(),
-                                        );
-                                    }
+                            let value = other.resolve(txn, value).await?;
+                            let value_ref = self.save_state(txn.clone(), value.clone()).await?;
 
-                                    subject.put(txn, &path, key, value.into())
-                                })
-                                .await
+                            if append {
+                                dest.append_put(*past_txn_id, path.clone(), key.clone(), value_ref);
+                            }
+
+                            subject.put(txn, &path, key, value).await
                         }
                     };
 
@@ -357,6 +361,8 @@ impl History {
     }
 
     pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
+        debug!("History::resolve {}", scalar);
+
         type OpSubject = crate::scalar::Subject;
 
         if let Scalar::Ref(tc_ref) = scalar {
@@ -369,18 +375,15 @@ impl History {
                     .map_ok(State::from)
                     .await
             } else {
+                error!("invalid subject for historical Chain state {}", tc_ref);
+
                 Err(TCError::internal(format!(
                     "invalid subject for historical Chain state {}",
                     tc_ref
                 )))
             }
-        } else if !scalar.is_ref() {
-            Ok(scalar.into())
         } else {
-            Err(TCError::internal(format!(
-                "invalid subject for historical Chain state {}",
-                scalar
-            )))
+            Ok(scalar.into())
         }
     }
 
@@ -391,6 +394,8 @@ impl History {
         schema: Scalar,
         class: CollectionType,
     ) -> TCResult<Collection> {
+        debug!("resolve historical collection value of type {}", class);
+
         match class {
             CollectionType::BTree(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
@@ -421,19 +426,42 @@ impl History {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let dir = self.dir.get_dir(txn.id(), &hash).await?.ok_or_else(|| {
+                let dir = self.dir.get_dir(txn.id(), &hash).await?;
+                let dir = dir.ok_or_else(|| {
                     TCError::internal(format!("missing historical Chain state {}", hash))
                 })?;
 
+                debug!("dir contents {:?}", dir.entry_ids(txn.id()).await?);
                 let table = TableIndex::load(txn, schema, dir).await?;
                 Ok(Collection::Table(table.into()))
             }
 
             #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => Err(TCError::not_implemented(format!(
-                "History::resolve instance of {}",
-                tt
-            ))),
+            CollectionType::Tensor(tt) => {
+                let schema = cast_into_tensor_schema(schema)?;
+
+                match tt {
+                    TensorType::Dense => {
+                        let file = self.dir.get_file(txn.id(), &hash).await?;
+                        let file = file.ok_or_else(|| {
+                            TCError::internal(format!("missing historical Chain state {}", hash))
+                        })?;
+
+                        let tensor = DenseTensor::load(txn, schema, file).await?;
+                        Ok(Collection::Tensor(tensor.into()))
+                    }
+                    TensorType::Sparse => {
+                        let dir = self.dir.get_dir(txn.id(), &hash).await?;
+                        let dir = dir.ok_or_else(|| {
+                            TCError::internal(format!("missing historical Chain state {}", hash))
+                        })?;
+
+                        debug!("dir contents {:?}", dir.entry_ids(txn.id()).await?);
+                        let tensor = SparseTensor::load(txn, schema, dir).await?;
+                        Ok(Collection::Tensor(tensor.into()))
+                    }
+                }
+            }
         }
     }
 }
@@ -650,6 +678,8 @@ impl<'en> IntoView<'en, fs::Dir> for History {
     type View = HistoryView<'en>;
 
     async fn into_view(self, txn: Txn) -> TCResult<Self::View> {
+        debug!("History::into_view");
+
         let txn_id = *txn.id();
         let latest = self.latest.read(&txn_id).await?;
 
@@ -658,33 +688,19 @@ impl<'en> IntoView<'en, fs::Dir> for History {
 
         let seq = stream::iter(0..((*latest) + 1))
             .map(BlockId::from)
+            .inspect(|id| debug!("encoding history block {}", id))
             .then(read_block)
             .map_ok(move |block| {
+                let this = self.clone();
                 let txn = txn.clone();
                 let map =
                     stream::iter(block.mutations().clone()).map(move |(past_txn_id, mutations)| {
-                        let txn = txn.clone();
-                        let mutations = stream::iter(mutations).then(move |op| {
-                            let txn = txn.clone();
-                            Box::pin(async move {
-                                match op {
-                                    Mutation::Delete(path, key) => {
-                                        Ok(MutationView::Delete(path, key))
-                                    }
-                                    Mutation::Put(_path, _key, value) if value.is_ref() => {
-                                        Err(TCError::not_implemented(
-                                            "resolve reference in Mutation::Put",
-                                        ))
-                                    }
-                                    Mutation::Put(path, key, value) => {
-                                        let value =
-                                            State::from(value).into_view(txn.clone()).await?;
+                        debug!("reading block mutations");
 
-                                        Ok(MutationView::Put(path, key, value))
-                                    }
-                                }
-                            })
-                        });
+                        let this = this.clone();
+                        let txn = txn.clone();
+                        let mutations = stream::iter(mutations)
+                            .then(move |op| Box::pin(load_history(this.clone(), op, txn.clone())));
 
                         let mutations: TCTryStream<'en, MutationView<'en>> = Box::pin(mutations);
                         let mutations = en::SeqStream::from(mutations);
@@ -697,6 +713,31 @@ impl<'en> IntoView<'en, fs::Dir> for History {
 
         let seq: TCTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
         Ok(en::SeqStream::from(seq))
+    }
+}
+
+async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<MutationView<'a>> {
+    match op {
+        Mutation::Delete(path, key) => Ok(MutationView::Delete(path, key)),
+        Mutation::Put(path, key, value) if value.is_ref() => {
+            debug!("historical mutation: PUT {}: {} <- {}", path, key, value);
+
+            let value = history
+                .resolve(&txn, value)
+                .map_err(|err| {
+                    error!("unable to load historical Chain data: {}", err);
+                    err
+                })
+                .await?;
+
+            let value = value.into_view(txn).await?;
+            Ok(MutationView::Put(path, key, value))
+        }
+        Mutation::Put(path, key, value) => {
+            let value = State::from(value).into_view(txn.clone()).await?;
+
+            Ok(MutationView::Put(path, key, value))
+        }
     }
 }
 
@@ -737,5 +778,32 @@ fn cast_tensor_schema(tensor: &Tensor) -> Value {
         .collect();
 
     let dtype = tc_value::ValueType::from(tensor.dtype()).path();
-    Value::Tuple(vec![shape.into(), dtype.into()].into())
+    Value::Tuple(Tuple::from(vec![shape.into(), dtype.into()]))
+}
+
+#[cfg(feature = "tensor")]
+fn cast_into_tensor_schema(scalar: Scalar) -> TCResult<tc_tensor::Schema> {
+    use std::convert::TryInto;
+    use tc_value::ValueType;
+
+    let (shape, dtype): (Vec<u64>, TCPathBuf) = match scalar {
+        Scalar::Value(Value::Tuple(schema)) => {
+            schema.try_cast_into(|v| TCError::internal(format!("invalid Tensor schema: {}", v)))
+        }
+        Scalar::Tuple(schema) => {
+            schema.try_cast_into(|v| TCError::internal(format!("invalid Tensor schema: {}", v)))
+        }
+        other => Err(TCError::internal(format!(
+            "invalid Tensor schema: {}",
+            other
+        ))),
+    }?;
+
+    let shape = tc_tensor::Shape::from(shape);
+
+    let dtype = ValueType::from_path(&dtype)
+        .ok_or_else(|| TCError::internal(format!("invalid data type for Tensor: {}", dtype)))?;
+    let dtype = dtype.try_into().map_err(TCError::internal)?;
+
+    Ok((shape, dtype))
 }

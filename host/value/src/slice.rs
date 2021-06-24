@@ -57,7 +57,7 @@ impl TryCastFrom<Value> for Bound {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Tuple(tuple) => tuple.opt_cast_into(),
-            _ => None
+            _ => None,
         }
     }
 }

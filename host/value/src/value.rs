@@ -705,7 +705,6 @@ impl TryCastFrom<Value> for Number {
             Value::Link(_) => false,
             Value::None => true,
             Value::Number(_) => true,
-            Value::Tuple(t) if t.is_empty() => true,
             Value::Tuple(t) if t.len() == 1 => Self::can_cast_from(&t[0]),
             Value::Tuple(t) if t.len() == 2 => {
                 Self::can_cast_from(&t[0]) && Self::can_cast_from(&t[1])
@@ -725,7 +724,6 @@ impl TryCastFrom<Value> for Number {
             Value::Link(_) => None,
             Value::None => Some(false.into()),
             Value::Number(n) => Some(n),
-            Value::Tuple(t) if t.is_empty() => Some(false.into()),
             Value::Tuple(mut t) if t.len() == 1 => Self::opt_cast_from(t.pop().unwrap()),
             Value::Tuple(mut t) if t.len() == 2 => {
                 let im = Self::opt_cast_from(t.pop().unwrap());

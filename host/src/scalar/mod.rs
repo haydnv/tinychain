@@ -12,7 +12,7 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -794,30 +794,11 @@ impl ScalarVisitor {
         }
 
         let subject = Link::from(class.path()).into();
-        let op_ref = if scalar.matches::<(Scalar, Scalar)>() {
-            let (key, value) = scalar.opt_cast_into().unwrap();
-            OpRef::Put((subject, key, value))
-        } else if scalar.matches::<(Scalar,)>() {
-            let (key,) = scalar.opt_cast_into().unwrap();
-            OpRef::Get((subject, key))
-        } else if scalar.matches::<Map<Scalar>>() {
-            let params = scalar.opt_cast_into().unwrap();
-            OpRef::Post((subject, params))
-        } else {
-            return Err(de::Error::invalid_type(
-                scalar,
-                format!("an Op with subject {}", subject),
-            ));
-        };
-
-        Ok(TCRef::Op(op_ref).into())
+        Self::visit_subject(subject, scalar)
     }
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
-        if let Scalar::Map(params) = params {
-            let op_ref = OpRef::Post((subject, params));
-            Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
-        } else if params.is_none() {
+        if params.is_none() {
             match subject {
                 Subject::Ref(id, path) if path.is_empty() => {
                     Ok(Scalar::Ref(Box::new(TCRef::Id(id))))

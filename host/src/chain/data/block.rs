@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::TryFutureExt;
+use log::debug;
 
 use tc_transact::fs::BlockData;
 use tc_transact::lock::Mutate;
@@ -147,6 +148,7 @@ impl ChainBlock {
 
     /// Append a PUT op to the contents of this `ChainBlock`.
     pub fn append_put(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
+        debug!("ChainBlock::append_put {}: {} <- {}", path, key, value);
         self.append(txn_id, Mutation::Put(path, key, value))
     }
 

@@ -302,7 +302,7 @@ class SparseTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
-    CACHE_SIZE = "10M"
+    CACHE_SIZE = "100M"
     NUM_HOSTS = 4
     NAME = "tensor"
 
@@ -318,7 +318,10 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             @tc.put_method
             def overwrite(self, txn):
                 txn.new = tc.tensor.Dense.constant([3], 2)
-                return [self.dense.write(None, txn.new), self.sparse.write([0], txn.new)]
+                return [
+                    self.dense.write(None, txn.new),
+                    self.sparse.write([0], txn.new)
+                ]
 
             @tc.get_method
             def eq(self):
@@ -339,7 +342,9 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             actual = host.get("/test/tensor/sparse")
             self.assertEqual(actual, sparse)
 
+        hosts[1].stop()
         hosts[0].put("/test/tensor/overwrite")
+        hosts[1].start()
 
         dense = expect_dense(tc.I32, [2, 3], [2] * 6)
 

@@ -323,10 +323,14 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for Up
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(TCError::bad_request("table update does not accept a key", key));
+                    return Err(TCError::bad_request(
+                        "table update does not accept a key",
+                        key,
+                    ));
                 }
 
-                let values = value.try_cast_into(|s| TCError::bad_request("invalid Table update", s))?;
+                let values =
+                    value.try_cast_into(|s| TCError::bad_request("invalid Table update", s))?;
                 self.table.update(&txn, values).await
             })
         }))
@@ -381,12 +385,17 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
         return Ok(Bounds::default());
     }
 
-    let scalar = Map::<Value>::try_cast_from(scalar, |s| TCError::bad_request("invalid selection bounds for Table", s))?;
+    let scalar = Map::<Value>::try_cast_from(scalar, |s| {
+        TCError::bad_request("invalid selection bounds for Table", s)
+    })?;
 
     scalar
         .into_iter()
         .map(|(col_name, bound)| {
-            if bound.matches::<(Bound, Bound)>() || bound.matches::<(Bound, Value)>() || bound.matches::<(Value, Bound)>() {
+            if bound.matches::<(Bound, Bound)>()
+                || bound.matches::<(Bound, Value)>()
+                || bound.matches::<(Value, Bound)>()
+            {
                 Ok(ColumnBound::In(bound.opt_cast_into().unwrap()))
             } else if bound.matches::<Value>() {
                 Ok(ColumnBound::Is(bound.opt_cast_into().unwrap()))

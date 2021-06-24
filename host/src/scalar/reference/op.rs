@@ -11,7 +11,7 @@ use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
 use log::debug;
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -463,15 +463,16 @@ impl OpRefVisitor {
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<OpRef, E> {
         match params {
             Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
-            Scalar::Tuple(params) if params.matches::<(Scalar, Scalar)>() => {
-                let (key, value) = params.opt_cast_into().unwrap();
-                Ok(OpRef::Put((subject, key, value)))
-            }
-            Scalar::Tuple(params) if params.matches::<(Scalar,)>() => {
-                let (key,) = params.opt_cast_into().unwrap();
+            Scalar::Tuple(mut tuple) if tuple.len() == 1 => {
+                let key = tuple.pop().unwrap();
                 Ok(OpRef::Get((subject, key)))
             }
-            other => Err(de::Error::invalid_type(other, &"OpRef")),
+            Scalar::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().unwrap();
+                let key = tuple.pop().unwrap();
+                Ok(OpRef::Put((subject, key, value)))
+            }
+            other => Err(de::Error::invalid_value(other, "OpRef parameters")),
         }
     }
 }
@@ -517,7 +518,7 @@ impl<'en> ToStream<'en> for OpRef {
         let mut map = e.encode_map(Some(1))?;
 
         match self {
-            OpRef::Get((path, key)) => map.encode_entry(path.to_string(), key)?,
+            OpRef::Get((path, key)) => map.encode_entry(path.to_string(), (key,))?,
             OpRef::Put((path, key, value)) => map.encode_entry(path.to_string(), (key, value))?,
             OpRef::Post((path, data)) => map.encode_entry(path.to_string(), data.deref())?,
             OpRef::Delete((path, key)) => {

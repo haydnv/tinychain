@@ -6,7 +6,9 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
+
 use tc_btree::BTreeType;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist, Restore, Store};
@@ -196,9 +198,15 @@ impl Subject {
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => {
                 let dir = dir.create_dir(txn_id, SUBJECT.into()).await?;
-                SparseTensor::create(&dir, schema, txn_id)
+                let tensor = SparseTensor::create(&dir, schema, txn_id)
                     .map_ok(Self::Sparse)
-                    .await
+                    .await?;
+
+                debug!(
+                    "subject dir contents after creating sparse tensor: {:?}",
+                    dir.entry_ids(&txn_id).await?
+                );
+                Ok(tensor)
             }
             Schema::Value(value) => {
                 let file: fs::File<Value> = dir
@@ -243,7 +251,9 @@ impl Subject {
             }
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => {
+                debug!("chain dir contents {:?}", dir.entry_ids(txn.id()).await?);
                 if let Some(dir) = dir.get_dir(txn.id(), &SUBJECT.into()).await? {
+                    debug!("subject dir contents {:?}", dir.entry_ids(txn.id()).await?);
                     SparseTensor::load(txn, schema, dir)
                         .map_ok(Self::Sparse)
                         .await
@@ -320,6 +330,8 @@ impl Subject {
 #[async_trait]
 impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!("commit chain subject");
+
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
@@ -332,6 +344,8 @@ impl Transact for Subject {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("finalize chain subject");
+
         match self {
             Self::BTree(btree) => btree.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,

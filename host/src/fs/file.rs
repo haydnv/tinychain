@@ -274,11 +274,12 @@ where
             ));
         }
 
-        let path = fs_path(&self.path, &name);
+        let version = block_version(&self.path, &txn_id, &name);
         contents.insert(name.clone());
 
+        self.mutate(txn_id, name.clone()).await;
         self.cache
-            .write(path, initial_value)
+            .write(version, initial_value)
             .map_ok(|lock| Block { name, txn_id, lock })
             .await
     }
@@ -382,6 +383,8 @@ where
                     });
 
                 try_join_all(commits).await.expect("commit file blocks");
+            } else {
+                debug!("no blocks mutated at {}", txn_id);
             }
         }
 
