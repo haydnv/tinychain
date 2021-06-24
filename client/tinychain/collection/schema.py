@@ -18,7 +18,7 @@ class Column(object):
 
 
 class BTree(object):
-    """A `BTree` schema which comprises a tuple of :class:`Column`\s."""
+    """A `BTree` schema which comprises a tuple of :class:`Column`s."""
 
     def __init__(self, *columns):
         self.columns = columns

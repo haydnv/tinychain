@@ -13,7 +13,7 @@ class Ex(Bound):
         self.value = value
 
     def __json__(self):
-        return to_json({"ex": self.value})
+        return to_json(["ex", self.value])
 
 
 class In(Bound):
@@ -23,7 +23,7 @@ class In(Bound):
         self.value = value
 
     def __json__(self):
-        return to_json({"in": self.value})
+        return to_json(["in", self.value])
 
 
 class Un(Bound):
@@ -34,7 +34,7 @@ class Un(Bound):
 
 
 class Range(object):
-    """A selection range of one or two :class:`Bound`\s."""
+    """A selection range of one or two :class:`Bound`s."""
 
     @staticmethod
     def from_slice(s):

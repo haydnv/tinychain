@@ -5,10 +5,10 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::TryFutureExt;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tcgeneric::{label, Id, Label, Map};
+use tcgeneric::{label, Id, Label, Tuple};
 
 use super::{Value, ValueCollator};
 
@@ -29,8 +29,8 @@ pub enum Bound {
 impl<'en> en::IntoStream<'en> for Bound {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::In(v) => single_entry(Id::from(IN), v, encoder),
-            Self::Ex(v) => single_entry(Id::from(EX), v, encoder),
+            Self::In(v) => (Id::from(IN), v).into_stream(encoder),
+            Self::Ex(v) => (Id::from(EX), v).into_stream(encoder),
             Self::Un => Value::None.into_stream(encoder),
         }
     }
@@ -39,27 +39,41 @@ impl<'en> en::IntoStream<'en> for Bound {
 impl<'en> en::ToStream<'en> for Bound {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::In(v) => single_entry(Id::from(IN), v, encoder),
-            Self::Ex(v) => single_entry(Id::from(EX), v, encoder),
+            Self::In(v) => en::IntoStream::into_stream((Id::from(IN), v), encoder),
+            Self::Ex(v) => en::IntoStream::into_stream((Id::from(EX), v), encoder),
             Self::Un => Value::None.to_stream(encoder),
         }
     }
 }
 
-impl TryCastFrom<Map<Value>> for Bound {
-    fn can_cast_from(value: &Map<Value>) -> bool {
-        value.len() == 1 && (value.contains_key(&IN.into()) || value.contains_key(&EX.into()))
+impl TryCastFrom<Value> for Bound {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
     }
 
-    fn opt_cast_from(mut value: Map<Value>) -> Option<Self> {
-        if value.len() == 1 {
-            if let Some(value) = value.remove(&IN.into()) {
-                Some(Self::In(value))
-            } else if let Some(value) = value.remove(&EX.into()) {
-                Some(Self::Ex(value))
-            } else {
-                None
-            }
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => tuple.opt_cast_into(),
+            _ => None
+        }
+    }
+}
+
+impl TryCastFrom<Tuple<Value>> for Bound {
+    fn can_cast_from(value: &Tuple<Value>) -> bool {
+        TryCastInto::<(Id, Value)>::can_cast_into(value)
+    }
+
+    fn opt_cast_from(value: Tuple<Value>) -> Option<Self> {
+        let (rtype, value): (Id, Value) = value.opt_cast_into()?;
+
+        if rtype == IN {
+            Some(Self::In(value))
+        } else if rtype == EX {
+            Some(Self::Ex(value))
         } else {
             None
         }
@@ -216,13 +230,54 @@ impl Default for Range {
     }
 }
 
+impl TryCastFrom<Value> for Range {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => tuple.opt_cast_into(),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Tuple<Value>> for Range {
+    fn can_cast_from(tuple: &Tuple<Value>) -> bool {
+        TryCastInto::<(Value, Value)>::can_cast_into(tuple)
+    }
+
+    fn opt_cast_from(tuple: Tuple<Value>) -> Option<Self> {
+        let (start, end): (Value, Value) = tuple.opt_cast_into()?;
+
+        let start = if start.matches::<Bound>() {
+            start.opt_cast_into().unwrap()
+        } else {
+            Bound::In(start)
+        };
+
+        let end = if end.matches::<Bound>() {
+            end.opt_cast_into().unwrap()
+        } else {
+            Bound::In(end)
+        };
+
+        Some(Range { start, end })
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Range {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        let start = if let Ok(map) = Map::<Value>::from_stream(cxt, decoder).await {
-            map.try_cast_into(|v| TCError::bad_request("invalid Range", v))
+        let start = if let Ok(tuple) = Tuple::<Value>::from_stream(cxt, decoder).await {
+            tuple
+                .try_cast_into(|v| TCError::bad_request("invalid Range", v))
                 .map_err(de::Error::custom)
         } else {
             Value::from_stream(cxt, decoder)
@@ -230,8 +285,9 @@ impl de::FromStream for Range {
                 .await
         }?;
 
-        let end = if let Ok(map) = Map::<Value>::from_stream(cxt, decoder).await {
-            map.try_cast_into(|v| TCError::bad_request("invalid Range", v))
+        let end = if let Ok(tuple) = Tuple::<Value>::from_stream(cxt, decoder).await {
+            tuple
+                .try_cast_into(|v| TCError::bad_request("invalid Range", v))
                 .map_err(de::Error::custom)
         } else {
             Value::from_stream(cxt, decoder)
@@ -307,21 +363,4 @@ impl fmt::Display for Range {
             (Bound::Un, Bound::Un) => f.write_str("[...]"),
         }
     }
-}
-
-fn single_entry<
-    'en,
-    K: en::IntoStream<'en> + 'en,
-    V: en::IntoStream<'en> + 'en,
-    E: en::Encoder<'en>,
->(
-    key: K,
-    value: V,
-    encoder: E,
-) -> Result<E::Ok, E::Error> {
-    use en::EncodeMap;
-
-    let mut map = encoder.encode_map(Some(1))?;
-    map.encode_entry(key, value)?;
-    map.end()
 }

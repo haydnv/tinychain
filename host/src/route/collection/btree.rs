@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::Value;
-use tcgeneric::{label, Map, PathSegment, Tuple};
+use tcgeneric::{label, Map, PathSegment};
 
 use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -261,19 +261,13 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
         };
     };
 
-    let mut prefix: Tuple<Scalar> =
+    let mut prefix: Vec<Value> =
         scalar.try_cast_into(|s| TCError::bad_request("invalid BTree range", s))?;
 
     if !prefix.is_empty() && tc_value::Range::can_cast_from(prefix.last().unwrap()) {
         let range = tc_value::Range::opt_cast_from(prefix.pop().unwrap()).unwrap();
-        let prefix =
-            prefix.try_cast_into(|v| TCError::bad_request("invalid BTree range prefix", v))?;
-
         Ok((prefix, range.start.into(), range.end.into()).into())
     } else {
-        let prefix =
-            prefix.try_cast_into(|v| TCError::bad_request("invalid BTree range prefix", v))?;
-
         Ok(Range::with_prefix(prefix))
     }
 }

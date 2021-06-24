@@ -1,8 +1,6 @@
-use std::convert::TryFrom;
 use std::iter::FromIterator;
 
 use futures::{future, TryFutureExt, TryStreamExt};
-use log::debug;
 use safecast::*;
 
 use tc_btree::Node;
@@ -10,7 +8,7 @@ use tc_error::*;
 use tc_table::{Bounds, ColumnBound, TableInstance, TableType};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tc_value::{Range, Value};
+use tc_value::{Bound, Value};
 use tcgeneric::{Id, Map, PathSegment, Tuple};
 
 use crate::collection::{Collection, Table, TableIndex};
@@ -266,7 +264,6 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
                 })?;
 
                 let bounds = cast_into_bounds(bounds)?;
-                debug!("slice Table with bounds {}", bounds);
 
                 let table = self.table.clone().slice(bounds).map(|slice| slice.into())?;
                 Ok(Collection::Table(table).into())
@@ -322,20 +319,15 @@ struct UpdateHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for UpdateHandler<T> {
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
-        Some(Box::new(|txn, value| {
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                let value = value
-                    .into_iter()
-                    .map(|(col, v)| {
-                        Value::try_cast_from(v, |v| {
-                            TCError::bad_request("invalid Value for Table row", v)
-                        })
-                        .map(|v| (col, v))
-                    })
-                    .collect::<TCResult<Map<Value>>>()?;
+                if key.is_some() {
+                    return Err(TCError::bad_request("table update does not accept a key", key));
+                }
 
-                self.table.update(&txn, value).map_ok(State::from).await
+                let values = value.try_cast_into(|s| TCError::bad_request("invalid Table update", s))?;
+                self.table.update(&txn, values).await
             })
         }))
     }
@@ -376,7 +368,6 @@ fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
             "group" => Some(Box::new(GroupHandler::from(table))),
             "order" => Some(Box::new(OrderHandler::from(table))),
             "select" => Some(Box::new(SelectHandler::from(table))),
-            "update" => Some(Box::new(UpdateHandler::from(table))),
             _ => None,
         }
     } else {
@@ -386,11 +377,16 @@ fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
 
 #[inline]
 fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
-    let scalar = Map::<Scalar>::try_from(scalar)?;
+    if scalar.is_none() {
+        return Ok(Bounds::default());
+    }
+
+    let scalar = Map::<Value>::try_cast_from(scalar, |s| TCError::bad_request("invalid selection bounds for Table", s))?;
+
     scalar
         .into_iter()
         .map(|(col_name, bound)| {
-            if bound.matches::<Range>() {
+            if bound.matches::<(Bound, Bound)>() || bound.matches::<(Bound, Value)>() || bound.matches::<(Value, Bound)>() {
                 Ok(ColumnBound::In(bound.opt_cast_into().unwrap()))
             } else if bound.matches::<Value>() {
                 Ok(ColumnBound::Is(bound.opt_cast_into().unwrap()))

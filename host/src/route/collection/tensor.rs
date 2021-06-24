@@ -15,7 +15,7 @@ use tcgeneric::{label, PathSegment, TCBoxTryFuture};
 use crate::collection::{Collection, Tensor};
 use crate::fs;
 use crate::route::{GetHandler, PostHandler, PutHandler};
-use crate::scalar::{Bound, Number, NumberClass, NumberType, Range, Scalar, Value, ValueType};
+use crate::scalar::{Bound, Number, NumberClass, NumberType, Range, Value, ValueType};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -228,46 +228,20 @@ where
     Collection: From<<T as TensorTransform>::Slice>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        Some(Box::new(|txn, key| {
+        Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    Ok(Collection::from(self.tensor.clone()).into())
-                } else if key.matches::<Coord>() {
-                    let coord = key.opt_cast_into().unwrap();
-                    self.tensor
-                        .read_value(txn, coord)
-                        .map_ok(Value::from)
-                        .map_ok(State::from)
-                        .await
-                } else if key.matches::<Bounds>() {
-                    let bounds = key.opt_cast_into().unwrap();
-                    self.tensor
-                        .slice(bounds)
-                        .map(Collection::from)
-                        .map(State::from)
-                } else {
-                    Err(TCError::bad_request("invalid tensor bounds", key))
-                }
+                let bounds = cast_bounds(self.tensor.shape(), key)?;
+                self.tensor
+                    .slice(bounds)
+                    .map(Collection::from)
+                    .map(State::from)
             })
         }))
     }
 
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(move |txn, key, value| {
-            Box::pin(write(self.tensor, txn, key.into(), value))
-        }))
-    }
-
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
-        Some(Box::new(|_txn, mut params| {
-            Box::pin(async move {
-                let bounds: Scalar = params.or_default(&label("bounds").into())?;
-                let bounds = cast_bounds(self.tensor.shape(), bounds)?;
-                self.tensor
-                    .slice(bounds)
-                    .map(Collection::from)
-                    .map(State::from)
-            })
+            Box::pin(write(self.tensor, txn, key, value))
         }))
     }
 }
@@ -331,38 +305,6 @@ where
                     let slice = self.tensor.slice(bounds)?;
                     (self.op)(slice, txn).map_ok(State::from).await
                 }
-            })
-        }))
-    }
-}
-
-struct WriteHandler<T> {
-    tensor: T,
-}
-
-impl<'a, T> Handler<'a> for WriteHandler<T>
-where
-    T: TensorAccess
-        + TensorIO<fs::Dir, Txn = Txn>
-        + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
-        + Send
-        + Sync
-        + 'a,
-{
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
-        Some(Box::new(move |txn, key, value| {
-            Box::pin(write(self.tensor, txn, key.into(), value))
-        }))
-    }
-
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
-        Some(Box::new(move |txn, mut params| {
-            Box::pin(async move {
-                let bounds = params.or_default(&label("bounds").into())?;
-                let value = params.require(&label("value").into())?;
-                write(self.tensor, txn, bounds, value)
-                    .map_ok(State::from)
-                    .await
             })
         }))
     }
@@ -458,8 +400,6 @@ where
                 TensorReduce::sum_all,
             ))),
 
-            "write" => Some(Box::new(WriteHandler { tensor: cloned })),
-
             _ => None,
         }
     } else {
@@ -477,11 +417,11 @@ async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> 
         .await
 }
 
-async fn write<T>(tensor: T, txn: Txn, key: Scalar, value: State) -> TCResult<()>
+async fn write<T>(tensor: T, txn: Txn, key: Value, value: State) -> TCResult<()>
 where
     T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>,
 {
-    let bounds = cast_bounds(tensor.shape(), key.into())?;
+    let bounds = cast_bounds(tensor.shape(), key)?;
 
     match value {
         State::Collection(Collection::Tensor(value)) => tensor.write(txn, bounds, value).await,
@@ -520,12 +460,43 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
     }
 }
 
-pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
-    debug!("tensor bounds from {}", scalar);
+fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
+    let start = match range.start {
+        Bound::Un => 0,
+        Bound::In(start) => cast_bound(dim, start)?,
+        Bound::Ex(start) => cast_bound(dim, start)? + 1,
+    };
 
-    match scalar {
-        none if none.is_none() => Ok(Bounds::all(shape)),
-        Scalar::Tuple(bounds) => {
+    let end = match range.end {
+        Bound::Un => dim,
+        Bound::In(end) => cast_bound(dim, end)? + 1,
+        Bound::Ex(end) => cast_bound(dim, end)?,
+    };
+
+    Ok(AxisBounds::In(start..end))
+}
+
+pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
+    debug!("tensor bounds from {}", value);
+
+    match value {
+        Value::None => Ok(Bounds::all(shape)),
+        Value::Number(i) => {
+            let bound = cast_bound(shape[0], i.into())?;
+            Ok(Bounds::from(vec![bound]))
+        }
+        Value::Tuple(range) if range.matches::<(Bound, Bound)>() => {
+            if shape.is_empty() {
+                return Err(TCError::bad_request(
+                    "empty Tensor has no valid bounds, but found",
+                    range,
+                ));
+            }
+
+            let range = range.opt_cast_into().unwrap();
+            Ok(Bounds::from(vec![cast_range(shape[0], range)?]))
+        }
+        Value::Tuple(bounds) => {
             if bounds.len() > shape.len() {
                 return Err(TCError::unsupported(format!(
                     "tensor of shape {} does not support bounds with {} axes",
@@ -541,53 +512,16 @@ pub fn cast_bounds(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
                     AxisBounds::all(shape[axis])
                 } else if bound.matches::<Range>() {
                     let range = Range::opt_cast_from(bound).unwrap();
-                    let start = match range.start {
-                        Bound::Un => 0,
-                        Bound::In(start) => cast_bound(shape[axis], start)?,
-                        Bound::Ex(start) => cast_bound(shape[axis], start)? + 1,
-                    };
-
-                    let end = match range.end {
-                        Bound::Un => shape[axis],
-                        Bound::In(end) => cast_bound(shape[axis], end)? + 1,
-                        Bound::Ex(end) => cast_bound(shape[axis], end)?,
-                    };
-
-                    AxisBounds::In(start..end)
+                    cast_range(shape[axis], range)?
                 } else if bound.matches::<Vec<u64>>() {
                     bound.opt_cast_into().map(AxisBounds::Of).unwrap()
-                } else if let Scalar::Value(value) = bound {
-                    cast_bound(shape[axis], value).map(AxisBounds::At)?
+                } else if let Value::Number(value) = bound {
+                    cast_bound(shape[axis], value.into()).map(AxisBounds::At)?
                 } else {
                     return Err(TCError::bad_request(
                         format!("invalid bound for axis {}", axis),
                         bound,
                     ));
-                };
-
-                axes.push(bound);
-            }
-
-            Ok(Bounds { axes })
-        }
-        Scalar::Value(Value::Tuple(bounds)) => {
-            let mut axes = Vec::with_capacity(shape.len());
-            for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
-                let bound = match bound {
-                    Value::None => AxisBounds::all(shape[axis]),
-                    Value::Tuple(indices) => {
-                        let indices = shape[..]
-                            .iter()
-                            .zip(indices.into_inner().into_iter())
-                            .map(|(dim, i)| cast_bound(*dim, i.into()))
-                            .collect::<TCResult<Vec<u64>>>()?;
-
-                        AxisBounds::Of(indices)
-                    }
-                    value => {
-                        let i = cast_bound(shape[axis], value)?;
-                        AxisBounds::At(i)
-                    }
                 };
 
                 axes.push(bound);

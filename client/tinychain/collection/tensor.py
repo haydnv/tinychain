@@ -2,10 +2,11 @@
 
 from tinychain import ref
 from tinychain.util import uri
-from tinychain.value import F32, Nil, Number
+from tinychain.value import F32, Number
 
 from . import schema
-from .collection import Collection, Range
+from .bound import Range
+from .collection import Collection
 
 
 class Tensor(Collection):
@@ -21,7 +22,7 @@ class Tensor(Collection):
             Range.from_slice(x) if isinstance(x, slice)
             else x for x in bounds]
 
-        return self._post("", Tensor, bounds=bounds)
+        return self._get("", bounds, Tensor)
 
     def __setitem__(self, bounds, value):
         if bounds is not None:
@@ -32,7 +33,7 @@ class Tensor(Collection):
                 Range.from_slice(x) if isinstance(x, slice)
                 else x for x in bounds]
 
-        return self._post("write", Nil, bounds=bounds, value=value)
+        return self._put("", bounds, value)
 
     def __add__(self, other):
         return self.add(other)

@@ -618,6 +618,10 @@ where
     }
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self> {
+        if dtype == self.dtype() {
+            return Ok(self);
+        }
+
         match self {
             Self::Dense(dense) => dense.cast_into(dtype).map(Self::from),
             Self::Sparse(sparse) => sparse.cast_into(dtype).map(Self::from),
@@ -632,6 +636,10 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self> {
+        if bounds == Bounds::all(self.shape()) {
+            return Ok(self);
+        }
+
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
             Self::Sparse(sparse) => sparse.slice(bounds).map(Self::from),
@@ -639,6 +647,10 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        if permutation == Some((0..self.ndim()).collect()) {
+            return Ok(self);
+        }
+
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),

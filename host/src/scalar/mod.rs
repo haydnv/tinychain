@@ -457,55 +457,17 @@ impl TryCastFrom<Scalar> for OpDef {
     }
 }
 
-impl TryCastFrom<Scalar> for Bound {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Map(map) if map.len() == 1 => {
-                map.contains_key(&IN.into()) || map.contains_key(&EX.into())
-            }
-            Scalar::Value(value) => value.is_none(),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Map(map) if BTreeMap::<Id, Value>::can_cast_from(&map) => {
-                let map = BTreeMap::<Id, Value>::opt_cast_from(map).unwrap();
-                Map::from(map).opt_cast_into()
-            }
-            Scalar::Value(value) if value.is_none() => Some(Self::Un),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<Scalar> for Range {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Tuple(tuple) if tuple.len() == 2 => {
-                tuple.iter().all(|s| Bound::can_cast_from(s))
-            }
-            Scalar::Value(Value::Tuple(tuple)) => tuple.len() == 2,
+            Scalar::Value(value) => Self::can_cast_from(value),
             _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Tuple(tuple)
-                if tuple.len() == 2 && tuple.iter().all(|s| Bound::can_cast_from(s)) =>
-            {
-                let (start, end) = tuple.opt_cast_into().unwrap();
-                Some(Self { start, end })
-            }
-            Scalar::Value(Value::Tuple(tuple)) if tuple.len() == 2 => {
-                let (start, end) = tuple.opt_cast_into().unwrap();
-                Some(Self {
-                    start: Bound::In(start),
-                    end: Bound::Ex(end),
-                })
-            }
+            Scalar::Value(value) => value.opt_cast_into(),
             _ => None,
         }
     }

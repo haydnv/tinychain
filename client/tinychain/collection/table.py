@@ -27,8 +27,7 @@ class Table(Collection):
         """
         Return the number of rows in this `Table`.
 
-        To count the number of keys which match a specific range,
-        call `table.where(range).count()`.
+        To count the number of keys which match a specific range, call `table.where(range).count()`.
         """
 
         return self._get("count", rtype=UInt)
@@ -73,8 +72,7 @@ class Table(Collection):
         """
         Set the order in which this `Table`'s rows will be iterated over.
 
-        If no index supports the given order, this will raise a
-        :class:`BadRequest` error.
+        If no index supports the given order, this will raise a :class:`BadRequest` error.
         """
 
         return self._get("order", (columns, reverse), Table)
@@ -88,11 +86,10 @@ class Table(Collection):
         """
         Update this `Table`\'s rows to the given values.
 
-        To limit the range of this update, use the `where` method, e.g.
-        `table.where(foo="bar").update(foo="baz")`.
+        To limit the range of the update, use the `where` method, e.g. `table.where(foo="bar").update(foo="baz")`.
         """
 
-        return self._post("update", Nil, **values)
+        return self._put("", None, values)
 
     def upsert(self, key, values=[]):
         """
@@ -107,8 +104,7 @@ class Table(Collection):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
-        If there is no index which supports the given range, this will raise
-        a :class:`BadRequest` error.
+        If there is no index which supports the given range, this will raise a :class:`BadRequest` error.
         """
 
         cond = {
