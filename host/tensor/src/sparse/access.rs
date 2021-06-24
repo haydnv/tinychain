@@ -745,29 +745,30 @@ where
         })
     }
 
-    fn filled_inner<'a>(self, left: SparseStream<'a>, right: SparseStream<'a>) -> SparseStream<'a> {
+    pub async fn filled_inner<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let left = self.left.clone().filled(txn.clone());
+        let right = self.right.clone().filled(txn);
+        let (left, right) = try_join!(left, right)?;
+
         let coord_bounds = coord_bounds(self.shape());
         let combinator = self.combinator;
         let left_zero = self.left.dtype().zero();
         let right_zero = self.right.dtype().zero();
-        let zero = left_zero * right_zero;
 
         let offset = move |row: &SparseRow| coord_to_offset(&row.0, &coord_bounds);
-        let combined = SparseCombine::new(left, right, offset)
-            .map_ok(move |(l, r)| match (l, r) {
-                (Some((l_coord, l)), Some((r_coord, r))) => {
-                    debug_assert_eq!(l_coord, r_coord);
-                    (l_coord, combinator(l, r))
-                }
-                (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
-                (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
-                (None, None) => {
-                    panic!("expected a coordinate and value from one sparse tensor stream")
-                }
-            })
-            .try_filter(move |(_, value)| future::ready(value != &zero));
+        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| match (l, r) {
+            (Some((l_coord, l)), Some((r_coord, r))) => {
+                debug_assert_eq!(l_coord, r_coord);
+                (l_coord, combinator(l, r))
+            }
+            (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
+            (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
+            (None, None) => {
+                panic!("expected a coordinate and value from one sparse tensor stream")
+            }
+        });
 
-        Box::pin(combined)
+        Ok(Box::pin(combined))
     }
 }
 
@@ -821,10 +822,10 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        let left = self.left.clone().filled(txn.clone());
-        let right = self.right.clone().filled(txn);
-        let (left, right) = try_join!(left, right)?;
-        Ok(self.filled_inner(left, right))
+        let zero = self.dtype().zero();
+        let filled_inner = self.filled_inner(txn).await?;
+        let filled = filled_inner.try_filter(move |(_, value)| future::ready(value != &zero));
+        Ok(Box::pin(filled))
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {

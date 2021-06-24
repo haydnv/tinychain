@@ -6,7 +6,6 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use tc_btree::BTreeType;
 use tc_error::*;
@@ -537,8 +536,6 @@ impl ChainInstance for Chain {
     }
 
     async fn write_ahead(&self, txn_id: &TxnId) {
-        debug!("Chain::write_ahead {}", txn_id);
-
         match self {
             Self::Block(chain) => chain.write_ahead(txn_id).await,
             Self::Sync(chain) => chain.write_ahead(txn_id).await,

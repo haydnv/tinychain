@@ -68,7 +68,7 @@ where
     ) -> TCResult<DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, OT>>> {
         if self.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
-                "Cannot combine tensors with different shapes: {}, {}",
+                "cannot combine tensors with different shapes: {}, {}",
                 self.shape(),
                 other.shape()
             )));

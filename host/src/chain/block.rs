@@ -89,13 +89,6 @@ impl ChainInstance for BlockChain {
                 .await
                 .expect("read latest chain block");
 
-            let num_mutations = if let Some(ops) = block.mutations().get(txn_id) {
-                ops.len()
-            } else {
-                0
-            };
-            debug!("BlockChain::write_ahead with {} mutations", num_mutations);
-
             if block.size().await.expect("block size") >= super::BLOCK_SIZE {
                 self.history
                     .create_next_block(*txn_id)

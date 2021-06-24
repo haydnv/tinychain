@@ -37,17 +37,32 @@ class Tensor(Collection):
     def __add__(self, other):
         return self.add(other)
 
-    def __div__(self, other):
-        return self.div(other)
+    def __eq__(self, other):
+        return self.eq(other)
 
-    def __truediv__(self, other):
-        return self.div(other)
+    def __gt__(self, other):
+        return self.gt(other)
+
+    def __ge__(self, other):
+        return self.gte(other)
+
+    def __lt__(self, other):
+        return self.lt(other)
+
+    def __le__(self, other):
+        return self.lte(other)
 
     def __mul__(self, other):
         return self.mul(other)
 
+    def __ne__(self, other):
+        return self.ne(other)
+
     def __sub__(self, other):
         return self.sub(other)
+
+    def __truediv__(self, other):
+        return self.div(other)
 
     def abs(self):
         return self._get("abs", rtype=Tensor)

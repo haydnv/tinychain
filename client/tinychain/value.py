@@ -54,6 +54,9 @@ class Number(Value):
     def __div__(self, other):
         return self.div(other)
 
+    def __eq__(self, other):
+        return self.eq(other)
+
     def __gt__(self, other):
         return self.gt(other)
 
@@ -68,6 +71,9 @@ class Number(Value):
 
     def __mul__(self, other):
         return self.mul(other)
+
+    def __ne__(self, other):
+        return self.ne(other)
 
     def __radd__(self, other):
         return self.add(other)
@@ -90,6 +96,11 @@ class Number(Value):
         """Return the quotient of `self` and `other`."""
 
         return self._get("div", other, self.__class__)
+
+    def eq(self, other):
+        """Return true if `self` is equal to `other`."""
+
+        return self._get("eq", other, Bool)
 
     def gt(self, other):
         """Return true if `self` is greater than `other`."""
@@ -115,6 +126,11 @@ class Number(Value):
         """Return the product of `self` and `other`."""
 
         return self._get("mul", other, self.__class__)
+
+    def ne(self, other):
+        """Return true if `self` is not equal to `other`."""
+
+        return self._get("ne", other, Bool)
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""

@@ -99,7 +99,6 @@ where
         self,
         other: SparseTensor<FD, FS, D, T, R>,
         txn: T,
-        default: Number,
         condensor: fn(Number, Number) -> Number,
     ) -> TCBoxTryFuture<'a, DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>>
     where
@@ -116,18 +115,18 @@ where
 
             let shape = self.shape().clone();
             let accessor =
-                SparseCombinator::new(self.accessor, other.accessor, condensor, default.class())?;
+                SparseCombinator::new(self.accessor, other.accessor, condensor, NumberType::Bool)?;
 
             let txn_id = *txn.id();
             let file = txn
                 .context()
                 .create_file_tmp(txn_id, TensorType::Dense)
                 .await?;
+            let condensed = DenseTensor::constant(file, txn_id, shape, true.into()).await?;
 
-            let condensed = DenseTensor::constant(file, txn_id, shape, default).await?;
-            let filled = accessor.filled(txn).await?;
-
+            let filled = accessor.filled_inner(txn).await?;
             filled
+                .inspect_ok(|(coord, value)| debug!("result at {:?} is {}", coord, value))
                 .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
                 .try_buffer_unordered(num_cpus::get())
                 .try_fold((), |_, _| future::ready(Ok(())))
@@ -274,10 +273,11 @@ where
         txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
         fn eq(l: Number, r: Number) -> Number {
+            debug!("compare {} == {}", l, r);
             (l == r).into()
         }
 
-        self.condense(other, txn, true.into(), eq).await
+        self.condense(other, txn, eq).await
     }
 
     fn gt(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {
@@ -297,7 +297,7 @@ where
             (l >= r).into()
         }
 
-        self.condense(other, txn, true.into(), gte).await
+        self.condense(other, txn, gte).await
     }
 
     fn lt(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {
@@ -317,7 +317,7 @@ where
             (l <= r).into()
         }
 
-        self.condense(other, txn, true.into(), lte).await
+        self.condense(other, txn, lte).await
     }
 
     fn ne(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Compare> {

@@ -17,7 +17,7 @@ use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType, Value};
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
 
 use crate::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
 use crate::transform::{self, Rebase};
@@ -335,12 +335,10 @@ where
 
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         Box::pin(async move {
-            debug!("BlockListFile::write_value_at {:?} <- {}", coord, value);
-
             if !self.shape().contains_coord(&coord) {
                 return Err(TCError::bad_request(
-                    "Invalid coordinate",
-                    format!("[{:?}]", coord),
+                    "invalid coordinate",
+                    Tuple::from(coord),
                 ));
             }
 
@@ -356,7 +354,6 @@ where
             let mut block = self.file.write_block(txn_id, block_id).await?;
 
             let offset = offset % PER_BLOCK as u64;
-            debug!("offset is {}", offset);
 
             (*block)
                 .set_value(offset as usize, value)
