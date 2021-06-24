@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
@@ -15,8 +15,8 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType, ValueType};
-use tcgeneric::{NativeClass, TCBoxTryFuture, TCTryStream};
+use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
 use super::dense::{BlockListFile, BlockListSparse, DenseAccess, DenseTensor};
 use super::{
@@ -26,6 +26,7 @@ use super::{
 };
 
 use crate::dense::PER_BLOCK;
+
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor};
 pub use table::SparseTable;
@@ -122,6 +123,7 @@ where
                 .context()
                 .create_file_tmp(txn_id, TensorType::Dense)
                 .await?;
+
             let condensed = DenseTensor::constant(file, txn_id, shape, true.into()).await?;
 
             let filled = accessor.filled_inner(txn).await?;
@@ -886,9 +888,11 @@ where
     type View = SparseTensorView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let shape = self.shape().clone();
+        let dtype = self.dtype();
+
         Ok(SparseTensorView {
-            shape: self.shape().to_vec(),
-            dtype: self.dtype().into(),
+            schema: Schema { shape, dtype },
             filled: self.accessor.filled(txn).await?,
         })
     }
@@ -944,13 +948,11 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let schema = seq.next_element::<(Vec<u64>, ValueType)>(()).await?;
-        let (shape, dtype) = schema.ok_or_else(|| de::Error::invalid_length(0, "tensor schema"))?;
-        let shape = Shape::from(shape);
-        let dtype = dtype.try_into().map_err(de::Error::custom)?;
+        let schema = seq.next_element(()).await?;
+        let schema = schema.ok_or_else(|| de::Error::invalid_length(0, "tensor schema"))?;
 
         let txn_id = *self.txn.id();
-        let table = SparseTable::create(self.txn.context(), (shape, dtype), txn_id)
+        let table = SparseTable::create(self.txn.context(), schema, txn_id)
             .map_err(de::Error::custom)
             .await?;
 
@@ -966,15 +968,13 @@ where
 }
 
 pub struct SparseTensorView<'en> {
-    shape: Vec<u64>,
-    dtype: ValueType,
+    schema: Schema,
     filled: SparseStream<'en>,
 }
 
 impl<'en> en::IntoStream<'en> for SparseTensorView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        let schema = (self.shape.to_vec(), self.dtype.path());
         let filled = en::SeqStream::from(self.filled);
-        (schema, filled).into_stream(encoder)
+        (self.schema, filled).into_stream(encoder)
     }
 }

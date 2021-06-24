@@ -1,5 +1,3 @@
-use std::convert::TryFrom;
-
 use afarray::Array;
 use futures::{Future, TryFutureExt};
 use log::debug;
@@ -15,7 +13,7 @@ use tcgeneric::{label, PathSegment, TCBoxTryFuture};
 use crate::collection::{Collection, Tensor};
 use crate::fs;
 use crate::route::{GetHandler, PostHandler, PutHandler};
-use crate::scalar::{Bound, Number, NumberClass, NumberType, Range, Value, ValueType};
+use crate::scalar::{Bound, Number, NumberClass, Range, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -46,12 +44,11 @@ impl<'a> Handler<'a> for CreateHandler {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.matches::<(Vec<u64>, ValueType)>() {
-                    let (shape, dtype): (Vec<u64>, ValueType) = key.opt_cast_into().unwrap();
-                    let dtype = NumberType::try_from(dtype)?;
+                if key.matches::<Schema>() {
+                    let Schema { shape, dtype } = key.opt_cast_into().unwrap();
 
                     match self.class {
-                        TensorType::Dense => constant(&txn, shape.into(), dtype.zero()).await,
+                        TensorType::Dense => constant(&txn, shape, dtype.zero()).await,
                         TensorType::Sparse => Err(TCError::not_implemented("create sparse tensor")),
                     }
                 } else {
@@ -407,7 +404,10 @@ where
     }
 }
 
-async fn constant(txn: &Txn, shape: Vec<u64>, value: Number) -> TCResult<State> {
+async fn constant<S>(txn: &Txn, shape: S, value: Number) -> TCResult<State>
+where
+    Shape: From<S>,
+{
     let file = create_file(txn).await?;
 
     DenseTensor::constant(file, *txn.id(), shape, value)

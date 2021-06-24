@@ -139,7 +139,9 @@ impl History {
 
                 #[cfg(feature = "tensor")]
                 Collection::Tensor(tensor) => {
-                    let schema = cast_tensor_schema(&tensor);
+                    let shape = tensor.shape().clone();
+                    let dtype = tensor.dtype();
+                    let schema = tc_tensor::Schema { shape, dtype };
                     let classpath = tensor.class().path();
 
                     let hash = match tensor {
@@ -175,6 +177,7 @@ impl History {
                         }
                     };
 
+                    let schema: Value = schema.cast_into();
                     Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
                 }
             },
@@ -438,7 +441,12 @@ impl History {
 
             #[cfg(feature = "tensor")]
             CollectionType::Tensor(tt) => {
-                let schema = cast_into_tensor_schema(schema)?;
+                let schema: Value = schema.try_cast_into(|s| {
+                    TCError::internal(format!("invalid Tensor schema: {}", s))
+                })?;
+                let schema = schema.try_cast_into(|v| {
+                    TCError::internal(format!("invalid Tensor schema: {}", v))
+                })?;
 
                 match tt {
                     TensorType::Dense => {
@@ -766,44 +774,4 @@ impl<'en> en::IntoStream<'en> for MutationView<'en> {
             Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
         }
     }
-}
-
-#[cfg(feature = "tensor")]
-fn cast_tensor_schema(tensor: &Tensor) -> Value {
-    let shape: Tuple<Value> = tensor
-        .shape()
-        .to_vec()
-        .into_iter()
-        .map(Value::from)
-        .collect();
-
-    let dtype = tc_value::ValueType::from(tensor.dtype()).path();
-    Value::Tuple(Tuple::from(vec![shape.into(), dtype.into()]))
-}
-
-#[cfg(feature = "tensor")]
-fn cast_into_tensor_schema(scalar: Scalar) -> TCResult<tc_tensor::Schema> {
-    use std::convert::TryInto;
-    use tc_value::ValueType;
-
-    let (shape, dtype): (Vec<u64>, TCPathBuf) = match scalar {
-        Scalar::Value(Value::Tuple(schema)) => {
-            schema.try_cast_into(|v| TCError::internal(format!("invalid Tensor schema: {}", v)))
-        }
-        Scalar::Tuple(schema) => {
-            schema.try_cast_into(|v| TCError::internal(format!("invalid Tensor schema: {}", v)))
-        }
-        other => Err(TCError::internal(format!(
-            "invalid Tensor schema: {}",
-            other
-        ))),
-    }?;
-
-    let shape = tc_tensor::Shape::from(shape);
-
-    let dtype = ValueType::from_path(&dtype)
-        .ok_or_else(|| TCError::internal(format!("invalid data type for Tensor: {}", dtype)))?;
-    let dtype = dtype.try_into().map_err(TCError::internal)?;
-
-    Ok((shape, dtype))
 }

@@ -55,10 +55,10 @@ where
     }
 
     fn table_schema(schema: &Schema) -> TableSchema {
-        let ndim = schema.0.len();
+        let ndim = schema.shape.len();
         let u64_type = NumberType::uint64();
         let key = (0..ndim).map(|axis| (axis, u64_type).into()).collect();
-        let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(schema.1)).into()];
+        let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(schema.dtype)).into()];
         let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
         TableSchema::new((key, value).into(), indices)
     }
@@ -67,22 +67,22 @@ where
 impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T> {
     #[inline]
     fn dtype(&self) -> NumberType {
-        self.schema.1
+        self.schema.dtype
     }
 
     #[inline]
     fn ndim(&self) -> usize {
-        self.schema.0.len()
+        self.schema.shape.len()
     }
 
     #[inline]
     fn shape(&'_ self) -> &'_ Shape {
-        &self.schema.0
+        &self.schema.shape
     }
 
     #[inline]
     fn size(&self) -> u64 {
-        self.schema.0.size()
+        self.schema.shape.size()
     }
 }
 
@@ -192,7 +192,9 @@ where
         store: D,
         txn: T,
     ) -> TCResult<Self> {
-        let schema = (instance.shape().clone(), instance.dtype());
+        let shape = instance.shape().clone();
+        let dtype = instance.dtype();
+        let schema = Schema { shape, dtype };
         let accessor = SparseTable::create(&store, schema, *txn.id()).await?;
 
         let txn_id = *txn.id();

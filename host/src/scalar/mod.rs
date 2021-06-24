@@ -601,6 +601,24 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     }
 }
 
+impl TryCastFrom<Scalar> for Tuple<Value> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => tuple.iter().all(Value::can_cast_from),
+            Scalar::Value(Value::Tuple(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => tuple.into_iter().map(Value::opt_cast_from).collect(),
+            Scalar::Value(Value::Tuple(tuple)) => Some(tuple),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for bool {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {

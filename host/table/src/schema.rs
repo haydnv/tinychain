@@ -433,3 +433,17 @@ impl CastFrom<TableSchema> for Value {
         Self::Tuple(vec![schema.primary.cast_into(), Value::from_iter(indices)].into())
     }
 }
+
+impl fmt::Display for TableSchema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "primary: {}", self.primary)?;
+        if !self.indices.is_empty() {
+            writeln!(f, "indices:")?;
+            for (name, columns) in &self.indices {
+                writeln!(f, "{}: {}", name, Tuple::<&Id>::from_iter(columns))?;
+            }
+        }
+
+        Ok(())
+    }
+}

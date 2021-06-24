@@ -15,8 +15,8 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType, ValueType};
-use tcgeneric::{NativeClass, TCBoxTryFuture, TCPathBuf, TCTryStream};
+use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
@@ -95,7 +95,7 @@ where
 {
     /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        let (shape, dtype) = schema;
+        let Schema { shape, dtype } = schema;
         BlockListFile::constant(file, txn_id, shape, dtype.zero())
             .map_ok(Self::from)
             .await
@@ -903,23 +903,10 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        debug!("visit Tensor data to deserialize");
+        let schema = seq.next_element(()).await?;
+        let schema = schema.ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
 
-        let (shape, dtype) = seq
-            .next_element::<(Vec<u64>, TCPathBuf)>(())
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
-
-        debug!("decoded Tensor schema");
-
-        let dtype = match ValueType::from_path(&dtype) {
-            Some(ValueType::Number(nt)) => Ok(nt),
-            _ => Err(de::Error::invalid_type(dtype, "a NumberType")),
-        }?;
-
-        debug!("decoding Tensor blocks");
-
-        let cxt = (self.txn_id, self.file, (shape.into(), dtype));
+        let cxt = (self.txn_id, self.file, schema);
         let blocks = seq
             .next_element::<BlockListFile<FD, FS, D, T>>(cxt)
             .await?
@@ -943,12 +930,12 @@ where
     type View = DenseTensorView<'en>;
 
     async fn into_view(self, txn: T) -> TCResult<DenseTensorView<'en>> {
+        let shape = self.shape().clone();
         let dtype = self.dtype();
-        let shape = self.shape().to_vec();
         let blocks = self.blocks.block_stream(txn).await?;
 
         Ok(DenseTensorView {
-            schema: (shape, ValueType::from(dtype).path()),
+            schema: Schema { shape, dtype },
             blocks: BlockStreamView { dtype, blocks },
         })
     }
@@ -956,7 +943,7 @@ where
 
 /// A view of a [`DenseTensor`] as of a specific [`TxnId`], used in serialization
 pub struct DenseTensorView<'en> {
-    schema: (Vec<u64>, TCPathBuf),
+    schema: Schema,
     blocks: BlockStreamView<'en>,
 }
 

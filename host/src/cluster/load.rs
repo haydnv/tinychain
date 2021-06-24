@@ -85,6 +85,8 @@ pub async fn instantiate(
 
     let mut chains = Map::<Chain>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
+        debug!("load chain {} of type {} with schema {}", id, class, schema);
+
         let dir = dir.get_or_create_dir(txn_id, id.clone()).await?;
         let chain = chain::load(txn, class, schema, dir).await?;
         chains.insert(id, chain);

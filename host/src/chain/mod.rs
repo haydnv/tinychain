@@ -2,6 +2,7 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use destream::{de, en};
@@ -9,7 +10,7 @@ use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
-use tc_btree::BTreeType;
+use tc_btree::{BTreeType, Column};
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
@@ -92,12 +93,12 @@ impl Schema {
 
                             #[cfg(feature = "tensor")]
                             CollectionType::Tensor(tt) => {
-                                let (shape, dtype): (Vec<u64>, ValueType) =
-                                    schema.try_cast_into(|s| {
-                                        TCError::bad_request("invalid Tensor schema", s)
-                                    })?;
-
-                                let schema = (shape.into(), dtype.try_into()?);
+                                let schema: Value = schema.try_cast_into(|s| {
+                                    TCError::bad_request("invalid Tensor schema", s)
+                                })?;
+                                let schema = schema.try_cast_into(|v| {
+                                    TCError::bad_request("invalid Tensor schema", v)
+                                })?;
 
                                 match tt {
                                     TensorType::Dense => Ok(Self::Dense(schema)),
@@ -142,15 +143,26 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.end()
             }
             #[cfg(feature = "tensor")]
-            Self::Dense((shape, dtype)) | Self::Sparse((shape, dtype)) => {
+            Self::Dense(schema) | Self::Sparse(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(
-                    TensorType::Dense.path(),
-                    ((shape.into_vec(), ValueType::from(dtype).path()),),
-                )?;
+                map.encode_entry(TensorType::Dense.path(), (schema,))?;
                 map.end()
             }
             Self::Value(value) => value.into_stream(encoder),
+        }
+    }
+}
+
+impl fmt::Display for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(schema) => write!(f, "{}", Tuple::<&Column>::from_iter(schema)),
+            Self::Table(schema) => fmt::Display::fmt(schema, f),
+            Self::Value(schema) => fmt::Display::fmt(schema, f),
+            #[cfg(feature = "tensor")]
+            Self::Dense(schema) => fmt::Display::fmt(schema, f),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(schema) => fmt::Display::fmt(schema, f),
         }
     }
 }

@@ -135,7 +135,7 @@ where
             vec![size].into()
         };
 
-        Ok(Self::new(file, (shape, dtype)))
+        Ok(Self::new(file, Schema { shape, dtype }))
     }
 
     /// Construct a new `BlockListFile` from the given `Stream` of elements.
@@ -155,7 +155,7 @@ where
             i += 1;
         }
 
-        Ok(Self::new(file, (shape, dtype)))
+        Ok(Self::new(file, Schema { shape, dtype }))
     }
 
     /// Construct a new `BlockListFile` of elements evenly distributed between `start` and `stop`.
@@ -223,19 +223,19 @@ where
 
 impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS, D, T> {
     fn dtype(&self) -> NumberType {
-        self.schema.1
+        self.schema.dtype
     }
 
     fn ndim(&self) -> usize {
-        self.schema.0.len()
+        self.schema.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
-        &self.schema.0
+        &self.schema.shape
     }
 
     fn size(&self) -> u64 {
-        self.schema.0.size()
+        self.schema.shape.size()
     }
 }
 
@@ -476,17 +476,17 @@ where
     T: Transaction<D>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
-        if self.schema.0 != backup.schema.0 {
+        if self.schema.shape != backup.schema.shape {
             return Err(TCError::bad_request(
                 "cannot restore a dense Tensor from a backup with a different shape",
-                &backup.schema.0,
+                &backup.schema.shape,
             ));
         }
 
-        if self.schema.1 != backup.schema.1 {
+        if self.schema.dtype != backup.schema.dtype {
             return Err(TCError::bad_request(
                 "cannot restore a dense Tensor from a backup with a different data type",
-                &backup.schema.1,
+                &backup.schema.dtype,
             ));
         }
 
@@ -509,7 +509,7 @@ where
         cxt: (TxnId, FD, Schema),
         decoder: &mut De,
     ) -> Result<Self, De::Error> {
-        let (txn_id, file, (shape, dtype)) = cxt;
+        let (txn_id, file, schema) = cxt;
         let visitor = BlockListVisitor::new(txn_id, &file);
 
         use tc_value::{
@@ -523,7 +523,7 @@ where
             ))
         }
 
-        let size = match dtype {
+        let size = match schema.dtype {
             NT::Bool => decoder.decode_array_bool(visitor).await,
             NT::Complex(ct) => match ct {
                 CT::C32 => {
@@ -560,12 +560,12 @@ where
             NT::Number => Err(err_nonspecific(NT::Number)),
         }?;
 
-        if size == shape.size() {
-            Ok(Self::new(file, (shape, dtype)))
+        if size == schema.shape.size() {
+            Ok(Self::new(file, schema))
         } else {
             Err(de::Error::custom(format!(
                 "tensor data has the wrong number of elements ({}) for shape {}",
-                size, shape
+                size, &schema.shape
             )))
         }
     }
@@ -848,7 +848,7 @@ where
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         let txn_id = *txn.id();
         let file = self.source.file;
-        let shape = self.source.schema.0;
+        let shape = self.source.schema.shape;
         let mut bounds = self.rebase.bounds().clone();
         bounds.normalize(&shape);
         let coord_bounds = coord_bounds(&shape);

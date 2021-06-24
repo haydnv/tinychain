@@ -8,15 +8,16 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
+use safecast::*;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Number, NumberType};
+use tc_value::{Number, NumberType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
-    TCPathBuf,
+    TCPathBuf, Tuple,
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -40,7 +41,69 @@ bijection of its source. Consider copying first, or writing directly to the sour
 pub const EXT: &str = "array";
 
 /// The schema of a [`Tensor`]
-pub type Schema = (Shape, NumberType);
+#[derive(Clone)]
+pub struct Schema {
+    pub shape: Shape,
+    pub dtype: NumberType,
+}
+
+impl TryCastFrom<Value> for Schema {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => TryCastInto::<(Vec<u64>, TCPathBuf)>::can_cast_into(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => {
+                let (shape, dtype): (Vec<u64>, TCPathBuf) = tuple.opt_cast_into()?;
+                let shape = Shape::from(shape);
+                let dtype = ValueType::from_path(&dtype)?;
+                match dtype {
+                    ValueType::Number(dtype) => Some(Schema { shape, dtype }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        let Schema { shape, dtype } = schema;
+        let shape = shape.into_vec();
+        let shape = shape.into_iter().map(Value::from).collect::<Tuple<Value>>();
+        let dtype = ValueType::from(dtype).path();
+        (shape, dtype).cast_into()
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let schema = Value::from_stream(cxt, decoder).await?;
+        Self::try_cast_from(schema, |v| de::Error::invalid_value(v, "a Tensor schema"))
+    }
+}
+
+#[async_trait]
+impl<'en> en::IntoStream<'en> for Schema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let Schema { shape, dtype } = self;
+        (shape.to_vec(), ValueType::from(dtype).path()).into_stream(encoder)
+    }
+}
+
+impl fmt::Display for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "shape {}, dtype {}", self.shape, self.dtype)
+    }
+}
 
 /// The address of an individual element in a [`Tensor`].
 pub type Coord = Vec<u64>;
@@ -623,8 +686,8 @@ where
         }
 
         match self {
-            Self::Dense(dense) => dense.cast_into(dtype).map(Self::from),
-            Self::Sparse(sparse) => sparse.cast_into(dtype).map(Self::from),
+            Self::Dense(dense) => TensorTransform::cast_into(dense, dtype).map(Self::from),
+            Self::Sparse(sparse) => TensorTransform::cast_into(sparse, dtype).map(Self::from),
         }
     }
 

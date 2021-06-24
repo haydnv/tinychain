@@ -629,6 +629,12 @@ impl From<u64> for Value {
     }
 }
 
+impl<T1: CastInto<Value>, T2: CastInto<Value>> CastFrom<(T1, T2)> for Value {
+    fn cast_from(value: (T1, T2)) -> Self {
+        Value::Tuple(vec![value.0.cast_into(), value.1.cast_into()].into())
+    }
+}
+
 impl TryFrom<Value> for Number {
     type Error = TCError;
 
