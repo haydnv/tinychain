@@ -331,6 +331,12 @@ impl Deref for TCPathBuf {
     }
 }
 
+impl PartialEq<[PathSegment]> for TCPathBuf {
+    fn eq(&self, other: &[PathSegment]) -> bool {
+        &self.segments == other
+    }
+}
+
 impl From<PathSegment> for TCPathBuf {
     fn from(segment: PathSegment) -> TCPathBuf {
         TCPathBuf {

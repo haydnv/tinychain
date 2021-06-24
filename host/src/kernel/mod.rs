@@ -329,12 +329,12 @@ fn execute<
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
-        if let Some(owner) = txn.owner().cloned() {
-            let self_link = txn.link(cluster.path().to_vec().into());
-            if owner != self_link {
-                txn.put(owner, Value::None, self_link.into()).await?;
+        if let Some(owner) = txn.owner() {
+            if owner.path() == cluster.path() {
+                debug!("{} owns this transaction, no need to notify", cluster);
             } else {
-                debug!("{} owns this transaction, no need to notify", self_link);
+                let self_link = txn.link(cluster.path().to_vec().into());
+                txn.put(owner.clone(), Value::None, self_link.into()).await?;
             }
 
             handler(txn.clone(), cluster).await
