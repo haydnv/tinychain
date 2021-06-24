@@ -5,13 +5,16 @@ Modules
 -------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
 
+   btree
    chain
    cluster
-   collection
    decorators
+   schema
    state
+   table
+   tensor
    util
    value
 

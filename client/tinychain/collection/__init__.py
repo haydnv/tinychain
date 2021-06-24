@@ -1,1 +1,1 @@
-"""Data structures responsible for storing a collection of :class:`Value`s"""
+"""Data structures responsible for storing a collection of :class:`Value` s"""

@@ -1,4 +1,4 @@
-"""A `BTree` with a schema of named, :class:`Value`-typed :class:`Column`s."""
+"""A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
 from tinychain.state import Map
 from tinychain.util import uri
@@ -9,7 +9,7 @@ from .bound import Range
 
 
 class BTree(Collection):
-    """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column`s."""
+    """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
     __uri__ = uri(Collection) + "/btree"
 

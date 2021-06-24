@@ -48,6 +48,9 @@ class Number(Value):
 
     __uri__ = uri(Value) + "/number"
 
+    def __abs__(self):
+        return self.abs()
+
     def __add__(self, other):
         return self.add(other)
 
@@ -86,6 +89,11 @@ class Number(Value):
 
     def __truediv__(self, other):
         return self.div(other)
+
+    def abs(self):
+        """Return this number's absolute value"""
+
+        return self._get("abs", rtype=self.__class__)
 
     def add(self, other):
         """Return the sum of `self` and `other`."""
@@ -148,6 +156,16 @@ class Complex(Number):
     """A complex number."""
 
     __uri__ = uri(Number) + "/complex"
+
+    def abs(self):
+        """Return the linear norm of this complex number."""
+
+        return Number.abs(self)
+
+    def norm(self):
+        """Return the linear norm of this complex number."""
+
+        return self.abs()
 
 
 class C32(Complex):

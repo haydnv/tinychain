@@ -238,6 +238,8 @@ def to_json(obj):
 
 
 def deanonymize(state, context):
+    """Assign an auto-generated name to the given state within the given context."""
+
     if hasattr(state, "__ns__"):
         state.__ns__(context)
     elif isinstance(state, tuple) or isinstance(state, list):
@@ -246,4 +248,3 @@ def deanonymize(state, context):
     elif isinstance(state, dict):
         for key in state:
             deanonymize(state[key], context)
-

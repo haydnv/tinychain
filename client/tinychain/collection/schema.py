@@ -18,7 +18,7 @@ class Column(object):
 
 
 class BTree(object):
-    """A `BTree` schema which comprises a tuple of :class:`Column`s."""
+    """A `BTree` schema which comprises a tuple of :class:`Column` s."""
 
     def __init__(self, *columns):
         self.columns = columns
@@ -28,7 +28,7 @@ class BTree(object):
 
 
 class Table(object):
-    """A `Table` schema which comprises a primary key and value :class:`Column`s."""
+    """A `Table` schema which comprises a primary key and value :class:`Column` s."""
 
     def __init__(self, key, values=[], indices={}):
         self.key = key

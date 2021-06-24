@@ -1,4 +1,4 @@
-"""Tinychain `State`s, such as `Map`, `Tuple`, and `Op`."""
+"""Tinychain `State` s, such as `Map`, `Tuple`, and `Op`."""
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -79,7 +79,7 @@ class State(object):
 
 
 class Map(State):
-    """A key-value map whose keys are `Id`s and whose values are `State`s."""
+    """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
     __uri__ = uri(State) + "/map"
 
@@ -91,7 +91,7 @@ class Map(State):
 
 
 class Tuple(State):
-    """A tuple of `State`s."""
+    """A tuple of `State` s."""
 
     __uri__ = uri(State) + "/tuple"
 
