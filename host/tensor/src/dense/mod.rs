@@ -437,7 +437,6 @@ where
 
         values
             .map(|(coord, r)| r.map(|value| (coord, value)))
-            .inspect_ok(|(coord, value)| debug!("write {} at {:?}", value, coord))
             .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -554,7 +553,7 @@ where
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
-            Tensor::Sparse(sparse) => self.mul(sparse.into_dense()).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.into_sparse().mul(sparse).map(Tensor::from),
         }
     }
 

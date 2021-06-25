@@ -128,7 +128,6 @@ where
 
             let filled = accessor.filled_inner(txn).await?;
             filled
-                .inspect_ok(|(coord, value)| debug!("result at {:?} is {}", coord, value))
                 .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
                 .try_buffer_unordered(num_cpus::get())
                 .try_fold((), |_, _| future::ready(Ok(())))
@@ -275,7 +274,6 @@ where
         txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
         fn eq(l: Number, r: Number) -> Number {
-            debug!("compare {} == {}", l, r);
             (l == r).into()
         }
 
@@ -532,7 +530,6 @@ where
         bounds.normalize(self.shape());
         debug!("SparseTensor::write_value {} to bounds, {}", value, bounds);
         stream::iter(bounds.affected())
-            .inspect(|coord| debug!("SparseTensor::write_value {:?} <- {}", coord, value))
             .map(|coord| self.accessor.write_value(txn_id, coord, value))
             .buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -605,7 +602,7 @@ where
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Sparse(sparse) => self.mul(sparse).map(Tensor::from),
-            Tensor::Dense(dense) => self.into_dense().mul(dense).map(Tensor::from),
+            Tensor::Dense(dense) => self.mul(dense.into_sparse()).map(Tensor::from),
         }
     }
 

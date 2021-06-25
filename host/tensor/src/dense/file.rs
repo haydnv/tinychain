@@ -374,12 +374,6 @@ where
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         Box::pin(async move {
-            debug!(
-                "read value at {:?} from BlockListFile with shape {}",
-                coord,
-                self.shape()
-            );
-
             if !self.shape().contains_coord(&coord) {
                 return Err(TCError::bad_request(
                     "Coordinate is out of bounds",
@@ -393,17 +387,8 @@ where
                 .map(|(d, x)| d * x)
                 .sum();
 
-            debug!("coord {:?} is offset {}", coord, offset);
-
             let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let block = self.file.read_block(*txn.id(), block_id).await?;
-
-            debug!(
-                "read offset {} from block of length {}",
-                offset % PER_BLOCK as u64,
-                block.len()
-            );
-
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
             Ok((coord, value))
@@ -871,12 +856,9 @@ where
                     let mut start = 0.0f64;
                     let mut values = vec![];
                     for block_id in block_ids {
-                        debug!("block {} starts at {}", block_id, start);
-
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        debug!("reading {} block_offsets", block_offsets.elements());
                         let block = file_clone.read_block(txn_id, block_id.into()).await?;
                         values.extend(block.get(&block_offsets.into()).to_vec());
                         start = new_start;

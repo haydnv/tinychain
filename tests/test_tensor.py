@@ -286,7 +286,6 @@ class SparseTests(unittest.TestCase):
         self.assertEqual(actual, expect_sparse(tc.I32, [2, 3, 5], expected))
 
     def testProduct(self):
-        self.maxDiff = None
         shape = [2, 4, 3, 5]
         axis = 2
 
@@ -299,6 +298,32 @@ class SparseTests(unittest.TestCase):
         expected[0, 1:3] = 2
         expected = expected.prod(axis)
         self.assertEqual(actual, expect_sparse(tc.I32, [2, 4, 5], expected))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.stop()
+
+
+class TensorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.host = start_host("test_tensor")
+
+    def testProduct(self):
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
+        cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
+        cxt.result = tc.After(cxt.sparse.write([0, slice(1, 3)], 2), cxt.dense * cxt.sparse)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.zeros([2, 3])
+        expected[0, 1:3] = 2
+        expected = expected * np.arange(0, 3)
+        self.assertEqual(actual, expect_sparse(tc.I64, [2, 3], expected))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.stop()
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
