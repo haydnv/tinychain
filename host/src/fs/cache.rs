@@ -312,6 +312,12 @@ impl Cache {
         Ok(())
     }
 
+    /// Lock the cache for writing before deleting the given filesystem directory.
+    pub async fn delete_dir(&self, path: PathBuf) -> TCResult<()> {
+        let _lock = self.lfu.write().await;
+        tokio::fs::remove_dir_all(&path).map_err(|e| io_err(e, &path)).await
+    }
+
     async fn _sync(cache: &mut LFU, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
@@ -408,19 +414,20 @@ fn spawn_cleanup_thread(cache: RwLock<LFU>, mut rx: mpsc::Receiver<Evict>) {
 async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<u64> {
     let tmp = path.with_extension(TMP);
 
-    let mut tmp_file = if tmp.exists() {
-        write_file(&tmp).await?
-    } else {
-        create_parent(&tmp).await?;
-        create_file(&tmp).await?
+    let size = {
+        let mut tmp_file = if tmp.exists() {
+            write_file(&tmp).await?
+        } else {
+            create_parent(&tmp).await?;
+            create_file(&tmp).await?
+        };
+
+        let size = block.persist(&mut tmp_file).await?;
+        tmp_file.sync_all().map_err(|e| io_err(e, &tmp)).await?;
+        size
     };
 
-    let size = block.persist(&mut tmp_file).await?;
-
-    tokio::fs::rename(&tmp, path)
-        .map_err(|e| io_err(e, format!("rename {:?} to {:?}", tmp, path)))
-        .await?;
-
+    tokio::fs::rename(&tmp, path).map_err(|e| io_err(e, &tmp)).await?;
     Ok(size)
 }
 
