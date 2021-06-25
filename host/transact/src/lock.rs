@@ -255,6 +255,7 @@ impl<T: Mutate> TxnLock<T> {
             if !lock.value_at.contains_key(txn_id) {
                 let value_at_txn_id =
                     UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
+
                 lock.value_at.insert(*txn_id, value_at_txn_id);
             }
 
@@ -378,8 +379,15 @@ impl<T: Mutate> Transact for TxnLock<T> {
 
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("TxnLock {} finalize {}", &self.name, txn_id);
-        self.write(*txn_id).await.unwrap(); // make sure there are no active locks
+
         let lock = &mut self.inner.lock().unwrap();
+
+        if let Some(readers) = lock.state.readers.get(txn_id) {
+            if readers > &0 {
+                panic!("tried to finalize a transaction that's still active!")
+            }
+        }
+
         lock.value_at.remove(txn_id);
     }
 }
