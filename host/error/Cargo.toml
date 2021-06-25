@@ -5,7 +5,7 @@ authors = ["haydnv"]
 edition = "2018"
 description = "Tinychain's generic error struct"
 license = "Apache-2.0"
-repository = "http://github.com/haydnv/tinychain.git"
+repository = "https://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain", "error", "service", "mesh"]
 categories = ["data-structures", "rust-patterns"]

@@ -6,7 +6,7 @@ edition = "2018"
 description = "Traits and locking utilities for a Tinychain transaction. Unstable."
 license = "Apache-2.0"
 readme = "README.md"
-repository = "http://github.com/haydnv/tinychain.git"
+repository = "https://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain", "transaction", "executor"]
 categories = ["concurrency", "data-structures"]
