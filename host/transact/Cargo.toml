@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["haydnv"]
 edition = "2018"
 description = "Traits and locking utilities for a Tinychain transaction. Unstable."
@@ -27,9 +27,9 @@ rand = "0.8"
 serde = { version = "1.0", features = []}
 sha2 = "0.9"
 tbon = { version = "~0.2.2", features = ["tokio-io"] }
-tcgeneric = { path = "../generic" }
+tcgeneric = "~0.1.8"
 tc-error = "~0.2.2"
-tc-value = { path = "../value" }
+tc-value = "~0.1.10"
 tokio = { version = "1.6", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
