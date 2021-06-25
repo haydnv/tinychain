@@ -71,7 +71,7 @@ impl Kernel {
             );
 
             cluster.get(&txn, suffix, key).await
-        } else if path[..2] == crate::collection::PREFIX[..] {
+        } else if path.len() > 1 && &path[..2] == &crate::collection::PREFIX[..] {
             let mut i = path.len() - 1;
             while i > 0 {
                 if let Some(class) = CollectionType::from_path(&path[..i]) {
