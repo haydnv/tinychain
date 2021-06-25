@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
