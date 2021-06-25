@@ -15,9 +15,9 @@ class Wholesaler(tc.Cluster):
         self.in_stock = tc.chain.Sync(IN_STOCK)
 
     @tc.put_method
-    def update(self, _txn, _key: tc.Nil, new_inventory: tc.UInt):
+    def update(self, _txn, value: tc.UInt):
         # TODO: add an auth scope, remove key param
-        return self.in_stock.set(new_inventory)
+        return self.in_stock.set(value)
 
     @tc.post_method
     def buy(self, txn, quantity: tc.UInt):

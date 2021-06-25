@@ -8,6 +8,9 @@ from tinychain.value import Nil, Value
 from . import resolve_class
 
 
+EMPTY = inspect.Parameter.empty
+
+
 class Method(object):
     __uri__ = uri(op.Op)
 
@@ -42,6 +45,7 @@ class Get(Method):
 
         cxt = Context()
         if len(parameters) > 1:
+            _check_context_param(parameters[1])
             args.append(cxt)
 
         key_name = "key"
@@ -63,18 +67,31 @@ class Put(Method):
     def __form__(self):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
-
-        if len(parameters) not in [1, 2, 4]:
-            raise ValueError(f"{self.dtype()} has one, two, or four arguments: (self, cxt, key, value)")
+        if len(parameters) > 4:
+            raise ValueError("a PUT method has a maximum of four parameters")
 
         args = [self.header]
 
         cxt = Context()
         if len(parameters) > 1:
+            _check_context_param(parameters[1])
             args.append(cxt)
 
         key_name = "key"
         value_name = "value"
+
+        if len(parameters) == 3:
+            name, param = parameters[2]
+            if name == key_name:
+                dtype = resolve_class(self.form, param.annotation, Value)
+                args.append(dtype(URI(key_name)))
+            elif name == value_name:
+                dtype = resolve_class(self.form, param.annotation, State)
+                args.append(dtype(URI(value_name)))
+            else:
+                raise ValueError(
+                    f"a PUT method with three parameters must specify either 'key' or 'value', not '{name}'")
+
         if len(parameters) == 4:
             key_name, param = parameters[2]
             dtype = resolve_class(self.form, param.annotation, Value)
@@ -107,6 +124,7 @@ class Post(Method):
 
         cxt = Context()
         if len(parameters) > 1:
+            _check_context_param(parameters[1])
             args.append(cxt)
 
         kwargs = {}
@@ -126,3 +144,12 @@ class Delete(Method):
 
     def __form__(self):
         return Get.__form__(self)
+
+
+def _check_context_param(parameter):
+    _name, param = parameter
+    if param.annotation == EMPTY or param.annotation == Context:
+        pass
+    else:
+        raise ValueError(
+            f"a method definition takes a transaction context as its second parameter, not {param.annotation}")

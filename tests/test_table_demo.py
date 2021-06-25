@@ -39,12 +39,11 @@ class Web(tc.Cluster):
             self.cache.insert([name, 0]))
 
     @tc.put_method
-    def add_view(self, txn, name: tc.String, _value: tc.Nil):
-        # TODO: remove value param
-        txn.views = self.views(name)
+    def add_view(self, txn, key: tc.String):
+        txn.views = self.views(key)
         return tc.After(
-            self.cache[name, txn.views].delete(),
-            self.cache.insert([name, txn.views + 1]))
+            self.cache[key, txn.views].delete(),
+            self.cache.insert([key, txn.views + 1]))
 
 
 class DemoTests(unittest.TestCase):

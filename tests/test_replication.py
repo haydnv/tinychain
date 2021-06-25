@@ -19,8 +19,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
                 return self.rev
 
             @tc.put_method
-            def bump(self, txn, _key: tc.Nil, _value: tc.Nil):
-                # TODO: remove key and value params
+            def bump(self, txn):
                 txn.rev = self.version()
                 return self.rev.set(txn.rev + 1)
 
