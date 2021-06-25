@@ -105,7 +105,6 @@ where
         let size = blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
-            .inspect_ok(|(id, block)| debug!("block {} has {} elements", id, block.len()))
             .map_ok(|(id, block)| {
                 let len = block.len() as u64;
                 file.create_block(txn_id, id, block).map_ok(move |_| len)
@@ -262,7 +261,9 @@ where
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| file.clone().read_block_owned(*txn.id(), block_id))
+                    .then(move |block_id| {
+                        file.clone().read_block_owned(*txn.id(), block_id)
+                    })
                     .map_ok(|block| (*block).clone()),
             );
 

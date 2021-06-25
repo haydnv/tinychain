@@ -756,15 +756,21 @@ where
         let right_zero = self.right.dtype().zero();
 
         let offset = move |row: &SparseRow| coord_to_offset(&row.0, &coord_bounds);
-        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| match (l, r) {
-            (Some((l_coord, l)), Some((r_coord, r))) => {
-                debug_assert_eq!(l_coord, r_coord);
-                (l_coord, combinator(l, r))
-            }
-            (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
-            (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
-            (None, None) => {
-                panic!("expected a coordinate and value from one sparse tensor stream")
+        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| {
+            match (l, r) {
+                (Some((l_coord, l)), Some((r_coord, r))) => {
+                    debug_assert_eq!(l_coord, r_coord);
+                    (l_coord, combinator(l, r))
+                }
+                (Some((l_coord, l)), None) => {
+                    (l_coord, combinator(l, right_zero))
+                },
+                (None, Some((r_coord, r))) => {
+                    (r_coord, combinator(left_zero, r))
+                },
+                (None, None) => {
+                    panic!("expected a coordinate and value from one sparse tensor stream")
+                }
             }
         });
 

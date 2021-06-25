@@ -334,7 +334,8 @@ fn execute<
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else {
                 let self_link = txn.link(cluster.path().to_vec().into());
-                txn.put(owner.clone(), Value::None, self_link.into()).await?;
+                txn.put(owner.clone(), Value::None, self_link.into())
+                    .await?;
             }
 
             handler(txn.clone(), cluster).await

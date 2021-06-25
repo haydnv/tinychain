@@ -442,7 +442,9 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(&l, &r));
+                .map_ok(move |(l, r)| {
+                    combinator(&l, &r)
+                });
 
             let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
@@ -585,7 +587,8 @@ where
 
     // TODO: replace with block_stream
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
+        let bounds = Bounds::all(self.shape());
+        let values = stream::iter(bounds.affected()).then(move |coord| {
             self.clone()
                 .read_value_at(txn.clone(), coord)
                 .map_ok(|(_, value)| value)

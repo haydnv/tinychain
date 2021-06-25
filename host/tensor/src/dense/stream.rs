@@ -48,11 +48,12 @@ impl<S: Stream<Item = TCResult<(Coord, Number)>>> Stream for SparseValueStream<S
             };
 
             let mut next = None;
-            mem::swap(&mut next, this.next);
+            mem::swap(this.next, &mut next);
             if let Some((filled_coord, value)) = next {
                 break if next_coord == filled_coord {
                     Some(Ok(value))
                 } else {
+                    *(this.next) = Some((filled_coord, value));
                     Some(Ok(*this.zero))
                 };
             } else {

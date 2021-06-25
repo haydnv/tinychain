@@ -307,9 +307,36 @@ class SparseTests(unittest.TestCase):
 class TensorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_tensor")
+        cls.host = start_host("test_tensor", cache_size="1G")
 
-    def testProduct(self):
+    def testAdd(self):
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
+        cxt.sparse = tc.tensor.Sparse.zeros([5, 2], tc.I32)
+        cxt.result = tc.After(cxt.sparse.write([1], 3), cxt.dense + cxt.sparse)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        l = np.arange(0, 30).reshape([3, 5, 2])
+        r = np.zeros([5, 2], np.int32)
+        r[1] = 3
+        expected = l + r
+        self.assertEqual(actual, expect_dense(tc.I64, [3, 5, 2], expected.flatten()))
+
+    def testDiv(self):
+        self.maxDiff = None
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
+        cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
+        cxt.result = tc.After(cxt.sparse.write([1], 2), cxt.sparse / cxt.dense)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        l = np.arange(1, 181).reshape([30, 3, 2])
+        r = np.zeros([3, 2], np.float)
+        r[1] = 2.
+        expected = r / l
+        self.assertEqual(actual, expect_sparse(tc.F64, [30, 3, 2], expected))
+
+    def testMul(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
@@ -320,6 +347,15 @@ class TensorTests(unittest.TestCase):
         expected[0, 1:3] = 2
         expected = expected * np.arange(0, 3)
         self.assertEqual(actual, expect_sparse(tc.I64, [2, 3], expected))
+
+    def testSubAndSum(self):
+        cxt = tc.Context()
+        cxt.sparse = tc.tensor.Sparse.zeros([30, 250, 2])
+        cxt.dense = tc.tensor.Dense.ones([30, 1, 2], tc.I32)
+        cxt.result = (cxt.sparse - cxt.dense).sum()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, -15000)
 
     @classmethod
     def tearDownClass(cls):

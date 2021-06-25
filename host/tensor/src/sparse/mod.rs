@@ -595,7 +595,7 @@ where
     fn div(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Sparse(sparse) => self.div(sparse).map(Tensor::from),
-            Tensor::Dense(dense) => self.into_dense().div(dense).map(Tensor::from),
+            Tensor::Dense(dense) => self.div(dense.into_sparse()).map(Tensor::from),
         }
     }
 
