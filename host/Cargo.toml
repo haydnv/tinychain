@@ -46,7 +46,7 @@ tc-btree = "~0.1.4"
 tc-error = "~0.2.2"
 tc-table = "~0.1.4"
 tc-tensor = { version = "~0.1.1", optional = true }
-tc-transact = "~0.6.1"
+tc-transact = "~0.6.2"
 tc-value = "~0.1.10"
 tcgeneric = "~0.1.8"
 tokio = { version = "1.7", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
