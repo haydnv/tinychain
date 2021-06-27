@@ -415,7 +415,10 @@ where
 
         let version = file_version(&self.path, txn_id);
         if version.exists() {
-            cache.delete_dir(version).await.expect("delete file version");
+            cache
+                .delete_dir(version)
+                .await
+                .expect("delete file version");
         }
 
         self.contents.finalize(txn_id).await;

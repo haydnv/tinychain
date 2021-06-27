@@ -273,7 +273,7 @@ impl Cache {
         } else if !path.exists() {
             return Ok(None);
         } else {
-            log::info!("cache miss: {:?}", path);
+            info!("cache miss: {:?}", path);
         }
 
         Self::_read_and_insert(cache, path.clone())
@@ -315,7 +315,9 @@ impl Cache {
     /// Lock the cache for writing before deleting the given filesystem directory.
     pub async fn delete_dir(&self, path: PathBuf) -> TCResult<()> {
         let _lock = self.lfu.write().await;
-        tokio::fs::remove_dir_all(&path).map_err(|e| io_err(e, &path)).await
+        tokio::fs::remove_dir_all(&path)
+            .map_err(|e| io_err(e, &path))
+            .await
     }
 
     async fn _sync(cache: &mut LFU, path: &PathBuf) -> TCResult<bool> {
@@ -326,7 +328,7 @@ impl Cache {
             debug!("sync'd block at {:?}, wrote {} bytes", path, size);
             Ok(true)
         } else {
-            log::info!("cache sync miss: {:?}", path);
+            info!("cache sync miss: {:?}", path);
             Ok(path.exists())
         }
     }
@@ -427,7 +429,10 @@ async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<u64> {
         size
     };
 
-    tokio::fs::rename(&tmp, path).map_err(|e| io_err(e, &tmp)).await?;
+    tokio::fs::rename(&tmp, path)
+        .map_err(|e| io_err(e, &tmp))
+        .await?;
+
     Ok(size)
 }
 
@@ -439,7 +444,6 @@ fn create_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ 
 #[inline]
 fn read_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ {
     fs::File::open(path).map_err(move |e| {
-        debug!("io error: {}", e);
         io_err(e, path)
     })
 }
@@ -450,7 +454,6 @@ async fn write_file(path: &PathBuf) -> TCResult<fs::File> {
         .write(true)
         .open(path)
         .map_err(move |e| {
-            debug!("io error: {}", e);
             io_err(e, path)
         })
         .await
