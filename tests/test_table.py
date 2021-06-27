@@ -218,7 +218,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[2].stop()
         hosts[1].delete("/test/table/table", ["one"])
-        hosts[2].start()
+        hosts[2].start(wait_time=2)
 
         for host in hosts:
             actual = host.get("/test/table/table")
