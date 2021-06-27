@@ -8,7 +8,7 @@ TC_PATH = "host/target/debug/tinychain"
 PORT = 8702
 
 
-def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"):
+def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1):
     port = PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -38,7 +38,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
         force_create=True)
 
     print(f"start host on port {port}")
-    host.start()
+    host.start(wait_time=wait_time)
     return host
 
 

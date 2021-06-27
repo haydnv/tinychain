@@ -52,7 +52,7 @@ class DemoTests(unittest.TestCase):
         for i in range(3):
             port = PORT + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
-            host = start_host("table_demo", [Database, Web], True, host_uri)
+            host = start_host("table_demo", [Database, Web], True, host_uri, wait_time=2)
             self.hosts.append(host)
 
     def testCache(self):
