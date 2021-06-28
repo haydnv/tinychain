@@ -375,7 +375,8 @@ where
 
                 future::ready(slice)
             })
-            .and_then(move |(coord, slice)| slice.any(txn.clone()).map_ok(|any| (coord, any)))
+            .map_ok(move |(coord, slice)| slice.any(txn.clone()).map_ok(|any| (coord, any)))
+            .try_buffered(num_cpus::get())
             .try_filter_map(|(coord, any)| {
                 let coord = if any { Some(coord) } else { None };
                 future::ready(Ok(coord))
@@ -756,21 +757,15 @@ where
         let right_zero = self.right.dtype().zero();
 
         let offset = move |row: &SparseRow| coord_to_offset(&row.0, &coord_bounds);
-        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| {
-            match (l, r) {
-                (Some((l_coord, l)), Some((r_coord, r))) => {
-                    debug_assert_eq!(l_coord, r_coord);
-                    (l_coord, combinator(l, r))
-                }
-                (Some((l_coord, l)), None) => {
-                    (l_coord, combinator(l, right_zero))
-                },
-                (None, Some((r_coord, r))) => {
-                    (r_coord, combinator(left_zero, r))
-                },
-                (None, None) => {
-                    panic!("expected a coordinate and value from one sparse tensor stream")
-                }
+        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| match (l, r) {
+            (Some((l_coord, l)), Some((r_coord, r))) => {
+                debug_assert_eq!(l_coord, r_coord);
+                (l_coord, combinator(l, r))
+            }
+            (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
+            (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
+            (None, None) => {
+                panic!("expected a coordinate and value from one sparse tensor stream")
             }
         });
 
@@ -1153,7 +1148,7 @@ where
         let source = self.source;
 
         let filled = filled
-            .and_then(move |coord| {
+            .map_ok(move |coord| {
                 let source_bounds = rebase.invert_coord(&coord);
                 let source = source.clone();
                 let txn = txn.clone();
@@ -1163,6 +1158,7 @@ where
                     Ok((coord, value))
                 })
             })
+            .try_buffered(num_cpus::get())
             .try_filter(move |(_coord, value)| future::ready(value != &zero));
 
         Ok(Box::pin(filled))
@@ -1175,7 +1171,8 @@ where
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
-        let filled = self.filled(txn).await?;
+        let axes = (0..self.ndim()).collect();
+        let filled = self.filled_at(txn, axes).await?;
 
         filled
             .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))

@@ -189,7 +189,7 @@ impl Rebase for Expand {
     }
 
     fn map_coord(&self, mut coord: Coord) -> Self::Map {
-        assert_eq!(coord.len(), self.source_shape.len());
+        debug_assert_eq!(coord.len(), self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
     }

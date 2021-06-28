@@ -9,10 +9,8 @@ use tc_value::Number;
 
 use super::Coord;
 
-pub use reader::*;
 pub use sorted::*;
 
-mod reader;
 mod sorted;
 
 pub type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
