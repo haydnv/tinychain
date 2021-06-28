@@ -732,7 +732,7 @@ where
     ) -> TCResult<Self> {
         if left.shape() != right.shape() {
             return Err(TCError::unsupported(
-                "Tried to combine SparseTensors with different shapes",
+                "tried to combine SparseTensors with different shapes",
             ));
         }
 
@@ -1027,7 +1027,7 @@ where
         let expand_axis = if let Some(permutation) = &permutation {
             if permutation.len() != self.ndim() {
                 return Err(TCError::unsupported(format!(
-                    "Invalid permutation for tensor of shape {}: {:?}",
+                    "invalid permutation for tensor of shape {}: {:?}",
                     self.shape(),
                     permutation
                 )));

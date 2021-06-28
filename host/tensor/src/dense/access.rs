@@ -361,7 +361,7 @@ where
     ) -> TCResult<Self> {
         if left.shape() != right.shape() {
             return Err(TCError::bad_request(
-                format!("Cannot combine shape {} with shape", left.shape()),
+                format!("cannot combine shape {} with shape", left.shape()),
                 right.shape(),
             ));
         }

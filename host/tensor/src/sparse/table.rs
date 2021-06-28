@@ -148,7 +148,7 @@ where
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(TCError::bad_request(
-                    "Coordinate out of bounds",
+                    "coordinate out of bounds",
                     Bounds::from(coord),
                 ));
             }
@@ -382,7 +382,7 @@ where
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(TCError::bad_request(
-                    "Coordinate out of bounds",
+                    "coordinate out of bounds",
                     Bounds::from(coord),
                 ));
             }
@@ -547,6 +547,6 @@ fn expect_u64(value: Value) -> TCResult<u64> {
     if let Value::Number(Number::UInt(UInt::U64(unwrapped))) = value {
         Ok(unwrapped)
     } else {
-        Err(TCError::bad_request("Expected u64 but found", value))
+        Err(TCError::bad_request("expected u64 but found", value))
     }
 }

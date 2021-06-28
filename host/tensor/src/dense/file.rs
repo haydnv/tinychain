@@ -284,7 +284,7 @@ where
         debug!("BlockListFile::write_value {} at {}", value, bounds);
 
         if !self.shape().contains_bounds(&bounds) {
-            return Err(TCError::bad_request("Bounds out of bounds", bounds));
+            return Err(TCError::bad_request("bounds out of bounds", bounds));
         } else if bounds.len() == self.ndim() {
             if let Some(coord) = bounds.as_coord() {
                 return self.write_value_at(txn_id, coord, value).await;
@@ -377,7 +377,7 @@ where
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(TCError::bad_request(
-                    "Coordinate is out of bounds",
+                    "coordinate is out of bounds",
                     Value::from_iter(coord),
                 ));
             }

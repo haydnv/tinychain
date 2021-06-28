@@ -32,7 +32,7 @@ impl Broadcast {
         let ndim = shape.len();
         if source_shape.len() > shape.len() {
             return Err(TCError::bad_request(
-                &format!("Cannot broadcast into {}", shape),
+                &format!("cannot broadcast into {}", shape),
                 source_shape,
             ));
         }
@@ -49,7 +49,7 @@ impl Broadcast {
                 inverted_axes.push(axis - offset);
             } else {
                 return Err(TCError::bad_request(
-                    &format!("Cannot broadcast into {}", shape),
+                    &format!("cannot broadcast into {}", shape),
                     source_shape,
                 ));
             }
@@ -131,7 +131,7 @@ pub struct Expand {
 impl Expand {
     pub fn new(source_shape: Shape, expand: usize) -> TCResult<Expand> {
         if expand > source_shape.len() {
-            return Err(TCError::bad_request("Axis out of bounds", expand));
+            return Err(TCError::bad_request("axis out of bounds", expand));
         }
 
         let mut inverted_axes = Vec::with_capacity(source_shape.len() + 1);
@@ -206,7 +206,7 @@ impl Reduce {
     pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
         if axis >= source_shape.len() {
             return Err(TCError::bad_request(
-                &format!("Tensor with shape {} has no such axis", source_shape),
+                &format!("tensor with shape {} has no such axis", source_shape),
                 axis,
             ));
         }
@@ -443,7 +443,7 @@ impl Transpose {
         if permutation.len() != ndim {
             let permutation: Vec<String> = permutation.iter().map(|x| x.to_string()).collect();
             return Err(TCError::bad_request(
-                "Invalid permutation for transpose",
+                "invalid permutation for transpose",
                 format!(
                     "Tensor with shape {} cannot transpose axes ({})",
                     source_shape,
