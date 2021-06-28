@@ -137,16 +137,12 @@ impl Kernel {
                 cluster
             );
 
+            let txn = maybe_claim_leadership(cluster, txn).await?;
+
             execute(txn, cluster, |txn, cluster| async move {
                 cluster
                     .put(&txn, suffix, key.clone(), value.clone())
                     .await?;
-
-                let txn = if !txn.has_leader(cluster.path()) {
-                    cluster.lead(txn).await?
-                } else {
-                    txn
-                };
 
                 let self_link = txn.link(cluster.path().to_vec().into());
                 if suffix.is_empty() {
@@ -217,6 +213,7 @@ impl Kernel {
                 cluster
             );
 
+            let txn = maybe_claim_leadership(cluster, txn).await?;
             if suffix.is_empty() && params.is_empty() {
                 // it's a "commit" instruction
                 cluster.post(&txn, suffix, params).await
@@ -257,6 +254,7 @@ impl Kernel {
                 cluster
             );
 
+            let txn = maybe_claim_leadership(cluster, txn).await?;
             execute(txn, cluster, |txn, cluster| async move {
                 cluster.delete(&txn, suffix, key.clone()).await?;
 
@@ -324,7 +322,7 @@ fn execute<
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a InstanceExt<Cluster>) -> Fut + Send + 'a,
 >(
-    txn: &'a Txn,
+    txn: Txn,
     cluster: &'a InstanceExt<Cluster>,
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
@@ -332,7 +330,7 @@ fn execute<
         if let Some(owner) = txn.owner() {
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
-            } else {
+            } else if !txn.is_leader(cluster.path()) {
                 let self_link = txn.link(cluster.path().to_vec().into());
                 txn.put(owner.clone(), Value::None, self_link.into())
                     .await?;
@@ -411,5 +409,13 @@ fn error_type(err_type: &Id) -> Option<ErrorType> {
         "timeout" => Some(ErrorType::Timeout),
         "unauthorized" => Some(ErrorType::Unauthorized),
         _ => None,
+    }
+}
+
+async fn maybe_claim_leadership(cluster: &Cluster, txn: &Txn) -> TCResult<Txn> {
+    if txn.has_owner() && !txn.has_leader(cluster.path()) {
+        cluster.lead(txn.clone()).await
+    } else {
+        Ok(txn.clone())
     }
 }

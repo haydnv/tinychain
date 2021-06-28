@@ -134,6 +134,11 @@ impl Txn {
         self.leader(cluster_path).is_some()
     }
 
+    /// Check if this transaction has an owner.
+    pub fn has_owner(&self) -> bool {
+        self.owner().is_some()
+    }
+
     /// Check if this host is leading the transaction for the specified cluster.
     pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(host) = self.leader(cluster_path) {
