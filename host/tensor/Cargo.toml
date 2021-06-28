@@ -29,6 +29,6 @@ strided = "~0.2.9"
 tc-btree = "~0.1.4"
 tc-error = { version = "~0.2.2", features = ["tensor"] }
 tc-value = "~0.1.10"
-tc-table = "~0.1.4"
+tc-table = { path = "../table" }
 tc-transact = { version = "~0.6.2", features = ["tensor"] }
 tcgeneric = "~0.1.8"
