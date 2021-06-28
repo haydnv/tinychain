@@ -1,4 +1,3 @@
-import itertools
 import random
 import tinychain as tc
 import unittest
