@@ -330,10 +330,13 @@ fn execute<
         if let Some(owner) = txn.owner() {
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
-            } else if !txn.is_leader(cluster.path()) {
+            } else if txn.is_leader(cluster.path()) {
                 let self_link = txn.link(cluster.path().to_vec().into());
                 txn.put(owner.clone(), Value::None, self_link.into())
                     .await?;
+            } else {
+                let self_link = txn.link(cluster.path().to_vec().into());
+                debug!("{} is not leading this transaction, no need to notify owner", self_link);
             }
 
             handler(txn.clone(), cluster).await
