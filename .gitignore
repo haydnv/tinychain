@@ -1,6 +1,7 @@
 # test data
 config
 tests/__pycache__
+tests/venv
 
 # IDE metadata
 .idea
