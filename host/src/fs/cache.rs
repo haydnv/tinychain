@@ -443,9 +443,7 @@ fn create_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ 
 
 #[inline]
 fn read_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ {
-    fs::File::open(path).map_err(move |e| {
-        io_err(e, path)
-    })
+    fs::File::open(path).map_err(move |e| io_err(e, path))
 }
 
 async fn write_file(path: &PathBuf) -> TCResult<fs::File> {
@@ -453,8 +451,6 @@ async fn write_file(path: &PathBuf) -> TCResult<fs::File> {
         .truncate(true)
         .write(true)
         .open(path)
-        .map_err(move |e| {
-            io_err(e, path)
-        })
+        .map_err(move |e| io_err(e, path))
         .await
 }
