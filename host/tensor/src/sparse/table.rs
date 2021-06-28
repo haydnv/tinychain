@@ -13,7 +13,7 @@ use tc_error::*;
 use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSchema};
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Bound, Number, NumberClass, NumberType, UInt, Value, ValueType};
+use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, GroupStream, Id, Label};
 
 use crate::stream::{sorted_coords, Read, ReadValueAt};
@@ -508,13 +508,18 @@ async fn upsert_value<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstan
     coord: Coord,
     value: Number,
 ) -> TCResult<()> {
-    let key = coord
+    let coord = coord
         .into_iter()
         .map(Number::from)
-        .map(Value::Number)
-        .collect();
+        .map(Value::Number);
 
-    table.upsert(txn_id, key, vec![Value::Number(value)]).await
+    if value == value.class().zero() {
+        let key = (0..coord.len()).map(Id::from).zip(coord).collect();
+        table.delete_row(txn_id, key).await
+    } else {
+        let key = coord.collect();
+        table.upsert(txn_id, key, vec![Value::Number(value)]).await
+    }
 }
 
 #[inline]
