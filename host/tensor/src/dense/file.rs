@@ -184,7 +184,8 @@ where
     pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
-            .then(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
+            .map(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
+            .buffered(num_cpus::get())
             .map_ok(|block| (*block).clone());
 
         Box::pin(blocks)
@@ -261,9 +262,7 @@ where
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| {
-                        file.clone().read_block_owned(*txn.id(), block_id)
-                    })
+                    .then(move |block_id| file.clone().read_block_owned(*txn.id(), block_id))
                     .map_ok(|block| (*block).clone()),
             );
 

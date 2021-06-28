@@ -8,12 +8,12 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
-use tc_value::UIntType;
+use tc_value::{Number, UIntType};
 
 use crate::dense::{BlockListFile, PER_BLOCK};
 use crate::{Coord, Shape, TensorAccess, TensorType};
 
-use super::{ReadValueAt, ValueReader};
+use super::ReadValueAt;
 
 pub async fn sorted_coords<FD, FS, D, T, C>(
     txn: &T,
@@ -43,18 +43,22 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     txn: T,
     source: A,
     coords: C,
-) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Coord>>, D, T, A>>
+) -> TCResult<impl Stream<Item = TCResult<(Coord, Number)>>>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
     C: Stream<Item = TCResult<Coord>> + Send + 'a,
-    A: TensorAccess + ReadValueAt<D> + 'a,
+    A: TensorAccess + ReadValueAt<D, Txn = T> + 'a + Clone,
     D::FileClass: From<TensorType>,
 {
-    let sorted_coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape(), coords).await?;
-    Ok(ValueReader::new(sorted_coords, txn, source))
+    let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape(), coords).await?;
+    let buffered = coords
+        .map_ok(move |coord| source.clone().read_value_at(txn.clone(), coord))
+        .try_buffered(num_cpus::get());
+
+    Ok(buffered)
 }
 
 async fn sort_coords<FD, FS, D, T, S>(

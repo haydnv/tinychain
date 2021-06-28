@@ -442,9 +442,7 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| {
-                    combinator(&l, &r)
-                });
+                .map_ok(move |(l, r)| combinator(&l, &r));
 
             let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
@@ -588,11 +586,13 @@ where
     // TODO: replace with block_stream
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         let bounds = Bounds::all(self.shape());
-        let values = stream::iter(bounds.affected()).then(move |coord| {
-            self.clone()
-                .read_value_at(txn.clone(), coord)
-                .map_ok(|(_, value)| value)
-        });
+        let values = stream::iter(bounds.affected())
+            .map(move |coord| {
+                self.clone()
+                    .read_value_at(txn.clone(), coord)
+                    .map_ok(|(_, value)| value)
+            })
+            .buffered(num_cpus::get());
 
         let values: TCTryStream<'a, Number> = Box::pin(values);
         Box::pin(future::ready(Ok(values)))
@@ -966,16 +966,18 @@ where
 
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         Box::pin(async move {
-            let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
-                let txn = txn.clone();
-                let source = self.source.clone();
-                let reductor = self.reductor;
-                let source_bounds = self.rebase.invert_coord(&coord);
-                Box::pin(async move {
-                    let slice = source.slice(source_bounds)?;
-                    reductor(&slice.accessor().into(), txn.clone()).await
+            let values = stream::iter(Bounds::all(self.shape()).affected())
+                .map(move |coord| {
+                    let txn = txn.clone();
+                    let source = self.source.clone();
+                    let reductor = self.reductor;
+                    let source_bounds = self.rebase.invert_coord(&coord);
+                    Box::pin(async move {
+                        let slice = source.slice(source_bounds)?;
+                        reductor(&slice.accessor().into(), txn.clone()).await
+                    })
                 })
-            });
+                .buffered(num_cpus::get());
 
             let values: TCTryStream<'a, Number> = Box::pin(values);
             Ok(values)
