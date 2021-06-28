@@ -17,7 +17,7 @@ use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Val
 use tcgeneric::{label, GroupStream, Id, Label};
 
 use crate::stream::{sorted_coords, Read, ReadValueAt};
-use crate::transform::{self, Rebase};
+use crate::transform;
 use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::SparseTranspose;
@@ -508,10 +508,7 @@ async fn upsert_value<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstan
     coord: Coord,
     value: Number,
 ) -> TCResult<()> {
-    let coord = coord
-        .into_iter()
-        .map(Number::from)
-        .map(Value::Number);
+    let coord = coord.into_iter().map(Number::from).map(Value::Number);
 
     if value == value.class().zero() {
         let key = (0..coord.len()).map(Id::from).zip(coord).collect();

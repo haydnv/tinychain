@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use afarray::Array;
+use afarray::{Array, ArrayExt, ArrayInstance};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -15,7 +15,7 @@ use tcgeneric::{TCBoxTryFuture, TCStream, TCTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::transform::{self, Rebase};
+use crate::transform;
 use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJECTIVE_WRITE};
 
 use super::file::{BlockListFile, BlockListFileSlice};
@@ -76,6 +76,9 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
 
     /// Return a transpose of this [`DenseTensor`].
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+
+    /// Return an Array with the values at the given coordinates.
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array>;
 
     /// Write a value to the slice of this [`DenseTensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
@@ -261,6 +264,21 @@ where
             Self::Unary(unary) => unary
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+        }
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        match self {
+            Self::File(file) => file.read_values(txn, coords).await,
+            Self::Slice(slice) => slice.read_values(txn, coords).await,
+            Self::Broadcast(broadcast) => broadcast.read_values(txn, coords).await,
+            Self::Cast(cast) => cast.read_values(txn, coords).await,
+            Self::Combine(combine) => combine.read_values(txn, coords).await,
+            Self::Expand(expansion) => expansion.read_values(txn, coords).await,
+            Self::Reduce(reduced) => reduced.read_values(txn, coords).await,
+            Self::Sparse(sparse) => sparse.read_values(txn, coords).await,
+            Self::Transpose(transpose) => transpose.read_values(txn, coords).await,
+            Self::Unary(unary) => unary.read_values(txn, coords).await,
         }
     }
 
@@ -475,6 +493,15 @@ where
         )
     }
 
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let (left, right) = try_join!(
+            self.left.read_values(txn, coords),
+            self.right.read_values(txn, coords)
+        )?;
+
+        Ok((self.combinator)(&left, &right))
+    }
+
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
@@ -611,6 +638,11 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(coords)?;
+        self.source.read_values(txn, &coords).await
+    }
+
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
@@ -729,6 +761,13 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let transpose = self.source.transpose(permutation)?;
         Ok(BlockListCast::new(transpose, self.dtype))
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        self.source
+            .read_values(txn, coords)
+            .map_ok(|values| values.cast_into(self.dtype))
+            .await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -851,6 +890,11 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
         self.source.transpose(permutation) // TODO: expand the result
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(coords)?;
+        self.source.read_values(txn, &coords).await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -999,6 +1043,18 @@ where
         BlockListReduce::new(source, reduce_axis, self.reductor)
     }
 
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let values: Vec<Number> = stream::iter(coords.to_vec().into_iter())
+            .chunks(self.ndim())
+            .map(|coord| self.clone().read_value_at(txn.clone(), coord))
+            .buffered(num_cpus::get())
+            .map_ok(|(_coord, value)| value)
+            .try_collect()
+            .await?;
+
+        Ok(Array::from(values))
+    }
+
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
@@ -1120,6 +1176,10 @@ where
         Err(TCError::not_implemented("BlockListTranspose::transpose"))
     }
 
+    async fn read_values(&self, _txn: &Self::Txn, _coords: &ArrayExt<u64>) -> TCResult<Array> {
+        Err(TCError::not_implemented("BlockListTranspose::read_values"))
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.write_value(txn_id, bounds, number).await
@@ -1224,6 +1284,19 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let transpose = self.source.transpose(permutation)?;
         Ok(transpose.into())
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let source = self.source.clone();
+        let values: Vec<Number> = stream::iter(coords.to_vec().into_iter())
+            .chunks(self.ndim())
+            .map(|coord| source.clone().read_value_at(txn.clone(), coord))
+            .buffered(num_cpus::get())
+            .map_ok(|(_coord, value)| value)
+            .try_collect()
+            .await?;
+
+        Ok(Array::from(values))
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -1377,6 +1450,13 @@ where
             dtype: self.dtype,
             phantom: Phantom::default(),
         })
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        self.source
+            .read_values(txn, coords)
+            .map_ok(|values| (self.transform)(&values))
+            .await
     }
 
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {

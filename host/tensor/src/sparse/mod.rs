@@ -559,11 +559,13 @@ where
     }
 
     fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        // TODO: implement left_combine
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, Number::div, dtype)
     }
 
     fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        // TODO: implement left_combine
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, Number::mul, dtype)
     }

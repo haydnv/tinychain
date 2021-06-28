@@ -553,7 +553,7 @@ where
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
-            Tensor::Sparse(sparse) => self.into_sparse().mul(sparse).map(Tensor::from),
+            Tensor::Sparse(sparse) => sparse.mul(self.into_sparse()).map(Tensor::from),
         }
     }
 

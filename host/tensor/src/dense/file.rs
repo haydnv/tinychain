@@ -20,7 +20,7 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType, Value};
 use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
 
 use crate::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
-use crate::transform::{self, Rebase};
+use crate::transform;
 use crate::{Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
@@ -277,6 +277,10 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         BlockListTranspose::new(self, permutation)
+    }
+
+    async fn read_values(&self, _txn: &Self::Txn, _coords: &ArrayExt<u64>) -> TCResult<Array> {
+        Err(TCError::not_implemented("BlockListFile::read_value"))
     }
 
     async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
@@ -879,6 +883,11 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         BlockListTranspose::new(self, permutation)
+    }
+
+    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(coords)?;
+        self.source.read_values(txn, &coords).await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
