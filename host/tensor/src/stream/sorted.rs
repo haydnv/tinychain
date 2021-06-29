@@ -57,7 +57,8 @@ where
     A: TensorAccess + ReadValueAt<D, Txn = T> + 'a + Clone,
     D::FileClass: From<TensorType>,
 {
-    let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
+   let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
+
     let buffered = coords
         .map_ok(move |coord| source.clone().read_value_at(txn.clone(), coord))
         .try_buffered(num_cpus::get());
