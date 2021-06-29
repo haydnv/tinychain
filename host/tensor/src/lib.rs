@@ -993,3 +993,10 @@ impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
         }
     }
 }
+
+#[inline]
+fn coord_bounds(shape: &[u64]) -> Vec<u64> {
+    (0..shape.len())
+        .map(|axis| shape[axis + 1..].iter().product())
+        .collect()
+}

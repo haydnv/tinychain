@@ -3,7 +3,7 @@ use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 
-use afarray::{to_offsets, Array, ArrayExt, ArrayInstance};
+use afarray::{Array, ArrayExt, ArrayInstance, Coords};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::de;
@@ -19,9 +19,9 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType, Value};
 use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
 
-use crate::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
+use crate::stream::{Read, ReadValueAt};
 use crate::transform;
-use crate::{Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
+use crate::{coord_bounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
 use super::{DenseAccess, DenseAccessor, PER_BLOCK};
@@ -279,8 +279,8 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
-        let offsets = to_offsets(&coords, self.shape());
+    async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
+        let offsets = coords.to_offsets(self.shape());
         let per_block = ArrayExt::<u64>::from(&[PER_BLOCK as u64][..]);
         let block_ids = &offsets / &per_block;
         let indices = offsets % per_block;
@@ -902,7 +902,7 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
         let coords = self.rebase.invert_coords(&coords);
         self.source.read_values(txn, coords).await
     }
@@ -954,4 +954,64 @@ fn div_ceil(l: u64, r: u64) -> u64 {
     } else {
         (l / r) + 1
     }
+}
+
+fn block_offsets(
+    af_indices: &af::Array<u64>,
+    af_offsets: &af::Array<u64>,
+    start: f64,
+    block_id: u64,
+) -> (af::Array<u64>, f64) {
+    assert_eq!(af_indices.elements(), af_offsets.elements());
+
+    let num_to_update = af::sum_all(&af::eq(
+        af_indices,
+        &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
+        true,
+    ))
+    .0;
+
+    if num_to_update == 0 {
+        return (af::Array::new_empty(af::Dim4::default()), start);
+    }
+
+    debug_assert!((start as usize + num_to_update as usize) <= af_offsets.elements());
+
+    let num_to_update = num_to_update as f64;
+    let block_offsets = af::index(
+        af_offsets,
+        &[af::Seq::new(start, (start + num_to_update) - 1f64, 1f64)],
+    );
+
+    (block_offsets, (start + num_to_update))
+}
+
+fn coord_block<I: Iterator<Item = Coord>>(
+    coords: I,
+    coord_bounds: &[u64],
+    per_block: usize,
+    ndim: usize,
+    num_coords: u64,
+) -> (Coord, af::Array<u64>, af::Array<u64>) {
+    let coords: Vec<u64> = coords.flatten().collect();
+    assert!(coords.len() > 0);
+    assert!(ndim > 0);
+
+    let af_per_block = af::constant(per_block as u64, af::Dim4::new(&[1, 1, 1, 1]));
+    let af_coord_bounds = af::Array::new(coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+
+    let af_coords = af::Array::new(
+        &coords,
+        af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
+    );
+    let af_coords = af::mul(&af_coords, &af_coord_bounds, true);
+    let af_coords = af::sum(&af_coords, 0);
+
+    let af_offsets = af::modulo(&af_coords, &af_per_block, true);
+    let af_indices = af_coords / af_per_block;
+
+    let af_block_ids = af::set_unique(&af_indices, true);
+    let mut block_ids = vec![0u64; af_block_ids.elements()];
+    af_block_ids.host(&mut block_ids);
+    (block_ids, af_indices, af_offsets)
 }

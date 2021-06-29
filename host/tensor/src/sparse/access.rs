@@ -14,10 +14,10 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{GroupStream, TCBoxTryFuture};
 
 use crate::dense::{DenseAccess, DenseAccessor, DenseTensor};
-use crate::stream::{coord_bounds, sorted_coords, sorted_values, Read, ReadValueAt};
+use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
 use crate::transform;
 use crate::{
-    AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, TensorUnary,
+    coord_bounds, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, TensorUnary,
     ERR_NONBIJECTIVE_WRITE,
 };
 

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::iter;
 
-use arrayfire as af;
+use afarray::Coords;
 
 use tc_error::*;
 
 use crate::bounds::{AxisBounds, Bounds, Shape};
 
 use super::Coord;
-use afarray::to_coords;
 
 #[derive(Clone)]
 pub struct Broadcast {
@@ -102,20 +101,15 @@ impl Broadcast {
         source_coord
     }
 
-    pub fn invert_coords(&self, coords: &af::Array<u64>) -> af::Array<u64> {
-        assert_eq!(coords.elements() % self.shape.len(), 0);
-        let num_coords = coords.elements() / self.shape.len();
-        let coords: Vec<u64> = to_coords(coords, self.shape.len())
+    pub fn invert_coords(&self, coords: &Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.shape.len());
+        let coords: Vec<Coord> = coords
+            .to_vec()
             .into_iter()
             .map(|coord| self.invert_coord(&coord))
-            .flatten()
             .collect();
 
-        assert_eq!(self.source_shape.len() * num_coords, coords.len());
-        af::Array::new(
-            &coords,
-            af::Dim4::new(&[self.source_shape.len() as u64, num_coords as u64, 1, 1]),
-        )
+        Coords::from_iter(coords, self.source_shape.len())
     }
 
     pub fn map_coord(&self, coord: Coord) -> Bounds {
@@ -186,7 +180,7 @@ impl Expand {
         inverted
     }
 
-    pub fn invert_coords(&self, _coords: &af::Array<u64>) -> af::Array<u64> {
+    pub fn invert_coords(&self, _coords: &Coords) -> Coords {
         todo!()
     }
 
@@ -393,7 +387,7 @@ impl Slice {
         source_coord
     }
 
-    pub fn invert_coords(&self, _coords: &af::Array<u64>) -> af::Array<u64> {
+    pub fn invert_coords(&self, _coords: &Coords) -> Coords {
         todo!()
     }
 
