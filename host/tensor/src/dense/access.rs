@@ -557,7 +557,7 @@ where
     }
 
     fn size(&self) -> u64 {
-        self.source.size()
+        self.shape().size()
     }
 }
 
