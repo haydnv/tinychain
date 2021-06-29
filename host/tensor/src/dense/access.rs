@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 
-use afarray::{Array, ArrayExt, ArrayInstance};
+use afarray::{Array, ArrayExt};
+use arrayfire as af;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -57,12 +58,7 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
 
             let values = values
                 .map_ok(|array| array.to_vec())
-                .map_ok(|values| {
-                    values
-                        .into_iter()
-                        .map(Ok)
-                        .collect::<Vec<TCResult<Number>>>()
-                })
+                .map_ok(|values| values.into_iter().map(Ok))
                 .map_ok(futures::stream::iter)
                 .try_flatten();
 
@@ -78,7 +74,7 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
     /// Return an Array with the values at the given coordinates.
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array>;
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array>;
 
     /// Write a value to the slice of this [`DenseTensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
@@ -267,7 +263,7 @@ where
         }
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
         match self {
             Self::File(file) => file.read_values(txn, coords).await,
             Self::Slice(slice) => slice.read_values(txn, coords).await,
@@ -493,9 +489,9 @@ where
         )
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
         let (left, right) = try_join!(
-            self.left.read_values(txn, coords),
+            self.left.read_values(txn.clone(), coords.clone()),
             self.right.read_values(txn, coords)
         )?;
 
@@ -582,7 +578,7 @@ where
     }
 
     fn size(&self) -> u64 {
-        self.source.size()
+        self.shape().size()
     }
 }
 
@@ -610,19 +606,28 @@ where
         DenseAccessor::Broadcast(Box::new(broadcast))
     }
 
-    // TODO: replace with block_stream
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        let bounds = Bounds::all(self.shape());
-        let values = stream::iter(bounds.affected())
-            .map(move |coord| {
-                self.clone()
-                    .read_value_at(txn.clone(), coord)
-                    .map_ok(|(_, value)| value)
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+        let shape = self.shape().clone();
+        let size = self.size();
+        let rebase = self.rebase;
+        let source = self.source;
+
+        let blocks = stream::iter((0..size).step_by(PER_BLOCK))
+            .map(move |start| {
+                let end = match start + PER_BLOCK as u64 {
+                    end if end > size => size,
+                    end => end,
+                };
+
+                ArrayExt::range(start, end)
             })
+            .map(move |offsets| offsets.to_coords(&shape))
+            .map(move |coords| rebase.invert_coords(&coords))
+            .map(move |coords| source.clone().read_values(txn.clone(), coords))
             .buffered(num_cpus::get());
 
-        let values: TCTryStream<'a, Number> = Box::pin(values);
-        Box::pin(future::ready(Ok(values)))
+        let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+        Box::pin(future::ready(Ok(blocks)))
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -638,9 +643,9 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
-        let coords = self.rebase.invert_coords(coords)?;
-        self.source.read_values(txn, &coords).await
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(&coords);
+        self.source.read_values(txn, coords).await
     }
 
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
@@ -763,10 +768,12 @@ where
         Ok(BlockListCast::new(transpose, self.dtype))
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let dtype = self.dtype;
+
         self.source
             .read_values(txn, coords)
-            .map_ok(|values| values.cast_into(self.dtype))
+            .map_ok(|values| values.cast_into(dtype))
             .await
     }
 
@@ -892,9 +899,9 @@ where
         self.source.transpose(permutation) // TODO: expand the result
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
-        let coords = self.rebase.invert_coords(coords)?;
-        self.source.read_values(txn, &coords).await
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(&coords);
+        self.source.read_values(txn, coords).await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -1043,10 +1050,15 @@ where
         BlockListReduce::new(source, reduce_axis, self.reductor)
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
-        let values: Vec<Number> = stream::iter(coords.to_vec().into_iter())
-            .chunks(self.ndim())
-            .map(|coord| self.clone().read_value_at(txn.clone(), coord))
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let coords = {
+            let mut coord_vec = vec![0u64; coords.elements()];
+            coords.host(&mut coord_vec);
+            stream::iter(coord_vec.into_iter()).chunks(self.ndim())
+        };
+
+        let values: Vec<Number> = coords
+            .map(move |coord| self.clone().read_value_at(txn.clone(), coord))
             .buffered(num_cpus::get())
             .map_ok(|(_coord, value)| value)
             .try_collect()
@@ -1176,7 +1188,7 @@ where
         Err(TCError::not_implemented("BlockListTranspose::transpose"))
     }
 
-    async fn read_values(&self, _txn: &Self::Txn, _coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, _txn: Self::Txn, _coords: af::Array<u64>) -> TCResult<Array> {
         Err(TCError::not_implemented("BlockListTranspose::read_values"))
     }
 
@@ -1286,11 +1298,16 @@ where
         Ok(transpose.into())
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let coords = {
+            let mut coord_vec = vec![0u64; coords.elements()];
+            coords.host(&mut coord_vec);
+            stream::iter(coord_vec.into_iter()).chunks(self.ndim())
+        };
+
         let source = self.source.clone();
-        let values: Vec<Number> = stream::iter(coords.to_vec().into_iter())
-            .chunks(self.ndim())
-            .map(|coord| source.clone().read_value_at(txn.clone(), coord))
+        let values: Vec<Number> = coords
+            .map(move |coord| source.clone().read_value_at(txn.clone(), coord))
             .buffered(num_cpus::get())
             .map_ok(|(_coord, value)| value)
             .try_collect()
@@ -1452,10 +1469,12 @@ where
         })
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let transform = self.transform;
+
         self.source
             .read_values(txn, coords)
-            .map_ok(|values| (self.transform)(&values))
+            .map_ok(move |values| (transform)(&values))
             .await
     }
 

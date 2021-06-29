@@ -3,7 +3,7 @@ use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 
-use afarray::{Array, ArrayExt};
+use afarray::{to_offsets, Array, ArrayExt, ArrayInstance};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::de;
@@ -279,8 +279,25 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn read_values(&self, _txn: &Self::Txn, _coords: &ArrayExt<u64>) -> TCResult<Array> {
-        Err(TCError::not_implemented("BlockListFile::read_value"))
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let offsets = to_offsets(&coords, self.shape());
+        let per_block = ArrayExt::<u64>::from(&[PER_BLOCK as u64][..]);
+        let block_ids = &offsets / &per_block;
+        let indices = offsets % per_block;
+
+        let txn_id = *txn.id();
+        let values = stream::iter(block_ids.to_vec().into_iter().zip(indices.to_vec()))
+            .map(move |(block_id, i)| {
+                self.file
+                    .clone()
+                    .read_block_owned(txn_id, block_id.into())
+                    .map_ok(move |block| block.get_value(i as usize))
+            })
+            .buffered(num_cpus::get())
+            .try_collect::<Vec<Number>>()
+            .await?;
+
+        Ok(Array::from(values))
     }
 
     async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
@@ -885,9 +902,9 @@ where
         BlockListTranspose::new(self, permutation)
     }
 
-    async fn read_values(&self, txn: &Self::Txn, coords: &ArrayExt<u64>) -> TCResult<Array> {
-        let coords = self.rebase.invert_coords(coords)?;
-        self.source.read_values(txn, &coords).await
+    async fn read_values(self, txn: Self::Txn, coords: af::Array<u64>) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(&coords);
+        self.source.read_values(txn, coords).await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {

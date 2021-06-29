@@ -450,7 +450,7 @@ where
     let coords = table.select(axes.into_iter().map(Id::from).collect())?;
     let coords = coords.rows(*txn.id()).await?;
     let coords = coords.map(|r| r.and_then(expect_coord));
-    let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, &shape, coords).await?;
+    let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, shape, coords).await?;
     Ok(Box::pin(GroupStream::from(coords)))
 }
 

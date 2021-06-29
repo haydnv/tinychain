@@ -490,6 +490,7 @@ where
 
     fn add(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn add_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l + r
         }
 
@@ -499,6 +500,7 @@ where
 
     fn div(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn div_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l / r
         }
 
@@ -508,6 +510,7 @@ where
 
     fn mul(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn mul_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l * r
         }
 
@@ -517,6 +520,7 @@ where
 
     fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn sub_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l - r
         }
 

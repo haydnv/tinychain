@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::iter;
 
-use afarray::ArrayExt;
+use arrayfire as af;
 
 use tc_error::*;
 
 use crate::bounds::{AxisBounds, Bounds, Shape};
 
 use super::Coord;
+use afarray::to_coords;
 
 #[derive(Clone)]
 pub struct Broadcast {
@@ -101,8 +102,20 @@ impl Broadcast {
         source_coord
     }
 
-    pub fn invert_coords(&self, _coords: &ArrayExt<u64>) -> TCResult<ArrayExt<u64>> {
-        Err(TCError::not_implemented("Broadcast::invert_coords"))
+    pub fn invert_coords(&self, coords: &af::Array<u64>) -> af::Array<u64> {
+        assert_eq!(coords.elements() % self.shape.len(), 0);
+        let num_coords = coords.elements() / self.shape.len();
+        let coords: Vec<u64> = to_coords(coords, self.shape.len())
+            .into_iter()
+            .map(|coord| self.invert_coord(&coord))
+            .flatten()
+            .collect();
+
+        assert_eq!(self.source_shape.len() * num_coords, coords.len());
+        af::Array::new(
+            &coords,
+            af::Dim4::new(&[self.source_shape.len() as u64, num_coords as u64, 1, 1]),
+        )
     }
 
     pub fn map_coord(&self, coord: Coord) -> Bounds {
@@ -173,8 +186,8 @@ impl Expand {
         inverted
     }
 
-    pub fn invert_coords(&self, _coords: &ArrayExt<u64>) -> TCResult<ArrayExt<u64>> {
-        Err(TCError::not_implemented("Expand::invert_coords"))
+    pub fn invert_coords(&self, _coords: &af::Array<u64>) -> af::Array<u64> {
+        todo!()
     }
 
     pub fn map_coord(&self, mut coord: Coord) -> Coord {
@@ -380,8 +393,8 @@ impl Slice {
         source_coord
     }
 
-    pub fn invert_coords(&self, _coords: &ArrayExt<u64>) -> TCResult<ArrayExt<u64>> {
-        Err(TCError::not_implemented("Sparse::invert_coords"))
+    pub fn invert_coords(&self, _coords: &af::Array<u64>) -> af::Array<u64> {
+        todo!()
     }
 
     pub fn map_coord(&self, source_coord: Coord) -> Coord {

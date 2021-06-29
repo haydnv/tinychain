@@ -15,7 +15,7 @@ categories = ["concurrency", "data-structures", "hardware-support", "mathematics
 pkg-config = "0.3"
 
 [dependencies]
-afarray = "~0.4.1"
+afarray = { version = "0.5" }
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.4"
@@ -26,9 +26,9 @@ num_cpus = "1.13"
 pin-project = "1.0"
 safecast = "0.1"
 strided = "~0.2.9"
-tc-btree = "~0.1.4"
-tc-error = { version = "~0.2.2", features = ["tensor"] }
-tc-value = "~0.1.10"
+tc-btree = { path = "../btree" }
+tc-error = { path = "../error", features = ["tensor"] }
+tc-value = { path = "../value" }
 tc-table = { path = "../table" }
-tc-transact = { version = "~0.6.2", features = ["tensor"] }
-tcgeneric = "~0.1.8"
+tc-transact = { path = "../transact", features = ["tensor"] }
+tcgeneric = { path = "../generic" }

@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use afarray::{Array, ArrayExt, ArrayInstance};
+use afarray::{into_coords, to_offsets, Array, ArrayExt};
 use arrayfire as af;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
@@ -17,7 +17,7 @@ use super::ReadValueAt;
 
 pub async fn sorted_coords<FD, FS, D, T, C>(
     txn: &T,
-    shape: &Shape,
+    shape: Shape,
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coord>> + Unpin>
 where
@@ -34,8 +34,12 @@ where
         .create_file_tmp(txn_id, TensorType::Dense)
         .await?;
 
-    let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape).await?;
-    let coords = offsets_to_coords(shape, offsets.into_stream(txn_id));
+    let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
+    let offsets = offsets
+        .into_stream(txn_id)
+        .map_ok(|array| array.type_cast());
+
+    let coords = offsets_to_coords(shape, offsets);
     Ok(coords)
 }
 
@@ -53,7 +57,7 @@ where
     A: TensorAccess + ReadValueAt<D, Txn = T> + 'a + Clone,
     D::FileClass: From<TensorType>,
 {
-    let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape(), coords).await?;
+    let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
     let buffered = coords
         .map_ok(move |coord| source.clone().read_value_at(txn.clone(), coord))
         .try_buffered(num_cpus::get());
@@ -65,7 +69,7 @@ async fn sort_coords<FD, FS, D, T, S>(
     file: FD,
     txn_id: TxnId,
     coords: S,
-    shape: &Shape,
+    shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
     FD: File<Array>,
@@ -85,13 +89,10 @@ where
 }
 
 fn coords_to_offsets<S: Stream<Item = TCResult<Coord>>>(
-    shape: &Shape,
+    shape: Shape,
     coords: S,
-) -> impl Stream<Item = TCResult<af::Array<u64>>> {
+) -> impl Stream<Item = TCResult<ArrayExt<u64>>> {
     let ndim = shape.len() as u64;
-    let coord_bounds = coord_bounds(shape);
-    let af_coord_bounds: af::Array<u64> =
-        af::Array::new(&coord_bounds, af::Dim4::new(&[ndim, 1, 1, 1]));
 
     coords
         .chunks(PER_BLOCK)
@@ -101,39 +102,19 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Coord>>>(
             let block = block.into_iter().flatten().collect::<Vec<u64>>();
             af::Array::new(&block, af::Dim4::new(&[ndim, num_coords as u64, 1, 1]))
         })
-        .map_ok(move |block| {
-            let offsets = af::mul(&block, &af_coord_bounds, true);
-            af::sum(&offsets, 0)
-        })
-        .map_ok(|block| af::moddims(&block, af::Dim4::new(&[block.elements() as u64, 1, 1, 1])))
+        .map_ok(move |block| to_offsets(&block, &shape))
 }
 
-fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(
-    shape: &Shape,
+fn offsets_to_coords<'a, S: Stream<Item = TCResult<ArrayExt<u64>>> + Unpin + 'a>(
+    shape: Shape,
     offsets: S,
 ) -> impl Stream<Item = TCResult<Coord>> + Unpin + 'a {
-    let ndim = shape.len() as u64;
-    let coord_bounds = coord_bounds(shape);
-    let af_coord_bounds: af::Array<u64> =
-        af::Array::new(&coord_bounds, af::Dim4::new(&[1, ndim, 1, 1]));
-    let af_shape: af::Array<u64> = af::Array::new(&shape.to_vec(), af::Dim4::new(&[1, ndim, 1, 1]));
     let ndim = shape.len();
 
     offsets
-        .map_ok(move |block| {
-            let offsets = af::div(block.type_cast::<u64>().af(), &af_coord_bounds, true);
-            af::modulo(&offsets, &af_shape, true)
-        })
-        .map_ok(|coord_block| {
-            let mut coords = vec![0u64; coord_block.elements()];
-            af::transpose(&coord_block, false).host(&mut coords);
-            coords
-        })
-        .map_ok(move |coords| {
-            stream::iter(coords.into_iter())
-                .chunks(ndim)
-                .map(TCResult::<Coord>::Ok)
-        })
+        .map_ok(move |block| block.to_coords(&shape))
+        .map_ok(move |coords| into_coords(coords, ndim).into_iter().map(Ok))
+        .map_ok(stream::iter)
         .try_flatten()
 }
 

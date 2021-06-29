@@ -532,7 +532,7 @@ where
             .try_flatten()
             .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect());
 
-        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, &shape, coords).await?;
+        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, shape, coords).await?;
         Ok(Box::pin(GroupStream::from(coords)))
     }
 
