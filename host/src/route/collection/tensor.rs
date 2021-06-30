@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, PathSegment, TCBoxTryFuture};
+use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -473,7 +473,14 @@ fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
         Bound::Ex(end) => cast_bound(dim, end)?,
     };
 
-    Ok(AxisBounds::In(start..end))
+    if end > start {
+        Ok(AxisBounds::In(start..end))
+    } else {
+        Err(TCError::bad_request(
+            "invalid range",
+            Tuple::from(vec![start, end]),
+        ))
+    }
 }
 
 pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
