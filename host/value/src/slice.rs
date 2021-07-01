@@ -255,15 +255,21 @@ impl TryCastFrom<Tuple<Value>> for Range {
         let (start, end): (Value, Value) = tuple.opt_cast_into()?;
 
         let start = if start.matches::<Bound>() {
-            start.opt_cast_into().unwrap()
+            match start.opt_cast_into().unwrap() {
+                Bound::In(value) if value.is_none() => Bound::Un,
+                bound => bound
+            }
         } else {
             Bound::In(start)
         };
 
         let end = if end.matches::<Bound>() {
-            end.opt_cast_into().unwrap()
+            match end.opt_cast_into().unwrap() {
+                Bound::Ex(value) if value.is_none() => Bound::Un,
+                bound => bound,
+            }
         } else {
-            Bound::In(end)
+            Bound::Ex(end)
         };
 
         Some(Range { start, end })
