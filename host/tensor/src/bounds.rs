@@ -335,7 +335,7 @@ impl fmt::Display for Bounds {
 }
 
 /// The shape of a `Tensor`
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct Shape(Vec<u64>);
 
 impl Shape {
@@ -442,14 +442,6 @@ impl DerefMut for Shape {
         &mut self.0
     }
 }
-
-impl PartialEq for Shape {
-    fn eq(&self, other: &Shape) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Shape {}
 
 impl From<Vec<u64>> for Shape {
     fn from(shape: Vec<u64>) -> Shape {

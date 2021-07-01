@@ -917,21 +917,11 @@ impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T> {
 ///
 /// For rules of broadcasting, see:
 /// [https://pytorch.org/docs/stable/notes/broadcasting.html](https://pytorch.org/docs/stable/notes/broadcasting.html)
-pub fn broadcast<FD, FS, D, T>(
-    left: Tensor<FD, FS, D, T>,
-    right: Tensor<FD, FS, D, T>,
-) -> TCResult<(Tensor<FD, FS, D, T>, Tensor<FD, FS, D, T>)>
+pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    D::FileClass: From<TensorType>,
+    L: TensorAccess + TensorTransform,
+    R: TensorAccess + TensorTransform,
 {
-    if left.shape() == right.shape() {
-        return Ok((left, right));
-    }
-
     let mut left_shape = left.shape().to_vec();
     let mut right_shape = right.shape().to_vec();
 

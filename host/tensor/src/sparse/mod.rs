@@ -18,7 +18,7 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
-use super::dense::{BlockListFile, BlockListSparse, DenseAccess, DenseTensor};
+use super::dense::{BlockListFile, BlockListSparse, DenseTensor};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
     TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
@@ -72,7 +72,7 @@ where
     ) -> TCResult<SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, A, R>>> {
         if self.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
-                "cannot combine Tensors of different shapes: {}, {}",
+                "cannot compare Tensors of different shapes: {}, {}",
                 self.shape(),
                 other.shape()
             )));
@@ -387,36 +387,6 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, A, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, B>>
-    for SparseTensor<FD, FS, D, T, A>
-where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
-    B: DenseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
-{
-    type Txn = T;
-
-    async fn mask(self, txn: Self::Txn, other: DenseTensor<FD, FS, D, T, B>) -> TCResult<()> {
-        let other = other.into_sparse();
-        self.mask(txn, other).await
-    }
-
-    async fn write(
-        self,
-        txn: Self::Txn,
-        bounds: Bounds,
-        other: DenseTensor<FD, FS, D, T, B>,
-    ) -> TCResult<()> {
-        let other = other.into_sparse();
-        self.write(txn, bounds, other).await
-    }
-}
-
-#[async_trait]
 impl<FD, FS, D, T, L, R> TensorDualIO<D, SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
@@ -460,7 +430,7 @@ where
         let slice = self.slice(bounds)?;
         if slice.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
-                "cannot write Tensor with shape {} to slice with shape {}",
+                "cannot write tensor of shape {} to slice of shape {}",
                 other.shape(),
                 slice.shape()
             )));
@@ -489,8 +459,14 @@ where
     type Txn = T;
 
     async fn mask(self, txn: Self::Txn, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
+        let other = if self.shape() == other.shape() {
+            other
+        } else {
+            other.broadcast(self.shape().clone())?
+        };
+
         match other {
-            Tensor::Dense(other) => self.mask(txn, other).await,
+            Tensor::Dense(other) => self.mask(txn, other.into_sparse()).await,
             Tensor::Sparse(other) => self.mask(txn, other).await,
         }
     }
@@ -501,8 +477,15 @@ where
         bounds: Bounds,
         other: Tensor<FD, FS, D, T>,
     ) -> TCResult<()> {
+        let shape = bounds.to_shape();
+        let other = if other.shape() == &shape {
+            other
+        } else {
+            other.broadcast(shape)?
+        };
+
         match other {
-            Tensor::Dense(other) => self.write(txn, bounds, other).await,
+            Tensor::Dense(other) => self.write(txn, bounds, other.into_sparse()).await,
             Tensor::Sparse(other) => self.write(txn, bounds, other).await,
         }
     }
