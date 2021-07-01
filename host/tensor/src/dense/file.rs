@@ -280,7 +280,15 @@ where
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
+        #[cfg(debug_assertions)]
+        {
+            for coord in coords.to_vec().into_iter() {
+                self.shape().validate_coord(&coord)?;
+            }
+        }
+
         let offsets = coords.to_offsets(self.shape());
+
         let per_block = ArrayExt::<u64>::from(&[PER_BLOCK as u64][..]);
         let block_ids = &offsets / &per_block;
         let indices = offsets % per_block;
@@ -291,7 +299,11 @@ where
                 self.file
                     .clone()
                     .read_block_owned(txn_id, block_id.into())
-                    .map_ok(move |block| block.get_value(i as usize))
+                    .map_ok(move |block| {
+                        let i = i as usize;
+                        assert!(i < block.len());
+                        block.get_value(i)
+                    })
             })
             .buffered(num_cpus::get())
             .try_collect::<Vec<Number>>()

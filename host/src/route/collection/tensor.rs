@@ -128,12 +128,12 @@ impl<'a> Handler<'a> for DualHandler {
                 let r: Tensor = params.require(&label("r").into())?;
                 params.expect_empty()?;
 
-                debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
-
                 if l.shape() == r.shape() {
+                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
                     (self.op)(l, r).map(Collection::from).map(State::from)
                 } else {
                     let (l, r) = broadcast(l, r)?;
+                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
                     (self.op)(l, r).map(Collection::from).map(State::from)
                 }
             })
@@ -166,16 +166,23 @@ where
                 let l = self.tensor;
                 let r: Tensor = params.require(&label("r").into())?;
 
-                debug!(
-                    "tensor dual async op with shapes: {}, {}",
-                    l.shape(),
-                    r.shape()
-                );
-
                 if l.shape() == r.shape() {
+                    debug!(
+                        "tensor dual async op with shapes: {}, {}",
+                        l.shape(),
+                        r.shape()
+                    );
+
                     (self.op)(l, r, txn)
                 } else {
                     let (l, r) = broadcast(l, r)?;
+
+                    debug!(
+                        "tensor dual async op with shapes: {}, {}",
+                        l.shape(),
+                        r.shape()
+                    );
+
                     (self.op)(l, r, txn)
                 }
                 .map_ok(Collection::from)

@@ -434,7 +434,6 @@ impl History {
                     TCError::internal(format!("missing historical Chain state {}", hash))
                 })?;
 
-                debug!("dir contents {:?}", dir.entry_ids(txn.id()).await?);
                 let table = TableIndex::load(txn, schema, dir).await?;
                 Ok(Collection::Table(table.into()))
             }
@@ -464,7 +463,6 @@ impl History {
                             TCError::internal(format!("missing historical Chain state {}", hash))
                         })?;
 
-                        debug!("dir contents {:?}", dir.entry_ids(txn.id()).await?);
                         let tensor = SparseTensor::load(txn, schema, dir).await?;
                         Ok(Collection::Tensor(tensor.into()))
                     }

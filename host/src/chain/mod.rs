@@ -214,10 +214,6 @@ impl Subject {
                     .map_ok(Self::Sparse)
                     .await?;
 
-                debug!(
-                    "subject dir contents after creating sparse tensor: {:?}",
-                    dir.entry_ids(&txn_id).await?
-                );
                 Ok(tensor)
             }
             Schema::Value(value) => {
@@ -263,9 +259,7 @@ impl Subject {
             }
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => {
-                debug!("chain dir contents {:?}", dir.entry_ids(txn.id()).await?);
                 if let Some(dir) = dir.get_dir(txn.id(), &SUBJECT.into()).await? {
-                    debug!("subject dir contents {:?}", dir.entry_ids(txn.id()).await?);
                     SparseTensor::load(txn, schema, dir)
                         .map_ok(Self::Sparse)
                         .await

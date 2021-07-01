@@ -922,6 +922,8 @@ where
     L: TensorAccess + TensorTransform,
     R: TensorAccess + TensorTransform,
 {
+    debug!("broadcast tensors with shapes {}, {}", left.shape(), right.shape());
+
     let mut left_shape = left.shape().to_vec();
     let mut right_shape = right.shape().to_vec();
 
@@ -953,14 +955,8 @@ where
         }
     }
 
-    let left_shape = Shape::from(left_shape);
-    let right_shape = Shape::from(right_shape);
-    let shape = if left_shape.size() > right_shape.size() {
-        left_shape
-    } else {
-        right_shape
-    };
-
+    let shape = Shape::from(shape);
+    debug!("broadcast shape is {}", shape);
     Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
 }
 
