@@ -72,7 +72,7 @@ class BTreeTests(unittest.TestCase):
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(keys[29:32]))
 
-    def testDelete(self):
+    def testDeleteAll(self):
         keys = [(i, num2words(i)) for i in range(100)]
 
         cxt = tc.Context()

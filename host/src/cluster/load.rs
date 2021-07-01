@@ -62,8 +62,8 @@ pub async fn instantiate(
                     // make sure not to replicate ops internal to this OpDef
                     let op_def = op_def.reference_self(link.path());
 
-                    // make sure not to duplicate requests to other clusters
                     for (id, provider) in op_def.form() {
+                        // make sure not to duplicate requests to other clusters
                         if provider.is_inter_service_write(link.path()) {
                             return Err(TCError::unsupported(format!(
                                 "replicated op {} may not perform inter-service writes: {}",
@@ -78,6 +78,16 @@ pub async fn instantiate(
                     // by routing them through the kernel
                     op_def.dereference_self(link.path())
                 };
+
+                for (id, provider) in op_def.form() {
+                    // make sure all writes to a chain subject are recorded
+                    if provider.is_derived_write() {
+                        return Err(TCError::unsupported(format!(
+                            "write op {} may not write to a derived view: {}",
+                            id, provider
+                        )));
+                    }
+                }
 
                 cluster_proto.insert(id, Scalar::Op(op_def));
             }

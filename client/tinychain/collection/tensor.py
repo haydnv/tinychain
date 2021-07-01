@@ -16,7 +16,10 @@ class Tensor(Collection):
 
     def __getitem__(self, bounds):
         if not isinstance(bounds, tuple):
-            bounds = tuple(bounds)
+            if hasattr(bounds, "__iter__"):
+                bounds = tuple(bounds)
+            else:
+                bounds = (bounds,)
 
         bounds = [
             Range.from_slice(x) if isinstance(x, slice)
@@ -158,14 +161,22 @@ class Tensor(Collection):
         rtype = Number if axis is None else Tensor
         return self._get("sum", axis, rtype)
 
-    def write(self, bounds, value):
+    def write(self, *args):
         """
         Write a `Tensor` or `Number` to the given slice of this one.
 
-        If `bounds` is `None`, this entire `Tensor` will be overwritten, broadcasting the `value` if necessary.
+        If only one argument is provided, it is assumed to be a value to write to this entire `Tensor`.
+        If two arguments are provided, the first is assumed to be the bounds of the write and the second the value.
         """
 
-        return self.__setitem__(bounds, value)
+        if len(args) == 1:
+            [value] = args
+            return self.__setitem__(None, value)
+        elif len(args) == 2:
+            [bounds, value] = args
+            return self.__setitem__(bounds, value)
+        else:
+            raise TypeError(f"Tensor.write accepts exactly one or two arguments (got {args})")
 
 
 class Dense(Tensor):

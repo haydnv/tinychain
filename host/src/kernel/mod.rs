@@ -336,7 +336,10 @@ fn execute<
                     .await?;
             } else {
                 let self_link = txn.link(cluster.path().to_vec().into());
-                debug!("{} is not leading this transaction, no need to notify owner", self_link);
+                debug!(
+                    "{} is not leading this transaction, no need to notify owner",
+                    self_link
+                );
             }
 
             handler(txn.clone(), cluster).await

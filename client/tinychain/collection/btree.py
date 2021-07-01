@@ -35,15 +35,14 @@ class BTree(Collection):
 
         return self._get("count", rtype=UInt)
 
-    def delete(self):
+    def delete(self, key=None):
         """
-        Delete the contents of this `BTree`.
+        Delete the contents of this `BTree` beginning with the specified prefix.
 
-        To delete all keys beginning with a specific prefix, call
-        `btree[prefix].delete()`.
+        If no prefix is specified, the entire contents of this `BTree` will be deleted.
         """
 
-        return self._delete("")
+        return self._delete("", key)
 
     def first(self):
         """

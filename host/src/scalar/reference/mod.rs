@@ -42,6 +42,9 @@ pub trait Refer {
     /// This is used to control whether or not an OpDef will be replicated.
     fn dereference_self(self, path: &TCPathBuf) -> Self;
 
+    /// Return `true` if this references a write operation to a derived view.
+    fn is_derived_write(&self) -> bool;
+
     /// Return `true` if this references a write operation to a cluster other than the path given.
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool;
 
@@ -156,6 +159,16 @@ impl Refer for TCRef {
                 Self::If(Box::new(if_ref))
             }
             Self::Op(op_ref) => Self::Op(op_ref.dereference_self(path)),
+        }
+    }
+
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::After(after) => after.is_derived_write(),
+            Self::Case(case) => case.is_derived_write(),
+            Self::Id(id_ref) => id_ref.is_derived_write(),
+            Self::If(if_ref) => if_ref.is_derived_write(),
+            Self::Op(op_ref) => op_ref.is_derived_write(),
         }
     }
 

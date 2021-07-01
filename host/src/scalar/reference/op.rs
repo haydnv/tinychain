@@ -11,7 +11,7 @@ use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -117,6 +117,12 @@ impl Subject {
     }
 }
 
+impl From<IdRef> for Subject {
+    fn from(id_ref: IdRef) -> Self {
+        Self::Ref(id_ref, TCPathBuf::default())
+    }
+}
+
 impl FromStr for Subject {
     type Err = TCError;
 
@@ -132,6 +138,15 @@ impl FromStr for Subject {
             }
         } else {
             Link::from_str(s).map(Self::Link)
+        }
+    }
+}
+
+impl From<Subject> for Scalar {
+    fn from(subject: Subject) -> Self {
+        match subject {
+            Subject::Ref(id_ref, path) => Scalar::Tuple(Tuple::from((id_ref.into(), path.into()))),
+            Subject::Link(link) => Scalar::Value(link.into()),
         }
     }
 }
@@ -321,6 +336,14 @@ impl Refer for OpRef {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::Put((Subject::Ref(id_ref, _path), _, _)) => id_ref.id() != &SELF,
+            Self::Delete((Subject::Ref(id_ref, _path), _)) => id_ref.id() != &SELF,
+            _ => false,
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         let subject = match self {
             Self::Put((Subject::Link(link), _, _)) => Some(link),
@@ -456,6 +479,17 @@ impl Refer for OpRef {
     }
 }
 
+impl CastFrom<OpRef> for Tuple<Scalar> {
+    fn cast_from(value: OpRef) -> Self {
+        match value {
+            OpRef::Get((subject, key)) => (subject.into(), key).into(),
+            OpRef::Put((subject, key, value)) => (subject.into(), key, value).into(),
+            OpRef::Post((subject, params)) => (subject.into(), params.into()).cast_into(),
+            OpRef::Delete((subject, key)) => (subject.into(), key).cast_into(),
+        }
+    }
+}
+
 pub struct OpRefVisitor;
 
 impl OpRefVisitor {
@@ -474,6 +508,8 @@ impl OpRefVisitor {
     }
 
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<OpRef, E> {
+        debug!("OpRefVisitor::visit_ref_value {} {}", subject, params);
+
         match params {
             Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
             Scalar::Tuple(mut tuple) if tuple.len() == 1 => {

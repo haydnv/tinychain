@@ -49,6 +49,10 @@ impl Refer for IdRef {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        false
+    }
+
     fn is_inter_service_write(&self, _cluster_path: &[PathSegment]) -> bool {
         false
     }

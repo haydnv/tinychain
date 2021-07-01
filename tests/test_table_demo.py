@@ -42,7 +42,7 @@ class Web(tc.Cluster):
     def add_view(self, txn, key: tc.String):
         txn.views = self.views(key)
         return tc.After(
-            self.cache[key, txn.views].delete(),
+            self.cache.delete(key),
             self.cache.insert([key, txn.views + 1]))
 
 

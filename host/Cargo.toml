@@ -42,13 +42,13 @@ serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
 tbon = "~0.2.1"
-tc-btree = "~0.1.4"
+tc-btree = { path = "btree" }
 tc-error = "~0.2.2"
-tc-table = "~0.1.4"
+tc-table = { path = "table" }
 tc-tensor = { path = "tensor", optional = true }
-tc-transact = "~0.6.2"
-tc-value = "~0.1.10"
-tcgeneric = "~0.1.8"
+tc-transact = { path = "transact" }
+tc-value = { path = "value" }
+tcgeneric = { path = "generic" }
 tokio = { version = "1.7", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"

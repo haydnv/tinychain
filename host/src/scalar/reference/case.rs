@@ -46,6 +46,12 @@ impl Refer for Case {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        self.cond.is_derived_write()
+            || self.switch.iter().any(|scalar| scalar.is_derived_write())
+            || self.case.iter().any(|scalar| scalar.is_derived_write())
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.cond.is_inter_service_write(cluster_path)
             || self

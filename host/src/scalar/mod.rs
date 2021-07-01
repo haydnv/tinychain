@@ -12,7 +12,7 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -191,7 +191,27 @@ impl Scalar {
                     .map(Scalar::Ref),
 
                 RT::Op(ort) => {
-                    if let Some(tuple) = Tuple::<Scalar>::opt_cast_from(self) {
+                    debug!("cast into op ref from {}", self);
+
+                    if ort == ORT::Delete && self.matches::<(Scalar, Scalar)>() {
+                        // TODO: is there a better way to handle this edge case?
+                        debug!("cast into DELETE ref from {}", self);
+
+                        let (subject, key): (Scalar, Scalar) = self.opt_cast_into().unwrap();
+                        let delete_ref = match subject {
+                            Scalar::Ref(tc_ref) => match *tc_ref {
+                                TCRef::Id(id_ref) => Some((id_ref.into(), key)),
+                                TCRef::Op(OpRef::Get((subject, none))) if none.is_none() => {
+                                    Some((subject, key))
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+
+                        delete_ref.map(OpRef::Delete).map(TCRef::Op).map(Self::from)
+                    } else if self.matches::<Tuple<Scalar>>() {
+                        let tuple: Tuple<Scalar> = self.opt_cast_into().unwrap();
                         debug!("cast into {} from tuple {}", ort, tuple);
 
                         let op_ref = match ort {
@@ -284,6 +304,16 @@ impl Refer for Scalar {
         }
     }
 
+    fn is_derived_write(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(|scalar| scalar.is_derived_write()),
+            Self::Op(op_def) => op_def.is_derived_write(),
+            Self::Ref(tc_ref) => tc_ref.is_derived_write(),
+            Self::Tuple(tuple) => tuple.iter().any(|scalar| scalar.is_derived_write()),
+            _ => false,
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::Map(map) => map
@@ -372,6 +402,12 @@ impl Refer for Scalar {
     }
 }
 
+impl From<IdRef> for Scalar {
+    fn from(id_ref: IdRef) -> Self {
+        Self::Ref(Box::new(TCRef::Id(id_ref)))
+    }
+}
+
 impl From<Link> for Scalar {
     fn from(link: Link) -> Self {
         Value::from(link).into()
@@ -393,6 +429,12 @@ impl From<OpRef> for Scalar {
 impl From<Range> for Scalar {
     fn from(range: Range) -> Self {
         Self::Range(range)
+    }
+}
+
+impl From<TCPathBuf> for Scalar {
+    fn from(path: TCPathBuf) -> Self {
+        Self::Value(path.into())
     }
 }
 

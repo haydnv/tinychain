@@ -32,10 +32,14 @@ class Table(Collection):
 
         return self._get("count", rtype=UInt)
 
-    def delete(self):
-        """Delete all contents of this `Table`."""
+    def delete(self, where=None):
+        """
+        Delete all contents of this `Table` matching the specified where clause.
 
-        return self._delete("")
+        If no where clause is specified, all contents of this `Table` will be deleted.
+        """
+
+        return self._delete("", where)
 
     def group_by(self, columns):
         """
@@ -83,13 +87,17 @@ class Table(Collection):
         return self._get("select", columns, Table)
 
     def update(self, **values):
-        """
-        Update this `Table`\'s rows to the given values.
-
-        To limit the range of the update, use the `where` method, e.g. `table.where(foo="bar").update(foo="baz")`.
-        """
+        """Update this `Table`\'s rows to the given values."""
 
         return self._put("", None, values)
+
+    def update_where(self, where, values):
+        """Update this `Table`\'s rows to the given values."""
+
+        if isinstance(where, dict):
+            where = _handle_where(where)
+
+        return self._put("", where, values)
 
     def upsert(self, key, values=[]):
         """
@@ -100,15 +108,18 @@ class Table(Collection):
 
         return self._put("", key, values)
 
-    def where(self, **cond):
+    def where(self, **where):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
         If there is no index which supports the given range, this will raise a :class:`BadRequest` error.
         """
 
-        cond = {
-            col: Range.from_slice(val) if isinstance(val, slice) else val
-            for col, val in cond.items()}
+        where = _handle_where(where)
+        return self._post("", Table, **where)
 
-        return self._post("", Table, **cond)
+def _handle_where(where):
+    return {
+        col: Range.from_slice(val) if isinstance(val, slice) else val
+        for col, val in where.items()
+    }
