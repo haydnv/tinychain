@@ -15,7 +15,7 @@ categories = ["concurrency", "data-structures", "hardware-support", "mathematics
 pkg-config = "0.3"
 
 [dependencies]
-afarray = { version = "~0.6.1" }
+afarray = "~0.6.2"
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.4"

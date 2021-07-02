@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
-use afarray::{Array, ArrayExt, CoordBlocks, Coords, Offsets};
-use futures::stream::{self, Stream, TryStreamExt};
+use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use tc_btree::Node;
 use tc_error::*;
@@ -18,13 +18,13 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     txn: &T,
     shape: Shape,
     coords: C,
-) -> TCResult<impl Stream<Item = TCResult<Coord>> + Unpin>
+) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    C: Stream<Item = TCResult<Coord>> + Unpin + Send,
+    C: Stream<Item = TCResult<Coords>> + Unpin + Send,
     D::FileClass: From<TensorType>,
 {
     let txn_id = *txn.id();
@@ -38,7 +38,8 @@ where
         .into_stream(txn_id)
         .map_ok(|array| array.type_cast());
 
-    let coords = offsets_to_coords(shape, offsets);
+    let coords = offsets_to_coords(shape.clone(), offsets);
+    let coords = CoordUnique::new(coords, shape.to_vec(), PER_BLOCK);
     Ok(coords)
 }
 
@@ -52,13 +53,15 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    C: Stream<Item = TCResult<Coord>> + Send + Unpin + 'a,
+    C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
     A: TensorAccess + ReadValueAt<D, Txn = T> + 'a + Clone,
     D::FileClass: From<TensorType>,
 {
     let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
 
     let buffered = coords
+        .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
+        .try_flatten()
         .map_ok(move |coord| source.clone().read_value_at(txn.clone(), coord))
         .try_buffered(num_cpus::get());
 
@@ -76,7 +79,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    S: Stream<Item = TCResult<Coord>> + Send + Unpin,
+    S: Stream<Item = TCResult<Coords>> + Send + Unpin,
 {
     let blocks = coords_to_offsets(shape, coords).map_ok(|block| ArrayExt::from(block).into());
 
@@ -88,20 +91,16 @@ where
     Ok(block_list)
 }
 
-fn coords_to_offsets<S: Stream<Item = TCResult<Coord>> + Unpin>(
+fn coords_to_offsets<S: Stream<Item = TCResult<Coords>> + Unpin>(
     shape: Shape,
     coords: S,
 ) -> impl Stream<Item = TCResult<Offsets>> {
-    CoordBlocks::new(coords, shape.len(), PER_BLOCK).map_ok(move |coords| coords.to_offsets(&shape))
+    coords.map_ok(move |coords| coords.to_offsets(&shape))
 }
 
 fn offsets_to_coords<'a, S: Stream<Item = TCResult<Offsets>> + Unpin + 'a>(
     shape: Shape,
     offsets: S,
-) -> impl Stream<Item = TCResult<Coord>> + Unpin + 'a {
-    offsets
-        .map_ok(move |block| Coords::from_offsets(block, &shape))
-        .map_ok(move |coords| coords.into_vec().into_iter().map(Ok))
-        .map_ok(stream::iter)
-        .try_flatten()
+) -> impl Stream<Item = TCResult<Coords>> + Unpin + 'a {
+    offsets.map_ok(move |block| Coords::from_offsets(block, &shape))
 }

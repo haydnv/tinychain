@@ -413,7 +413,7 @@ pub struct Transpose {
     source_shape: Shape,
     shape: Shape,
     permutation: Vec<usize>,
-    inverse_permutation: Vec<u64>,
+    inverse_permutation: Vec<usize>,
 }
 
 impl Transpose {
@@ -441,7 +441,7 @@ impl Transpose {
 
         let mut inverse_permutation = vec![0; ndim];
         for (i, x) in permutation.iter().enumerate() {
-            inverse_permutation[*x] = i as u64;
+            inverse_permutation[*x] = i;
         }
 
         Ok(Transpose {
@@ -454,6 +454,12 @@ impl Transpose {
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
         axes.into_iter().map(|x| self.permutation[x]).collect()
+    }
+
+    pub fn map_axes(&self, axes: &[usize]) -> Vec<usize> {
+        axes.into_iter()
+            .map(|x| self.inverse_permutation[*x])
+            .collect()
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {
@@ -505,5 +511,10 @@ impl Transpose {
         }
 
         coord
+    }
+
+    pub fn map_coords(&self, coords: Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.permutation.len());
+        coords.transpose(Some(&self.permutation))
     }
 }

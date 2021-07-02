@@ -173,7 +173,7 @@ impl std::error::Error for TCError {}
 impl From<afarray::ArrayError> for TCError {
     fn from(cause: afarray::ArrayError) -> Self {
         Self {
-            code: ErrorType::BadRequest,
+            code: ErrorType::Internal,
             message: format!("tensor error: {}", cause),
         }
     }

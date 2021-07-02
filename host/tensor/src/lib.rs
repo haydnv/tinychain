@@ -922,7 +922,11 @@ where
     L: TensorAccess + TensorTransform,
     R: TensorAccess + TensorTransform,
 {
-    debug!("broadcast tensors with shapes {}, {}", left.shape(), right.shape());
+    debug!(
+        "broadcast tensors with shapes {}, {}",
+        left.shape(),
+        right.shape()
+    );
 
     let mut left_shape = left.shape().to_vec();
     let mut right_shape = right.shape().to_vec();

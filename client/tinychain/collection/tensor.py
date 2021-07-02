@@ -15,24 +15,11 @@ class Tensor(Collection):
     __uri__ = uri(Collection) + "/tensor"
 
     def __getitem__(self, bounds):
-        if not isinstance(bounds, tuple):
-            bounds = tuple(bounds)
-
-        bounds = [
-            Range.from_slice(x) if isinstance(x, slice)
-            else x for x in bounds]
-
+        bounds = _handle_bounds(bounds)
         return self._get("", bounds, Tensor)
 
     def __setitem__(self, bounds, value):
-        if bounds is not None:
-            if not isinstance(bounds, tuple):
-                bounds = tuple(bounds)
-
-            bounds = [
-                Range.from_slice(x) if isinstance(x, slice)
-                else x for x in bounds]
-
+        bounds = _handle_bounds(bounds)
         return self._put("", bounds, value)
 
     def __add__(self, other):
@@ -158,14 +145,21 @@ class Tensor(Collection):
         rtype = Number if axis is None else Tensor
         return self._get("sum", axis, rtype)
 
-    def write(self, bounds, value):
+    def write(self, *args):
         """
         Write a `Tensor` or `Number` to the given slice of this one.
 
-        If `bounds` is `None`, this entire `Tensor` will be overwritten, broadcasting the `value` if necessary.
+        If only one argument if provided, it will overwrite this entire `Tensor`, broadcasting if necessary.
         """
 
-        return self.__setitem__(bounds, value)
+        if len(args) == 1:
+            [value] = args
+            return self.__setitem__(None, value)
+        elif len(args) == 2:
+            [bounds, value] = args
+            return self.__setitem__(bounds, value)
+        else:
+            raise TypeError(f"Tensor.write takes exactly one or two arguments, not f{args}")
 
 
 class Dense(Tensor):
@@ -223,3 +217,16 @@ class Sparse(Tensor):
         """
 
         return cls(schema.Tensor(shape, dtype))
+
+def _handle_bounds(bounds):
+    if bounds is None:
+        return None
+
+    if hasattr(bounds, "__iter__"):
+        bounds = tuple(bounds)
+    else:
+        bounds = (bounds,)
+
+    return [
+        Range.from_slice(x) if isinstance(x, slice)
+        else x for x in bounds]

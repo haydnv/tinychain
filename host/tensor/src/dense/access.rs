@@ -632,7 +632,7 @@ where
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.shape().validate_bounds(&bounds)?;
 
-        let shape = bounds.to_shape();
+        let shape = bounds.to_shape(self.shape())?;
         let bounds = self.rebase.invert_bounds(bounds);
         let source = self.source.slice(bounds)?;
         BlockListBroadcast::new(source, shape)

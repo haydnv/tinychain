@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 
-use afarray::Array;
+use afarray::{Array, CoordBlocks, Coords};
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
+use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -14,14 +15,15 @@ use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSche
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
-use tcgeneric::{label, GroupStream, Id, Label};
+use tcgeneric::{label, Id, Label, TCTryStream};
 
 use crate::stream::{sorted_coords, Read, ReadValueAt};
 use crate::transform;
 use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::SparseTranspose;
-use super::{CoordStream, SparseAccess, SparseAccessor, SparseStream, SparseTensor};
+use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
+use crate::dense::PER_BLOCK;
 
 const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
@@ -109,10 +111,11 @@ where
         Ok(filled)
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
         let shape = self.shape();
         let shape = axes.iter().map(|x| shape[*x]).collect();
-        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
+        let filled_at = filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await?;
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -341,10 +344,11 @@ where
         Ok(filled)
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
         let shape = self.shape();
         let shape = axes.iter().map(|x| shape[*x]).collect();
-        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
+        let filled_at = filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await?;
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -438,7 +442,7 @@ async fn filled_at<'a, FD, FS, D, Txn, T>(
     shape: Shape,
     axes: Vec<usize>,
     table: T,
-) -> TCResult<CoordStream<'a>>
+) -> TCResult<impl Stream<Item = TCResult<Coords>> + Send + Unpin>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
@@ -447,11 +451,15 @@ where
     T: TableInstance<FS, D, Txn>,
     D::FileClass: From<TensorType>,
 {
+    debug!("SparseTable::filled_at {:?}", axes);
+
+    let ndim = axes.len();
     let coords = table.select(axes.into_iter().map(Id::from).collect())?;
     let coords = coords.rows(*txn.id()).await?;
     let coords = coords.map(|r| r.and_then(expect_coord));
+    let coords = CoordBlocks::new(coords, ndim, PER_BLOCK);
     let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, shape, coords).await?;
-    Ok(Box::pin(GroupStream::from(coords)))
+    Ok(coords)
 }
 
 fn slice_table<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(

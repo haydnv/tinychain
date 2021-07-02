@@ -8,7 +8,6 @@ from testutils import PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 
-
 class DenseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -20,7 +19,7 @@ class DenseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
-        cxt.result = tc.After(cxt.tensor.write([0, 0, 0], 0), cxt.tensor)
+        cxt.result = tc.After(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
         expected = expect_dense(tc.F64, shape, [0] + [c] * (product(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
@@ -37,16 +36,32 @@ class DenseTests(unittest.TestCase):
         expected = expect_dense(tc.I64, [2], np.arange(1, 11).reshape([2, 5])[1, 2:-1])
         self.assertEqual(actual, expected)
 
-    def testAdd(self):
-        shape = [5, 2, 1]
-
+    def testAssignSlice(self):
         cxt = tc.Context()
-        cxt.left = tc.tensor.Dense.arange(shape, 1., 6.)
-        cxt.right = tc.tensor.Dense.constant([5], 2)
+        cxt.big = tc.tensor.Dense.zeros([2, 2, 5])
+        cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
+        cxt.result = tc.After(cxt.big[1, 0:2].write(cxt.small[0]), cxt.big)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = np.zeros([2, 2, 5], np.int64)
+        expected[1, 0:2] = np.arange(1, 11).reshape(2, 5)[0]
+        expected = expect_dense(tc.I64, [2, 2, 5], expected.flatten())
+
+        self.assertEqual(actual, expected)
+
+    def testAdd(self):
+        cxt = tc.Context()
+        cxt.left = tc.tensor.Dense.arange([5, 2, 2], 1., 21.)
+        cxt.right = tc.tensor.Dense.constant([2, 5, 1, 2], 2)
         cxt.result = cxt.left + cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.F64, shape, np.arange(1, 6, 0.5) + 2)
+
+        left = np.arange(1., 21., 1.).reshape([5, 2, 2])
+        right = np.ones([2, 5, 1, 2], np.int32) * 2
+        expected = expect_dense(tc.F64, [2, 5, 2, 2], (left + right).flatten())
+
         self.assertEqual(actual, expected)
 
     def testDiv(self):
@@ -70,7 +85,11 @@ class DenseTests(unittest.TestCase):
         cxt.result = cxt.left * cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.I64, shape, np.arange(1, 11) * 2)
+
+        left = np.arange(1, 11).reshape(shape)
+        right = np.ones([5]) * 2
+        expected = left * right
+        expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
 
     def testSub(self):
@@ -166,7 +185,7 @@ class SparseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.tensor.write(coord, value), cxt.tensor)
+        cxt.result = tc.After(cxt.tensor[coord].write(value), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.I32, shape, [[coord, value]])
@@ -177,7 +196,7 @@ class SparseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
-        cxt.result = tc.After(cxt.tensor.write([None, slice(2, -1)], 1), cxt.tensor)
+        cxt.result = tc.After(cxt.tensor[None, slice(2, -1)].write(1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.F32, shape, [[[0, 2], 1], [[0, 3], 1], [[1, 2], 1], [[1, 3], 1]])
@@ -190,8 +209,8 @@ class SparseTests(unittest.TestCase):
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
         cxt.result = tc.After([
-            cxt.big.write([1], 1),
-            cxt.small.write([1], 2),
+            cxt.big[1].write(1),
+            cxt.small[1].write(2),
         ], cxt.big + cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -212,8 +231,8 @@ class SparseTests(unittest.TestCase):
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([1, 1])
         cxt.result = tc.After([
-            cxt.big.write([slice(2)], 1),
-            cxt.small.write([0], -2),
+            cxt.big[:2].write(1),
+            cxt.small[0].write(-2),
         ], cxt.big / cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -234,8 +253,8 @@ class SparseTests(unittest.TestCase):
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([5, 2])
         cxt.result = tc.After([
-            cxt.big.write([None, slice(1, -2)], 2),
-            cxt.small.write([1], 3),
+            cxt.big[:, 1:-2].write(2),
+            cxt.small[1].write(3),
         ], cxt.big * cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -256,8 +275,8 @@ class SparseTests(unittest.TestCase):
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I16)
         cxt.small = tc.tensor.Sparse.zeros([5, 2], tc.U32)
         cxt.result = tc.After([
-            cxt.big.write([None, slice(1, -2)], 2),
-            cxt.small.write([1], 3),
+            cxt.big[:, 1:-2].write(2),
+            cxt.small[1].write(3),
         ], cxt.small - cxt.big)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -277,7 +296,7 @@ class SparseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.big.write([0, slice(1, 3)], 2), cxt.big.sum(axis))
+        cxt.result = tc.After(cxt.big[0, 1:3].write(2), cxt.big.sum(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros(shape, dtype=np.int32)
@@ -291,7 +310,7 @@ class SparseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.big.write([0, slice(1, 3)], 2), cxt.big.product(axis))
+        cxt.result = tc.After(cxt.big[0, 1:3].write(2), cxt.big.product(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros(shape, dtype=np.int32)
@@ -313,7 +332,7 @@ class TensorTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
         cxt.sparse = tc.tensor.Sparse.zeros([5, 2], tc.I32)
-        cxt.result = tc.After(cxt.sparse.write([1], 3), cxt.dense + cxt.sparse)
+        cxt.result = tc.After(cxt.sparse[1].write(3), cxt.dense + cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(0, 30).reshape([3, 5, 2])
@@ -327,7 +346,7 @@ class TensorTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
-        cxt.result = tc.After(cxt.sparse.write([1], 2), cxt.sparse / cxt.dense)
+        cxt.result = tc.After(cxt.sparse[1].write(2), cxt.sparse / cxt.dense)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
@@ -340,7 +359,7 @@ class TensorTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
-        cxt.result = tc.After(cxt.sparse.write([0, slice(1, 3)], 2), cxt.dense * cxt.sparse)
+        cxt.result = tc.After(cxt.sparse[0, 1:3].write(2), cxt.dense * cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros([2, 3])
@@ -380,7 +399,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             def overwrite(self, txn):
                 txn.new = tc.tensor.Dense.constant([3], 2)
                 return [
-                    self.dense.write(None, txn.new),
+                    self.dense.write(txn.new),
                     self.sparse.write([0], txn.new)
                 ]
 

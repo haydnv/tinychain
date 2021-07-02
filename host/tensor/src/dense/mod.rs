@@ -551,11 +551,11 @@ where
     async fn write(self, txn: T, bounds: Bounds, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
         debug!("DenseTensor::write {} to {}", other, bounds);
 
-        let shape = bounds.to_shape();
+        let shape = bounds.to_shape(self.shape())?;
         let other = if other.shape() == &shape {
             other
         } else {
-            other.broadcast(bounds.to_shape())?
+            other.broadcast(shape)?
         };
 
         match other {

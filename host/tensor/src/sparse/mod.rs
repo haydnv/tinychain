@@ -35,7 +35,6 @@ mod access;
 mod combine;
 mod table;
 
-type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
 
@@ -477,7 +476,7 @@ where
         bounds: Bounds,
         other: Tensor<FD, FS, D, T>,
     ) -> TCResult<()> {
-        let shape = bounds.to_shape();
+        let shape = bounds.to_shape(self.shape())?;
         let other = if other.shape() == &shape {
             other
         } else {
