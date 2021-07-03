@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 
 use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use log::debug;
 
 use tc_btree::Node;
 use tc_error::*;
@@ -54,9 +55,13 @@ where
     D: Dir,
     T: Transaction<D>,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
-    A: TensorAccess + ReadValueAt<D, Txn = T> + 'a + Clone,
+    A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + 'a,
     D::FileClass: From<TensorType>,
 {
+    debug!(
+        "sort values by coordinate for Tensor with shape {}",
+        source.shape()
+    );
     let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
 
     let buffered = coords
@@ -81,6 +86,7 @@ where
     T: Transaction<D>,
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,
 {
+    debug!("sort coords for Tensor with shape {}", shape);
     let blocks = coords_to_offsets(shape, coords).map_ok(|block| ArrayExt::from(block).into());
 
     let block_list =

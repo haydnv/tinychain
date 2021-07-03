@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
+use log::debug;
 
 use tc_btree::*;
 use tc_error::*;
@@ -21,6 +22,10 @@ use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_NONBIJE
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
 use super::{DenseTensor, PER_BLOCK};
+
+const ERR_NON_SEQUENTIAL_WRITE: &str =
+    "non-sequential writes to a dense Tensor are not efficient--\
+consider transposing or broadcasting the value instead";
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
@@ -75,11 +80,11 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
     /// Return an Array with the values at the given coordinates.
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array>;
 
+    /// Overwrite this accessor's contents with those of the given accessor.
+    async fn write<V: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: V) -> TCResult<()>;
+
     /// Write a value to the slice of this [`DenseTensor`] with the given [`Bounds`].
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
-
-    /// Overwrite a single element of this [`DenseTensor`].
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()>;
 }
 
 /// A generic enum which can contain any [`DenseAccess`] impl
@@ -277,6 +282,21 @@ where
         }
     }
 
+    async fn write<V: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: V) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.write(txn, value).await,
+            Self::Slice(slice) => slice.write(txn, value).await,
+            Self::Broadcast(broadcast) => broadcast.write(txn, value).await,
+            Self::Cast(cast) => cast.write(txn, value).await,
+            Self::Combine(combine) => combine.write(txn, value).await,
+            Self::Expand(expansion) => expansion.write(txn, value).await,
+            Self::Reduce(reduced) => reduced.write(txn, value).await,
+            Self::Sparse(sparse) => sparse.write(txn, value).await,
+            Self::Transpose(transpose) => transpose.write(txn, value).await,
+            Self::Unary(unary) => unary.write(txn, value).await,
+        }
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         match self {
             Self::File(file) => file.write_value(txn_id, bounds, number).await,
@@ -289,21 +309,6 @@ where
             Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, number).await,
             Self::Transpose(transpose) => transpose.write_value(txn_id, bounds, number).await,
             Self::Unary(unary) => unary.write_value(txn_id, bounds, number).await,
-        }
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        match self {
-            Self::File(file) => file.write_value_at(txn_id, coord, value),
-            Self::Slice(slice) => slice.write_value_at(txn_id, coord, value),
-            Self::Broadcast(broadcast) => broadcast.write_value_at(txn_id, coord, value),
-            Self::Cast(cast) => cast.write_value_at(txn_id, coord, value),
-            Self::Combine(combine) => combine.write_value_at(txn_id, coord, value),
-            Self::Expand(expansion) => expansion.write_value_at(txn_id, coord, value),
-            Self::Reduce(reduced) => reduced.write_value_at(txn_id, coord, value),
-            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value),
-            Self::Transpose(transpose) => transpose.write_value_at(txn_id, coord, value),
-            Self::Unary(unary) => unary.write_value_at(txn_id, coord, value),
         }
     }
 }
@@ -446,6 +451,8 @@ where
     }
 
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+        debug!("BlockListCombine::block_stream");
+
         Box::pin(async move {
             let left = self.left.block_stream(txn.clone());
             let right = self.right.block_stream(txn);
@@ -455,7 +462,9 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(&l, &r));
+                .map_ok(move |(l, r)| {
+                    combinator(&l, &r)
+                });
 
             let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
@@ -497,14 +506,16 @@ where
         Ok((self.combinator)(&left, &right))
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+    async fn write<V: DenseAccess<FD, FS, D, T>>(
+        &self,
+        _txn: Self::Txn,
+        _value: V,
+    ) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(TCError::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 
@@ -647,14 +658,16 @@ where
         self.source.read_values(txn, coords).await
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+    async fn write<V: DenseAccess<FD, FS, D, T>>(
+        &self,
+        _txn: Self::Txn,
+        _value: V,
+    ) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(TCError::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 
@@ -776,12 +789,12 @@ where
             .await
     }
 
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.source.write_value(txn_id, bounds, number).await
+    async fn write<V: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: V) -> TCResult<()> {
+        self.source.write(txn, value).await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        self.source.write_value_at(txn_id, coord, value)
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.source.write_value(txn_id, bounds, number).await
     }
 }
 
@@ -903,14 +916,13 @@ where
         self.source.read_values(txn, coords).await
     }
 
+    async fn write<V: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: V) -> TCResult<()> {
+        self.source.write(txn, value).await
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.write_value(txn_id, bounds, number).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
     }
 }
 
@@ -1061,14 +1073,16 @@ where
         Ok(Array::from(values))
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+    async fn write<V: DenseAccess<FD, FS, D, T>>(
+        &self,
+        _txn: Self::Txn,
+        _value: V,
+    ) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(TCError::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 
@@ -1186,14 +1200,17 @@ where
         Err(TCError::not_implemented("BlockListTranspose::read_values"))
     }
 
+    async fn write<V: DenseAccess<FD, FS, D, T>>(
+        &self,
+        _txn: Self::Txn,
+        _value: V,
+    ) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NON_SEQUENTIAL_WRITE))
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.write_value(txn_id, bounds, number).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
     }
 }
 
@@ -1272,6 +1289,8 @@ where
     }
 
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+        debug!("BlockListSparse::value_stream");
+
         Box::pin(async move {
             let bounds = Bounds::all(self.shape());
             let zero = self.dtype().zero();
@@ -1305,16 +1324,34 @@ where
         Ok(Array::from(values))
     }
 
+    async fn write<V: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: V) -> TCResult<()> {
+        if value.shape() != self.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot write a value of shape {} to a tensor of shape {}",
+                value.shape(),
+                self.shape()
+            )));
+        }
+
+        let txn_id = *txn.id();
+        let bounds = Bounds::all(self.shape());
+        let values = value.value_stream(txn).await?;
+        let source = &self.source;
+        stream::iter(bounds.affected())
+            .zip(values)
+            .map(|(coord, r)| r.map(|n| (coord, n)))
+            .map_ok(|(coord, n)| source.write_value(txn_id, coord, n))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         stream::iter(bounds.affected())
             .map(|coord| self.source.write_value(txn_id, coord, number))
             .buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        self.source.write_value(txn_id, coord, value)
     }
 }
 
@@ -1467,14 +1504,16 @@ where
             .await
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+    async fn write<V: DenseAccess<FD, FS, D, T>>(
+        &self,
+        _txn: Self::Txn,
+        _value: V,
+    ) -> TCResult<()> {
         Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(TCError::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
+        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 

@@ -8,7 +8,7 @@ use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, TryStreamExt};
 use log::debug;
 
 use tc_btree::Node;
@@ -464,11 +464,15 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
-        self.blocks.clone().write_value(txn_id, bounds, value).await
+        self.blocks.write_value(txn_id, bounds, value).await
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.blocks.write_value_at(txn_id, coord, value).await
+        debug!("DenseTensor::write_value_at");
+
+        self.blocks
+            .write_value(txn_id, Bounds::from(coord), value)
+            .await
     }
 }
 
@@ -497,29 +501,21 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
     ) -> TCResult<()> {
         debug!("write {} to dense {}", other, bounds);
+        if bounds == Bounds::all(self.shape()) {
+            self.blocks.write(txn, other.blocks).await
+        } else {
+            let slice = self.slice(bounds)?;
+            if other.shape() != slice.shape() {
+                return Err(TCError::unsupported(format!(
+                    "cannot write a tensor of shape {} to a slice of shape {}",
+                    other.shape(),
+                    slice.shape()
+                )));
+            }
 
-        let txn_id = *txn.id();
-        let coords = bounds.affected();
-        let slice = self.slice(bounds.clone())?;
-        if other.shape() != slice.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot write a tensor of shape {} to a slice of shape {}",
-                other.shape(),
-                slice.shape()
-            )));
+            let bounds = Bounds::all(slice.shape());
+            slice.write(txn, bounds, other).await
         }
-
-        let other_values = other.blocks.value_stream(txn).await?;
-        let values = futures::stream::iter(coords).zip(other_values);
-
-        values
-            .map(|(coord, r)| r.map(|value| (coord, value)))
-            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await?;
-
-        Ok(())
     }
 }
 
@@ -609,6 +605,8 @@ where
     }
 
     fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        debug!("subtract {} from {}", other, self);
+
         fn sub_array(l: &Array, r: &Array) -> Array {
             debug_assert_eq!(l.len(), r.len());
             l - r

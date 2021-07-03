@@ -6,7 +6,7 @@ use afarray::{Array, CoordBlocks, Coords};
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
 
 use tc_btree::{BTreeType, Node};
@@ -112,6 +112,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if self.is_empty(&txn).await? {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let shape = self.shape();
         let shape = axes.iter().map(|x| shape[*x]).collect();
         let filled_at = filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await?;
@@ -120,6 +124,10 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
+        self.table.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -345,6 +353,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if self.is_empty(&txn).await? {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let shape = self.shape();
         let shape = axes.iter().map(|x| shape[*x]).collect();
         let filled_at = filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await?;
@@ -353,6 +365,11 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
+        let mut rows = self.table.clone().rows(*txn.id()).await?;
+        rows.try_next().map_ok(|v| v.is_some()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {

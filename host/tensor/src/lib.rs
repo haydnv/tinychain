@@ -34,8 +34,8 @@ mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
-bijection of its source. Consider copying first, or writing directly to the source Tensor.";
+const ERR_NONBIJECTIVE_WRITE: &str = "cannot write to a derived Tensor which is not a \
+bijection of its source--consider copying first, or writing directly to the source Tensor";
 
 /// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";

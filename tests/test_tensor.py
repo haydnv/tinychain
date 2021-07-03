@@ -368,13 +368,17 @@ class TensorTests(unittest.TestCase):
         self.assertEqual(actual, expect_sparse(tc.I64, [2, 3], expected))
 
     def testSubAndSum(self):
+        x = 300
+        y = 250
+        z = 2
+
         cxt = tc.Context()
-        cxt.sparse = tc.tensor.Sparse.zeros([30, 250, 2])
-        cxt.dense = tc.tensor.Dense.ones([30, 1, 2], tc.I32)
+        cxt.sparse = tc.tensor.Sparse.zeros([1, y, z])
+        cxt.dense = tc.tensor.Dense.ones([x, 1, z], tc.I32)
         cxt.result = (cxt.sparse - cxt.dense).sum()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, -15000)
+        self.assertEqual(actual, -(x * y * z))
 
     @classmethod
     def tearDownClass(cls):

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::iter;
 
 use afarray::Coords;
-use log::debug;
 
 use tc_error::*;
 use tcgeneric::Tuple;
@@ -384,10 +383,7 @@ impl Slice {
     }
 
     pub fn invert_coords(&self, coords: &Coords) -> Coords {
-        debug!("slice {} from {}", self.bounds, self.source_shape);
-        debug!("slice coords {:?}", coords.to_vec());
         let source_coords = coords.unslice(&self.source_shape, &self.elided, &self.offset);
-        debug!("source coords {:?}", source_coords.to_vec());
         source_coords
     }
 

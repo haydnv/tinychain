@@ -3,7 +3,7 @@ use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 
-use afarray::{Array, ArrayExt, ArrayInstance, Coords};
+use afarray::{Array, ArrayExt, ArrayInstance, CoordBlocks, Coords, Offsets};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::de;
@@ -59,6 +59,8 @@ where
 {
     /// Construct a new `BlockListFile` with the given [`Shape`], filled with the given `value`.
     pub async fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
+        debug!("BlockListFile::constant {} {}", shape, value);
+
         if !file.is_empty(&txn_id).await? {
             return Err(TCError::unsupported(
                 "cannot create new tensor: file is not empty",
@@ -145,13 +147,26 @@ where
         dtype: NumberType,
         values: S,
     ) -> TCResult<Self> {
+        debug!("BlockListFile::from_values {}", shape);
+
         let mut i = 0u64;
+        let mut size = 0u64;
         let mut values = values.chunks((Array::max_size() as usize) / dtype.size());
         while let Some(chunk) = values.next().await {
+            size += chunk.len() as u64;
             let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
             file.create_block(txn_id, block_id, block).await?;
             i += 1;
+        }
+
+        if size != shape.size() {
+            return Err(TCError::unsupported(format!(
+                "DenseTensor of shape {} requires {} values, found {}",
+                shape,
+                size,
+                shape.size()
+            )));
         }
 
         Ok(Self::new(file, Schema { shape, dtype }))
@@ -219,6 +234,32 @@ where
 
         Ok(())
     }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        if !self.shape().contains_coord(&coord) {
+            return Err(TCError::bad_request(
+                "invalid coordinate",
+                Tuple::from(coord),
+            ));
+        }
+
+        let value = value.into_type(self.dtype());
+
+        let offset: u64 = coord_bounds(self.shape())
+            .iter()
+            .zip(coord.iter())
+            .map(|(d, x)| d * x)
+            .sum();
+
+        let block_id = BlockId::from(offset / PER_BLOCK as u64);
+        let mut block = self.file.write_block(txn_id, block_id).await?;
+
+        let offset = offset % PER_BLOCK as u64;
+
+        (*block)
+            .set_value(offset as usize, value)
+            .map_err(TCError::from)
+    }
 }
 
 impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS, D, T> {
@@ -280,36 +321,61 @@ where
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
-        #[cfg(debug_assertions)]
-        {
-            for coord in coords.to_vec().into_iter() {
-                self.shape().validate_coord(&coord)?;
-            }
-        }
+        let txn_id = *txn.id();
+        let per_block = ArrayExt::from(&[PER_BLOCK as u64][..]);
 
         let offsets = coords.to_offsets(self.shape());
+        let block_offsets = &offsets / &per_block;
+        let block_ids = block_offsets.unique(false).to_vec();
+        let block_offsets = block_offsets.to_vec();
 
-        let per_block = ArrayExt::<u64>::from(&[PER_BLOCK as u64][..]);
-        let block_ids = &offsets / &per_block;
-        let indices = offsets % per_block;
+        let values = Array::constant(self.dtype().zero(), 0);
+        let file = self.file;
+        stream::iter(block_ids)
+            .map(|block_id| {
+                let index = block_offsets
+                    .iter()
+                    .zip(offsets.to_vec())
+                    .filter_map(|(b, o)| if b == &block_id { Some(o) } else { None })
+                    .collect::<ArrayExt<u64>>();
+
+                (block_id, index)
+            })
+            .map(|(block_id, index)| {
+                file.read_block(txn_id, block_id.into())
+                    .map_ok(move |block| block.get(&index))
+            })
+            .buffer_unordered(num_cpus::get())
+            .try_fold(values, |values, block_values| {
+                let values = Array::concatenate(&values, &block_values);
+                future::ready(Ok(values.expect("concatenate array")))
+            })
+            .await
+    }
+
+    async fn write<B: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: B) -> TCResult<()> {
+        if value.shape() != self.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot overwrite a Tensor of shape {} with one of shape {}",
+                self.shape(),
+                value.shape()
+            )));
+        }
 
         let txn_id = *txn.id();
-        let values = stream::iter(block_ids.to_vec().into_iter().zip(indices.to_vec()))
-            .map(move |(block_id, i)| {
-                self.file
-                    .clone()
-                    .read_block_owned(txn_id, block_id.into())
-                    .map_ok(move |block| {
-                        let i = i as usize;
-                        assert!(i < block.len());
-                        block.get_value(i)
-                    })
+        let num_blocks = div_ceil(value.size(), PER_BLOCK as u64);
+        let contents = value.block_stream(txn).await?;
+        stream::iter((0..num_blocks).map(BlockId::from))
+            .zip(contents)
+            .map(|(block_id, r)| r.map(|array| (block_id, array)))
+            .map_ok(|(block_id, array)| async {
+                let mut block = self.file.write_block(txn_id, block_id).await?;
+                *block = array;
+                Ok(())
             })
-            .buffered(num_cpus::get())
-            .try_collect::<Vec<Number>>()
-            .await?;
-
-        Ok(Array::from(values))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
     async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
@@ -324,27 +390,18 @@ where
         }
 
         bounds.normalize(self.shape());
-        let coord_bounds = coord_bounds(self.shape());
 
-        stream::iter(bounds.affected())
-            .chunks(PER_BLOCK)
-            .map(|coords| {
-                let ndim = coords[0].len();
-                let num_coords = coords.len() as u64;
-                let (block_ids, af_indices, af_offsets) = coord_block(
-                    coords.into_iter(),
-                    &coord_bounds,
-                    PER_BLOCK,
-                    ndim,
-                    num_coords,
-                );
+        let coords = stream::iter(bounds.affected().map(TCResult::Ok));
+        CoordBlocks::new(coords, bounds.len(), PER_BLOCK)
+            .map_ok(|coords| {
+                let (block_ids, af_indices, af_offsets) = coord_block(coords, self.shape());
 
                 let file = &self.file;
                 let value = value.clone();
                 let txn_id = txn_id;
 
-                Ok(async move {
-                    let mut start = 0f64;
+                async move {
+                    let mut start = 0;
                     for block_id in block_ids {
                         let value = value.clone();
                         let (block_offsets, new_start) =
@@ -359,39 +416,11 @@ where
                     }
 
                     Ok(())
-                })
+                }
             })
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |(), ()| future::ready(Ok(())))
             .await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        Box::pin(async move {
-            if !self.shape().contains_coord(&coord) {
-                return Err(TCError::bad_request(
-                    "invalid coordinate",
-                    Tuple::from(coord),
-                ));
-            }
-
-            let value = value.into_type(self.dtype());
-
-            let offset: u64 = coord_bounds(self.shape())
-                .iter()
-                .zip(coord.iter())
-                .map(|(d, x)| d * x)
-                .sum();
-
-            let block_id = BlockId::from(offset / PER_BLOCK as u64);
-            let mut block = self.file.write_block(txn_id, block_id).await?;
-
-            let offset = offset % PER_BLOCK as u64;
-
-            (*block)
-                .set_value(offset as usize, value)
-                .map_err(TCError::from)
-        })
     }
 }
 
@@ -869,37 +898,28 @@ where
         let shape = self.source.schema.shape;
         let mut bounds = self.rebase.bounds().clone();
         bounds.normalize(&shape);
-        let coord_bounds = coord_bounds(&shape);
 
-        let values = stream::iter(bounds.affected())
-            .chunks(PER_BLOCK)
-            .then(move |coords| {
-                let ndim = coords[0].len();
-                let num_coords = coords.len() as u64;
-                let file_clone = file.clone();
-                let (block_ids, af_indices, af_offsets) = coord_block(
-                    coords.into_iter(),
-                    &coord_bounds,
-                    PER_BLOCK,
-                    ndim,
-                    num_coords,
-                );
+        let ndim = bounds.len();
+        let coords = stream::iter(bounds.affected().map(TCResult::Ok));
+        let values = CoordBlocks::new(coords, ndim, PER_BLOCK).and_then(move |coords| {
+            let file_clone = file.clone();
+            let (block_ids, af_indices, af_offsets) = coord_block(coords, &shape);
 
-                Box::pin(async move {
-                    let mut start = 0.0f64;
-                    let mut values = vec![];
-                    for block_id in block_ids {
-                        let (block_offsets, new_start) =
-                            block_offsets(&af_indices, &af_offsets, start, block_id);
+            Box::pin(async move {
+                let mut start = 0;
+                let mut values = vec![];
+                for block_id in block_ids {
+                    let (block_offsets, new_start) =
+                        block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        let block = file_clone.read_block(txn_id, block_id.into()).await?;
-                        values.extend(block.get(&block_offsets.into()).to_vec());
-                        start = new_start;
-                    }
+                    let block = file_clone.read_block(txn_id, block_id.into()).await?;
+                    values.extend(block.get(&block_offsets.into()).to_vec());
+                    start = new_start;
+                }
 
-                    Ok(Array::from(values))
-                })
-            });
+                Ok(Array::from(values))
+            })
+        });
 
         let blocks: TCTryStream<Array> = Box::pin(values);
         Box::pin(future::ready(Ok(blocks)))
@@ -926,17 +946,75 @@ where
         self.source.write_value(txn_id, bounds, number).await
     }
 
-    fn write_value_at(
-        &'_ self,
-        txn_id: TxnId,
-        coord: Coord,
-        value: Number,
-    ) -> TCBoxTryFuture<'_, ()> {
-        Box::pin(async move {
-            self.shape().validate_coord(&coord)?;
-            let coord = self.rebase.invert_coord(&coord);
-            self.source.write_value_at(txn_id, coord, value).await
-        })
+    async fn write<B: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: B) -> TCResult<()> {
+        if self.shape() != value.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot overwrite a Tensor of shape {} with one of shape {}",
+                self.shape(),
+                value.shape()
+            )));
+        }
+
+        let size = self.size();
+        let rebase = &self.rebase;
+        let txn_id = *txn.id();
+        let offsets = (0..size)
+            .step_by(PER_BLOCK)
+            .map(|start| {
+                let end = start + PER_BLOCK as u64;
+                if end > size {
+                    Offsets::range(start, size)
+                } else {
+                    Offsets::range(start, end)
+                }
+            })
+            .map(|offsets| Coords::from_offsets(offsets, self.shape()))
+            .map(|coords| {
+                rebase
+                    .invert_coords(&coords)
+                    .to_offsets(self.source.shape())
+            });
+
+        let blocks = value.block_stream(txn).await?;
+
+        let af_per_block = af::constant(PER_BLOCK as u64, af::Dim4::new(&[1, 1, 1, 1]));
+        stream::iter(offsets)
+            .zip(blocks)
+            .map(|(offsets, r)| r.map(|array| (offsets, array)))
+            .map_ok(|(offsets, array)| {
+                let af_per_block = af_per_block.clone();
+
+                async move {
+                    let indices: ArrayExt<u64> =
+                        af::modulo(offsets.af(), &af_per_block, true).into();
+                    let block_offsets = af::div(offsets.af(), &af_per_block, true);
+                    let block_ids = ArrayExt::from(af::set_unique(&block_offsets, true)).to_vec();
+
+                    let mut start = 0;
+                    for block_id in block_ids.into_iter() {
+                        let af_block_id = ArrayExt::from(&[block_id][..]);
+                        let (len, _) = af::sum_all(&af::eq(&block_offsets, af_block_id.af(), true));
+                        let end = start + len as usize;
+                        let indices = indices.slice(start, end);
+                        let array = array.slice(start, end).map_err(TCError::from)?;
+
+                        let mut block = self
+                            .source
+                            .file
+                            .write_block(txn_id, block_id.into())
+                            .await?;
+
+                        block.set(&indices, &array)?;
+
+                        start = end;
+                    }
+
+                    Ok(())
+                }
+            })
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await
     }
 }
 
@@ -969,61 +1047,35 @@ fn div_ceil(l: u64, r: u64) -> u64 {
 }
 
 fn block_offsets(
-    af_indices: &af::Array<u64>,
-    af_offsets: &af::Array<u64>,
-    start: f64,
+    indices: &ArrayExt<u64>,
+    offsets: &ArrayExt<u64>,
+    start: usize,
     block_id: u64,
-) -> (af::Array<u64>, f64) {
-    assert_eq!(af_indices.elements(), af_offsets.elements());
+) -> (ArrayExt<u64>, usize) {
+    assert_eq!(indices.len(), offsets.len());
 
     let num_to_update = af::sum_all(&af::eq(
-        af_indices,
+        indices.af(),
         &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
         true,
     ))
     .0;
 
     if num_to_update == 0 {
-        return (af::Array::new_empty(af::Dim4::default()), start);
+        return (af::Array::new_empty(af::Dim4::default()).into(), start);
     }
 
-    debug_assert!((start as usize + num_to_update as usize) <= af_offsets.elements());
+    let end = start + num_to_update as usize;
+    let block_offsets = offsets.slice(start, end);
 
-    let num_to_update = num_to_update as f64;
-    let block_offsets = af::index(
-        af_offsets,
-        &[af::Seq::new(start, (start + num_to_update) - 1f64, 1f64)],
-    );
-
-    (block_offsets, (start + num_to_update))
+    (block_offsets, end)
 }
 
-fn coord_block<I: Iterator<Item = Coord>>(
-    coords: I,
-    coord_bounds: &[u64],
-    per_block: usize,
-    ndim: usize,
-    num_coords: u64,
-) -> (Coord, af::Array<u64>, af::Array<u64>) {
-    let coords: Vec<u64> = coords.flatten().collect();
-    assert!(coords.len() > 0);
-    assert!(ndim > 0);
+fn coord_block(coords: Coords, shape: &[u64]) -> (Vec<u64>, ArrayExt<u64>, Offsets) {
+    let af_per_block = af::constant(PER_BLOCK as u64, af::Dim4::new(&[1, 1, 1, 1]));
 
-    let af_per_block = af::constant(per_block as u64, af::Dim4::new(&[1, 1, 1, 1]));
-    let af_coord_bounds = af::Array::new(coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
-
-    let af_coords = af::Array::new(
-        &coords,
-        af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
-    );
-    let af_coords = af::mul(&af_coords, &af_coord_bounds, true);
-    let af_coords = af::sum(&af_coords, 0);
-
-    let af_offsets = af::modulo(&af_coords, &af_per_block, true);
-    let af_indices = af_coords / af_per_block;
-
-    let af_block_ids = af::set_unique(&af_indices, true);
-    let mut block_ids = vec![0u64; af_block_ids.elements()];
-    af_block_ids.host(&mut block_ids);
-    (block_ids, af_indices, af_offsets)
+    let offsets = coords.to_offsets(shape);
+    let block_offsets = ArrayExt::from(af::div(offsets.af(), &af_per_block, true));
+    let block_ids = block_offsets.unique(true);
+    (block_ids.to_vec(), block_offsets, offsets)
 }
