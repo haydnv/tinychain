@@ -3,6 +3,7 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::convert::TryInto;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::TryFutureExt;
 use log::debug;
@@ -17,6 +18,9 @@ use crate::gateway::Gateway;
 
 use super::request::*;
 use super::{Active, Txn, TxnId};
+
+const GRACE: Duration = Duration::from_secs(2);
+const INTERVAL: Duration = Duration::from_secs(1);
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
@@ -83,7 +87,7 @@ impl TxnServer {
 }
 
 fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Arc<Active>>>) {
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(INTERVAL.as_secs()));
 
     tokio::spawn(async move {
         loop {
@@ -99,7 +103,7 @@ async fn cleanup(workspace: &fs::Dir, txn_pool: &RwLock<HashMap<TxnId, Arc<Activ
         let mut txn_pool = txn_pool.write().await;
         let mut expired = Vec::with_capacity(txn_pool.len());
         for (txn_id, txn) in txn_pool.iter() {
-            if txn.expires() < &now {
+            if txn.expires() + GRACE < now {
                 debug!("transaction {} has expired", txn_id);
                 expired.push(*txn_id);
             }

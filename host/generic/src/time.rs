@@ -46,6 +46,26 @@ impl ops::Add<time::Duration> for NetworkTime {
     }
 }
 
+impl<'a> ops::Add<time::Duration> for &'a NetworkTime {
+    type Output = NetworkTime;
+
+    fn add(self, other: time::Duration) -> NetworkTime {
+        NetworkTime {
+            nanos: self.nanos + other.as_nanos() as u64,
+        }
+    }
+}
+
+impl ops::Add<&NetworkTime> for Duration {
+    type Output = NetworkTime;
+
+    fn add(self, other: &NetworkTime) -> NetworkTime {
+        NetworkTime {
+            nanos: self.as_nanos() as u64 + other.nanos,
+        }
+    }
+}
+
 impl TryFrom<time::SystemTime> for NetworkTime {
     type Error = TCError;
 
