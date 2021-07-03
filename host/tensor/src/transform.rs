@@ -1,22 +1,14 @@
 use std::collections::HashMap;
 use std::iter;
 
+use afarray::Coords;
+
 use tc_error::*;
+use tcgeneric::Tuple;
 
 use crate::bounds::{AxisBounds, Bounds, Shape};
 
 use super::Coord;
-
-pub trait Rebase {
-    type Invert;
-    type Map;
-
-    fn invert_bounds(&self, bounds: Bounds) -> Bounds;
-
-    fn invert_coord(&self, coord: &[u64]) -> Self::Invert;
-
-    fn map_coord(&self, coord: Coord) -> Self::Map;
-}
 
 #[derive(Clone)]
 pub struct Broadcast {
@@ -81,13 +73,8 @@ impl Broadcast {
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
     }
-}
 
-impl Rebase for Broadcast {
-    type Invert = Coord;
-    type Map = Bounds;
-
-    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let source_ndim = self.source_shape.len();
         let mut source_bounds = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
@@ -101,7 +88,7 @@ impl Rebase for Broadcast {
         source_bounds.into()
     }
 
-    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         let source_ndim = self.source_shape.len();
         let mut source_coord = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
@@ -115,7 +102,12 @@ impl Rebase for Broadcast {
         source_coord
     }
 
-    fn map_coord(&self, coord: Coord) -> Self::Map {
+    pub fn invert_coords(&self, coords: &Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.shape.len());
+        coords.unbroadcast(&self.source_shape, &self.broadcast)
+    }
+
+    pub fn map_coord(&self, coord: Coord) -> Bounds {
         self.map_bounds(coord.into())
     }
 }
@@ -161,13 +153,8 @@ impl Expand {
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
     }
-}
 
-impl Rebase for Expand {
-    type Invert = Coord;
-    type Map = Coord;
-
-    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.expand {
             bounds.remove(self.expand);
         }
@@ -175,7 +162,7 @@ impl Rebase for Expand {
         bounds
     }
 
-    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         assert_eq!(coord.len(), self.shape.len());
 
         let mut inverted = Vec::with_capacity(self.source_shape.len());
@@ -188,8 +175,12 @@ impl Rebase for Expand {
         inverted
     }
 
-    fn map_coord(&self, mut coord: Coord) -> Self::Map {
-        assert_eq!(coord.len(), self.source_shape.len());
+    pub fn invert_coords(&self, coords: &Coords) -> Coords {
+        coords.contract_dim(self.expand)
+    }
+
+    pub fn map_coord(&self, mut coord: Coord) -> Coord {
+        debug_assert_eq!(coord.len(), self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
     }
@@ -244,13 +235,8 @@ impl Reduce {
 
         reduce_axis
     }
-}
 
-impl Rebase for Reduce {
-    type Invert = Bounds;
-    type Map = Coord;
-
-    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.axis {
             bounds
         } else {
@@ -259,14 +245,10 @@ impl Rebase for Reduce {
         }
     }
 
-    fn invert_coord(&self, coord: &[u64]) -> Bounds {
+    pub fn invert_coord(&self, coord: &[u64]) -> Bounds {
         let mut bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
         bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
         bounds.into()
-    }
-
-    fn map_coord(&self, _coord: Coord) -> Coord {
-        panic!("Reduced coordinate has no mapping")
     }
 }
 
@@ -339,13 +321,8 @@ impl Slice {
     pub fn size(&self) -> u64 {
         self.shape.size()
     }
-}
 
-impl Rebase for Slice {
-    type Invert = Coord;
-    type Map = Coord;
-
-    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         bounds.normalize(&self.shape);
 
         if bounds.is_empty() || bounds == Bounds::all(self.shape()) {
@@ -387,7 +364,7 @@ impl Rebase for Slice {
         source_bounds.into()
     }
 
-    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         assert_eq!(coord.len(), self.shape.len());
 
         let mut source_coord = Vec::with_capacity(self.source_shape.len());
@@ -405,7 +382,12 @@ impl Rebase for Slice {
         source_coord
     }
 
-    fn map_coord(&self, source_coord: Coord) -> Self::Map {
+    pub fn invert_coords(&self, coords: &Coords) -> Coords {
+        let source_coords = coords.unslice(&self.source_shape, &self.elided, &self.offset);
+        source_coords
+    }
+
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
         assert_eq!(source_coord.len(), self.source_shape.len());
 
         let mut coord = Vec::with_capacity(self.shape.len());
@@ -427,29 +409,24 @@ pub struct Transpose {
     source_shape: Shape,
     shape: Shape,
     permutation: Vec<usize>,
+    inverse_permutation: Vec<usize>,
 }
 
 impl Transpose {
     pub fn new(source_shape: Shape, permutation: Option<Vec<usize>>) -> TCResult<Transpose> {
         let ndim = source_shape.len();
-        let permutation = permutation
-            .or_else(|| {
-                let mut axes: Vec<usize> = (0..ndim).collect();
-                axes.reverse();
-                Some(axes)
-            })
-            .unwrap();
+        let permutation = permutation.unwrap_or_else(|| {
+            let mut axes: Vec<usize> = (0..ndim).collect();
+            axes.reverse();
+            axes
+        });
 
         if permutation.len() != ndim {
-            let permutation: Vec<String> = permutation.iter().map(|x| x.to_string()).collect();
-            return Err(TCError::bad_request(
-                "invalid permutation for transpose",
-                format!(
-                    "Tensor with shape {} cannot transpose axes ({})",
-                    source_shape,
-                    permutation.join(", ")
-                ),
-            ));
+            return Err(TCError::unsupported(format!(
+                "tensor with shape {} cannot transpose axes {}",
+                source_shape,
+                Tuple::from(permutation)
+            )));
         }
 
         let mut shape: Coord = Vec::with_capacity(ndim);
@@ -457,10 +434,17 @@ impl Transpose {
             shape.push(source_shape[*axis]);
         }
         let shape: Shape = shape.into();
+
+        let mut inverse_permutation = vec![0; ndim];
+        for (i, x) in permutation.iter().enumerate() {
+            inverse_permutation[*x] = i;
+        }
+
         Ok(Transpose {
             source_shape,
             shape,
             permutation,
+            inverse_permutation,
         })
     }
 
@@ -468,20 +452,17 @@ impl Transpose {
         axes.into_iter().map(|x| self.permutation[x]).collect()
     }
 
-    pub fn invert_permutation(&self, _bounds: &Bounds) -> Vec<usize> {
-        todo!()
+    pub fn map_axes(&self, axes: &[usize]) -> Vec<usize> {
+        axes.into_iter()
+            .map(|x| self.inverse_permutation[*x])
+            .collect()
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
     }
-}
 
-impl Rebase for Transpose {
-    type Invert = Coord;
-    type Map = Coord;
-
-    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let mut source_bounds = Bounds::all(&self.source_shape);
         for axis in 0..bounds.len() {
             source_bounds[self.permutation[axis]] = bounds[axis].clone();
@@ -489,7 +470,7 @@ impl Rebase for Transpose {
         source_bounds
     }
 
-    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         assert_eq!(coord.len(), self.permutation.len());
 
         let mut source_coord = vec![0; coord.len()];
@@ -500,7 +481,24 @@ impl Rebase for Transpose {
         source_coord
     }
 
-    fn map_coord(&self, source_coord: Coord) -> Self::Map {
+    pub fn invert_coords(&self, coords: &Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.permutation.len());
+        coords.transpose(Some(&self.inverse_permutation))
+    }
+
+    pub fn invert_permutation(&self, bounds: &Bounds) -> Vec<usize> {
+        let mut permutation = Vec::with_capacity(self.shape.len());
+        for (i, bound) in bounds.iter().enumerate() {
+            if bound.is_index() {
+                // pass
+            } else {
+                permutation.push(self.permutation[i]);
+            }
+        }
+        permutation
+    }
+
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
         assert_eq!(source_coord.len(), self.permutation.len());
 
         let mut coord = vec![0; source_coord.len()];
@@ -509,5 +507,10 @@ impl Rebase for Transpose {
         }
 
         coord
+    }
+
+    pub fn map_coords(&self, coords: Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.permutation.len());
+        coords.transpose(Some(&self.permutation))
     }
 }

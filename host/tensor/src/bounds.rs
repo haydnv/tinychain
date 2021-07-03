@@ -222,21 +222,40 @@ impl Bounds {
     }
 
     /// Return the [`Shape`] of the `Tensor` slice with these `Bounds`.
-    pub fn to_shape(&self) -> Shape {
-        let mut shape = Vec::with_capacity(self.len());
+    pub fn to_shape(&self, source_shape: &Shape) -> TCResult<Shape> {
+        if source_shape.len() < self.len() {
+            return Err(TCError::unsupported(format!(
+                "invalid bounds {} for shape {}",
+                self, source_shape
+            )));
+        }
+
+        let mut shape = source_shape.to_vec();
+
+        let mut axis = 0;
         for bound in &self.axes {
-            let dim = bound.dim();
-            if dim > 0 {
-                shape.push(dim);
+            match bound {
+                AxisBounds::In(range) => {
+                    shape[axis] = range.end - range.start;
+                    axis += 1;
+                }
+                AxisBounds::At(_) => {
+                    shape.remove(axis);
+                }
+                AxisBounds::Of(indices) => {
+                    shape[axis] = indices.len() as u64;
+                    axis += 1;
+                }
             }
         }
 
-        shape.into()
+        Ok(shape.into())
     }
 
-    /// Return the number of elements contained within these `Bounds`.
+    /// Return the size of the slice with these `Bounds`,
+    /// assuming they are of the same length as the source shape.
     pub fn size(&self) -> u64 {
-        self.to_shape().size()
+        self.axes.iter().map(|bound| bound.dim()).product()
     }
 }
 
@@ -335,7 +354,7 @@ impl fmt::Display for Bounds {
 }
 
 /// The shape of a `Tensor`
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct Shape(Vec<u64>);
 
 impl Shape {
@@ -442,14 +461,6 @@ impl DerefMut for Shape {
         &mut self.0
     }
 }
-
-impl PartialEq for Shape {
-    fn eq(&self, other: &Shape) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Shape {}
 
 impl From<Vec<u64>> for Shape {
     fn from(shape: Vec<u64>) -> Shape {

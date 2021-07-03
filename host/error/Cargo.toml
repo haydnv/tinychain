@@ -14,4 +14,4 @@ categories = ["data-structures", "rust-patterns"]
 tensor = ["afarray"]
 
 [dependencies]
-afarray = { version = "~0.4.1", optional = true }
+afarray = { version = "~0.6.3", optional = true }

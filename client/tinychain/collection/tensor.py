@@ -15,27 +15,11 @@ class Tensor(Collection):
     __uri__ = uri(Collection) + "/tensor"
 
     def __getitem__(self, bounds):
-        if not isinstance(bounds, tuple):
-            if hasattr(bounds, "__iter__"):
-                bounds = tuple(bounds)
-            else:
-                bounds = (bounds,)
-
-        bounds = [
-            Range.from_slice(x) if isinstance(x, slice)
-            else x for x in bounds]
-
+        bounds = _handle_bounds(bounds)
         return self._get("", bounds, Tensor)
 
     def __setitem__(self, bounds, value):
-        if bounds is not None:
-            if not isinstance(bounds, tuple):
-                bounds = tuple(bounds)
-
-            bounds = [
-                Range.from_slice(x) if isinstance(x, slice)
-                else x for x in bounds]
-
+        bounds = _handle_bounds(bounds)
         return self._put("", bounds, value)
 
     def __add__(self, other):
@@ -176,7 +160,7 @@ class Tensor(Collection):
             [bounds, value] = args
             return self.__setitem__(bounds, value)
         else:
-            raise TypeError(f"Tensor.write accepts exactly one or two arguments (got {args})")
+            raise TypeError(f"Tensor.write takes exactly one or two arguments, not f{args}")
 
 
 class Dense(Tensor):
@@ -234,3 +218,16 @@ class Sparse(Tensor):
         """
 
         return cls(schema.Tensor(shape, dtype))
+
+def _handle_bounds(bounds):
+    if bounds is None:
+        return None
+
+    if hasattr(bounds, "__iter__"):
+        bounds = tuple(bounds)
+    else:
+        bounds = (bounds,)
+
+    return [
+        Range.from_slice(x) if isinstance(x, slice)
+        else x for x in bounds]

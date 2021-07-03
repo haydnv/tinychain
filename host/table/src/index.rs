@@ -866,7 +866,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         index
             .map(|values| values.and_then(|values| schema.row_from_values(values)))
             .map_ok(|row| self.update_row(*txn.id(), row, update.clone()))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 

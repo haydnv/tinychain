@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, PathSegment, TCBoxTryFuture};
+use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -124,42 +124,70 @@ impl<'a> Handler<'a> for DualHandler {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let r = params.require(&label("r").into())?;
+                let l = self.tensor;
+                let r: Tensor = params.require(&label("r").into())?;
                 params.expect_empty()?;
 
-                let (l, r) = broadcast(self.tensor, r)?;
-                debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
-
-                (self.op)(l, r).map(Collection::from).map(State::from)
+                if l.shape() == r.shape() {
+                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
+                    (self.op)(l, r).map(Collection::from).map(State::from)
+                } else {
+                    let (l, r) = broadcast(l, r)?;
+                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
+                    (self.op)(l, r).map(Collection::from).map(State::from)
+                }
             })
         }))
     }
 }
 
-struct DualHandlerAsync<T, F> {
-    tensor: T,
-    op: fn(T, Tensor, Txn) -> F,
+struct DualHandlerAsync<F> {
+    tensor: Tensor,
+    op: fn(Tensor, Tensor, Txn) -> F,
 }
 
-impl<T, F> DualHandlerAsync<T, F> {
-    fn new(tensor: T, op: fn(T, Tensor, Txn) -> F) -> Self {
+impl<F> DualHandlerAsync<F> {
+    fn new<T>(tensor: T, op: fn(Tensor, Tensor, Txn) -> F) -> Self
+    where
+        Tensor: From<T>,
+    {
+        let tensor = tensor.into();
         Self { tensor, op }
     }
 }
 
-impl<'a, T, F> Handler<'a> for DualHandlerAsync<T, F>
+impl<'a, F> Handler<'a> for DualHandlerAsync<F>
 where
-    T: Send + Sync + 'a,
     F: Future<Output = TCResult<Tensor>> + Send + 'a,
 {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let other = params.require(&label("r").into())?;
-                (self.op)(self.tensor, other, txn)
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
+                let l = self.tensor;
+                let r: Tensor = params.require(&label("r").into())?;
+
+                if l.shape() == r.shape() {
+                    debug!(
+                        "tensor dual async op with shapes: {}, {}",
+                        l.shape(),
+                        r.shape()
+                    );
+
+                    (self.op)(l, r, txn)
+                } else {
+                    let (l, r) = broadcast(l, r)?;
+
+                    debug!(
+                        "tensor dual async op with shapes: {}, {}",
+                        l.shape(),
+                        r.shape()
+                    );
+
+                    (self.op)(l, r, txn)
+                }
+                .map_ok(Collection::from)
+                .map_ok(State::from)
+                .await
             })
         }))
     }
@@ -221,12 +249,14 @@ where
         + Clone
         + Send
         + Sync,
+    <T as TensorTransform>::Slice: TensorAccess + Send,
     Collection: From<T>,
     Collection: From<<T as TensorTransform>::Slice>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
+                debug!("GET Tensor: {}", key);
                 let bounds = cast_bounds(self.tensor.shape(), key)?;
                 self.tensor
                     .slice(bounds)
@@ -238,6 +268,7 @@ where
 
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(move |txn, key, value| {
+            debug!("PUT Tensor: {} <- {}", key, value);
             Box::pin(write(self.tensor, txn, key, value))
         }))
     }
@@ -344,6 +375,7 @@ where
         + Send
         + Sync,
     Tensor: From<T>,
+    <T as TensorTransform>::Slice: TensorAccess + Send,
     Collection: From<T>,
     Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Collection: From<<T as TensorTransform>::Slice>,
@@ -419,8 +451,14 @@ where
 
 async fn write<T>(tensor: T, txn: Txn, key: Value, value: State) -> TCResult<()>
 where
-    T: TensorAccess + TensorIO<fs::Dir, Txn = Txn> + TensorDualIO<fs::Dir, Tensor, Txn = Txn>,
+    T: TensorAccess
+        + TensorIO<fs::Dir, Txn = Txn>
+        + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorTransform
+        + Clone,
+    <T as TensorTransform>::Slice: TensorAccess + Send,
 {
+    debug!("write {} to {}", value, key);
     let bounds = cast_bounds(tensor.shape(), key)?;
 
     match value {
@@ -461,6 +499,8 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
 }
 
 fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
+    debug!("cast range from {} with dimension {}", range, dim);
+
     let start = match range.start {
         Bound::Un => 0,
         Bound::In(start) => cast_bound(dim, start)?,
@@ -473,11 +513,18 @@ fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
         Bound::Ex(end) => cast_bound(dim, end)?,
     };
 
-    Ok(AxisBounds::In(start..end))
+    if end > start {
+        Ok(AxisBounds::In(start..end))
+    } else {
+        Err(TCError::bad_request(
+            "invalid range",
+            Tuple::from(vec![start, end]),
+        ))
+    }
 }
 
 pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
-    debug!("tensor bounds from {}", value);
+    debug!("tensor bounds from {} (shape is {})", value, shape);
 
     match value {
         Value::None => Ok(Bounds::all(shape)),
@@ -508,6 +555,11 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
             let mut axes = Vec::with_capacity(shape.len());
 
             for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
+                debug!(
+                    "bound for axis {} with dimension {} is {}",
+                    axis, shape[axis], bound
+                );
+
                 let bound = if bound.is_none() {
                     AxisBounds::all(shape[axis])
                 } else if bound.matches::<Range>() {

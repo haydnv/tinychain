@@ -34,8 +34,8 @@ mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
-bijection of its source. Consider copying first, or writing directly to the source Tensor.";
+const ERR_NONBIJECTIVE_WRITE: &str = "cannot write to a derived Tensor which is not a \
+bijection of its source--consider copying first, or writing directly to the source Tensor";
 
 /// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";
@@ -917,20 +917,16 @@ impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T> {
 ///
 /// For rules of broadcasting, see:
 /// [https://pytorch.org/docs/stable/notes/broadcasting.html](https://pytorch.org/docs/stable/notes/broadcasting.html)
-pub fn broadcast<FD, FS, D, T>(
-    left: Tensor<FD, FS, D, T>,
-    right: Tensor<FD, FS, D, T>,
-) -> TCResult<(Tensor<FD, FS, D, T>, Tensor<FD, FS, D, T>)>
+pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
-    D: Dir,
-    T: Transaction<D>,
-    D::FileClass: From<TensorType>,
+    L: TensorAccess + TensorTransform,
+    R: TensorAccess + TensorTransform,
 {
-    if left.shape() == right.shape() {
-        return Ok((left, right));
-    }
+    debug!(
+        "broadcast tensors with shapes {}, {}",
+        left.shape(),
+        right.shape()
+    );
 
     let mut left_shape = left.shape().to_vec();
     let mut right_shape = right.shape().to_vec();
@@ -963,14 +959,8 @@ where
         }
     }
 
-    let left_shape = Shape::from(left_shape);
-    let right_shape = Shape::from(right_shape);
-    let shape = if left_shape.size() > right_shape.size() {
-        left_shape
-    } else {
-        right_shape
-    };
-
+    let shape = Shape::from(shape);
+    debug!("broadcast shape is {}", shape);
     Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
 }
 
@@ -992,4 +982,11 @@ impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
             txn: PhantomData,
         }
     }
+}
+
+#[inline]
+fn coord_bounds(shape: &[u64]) -> Vec<u64> {
+    (0..shape.len())
+        .map(|axis| shape[axis + 1..].iter().product())
+        .collect()
 }

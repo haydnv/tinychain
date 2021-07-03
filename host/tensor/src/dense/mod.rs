@@ -8,7 +8,7 @@ use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, TryStreamExt};
 use log::debug;
 
 use tc_btree::Node;
@@ -130,8 +130,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    FD: File<Array>,
+    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -180,14 +180,38 @@ where
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
     fn and(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
     fn or(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
     fn xor(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
@@ -246,6 +270,14 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn eq(l: Number, r: Number) -> Number {
             Number::from(l == r)
         }
@@ -254,6 +286,14 @@ where
     }
 
     fn gt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn gt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -266,6 +306,14 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn gte(l: Number, r: Number) -> Number {
             Number::from(l >= r)
         }
@@ -274,6 +322,14 @@ where
     }
 
     fn lt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn lt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -286,6 +342,14 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn lte(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -294,6 +358,14 @@ where
     }
 
     fn ne(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot combine tensor of shape {} with one of shape {}",
+                other.shape(),
+                self.shape()
+            )));
+        }
+
         fn ne(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -392,11 +464,15 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
-        self.blocks.clone().write_value(txn_id, bounds, value).await
+        self.blocks.write_value(txn_id, bounds, value).await
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.blocks.write_value_at(txn_id, coord, value).await
+        debug!("DenseTensor::write_value_at");
+
+        self.blocks
+            .write_value(txn_id, Bounds::from(coord), value)
+            .await
     }
 }
 
@@ -424,25 +500,22 @@ where
         bounds: Bounds,
         other: DenseTensor<FD, FS, D, T, O>,
     ) -> TCResult<()> {
-        debug!("write dense tensor to dense {}", bounds);
+        debug!("write {} to dense {}", other, bounds);
+        if bounds == Bounds::all(self.shape()) {
+            self.blocks.write(txn, other.blocks).await
+        } else {
+            let slice = self.slice(bounds)?;
+            if other.shape() != slice.shape() {
+                return Err(TCError::unsupported(format!(
+                    "cannot write a tensor of shape {} to a slice of shape {}",
+                    other.shape(),
+                    slice.shape()
+                )));
+            }
 
-        let dtype = self.dtype();
-        let txn_id = *txn.id();
-        let coords = bounds.affected();
-        let slice = self.slice(bounds.clone())?;
-        let other = other.broadcast(slice.shape().clone())?.cast_into(dtype)?;
-
-        let other_values = other.blocks.value_stream(txn).await?;
-        let values = futures::stream::iter(coords).zip(other_values);
-
-        values
-            .map(|(coord, r)| r.map(|value| (coord, value)))
-            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await?;
-
-        Ok(())
+            let bounds = Bounds::all(slice.shape());
+            slice.write(txn, bounds, other).await
+        }
     }
 }
 
@@ -459,6 +532,12 @@ where
     type Txn = T;
 
     async fn mask(self, txn: T, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
+        let other = if self.shape() == other.shape() {
+            other
+        } else {
+            other.broadcast(self.shape().clone())?
+        };
+
         match other {
             Tensor::Dense(dense) => self.mask(txn, dense).await,
             Tensor::Sparse(sparse) => self.mask(txn, sparse.into_dense()).await,
@@ -467,6 +546,13 @@ where
 
     async fn write(self, txn: T, bounds: Bounds, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
         debug!("DenseTensor::write {} to {}", other, bounds);
+
+        let shape = bounds.to_shape(self.shape())?;
+        let other = if other.shape() == &shape {
+            other
+        } else {
+            other.broadcast(shape)?
+        };
 
         match other {
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
@@ -490,6 +576,7 @@ where
 
     fn add(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn add_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l + r
         }
 
@@ -499,6 +586,7 @@ where
 
     fn div(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn div_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l / r
         }
 
@@ -508,6 +596,7 @@ where
 
     fn mul(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn mul_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l * r
         }
 
@@ -516,7 +605,10 @@ where
     }
 
     fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        debug!("subtract {} from {}", other, self);
+
         fn sub_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
             l - r
         }
 
@@ -553,7 +645,7 @@ where
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
-            Tensor::Sparse(sparse) => self.into_sparse().mul(sparse).map(Tensor::from),
+            Tensor::Sparse(sparse) => sparse.mul(self.into_sparse()).map(Tensor::from),
         }
     }
 
@@ -860,9 +952,16 @@ where
     }
 }
 
-impl<FD, FS, D, T, B> fmt::Display for DenseTensor<FD, FS, D, T, B> {
+impl<FD, FS, D, T, B> fmt::Display for DenseTensor<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a dense Tensor")
+        write!(f, "a dense Tensor with shape {}", self.shape())
     }
 }
 

@@ -362,7 +362,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.delete_row(txn_id, row))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
@@ -409,7 +409,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.update_row(*txn.id(), row, value.clone()))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
@@ -614,7 +614,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
         let merge = keys
             .map_ok(move |key| Bounds::from_key(key, &key_columns))
             .try_filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
-            .and_then(move |bounds| Box::pin(left_clone.clone().slice_rows(txn_id, bounds, false)))
+            .map_ok(move |bounds| Box::pin(left_clone.clone().slice_rows(txn_id, bounds, false)))
+            .try_buffered(num_cpus::get())
             .try_flatten();
 
         Ok(Box::pin(merge))
@@ -642,7 +643,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(*txn.id(), row, value.clone()))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
@@ -945,7 +946,7 @@ where
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(txn_id, row))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
@@ -1010,7 +1011,7 @@ where
 
         rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(txn_id, row, value.clone()))
-            .try_buffer_unordered(2)
+            .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
