@@ -180,38 +180,14 @@ where
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
     fn and(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
     fn or(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
     fn xor(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
@@ -270,14 +246,6 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn eq(l: Number, r: Number) -> Number {
             Number::from(l == r)
         }
@@ -286,14 +254,6 @@ where
     }
 
     fn gt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn gt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -306,14 +266,6 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn gte(l: Number, r: Number) -> Number {
             Number::from(l >= r)
         }
@@ -322,14 +274,6 @@ where
     }
 
     fn lt(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn lt(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -342,14 +286,6 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
         _txn: Self::Txn,
     ) -> TCResult<Self::Dense> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn lte(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -358,14 +294,6 @@ where
     }
 
     fn ne(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Compare> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot combine tensor of shape {} with one of shape {}",
-                other.shape(),
-                self.shape()
-            )));
-        }
-
         fn ne(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }

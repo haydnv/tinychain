@@ -302,8 +302,7 @@ where
         {
             let contents = self.contents.read(&txn_id).await?;
             if !contents.contains(&name) {
-                panic!("missing block at {}", name);
-                // return Err(TCError::not_found(name));
+                return Err(TCError::not_found(name));
             }
         }
 
