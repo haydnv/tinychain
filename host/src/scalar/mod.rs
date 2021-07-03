@@ -10,7 +10,8 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::future::{try_join_all, TryFutureExt};
+use futures::future::TryFutureExt;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -381,21 +382,30 @@ impl Refer for Scalar {
 
         match self {
             Self::Map(map) => {
-                let resolved =
-                    try_join_all(map.into_iter().map(|(id, scalar)| {
-                        scalar.resolve(context, txn).map_ok(|state| (id, state))
-                    }))
-                    .await?;
+                let mut resolved = stream::iter(map)
+                    .map(|(id, scalar)| scalar.resolve(context, txn).map_ok(|state| (id, state)))
+                    .buffer_unordered(num_cpus::get());
 
-                Ok(State::Map(Map::from_iter(resolved)))
+                let mut map = Map::new();
+                while let Some((id, state)) = resolved.try_next().await? {
+                    map.insert(id, state);
+                }
+
+                Ok(State::Map(map))
             }
             Self::Ref(tc_ref) => tc_ref.resolve(context, txn).await,
             Self::Tuple(tuple) => {
-                let resolved =
-                    try_join_all(tuple.into_iter().map(|scalar| scalar.resolve(context, txn)))
-                        .await?;
+                let len = tuple.len();
+                let mut resolved = stream::iter(tuple)
+                    .map(|scalar| scalar.resolve(context, txn))
+                    .buffered(num_cpus::get());
 
-                Ok(State::Tuple(resolved.into()))
+                let mut tuple = Vec::with_capacity(len);
+                while let Some(state) = resolved.try_next().await? {
+                    tuple.push(state);
+                }
+
+                Ok(State::Tuple(tuple.into()))
             }
             other => Ok(State::Scalar(other)),
         }

@@ -223,11 +223,14 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             actual = host.get("/test/table/table")
             self.assertEqual(actual, expected([["two", 2]]))
 
-        n = 100
-        for i in range(n):
-            hosts[0].put("/test/table/table", [num2words(i)], [i])
+        total = 100
+        for n in range(total):
+            i = random.choice(range(self.NUM_HOSTS))
+            hosts[i].put("/test/table/table", [num2words(n)], [n])
 
-        self.assertEqual(hosts[1].get("/test/table/table/count"), n)
+        for i in range(len(hosts)):
+            count = hosts[i].get("/test/table/table/count")
+            self.assertEqual(total, count, f"host {i}")
 
 
 class ErrorTest(unittest.TestCase):

@@ -3,14 +3,13 @@
 use std::collections::{BTreeMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
-use futures::future::try_join_all;
-use futures::TryFutureExt;
+use futures::future::TryFutureExt;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::TryCastFrom;
 
@@ -289,22 +288,30 @@ impl Refer for State {
 
         match self {
             Self::Map(map) => {
-                let resolved = try_join_all(
-                    map.into_iter()
-                        .map(|(id, state)| state.resolve(context, txn).map_ok(|s| (id, s))),
-                )
-                .await?;
+                let mut resolved = stream::iter(map)
+                    .map(|(id, state)| state.resolve(context, txn).map_ok(|state| (id, state)))
+                    .buffer_unordered(num_cpus::get());
 
-                let map = BTreeMap::from_iter(resolved);
-                Ok(State::Map(map.into()))
+                let mut map = Map::new();
+                while let Some((id, state)) = resolved.try_next().await? {
+                    map.insert(id, state);
+                }
+
+                Ok(State::Map(map))
             }
             Self::Scalar(scalar) => scalar.resolve(context, txn).await,
             Self::Tuple(tuple) => {
-                let resolved =
-                    try_join_all(tuple.into_iter().map(|state| state.resolve(context, txn)))
-                        .await?;
+                let len = tuple.len();
+                let mut resolved = stream::iter(tuple)
+                    .map(|state| state.resolve(context, txn))
+                    .buffered(num_cpus::get());
 
-                Ok(State::Tuple(resolved.into()))
+                let mut tuple = Vec::with_capacity(len);
+                while let Some(state) = resolved.try_next().await? {
+                    tuple.push(state);
+                }
+
+                Ok(State::Tuple(tuple.into()))
             }
             other => Ok(other),
         }
