@@ -1,6 +1,6 @@
 [package]
 name = "tc-tensor"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["haydnv"]
 edition = "2018"
 description = "Tinychain's Tensor collection type. Unstable."
@@ -26,9 +26,9 @@ num_cpus = "1.13"
 pin-project = "1.0"
 safecast = "0.1"
 strided = "~0.2.9"
-tc-btree = { path = "../btree" }
-tc-error = { path = "../error", features = ["tensor"] }
-tc-value = { path = "../value" }
-tc-table = { path = "../table" }
-tc-transact = { path = "../transact", features = ["tensor"] }
-tcgeneric = { path = "../generic" }
+tc-btree = "~0.1.5"
+tc-error = { version = "~0.2.3", features = ["tensor"] }
+tc-value = "~0.1.11"
+tc-table = "~0.1.4"
+tc-transact = { version = "~0.6.3", features = ["tensor"] }
+tcgeneric = "~0.1.9"
