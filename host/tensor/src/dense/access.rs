@@ -462,9 +462,7 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| {
-                    combinator(&l, &r)
-                });
+                .map_ok(move |(l, r)| combinator(&l, &r));
 
             let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)

@@ -327,28 +327,24 @@ where
         let offsets = coords.to_offsets(self.shape());
         let block_offsets = &offsets / &per_block;
         let block_ids = block_offsets.unique(false).to_vec();
-        let block_offsets = block_offsets.to_vec();
 
-        let values = Array::constant(self.dtype().zero(), 0);
+        let values = Array::constant(self.dtype().zero(), coords.len());
         let file = self.file;
         stream::iter(block_ids)
             .map(|block_id| {
-                let index = block_offsets
-                    .iter()
-                    .zip(offsets.to_vec())
-                    .filter_map(|(b, o)| if b == &block_id { Some(o) } else { None })
-                    .collect::<ArrayExt<u64>>();
-
-                (block_id, index)
+                let af_block_id = af::Array::new(&[block_id], af::Dim4::new(&[1, 1, 1, 1]));
+                let mask = ArrayExt::from(af::eq(block_offsets.af(), &af_block_id, true));
+                let indices = (&offsets % &per_block).af() * mask.af();
+                (block_id, mask.into(), indices.into())
             })
-            .map(|(block_id, index)| {
+            .map(|(block_id, mask, indices)| {
                 file.read_block(txn_id, block_id.into())
-                    .map_ok(move |block| block.get(&index))
+                    .map_ok(move |block| block.get(&indices))
+                    .map_ok(move |block_values| &block_values * &mask)
             })
             .buffer_unordered(num_cpus::get())
             .try_fold(values, |values, block_values| {
-                let values = Array::concatenate(&values, &block_values);
-                future::ready(Ok(values.expect("concatenate array")))
+                future::ready(Ok(&values + &block_values))
             })
             .await
     }
@@ -939,13 +935,6 @@ where
         self.source.read_values(txn, coords).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.shape().validate_bounds(&bounds)?;
-
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, number).await
-    }
-
     async fn write<B: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: B) -> TCResult<()> {
         if self.shape() != value.shape() {
             return Err(TCError::unsupported(format!(
@@ -1015,6 +1004,13 @@ where
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |(), ()| future::ready(Ok(())))
             .await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.write_value(txn_id, bounds, number).await
     }
 }
 
