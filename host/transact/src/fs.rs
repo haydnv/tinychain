@@ -80,8 +80,8 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: Clone + en::IntoStream<'en> + 'en,
     {
-        let encoded = tbon::en::encode(self)
-            .map_err(|e| TCError::bad_request("serialization error", e))?;
+        let encoded =
+            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))
@@ -95,8 +95,8 @@ pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'stati
     where
         Self: en::ToStream<'en>,
     {
-        let encoded = tbon::en::encode(self)
-            .map_err(|e| TCError::bad_request("serialization error", e))?;
+        let encoded =
+            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
 
         encoded
             .map_err(|e| TCError::bad_request("serialization error", e))

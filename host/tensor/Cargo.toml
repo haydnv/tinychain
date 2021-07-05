@@ -15,10 +15,10 @@ categories = ["concurrency", "data-structures", "hardware-support", "mathematics
 pkg-config = "0.3"
 
 [dependencies]
-afarray = "~0.6.3"
+afarray = "~0.6.4"
 arrayfire = "3.8"
 async-trait = "0.1"
-destream = "0.4"
+destream = "0.5"
 futures = "0.3"
 itertools  = "0.10"
 log = { version = "0.4", features = ["release_max_level_warn"] }

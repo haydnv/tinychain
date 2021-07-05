@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use destream::{en, EncodeMap, Encoder};
+
 pub type TCResult<T> = Result<T, TCError>;
 
 /// The category of a `TCError`.
@@ -19,6 +21,27 @@ pub enum ErrorType {
     NotImplemented,
     Timeout,
     Unauthorized,
+}
+
+impl<'en> en::IntoStream<'en> for ErrorType {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        format!(
+            "/error/{}",
+            match self {
+                Self::BadGateway => "bad_gateway",
+                Self::BadRequest => "bad_request",
+                Self::Conflict => "conflict",
+                Self::Forbidden => "forbidden",
+                Self::Internal => "internal",
+                Self::MethodNotAllowed => "method_not_allowed",
+                Self::NotFound => "not_found",
+                Self::NotImplemented => "not_implemented",
+                Self::Timeout => "timeout",
+                Self::Unauthorized => "unauthorized",
+            }
+        )
+        .into_stream(encoder)
+    }
 }
 
 impl fmt::Debug for ErrorType {
@@ -168,6 +191,22 @@ impl TCError {
 }
 
 impl std::error::Error for TCError {}
+
+impl<'en> en::ToStream<'en> for TCError {
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.code, &self.message)?;
+        map.end()
+    }
+}
+
+impl<'en> en::IntoStream<'en> for TCError {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.code, self.message)?;
+        map.end()
+    }
+}
 
 #[cfg(feature = "tensor")]
 impl From<afarray::ArrayError> for TCError {

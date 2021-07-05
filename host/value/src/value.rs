@@ -8,9 +8,10 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use destream::de;
 use destream::de::Error as DestreamError;
 use destream::de::Visitor as DestreamVisitor;
-use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, MapAccess, ToStream};
+use destream::en;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -293,10 +294,10 @@ impl TryFrom<ValueType> for NumberType {
 }
 
 #[async_trait]
-impl FromStream for ValueType {
+impl de::FromStream for ValueType {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_any(ValueTypeVisitor).await
     }
 }
@@ -338,7 +339,7 @@ impl DestreamVisitor for ValueTypeVisitor {
         self.visit_path(path)
     }
 
-    async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(path) = access.next_key::<TCPathBuf>(()).await? {
             if let Ok(list) = access.next_value::<Tuple<Value>>(()).await {
                 if list.is_empty() {
@@ -494,16 +495,18 @@ where
 }
 
 #[async_trait]
-impl FromStream for Value {
+impl de::FromStream for Value {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(_context: (), decoder: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: de::Decoder>(_context: (), decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_any(ValueVisitor).await
     }
 }
 
-impl<'en> ToStream<'en> for Value {
-    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+impl<'en> en::ToStream<'en> for Value {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(bytes),
             Self::Id(id) => {
@@ -531,8 +534,10 @@ impl<'en> ToStream<'en> for Value {
     }
 }
 
-impl<'en> IntoStream<'en> for Value {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+impl<'en> en::IntoStream<'en> for Value {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
             Self::Id(id) => {

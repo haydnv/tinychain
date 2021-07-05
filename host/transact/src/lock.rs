@@ -230,16 +230,26 @@ impl<T: Mutate> TxnLock<T> {
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
         let lock = &mut self.inner.lock().unwrap();
 
-        let last_commit = lock.state.last_commit.as_ref().unwrap_or(&super::id::MIN_ID);
+        let last_commit = lock
+            .state
+            .last_commit
+            .as_ref()
+            .unwrap_or(&super::id::MIN_ID);
         if !lock.value_at.contains_key(txn_id) && txn_id < last_commit {
             // If the requested time is too old, just return an error.
             // We can't keep track of every historical version here.
-            debug!("transaction {} is already finalized, can't acquire read lock", txn_id);
+            debug!(
+                "transaction {} is already finalized, can't acquire read lock",
+                txn_id
+            );
             Err(TCError::conflict())
         } else if lock.state.reserved.is_some() && txn_id >= lock.state.reserved.as_ref().unwrap() {
             // If a writer can mutate the locked value at the requested time, wait it out.
             let past_write = lock.state.reserved.as_ref().unwrap();
-            debug!("TxnLock {} is already reserved for writing at {}", &self.name, past_write);
+            debug!(
+                "TxnLock {} is already reserved for writing at {}",
+                &self.name, past_write
+            );
             Ok(None)
         } else {
             // Otherwise, return a ReadGuard.

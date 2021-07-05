@@ -29,6 +29,7 @@ use super::{
 use access::*;
 pub use access::{BlockListSparse, DenseAccess, DenseAccessor};
 pub use file::BlockListFile;
+use futures::StreamExt;
 
 mod access;
 mod file;
@@ -965,13 +966,15 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
             ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
         };
 
-        fn encodable<'en, E: en::Error + 'en, T: af::HasAfEnum + Clone + Default + 'en>(
+        fn encodable<'en, T: af::HasAfEnum + Clone + Default + 'en>(
             blocks: TCTryStream<'en, Array>,
-        ) -> impl Stream<Item = Result<Vec<T>, E>> + 'en {
+        ) -> impl Stream<Item = Vec<T>> + 'en {
+            // an error can't be encoded within an array
+            // so in case of a read error, let the receiver figure out that the tensor
+            // doesn't have enough elements
             blocks
-                .map_ok(|arr| arr.type_cast())
-                .map_ok(|arr| arr.to_vec())
-                .map_err(en::Error::custom)
+                .take_while(|r| future::ready(r.is_ok()))
+                .map(|r| r.expect("tensor block").type_cast().to_vec())
         }
 
         match self.dtype {
@@ -1003,11 +1006,11 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
     }
 }
 
-fn encodable_c32<'en, E: en::Error + 'en>(
-    blocks: TCTryStream<'en, Array>,
-) -> impl Stream<Item = Result<Vec<f32>, E>> + 'en {
+fn encodable_c32<'en>(blocks: TCTryStream<'en, Array>) -> impl Stream<Item = Vec<f32>> + 'en {
     blocks
-        .map_ok(|arr| {
+        .take_while(|r| future::ready(r.is_ok()))
+        .map(|block| block.expect("tensor block"))
+        .map(|arr| {
             let source = arr.type_cast::<afarray::Complex<f32>>();
             let re = source.re();
             let im = source.im();
@@ -1022,14 +1025,13 @@ fn encodable_c32<'en, E: en::Error + 'en>(
 
             dest
         })
-        .map_err(en::Error::custom)
 }
 
-fn encodable_c64<'en, E: en::Error + 'en>(
-    blocks: TCTryStream<'en, Array>,
-) -> impl Stream<Item = Result<Vec<f64>, E>> + 'en {
+fn encodable_c64<'en>(blocks: TCTryStream<'en, Array>) -> impl Stream<Item = Vec<f64>> + 'en {
     blocks
-        .map_ok(|arr| {
+        .take_while(|r| future::ready(r.is_ok()))
+        .map(|block| block.expect("tensor block"))
+        .map(|arr| {
             let source = arr.type_cast::<afarray::Complex<f64>>();
             let re = source.re();
             let im = source.im();
@@ -1044,5 +1046,4 @@ fn encodable_c64<'en, E: en::Error + 'en>(
 
             dest
         })
-        .map_err(en::Error::custom)
 }

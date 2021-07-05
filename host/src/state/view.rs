@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use destream::en;
@@ -45,11 +44,12 @@ impl<'en> IntoView<'en, fs::Dir> for State {
             Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
             Self::Map(map) => {
                 let map_view = stream::iter(map.into_iter())
-                    .then(|(key, state)| state.into_view(txn.clone()).map_ok(|view| (key, view)))
-                    .try_collect::<Vec<(Id, StateView)>>()
+                    .map(|(key, state)| state.into_view(txn.clone()).map_ok(|view| (key, view)))
+                    .buffer_unordered(num_cpus::get())
+                    .try_collect::<HashMap<Id, StateView>>()
                     .await?;
 
-                Ok(StateView::Map(HashMap::from_iter(map_view)))
+                Ok(StateView::Map(map_view))
             }
             Self::Object(object) => {
                 object
@@ -61,7 +61,8 @@ impl<'en> IntoView<'en, fs::Dir> for State {
             Self::Scalar(scalar) => Ok(StateView::Scalar(scalar)),
             Self::Tuple(tuple) => {
                 let tuple_view = stream::iter(tuple.into_iter())
-                    .then(|state| state.into_view(txn.clone()))
+                    .map(|state| state.into_view(txn.clone()))
+                    .buffered(num_cpus::get())
                     .try_collect::<Vec<StateView>>()
                     .await?;
 

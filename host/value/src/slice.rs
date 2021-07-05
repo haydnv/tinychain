@@ -257,7 +257,7 @@ impl TryCastFrom<Tuple<Value>> for Range {
         let start = if start.matches::<Bound>() {
             match start.opt_cast_into().unwrap() {
                 Bound::In(value) if value.is_none() => Bound::Un,
-                bound => bound
+                bound => bound,
             }
         } else {
             Bound::In(start)

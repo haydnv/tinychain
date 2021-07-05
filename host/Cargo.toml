@@ -26,8 +26,8 @@ tensor = ["afarray", "tc-tensor"]
 afarray = { version = "~0.6.3", optional = true }
 async-trait = "0.1"
 bytes = "1.0"
-destream = "0.4"
-destream_json = { version = "~0.6.1", features = ["tokio-io"] }
+destream = "0.5"
+destream_json = { version = "0.7", features = ["tokio-io"] }
 env_logger = "0.8"
 freqache = "~0.2.2"
 futures = "0.3"
@@ -41,7 +41,7 @@ safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
-tbon = "~0.2.1"
+tbon = "0.3"
 tc-btree = { path = "btree" }
 tc-error = { path = "error" }
 tc-table = { path = "table" }

@@ -14,7 +14,7 @@ categories = ["database", "database-implementations", "data-structures"]
 [dependencies]
 async-trait = "0.1"
 collate = "~0.1.9"
-destream = "0.4"
+destream = "0.5"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"

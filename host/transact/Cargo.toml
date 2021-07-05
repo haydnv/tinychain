@@ -18,7 +18,7 @@ tensor = ["afarray"]
 afarray = { version = "~0.6.3", optional = true }
 async-trait = "0.1"
 bytes = "1.0"
-destream = "0.4"
+destream = "0.5"
 env_logger = "0.8"
 futures = "0.3"
 hex = "0.4"
@@ -26,7 +26,7 @@ log = { version = "0.4", features = [] }
 rand = "0.8"
 serde = { version = "1.0", features = []}
 sha2 = "0.9"
-tbon = { version = "~0.2.2", features = ["tokio-io"] }
+tbon = { version = "0.3", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
