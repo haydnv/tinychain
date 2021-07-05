@@ -1,6 +1,6 @@
 [package]
 name = "tc-table"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["haydnv"]
 edition = "2018"
 description = "Tinychain's Table collection type. Unstable."
@@ -19,7 +19,7 @@ futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
-tc-btree = "~0.1.4"
+tc-btree = "~0.1.5"
 tc-error = "~0.2.3"
 tc-transact = "~0.6.3"
 tc-value = "~0.1.11"
