@@ -154,11 +154,7 @@ pub trait TensorBoolean<O> {
 }
 
 /// Tensor comparison operations
-#[async_trait]
-pub trait TensorCompare<D: Dir, O> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<D>;
-
+pub trait TensorCompare<O> {
     /// The result of a comparison operation
     type Compare: TensorInstance;
 
@@ -166,19 +162,19 @@ pub trait TensorCompare<D: Dir, O> {
     type Dense: TensorInstance;
 
     /// Element-wise equality
-    async fn eq(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+    fn eq(self, other: O) -> TCResult<Self::Dense>;
 
     /// Element-wise greater-than
     fn gt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-or-equal
-    async fn gte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+    fn gte(self, other: O) -> TCResult<Self::Dense>;
 
     /// Element-wise less-than
     fn lt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise less-or-equal
-    async fn lte(self, other: O, txn: Self::Txn) -> TCResult<Self::Dense>;
+    fn lte(self, other: O) -> TCResult<Self::Dense>;
 
     /// Element-wise not-equal
     fn ne(self, other: O) -> TCResult<Self::Compare>;
@@ -457,8 +453,7 @@ where
     }
 }
 
-#[async_trait]
-impl<FD, FS, D, T> TensorCompare<D, Self> for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorCompare<Self> for Tensor<FD, FS, D, T>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
@@ -466,14 +461,13 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
-    type Txn = T;
     type Compare = Self;
     type Dense = Self;
 
-    async fn eq(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
+    fn eq(self, other: Self) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.eq(other, txn).await,
-            Self::Sparse(sparse) => sparse.eq(other, txn).await,
+            Self::Dense(dense) => dense.eq(other),
+            Self::Sparse(sparse) => sparse.eq(other),
         }
     }
 
@@ -484,10 +478,10 @@ where
         }
     }
 
-    async fn gte(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
+    fn gte(self, other: Self) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.gte(other, txn).await,
-            Self::Sparse(sparse) => sparse.gte(other, txn).await,
+            Self::Dense(dense) => dense.gte(other),
+            Self::Sparse(sparse) => sparse.gte(other),
         }
     }
 
@@ -498,10 +492,10 @@ where
         }
     }
 
-    async fn lte(self, other: Self, txn: Self::Txn) -> TCResult<Self> {
+    fn lte(self, other: Self) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.lte(other, txn).await,
-            Self::Sparse(sparse) => sparse.lte(other, txn).await,
+            Self::Dense(dense) => dense.lte(other),
+            Self::Sparse(sparse) => sparse.lte(other),
         }
     }
 

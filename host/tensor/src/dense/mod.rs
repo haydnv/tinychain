@@ -225,8 +225,7 @@ where
     }
 }
 
-#[async_trait]
-impl<FD, FS, D, T, B, O> TensorCompare<D, DenseTensor<FD, FS, D, T, O>>
+impl<FD, FS, D, T, B, O> TensorCompare<DenseTensor<FD, FS, D, T, O>>
     for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
@@ -237,15 +236,10 @@ where
     O: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Txn = T;
     type Compare = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
     type Dense = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
-    async fn eq(
-        self,
-        other: DenseTensor<FD, FS, D, T, O>,
-        _txn: Self::Txn,
-    ) -> TCResult<Self::Dense> {
+    fn eq(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Dense> {
         fn eq(l: Number, r: Number) -> Number {
             Number::from(l == r)
         }
@@ -261,11 +255,7 @@ where
         self.combine(other, Array::gt, gt, NumberType::Bool)
     }
 
-    async fn gte(
-        self,
-        other: DenseTensor<FD, FS, D, T, O>,
-        _txn: Self::Txn,
-    ) -> TCResult<Self::Dense> {
+    fn gte(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Dense> {
         fn gte(l: Number, r: Number) -> Number {
             Number::from(l >= r)
         }
@@ -281,11 +271,7 @@ where
         self.combine(other, Array::lt, lt, NumberType::Bool)
     }
 
-    async fn lte(
-        self,
-        other: DenseTensor<FD, FS, D, T, O>,
-        _txn: Self::Txn,
-    ) -> TCResult<Self::Dense> {
+    fn lte(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Dense> {
         fn lte(l: Number, r: Number) -> Number {
             Number::from(l > r)
         }
@@ -302,8 +288,7 @@ where
     }
 }
 
-#[async_trait]
-impl<FD, FS, D, T, B> TensorCompare<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
+impl<FD, FS, D, T, B> TensorCompare<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
@@ -312,19 +297,13 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Txn = T;
     type Compare = Tensor<FD, FS, D, T>;
     type Dense = Tensor<FD, FS, D, T>;
 
-    async fn eq(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+    fn eq(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(dense) => self.eq(dense, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(sparse) => {
-                self.into_sparse()
-                    .eq(sparse, txn)
-                    .map_ok(Tensor::from)
-                    .await
-            }
+            Tensor::Dense(dense) => self.eq(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.into_sparse().eq(sparse).map(Tensor::from),
         }
     }
 
@@ -335,14 +314,10 @@ where
         }
     }
 
-    async fn gte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+    fn gte(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(dense) => self.gte(dense, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(sparse) => {
-                self.gte(sparse.into_dense(), txn)
-                    .map_ok(Tensor::from)
-                    .await
-            }
+            Tensor::Dense(dense) => self.gte(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.gte(sparse.into_dense()).map(Tensor::from),
         }
     }
 
@@ -353,14 +328,10 @@ where
         }
     }
 
-    async fn lte(self, other: Tensor<FD, FS, D, T>, txn: Self::Txn) -> TCResult<Self::Dense> {
+    fn lte(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Dense> {
         match other {
-            Tensor::Dense(dense) => self.lte(dense, txn).map_ok(Tensor::from).await,
-            Tensor::Sparse(sparse) => {
-                self.lte(sparse.into_dense(), txn)
-                    .map_ok(Tensor::from)
-                    .await
-            }
+            Tensor::Dense(dense) => self.lte(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.lte(sparse.into_dense()).map(Tensor::from),
         }
     }
 

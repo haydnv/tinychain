@@ -141,58 +141,6 @@ impl<'a> Handler<'a> for DualHandler {
     }
 }
 
-struct DualHandlerAsync<F> {
-    tensor: Tensor,
-    op: fn(Tensor, Tensor, Txn) -> F,
-}
-
-impl<F> DualHandlerAsync<F> {
-    fn new<T>(tensor: T, op: fn(Tensor, Tensor, Txn) -> F) -> Self
-    where
-        Tensor: From<T>,
-    {
-        let tensor = tensor.into();
-        Self { tensor, op }
-    }
-}
-
-impl<'a, F> Handler<'a> for DualHandlerAsync<F>
-where
-    F: Future<Output = TCResult<Tensor>> + Send + 'a,
-{
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
-        Some(Box::new(|txn, mut params| {
-            Box::pin(async move {
-                let l = self.tensor;
-                let r: Tensor = params.require(&label("r").into())?;
-
-                if l.shape() == r.shape() {
-                    debug!(
-                        "tensor dual async op with shapes: {}, {}",
-                        l.shape(),
-                        r.shape()
-                    );
-
-                    (self.op)(l, r, txn)
-                } else {
-                    let (l, r) = broadcast(l, r)?;
-
-                    debug!(
-                        "tensor dual async op with shapes: {}, {}",
-                        l.shape(),
-                        r.shape()
-                    );
-
-                    (self.op)(l, r, txn)
-                }
-                .map_ok(Collection::from)
-                .map_ok(State::from)
-                .await
-            })
-        }))
-    }
-}
-
 struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
     tensor: &'a T,
     reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
@@ -364,7 +312,7 @@ fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handle
 where
     T: TensorAccess
         + TensorIO<fs::Dir, Txn = Txn>
-        + TensorCompare<fs::Dir, Tensor, Compare = Tensor, Dense = Tensor, Txn = Txn>
+        + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorBoolean<Tensor, Combine = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
@@ -392,11 +340,11 @@ where
             "xor" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::xor))),
 
             // comparison ops
-            "eq" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::eq))),
+            "eq" => Some(Box::new(DualHandler::new(cloned, TensorCompare::eq))),
             "gt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::gt))),
-            "gte" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::gte))),
+            "gte" => Some(Box::new(DualHandler::new(cloned, TensorCompare::gte))),
             "lt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::lt))),
-            "lte" => Some(Box::new(DualHandlerAsync::new(cloned, TensorCompare::lte))),
+            "lte" => Some(Box::new(DualHandler::new(cloned, TensorCompare::lte))),
             "ne" => Some(Box::new(DualHandler::new(cloned, TensorCompare::ne))),
 
             // unary ops

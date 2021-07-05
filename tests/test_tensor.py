@@ -8,6 +8,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 
+
 class DenseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
