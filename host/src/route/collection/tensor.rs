@@ -62,6 +62,36 @@ impl<'a> Handler<'a> for CreateHandler {
     }
 }
 
+struct ExpandHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for ExpandHandler<T>
+where
+    T: TensorTransform + Send + 'a,
+    Tensor: From<T::Expand>,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let axis = key.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
+
+                self.tensor
+                    .expand_dims(axis)
+                    .map(Tensor::from)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ExpandHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct RangeHandler;
 
 impl<'a> Handler<'a> for RangeHandler {
@@ -84,6 +114,43 @@ impl<'a> Handler<'a> for RangeHandler {
                 }
             })
         }))
+    }
+}
+
+struct TransposeHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for TransposeHandler<T>
+where
+    T: TensorTransform + Send + 'a,
+    Tensor: From<T::Transpose>,
+{
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let transpose = if key.is_none() {
+                    self.tensor.transpose(None)
+                } else {
+                    let permutation = key.try_cast_into(|v| {
+                        TCError::bad_request("invalid permutation for transpose", v)
+                    })?;
+
+                    self.tensor.transpose(Some(permutation))
+                };
+
+                transpose
+                    .map(Tensor::from)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for TransposeHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
     }
 }
 
@@ -163,7 +230,7 @@ impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
 
 impl<'a, T: TensorReduce<fs::Dir> + Clone + Sync> Handler<'a> for ReduceHandler<'a, T>
 where
-    Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+    Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|txn, key| {
@@ -176,6 +243,7 @@ where
                 } else {
                     let axis = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
                     (self.reduce)(self.tensor.clone(), axis)
+                        .map(Tensor::from)
                         .map(Collection::from)
                         .map(State::from)
                 }
@@ -198,8 +266,7 @@ where
         + Send
         + Sync,
     <T as TensorTransform>::Slice: TensorAccess + Send,
-    Collection: From<T>,
-    Collection: From<<T as TensorTransform>::Slice>,
+    Tensor: From<<T as TensorTransform>::Slice>,
 {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(|_txn, key| {
@@ -208,6 +275,7 @@ where
                 let bounds = cast_bounds(self.tensor.shape(), key)?;
                 self.tensor
                     .slice(bounds)
+                    .map(Tensor::from)
                     .map(Collection::from)
                     .map(State::from)
             })
@@ -322,11 +390,13 @@ where
         + Clone
         + Send
         + Sync,
+    Collection: From<T>,
     Tensor: From<T>,
     <T as TensorTransform>::Slice: TensorAccess + Send,
-    Collection: From<T>,
-    Collection: From<<T as TensorReduce<fs::Dir>>::Reduce>,
-    Collection: From<<T as TensorTransform>::Slice>,
+    Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+    Tensor: From<<T as TensorTransform>::Expand>,
+    Tensor: From<<T as TensorTransform>::Slice>,
+    Tensor: From<<T as TensorTransform>::Transpose>,
 {
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor.clone())))
@@ -376,6 +446,10 @@ where
                 TensorReduce::sum,
                 TensorReduce::sum_all,
             ))),
+
+            // transforms
+            "expand_dims" => Some(Box::new(ExpandHandler::from(cloned))),
+            "transpose" => Some(Box::new(TransposeHandler::from(cloned))),
 
             _ => None,
         }

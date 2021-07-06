@@ -78,6 +78,11 @@ class Tensor(Collection):
 
         return self._post("eq", Tensor, r=other)
 
+    def expand_dims(self, axis):
+        """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
+
+        return self._get("expand_dims", axis, self.__class__)
+
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
@@ -144,6 +149,15 @@ class Tensor(Collection):
 
         rtype = Number if axis is None else self.__class__
         return self._get("sum", axis, rtype)
+
+    def transpose(self, permutation=None):
+        """
+        Return a view of this `Tensor` with its axes transposed according to the given permutation.
+
+        If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
+        """
+
+        return self._get("transpose", permutation, self.__class__)
 
     def write(self, *args):
         """
