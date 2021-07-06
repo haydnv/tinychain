@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use afarray::{Array, ArrayExt, Coords};
+use afarray::{Array, ArrayExt, Coords, Offsets};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -1180,10 +1180,29 @@ where
         DenseAccessor::Transpose(Box::new(accessor))
     }
 
-    fn block_stream<'a>(self, _txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(future::ready(Err(TCError::not_implemented(
-            "BlockListTranspose::block_stream",
-        ))))
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+        Box::pin(async move {
+            let size = self.size();
+            let shape = self.shape().clone();
+
+            let per_block = PER_BLOCK as u64;
+            let blocks = stream::iter((0..size).step_by(PER_BLOCK))
+                .map(move |start| {
+                    let end = start + per_block;
+                    if end > size {
+                        (start, size)
+                    } else {
+                        (start, end)
+                    }
+                })
+                .map(|(start, end)| Offsets::range(start, end))
+                .map(move |offsets| Coords::from_offsets(offsets, &shape))
+                .map(move |coords| self.clone().read_values(txn.clone(), coords))
+                .buffered(num_cpus::get());
+
+            let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+            Ok(blocks)
+        })
     }
 
     fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
@@ -1194,8 +1213,9 @@ where
         Err(TCError::not_implemented("BlockListTranspose::transpose"))
     }
 
-    async fn read_values(self, _txn: Self::Txn, _coords: Coords) -> TCResult<Array> {
-        Err(TCError::not_implemented("BlockListTranspose::read_values"))
+    async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
+        let coords = self.rebase.invert_coords(&coords);
+        self.source.read_values(txn, coords).await
     }
 
     async fn write<V: DenseAccess<FD, FS, D, T>>(
