@@ -2,7 +2,7 @@
 
 from tinychain import ref
 from tinychain.util import uri
-from tinychain.value import F32, Number
+from tinychain.value import Bool, F32, Number
 
 from . import schema
 from .bound import Range
@@ -53,7 +53,7 @@ class Tensor(Collection):
         return self.div(other)
 
     def abs(self):
-        return self._get("abs", rtype=Tensor)
+        return self._get("abs", rtype=self.__class__)
 
     def add(self, other):
         return self._post("add", Tensor, r=other)
@@ -61,12 +61,12 @@ class Tensor(Collection):
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""
 
-        return self._get("all", rtype=Tensor)
+        return self._get("all", rtype=Bool)
 
     def any(self):
         """Return `True` if any element in this `Tensor` are nonzero."""
 
-        return self._get("any", rtype=Tensor)
+        return self._get("any", rtype=Bool)
 
     def div(self, other):
         """Divide this `Tensor` by another, broadcasting if necessary."""
@@ -81,7 +81,7 @@ class Tensor(Collection):
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
-        return self._post("gt", Tensor, r=other)
+        return self._post("gt", self.__class__, r=other)
 
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
@@ -91,7 +91,7 @@ class Tensor(Collection):
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
 
-        return self._post("lt", Tensor, r=other)
+        return self._post("lt", self.__class__, r=other)
 
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
@@ -101,7 +101,7 @@ class Tensor(Collection):
     def logical_and(self, other):
         """Return a boolean `Tensor` with element-wise logical and values."""
 
-        return self._post("and", Tensor, r=other)
+        return self._post("and", self.__class__, r=other)
 
     def logical_not(self):
         """Return a boolean `Tensor` with element-wise logical not values."""
@@ -121,17 +121,17 @@ class Tensor(Collection):
     def mul(self, other):
         """Multiply this `Tensor` by another, broadcasting if necessary."""
 
-        return self._post("mul", Tensor, r=other)
+        return self._post("mul", self.__class__, r=other)
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
 
-        return self._post("ne", Tensor, r=other)
+        return self._post("ne", self.__class__, r=other)
 
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
 
-        rtype = Number if axis is None else Tensor
+        rtype = Number if axis is None else self.__class__
         return self._get("product", axis, rtype)
 
     def sub(self, other):
@@ -142,7 +142,7 @@ class Tensor(Collection):
     def sum(self, axis=None):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
-        rtype = Number if axis is None else Tensor
+        rtype = Number if axis is None else self.__class__
         return self._get("sum", axis, rtype)
 
     def write(self, *args):
