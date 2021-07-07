@@ -864,12 +864,6 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1,
     }
 
     fn opt_cast_from(value: Value) -> Option<Self> {
-        debug!(
-            "cast from {} into {}?",
-            value,
-            std::any::type_name::<Self>()
-        );
-
         match value {
             Value::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -935,14 +929,14 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
-            Self::Id(id) => write!(f, "{} {:?}", ValueType::Id, id.as_str()),
-            Self::Link(link) => write!(f, "{} {:?}", ValueType::Link, link),
+            Self::Id(id) => write!(f, "{}: {:?}", ValueType::Id, id.as_str()),
+            Self::Link(link) => write!(f, "{}: {:?}", ValueType::Link, link),
             Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Debug::fmt(n, f),
-            Self::String(s) => write!(f, "{}, {}", ValueType::String, s),
+            Self::String(s) => write!(f, "{}: {}", ValueType::String, s),
             Self::Tuple(t) => write!(
                 f,
-                "{} ({})",
+                "{}: ({})",
                 ValueType::Tuple,
                 t.iter()
                     .map(|v| format!("{:?}", v))
