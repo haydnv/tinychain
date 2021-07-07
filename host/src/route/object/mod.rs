@@ -12,7 +12,10 @@ struct ClassHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ClassHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let parent = State::from(key);

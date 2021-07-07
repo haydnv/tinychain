@@ -5,59 +5,66 @@ use tc_value::{Number, NumberInstance, Value};
 use tcgeneric::PathSegment;
 
 use crate::route::{GetHandler, Handler, Route};
+use crate::state::State;
 
-struct Dual<'a> {
-    handler: GetHandler<'a>,
+struct Dual<F> {
+    op: F,
 }
 
-impl<'a, F: FnOnce(Number) -> Number + Send + 'a> From<F> for Dual<'a> {
-    fn from(handler: F) -> Self {
-        Self {
-            handler: Box::new(|_txn, other| {
-                Box::pin(async move {
-                    let other = other.try_cast_into(|v| {
-                        TCError::bad_request("cannot cast into Number from", v)
-                    })?;
-
-                    Ok(Value::from(handler(other)).into())
-                })
-            }),
-        }
+impl<F> Dual<F> {
+    fn new(op: F) -> Self {
+        Self { op }
     }
 }
 
-impl<'a> Handler<'a> for Dual<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        Some(self.handler)
+impl<'a, F> Handler<'a> for Dual<F>
+where
+    F: Fn(Number) -> Number + Send + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, value| {
+            Box::pin(async move {
+                let value = value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
+                Ok(State::from(Value::from((self.op)(value))))
+            })
+        }))
     }
 }
 
-struct Unary<'a> {
-    handler: GetHandler<'a>,
+struct Unary<F> {
+    name: &'static str,
+    op: F,
 }
 
-impl<'a, F: FnOnce() -> Number + Send + 'a> From<F> for Unary<'a> {
-    fn from(handler: F) -> Self {
-        Self {
-            handler: Box::new(|_txn, other| {
-                Box::pin(async move {
-                    if other.is_some() {
-                        return Err(TCError::bad_request(
-                            "unary operation takes no arguments, but got",
-                            other,
-                        ));
-                    }
-
-                    Ok(Value::from(handler()).into())
-                })
-            }),
-        }
+impl<F> Unary<F> {
+    fn new(name: &'static str, op: F) -> Self {
+        Self { name, op }
     }
 }
 
-impl<'a> Handler<'a> for Unary<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        Some(self.handler)
+impl<'a, F> Handler<'a> for Unary<F>
+where
+    F: Fn() -> Number + Send + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, value| {
+            Box::pin(async move {
+                if value.is_some() {
+                    return Err(TCError::unsupported(format!(
+                        "{} does not have any parameters (found {})",
+                        self.name, value
+                    )));
+                }
+
+                Ok(State::from(Value::from((self.op)())))
+            })
+        }))
     }
 }
 
@@ -68,16 +75,16 @@ impl Route for Number {
         }
 
         let handler: Box<dyn Handler<'a> + 'a> = match path[0].as_str() {
-            "abs" => Box::new(Unary::from(move || self.abs())),
-            "add" => Box::new(Dual::from(move |other| *self + other)),
-            "div" => Box::new(Dual::from(move |other| *self / other)),
-            "mul" => Box::new(Dual::from(move |other| *self * other)),
-            "sub" => Box::new(Dual::from(move |other| *self - other)),
-            "pow" => Box::new(Dual::from(move |other| self.pow(other))),
-            "gt" => Box::new(Dual::from(move |other| (*self > other).into())),
-            "gte" => Box::new(Dual::from(move |other| (*self >= other).into())),
-            "lt" => Box::new(Dual::from(move |other| (*self < other).into())),
-            "lte" => Box::new(Dual::from(move |other| (*self <= other).into())),
+            "abs" => Box::new(Unary::new("abs", move || self.abs())),
+            "add" => Box::new(Dual::new(move |other| *self + other)),
+            "div" => Box::new(Dual::new(move |other| *self / other)),
+            "mul" => Box::new(Dual::new(move |other| *self * other)),
+            "sub" => Box::new(Dual::new(move |other| *self - other)),
+            "pow" => Box::new(Dual::new(move |other| self.pow(other))),
+            "gt" => Box::new(Dual::new(move |other| (*self > other).into())),
+            "gte" => Box::new(Dual::new(move |other| (*self >= other).into())),
+            "lt" => Box::new(Dual::new(move |other| (*self < other).into())),
+            "lte" => Box::new(Dual::new(move |other| (*self <= other).into())),
             _ => return None,
         };
 

@@ -19,35 +19,45 @@ mod object;
 mod scalar;
 mod state;
 
-// TODO: can Txn be borrowed?
-
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
-pub type GetHandler<'a> = Box<dyn FnOnce(Txn, Value) -> GetFuture<'a> + Send + 'a>;
+pub type GetHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> GetFuture<'a> + Send + 'a>;
 
 pub type PutFuture<'a> = Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>>;
-pub type PutHandler<'a> = Box<dyn FnOnce(Txn, Value, State) -> PutFuture<'a> + Send + 'a>;
+pub type PutHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value, State) -> PutFuture<'a> + Send + 'a>;
 
 pub type PostFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
-pub type PostHandler<'a> = Box<dyn FnOnce(Txn, Map<State>) -> PostFuture<'a> + Send + 'a>;
+pub type PostHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Map<State>) -> PostFuture<'a> + Send + 'a>;
 
 pub type DeleteFuture<'a> = Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>>;
-pub type DeleteHandler<'a> = Box<dyn FnOnce(Txn, Value) -> DeleteFuture<'a> + Send + 'a>;
+pub type DeleteHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> DeleteFuture<'a> + Send + 'a>;
 
 #[async_trait]
 pub trait Handler<'a>: Send {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         None
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         None
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         None
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         None
     }
 }
@@ -75,7 +85,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(get_handler) = handler.get() {
-            get_handler(txn.clone(), key).await
+            get_handler(txn, key).await
         } else {
             Err(TCError::method_not_allowed(
                 ORT::Get,
@@ -91,7 +101,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(put_handler) = handler.put() {
-            put_handler(txn.clone(), key, value).await
+            put_handler(txn, key, value).await
         } else {
             Err(TCError::method_not_allowed(
                 ORT::Put,
@@ -107,7 +117,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(post_handler) = handler.post() {
-            post_handler(txn.clone(), params).await
+            post_handler(txn, params).await
         } else {
             Err(TCError::method_not_allowed(
                 ORT::Post,
@@ -123,7 +133,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(delete_handler) = handler.delete() {
-            delete_handler(txn.clone(), key).await
+            delete_handler(txn, key).await
         } else {
             Err(TCError::method_not_allowed(
                 ORT::Delete,

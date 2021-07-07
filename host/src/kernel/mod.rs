@@ -77,7 +77,7 @@ impl Kernel {
                 if let Some(class) = CollectionType::from_path(&path[..i]) {
                     if let Some(handler) = class.route(&path[i..]) {
                         if let Some(handler) = handler.get() {
-                            return handler(txn.clone(), key).await;
+                            return handler(txn, key).await;
                         }
                     }
                 }
@@ -366,7 +366,7 @@ async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<
         StateType::Collection(class) => {
             if let Some(handler) = class.route(&[]) {
                 if let Some(handler) = handler.get() {
-                    return handler(txn.clone(), value).await;
+                    return handler(txn, value).await;
                 }
             }
 

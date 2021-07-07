@@ -20,7 +20,10 @@ where
     State: From<Map<T>>,
     State: From<T>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_none() {
@@ -63,7 +66,10 @@ where
     State: From<Tuple<T>>,
     State: From<T>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_none() {

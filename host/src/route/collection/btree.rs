@@ -18,7 +18,10 @@ use crate::state::State;
 struct CreateHandler;
 
 impl<'a> Handler<'a> for CreateHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
                 let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
@@ -57,7 +60,10 @@ impl<'a, T: BTreeInstance> Handler<'a> for BTreeHandler<'a, T>
 where
     BTree: From<T::Slice>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, range| {
             Box::pin(async move {
                 let range = cast_into_range(Scalar::Value(range))?;
@@ -67,7 +73,10 @@ where
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_some() {
@@ -93,7 +102,10 @@ where
         }))
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let reverse = params.or_default(&label("reverse").into())?;
@@ -105,7 +117,10 @@ where
         }))
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, range| {
             Box::pin(async move {
                 let range = cast_into_range(Scalar::Value(range))?;
@@ -130,7 +145,10 @@ struct CountHandler<'a, T> {
 }
 
 impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
@@ -157,7 +175,10 @@ struct FirstHandler<'a, T> {
 }
 
 impl<'a, T: BTreeInstance> Handler<'a> for FirstHandler<'a, T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
@@ -193,7 +214,10 @@ impl<'a, T: BTreeInstance + 'a> Handler<'a> for ReverseHandler<T>
 where
     BTree: From<<T as BTreeInstance>::Slice>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_some() {

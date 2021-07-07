@@ -31,7 +31,10 @@ impl<'a> SubjectHandler<'a> {
 }
 
 impl<'a> Handler<'a> for SubjectHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 debug!("Subject::get {} {}", TCPath::from(self.path), key);
@@ -55,7 +58,10 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 match self.subject {
@@ -88,7 +94,10 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         }))
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
                 debug!("Subject::post {}", params);
@@ -108,7 +117,10 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         }))
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 match self.subject {
@@ -157,14 +169,20 @@ impl<'a> AppendHandler<'a> {
 }
 
 impl<'a> Handler<'a> for AppendHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         match self.chain.subject().route(self.path) {
             Some(handler) => handler.get(),
             None => None,
         }
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         match self.chain.subject().route(self.path) {
             Some(handler) => match handler.put() {
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
@@ -185,14 +203,20 @@ impl<'a> Handler<'a> for AppendHandler<'a> {
         }
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         match self.chain.subject().route(self.path) {
             Some(handler) => handler.post(),
             None => None,
         }
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         match self.chain.subject().route(self.path) {
             Some(handler) => match handler.delete() {
                 Some(delete_handler) => Some(Box::new(|txn, key| {
@@ -224,7 +248,10 @@ impl<'a> From<&'a Chain> for ChainHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ChainHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_none() {

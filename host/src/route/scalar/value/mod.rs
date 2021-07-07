@@ -10,7 +10,10 @@ struct EqHandler<F> {
 }
 
 impl<'a, F: FnOnce(Value) -> bool + Send + 'a> Handler<'a> for EqHandler<F> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move { Ok(Value::from((self.call)(key)).into()) })
         }))

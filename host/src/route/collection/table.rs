@@ -21,7 +21,10 @@ use crate::txn::Txn;
 struct CreateHandler;
 
 impl<'a> Handler<'a> for CreateHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
                 let schema = tc_table::TableSchema::try_cast_from(value, |v| {
@@ -53,7 +56,10 @@ struct ContainsHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for ContainsHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 let key = primary_key(key, &self.table)?;
@@ -81,7 +87,10 @@ struct CountHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for CountHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
@@ -108,7 +117,10 @@ struct GroupHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for GroupHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let columns = key.try_cast_into(|v| {
@@ -133,7 +145,10 @@ struct LimitHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for LimitHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let limit = key.try_cast_into(|v| {
@@ -157,7 +172,10 @@ struct OrderHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for OrderHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let ordered = if key.matches::<(Vec<Id>, bool)>() {
@@ -187,7 +205,10 @@ struct TableHandler<'a, T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHandler<'a, T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
@@ -214,7 +235,10 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, values| {
             Box::pin(async move {
                 if key.is_none() {
@@ -256,7 +280,10 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
         }))
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, params| {
             Box::pin(async move {
                 let bounds = Scalar::try_cast_from(State::Map(params), |s| {
@@ -271,7 +298,10 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
         }))
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
@@ -290,7 +320,10 @@ struct SelectHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for SelectHandler<T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let columns =
@@ -319,7 +352,10 @@ struct UpdateHandler<T> {
 }
 
 impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for UpdateHandler<T> {
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_some() {

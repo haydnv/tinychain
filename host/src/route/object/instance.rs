@@ -29,8 +29,13 @@ impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
 }
 
 impl<'a, T: Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |txn, key| {
+            Box::pin(self.call(txn.clone(), key))
+        }))
     }
 }
 
@@ -54,9 +59,12 @@ impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
 }
 
 impl<'a, T: Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(move |txn, key, value| {
-            Box::pin(self.call(txn, key, value))
+            Box::pin(self.call(txn.clone(), key, value))
         }))
     }
 }
@@ -74,9 +82,12 @@ impl<'a, T: Instance + Route + 'a> PostMethod<'a, T> {
 }
 
 impl<'a, T: Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(move |txn, params| {
-            Box::pin(self.call(txn, params))
+            Box::pin(self.call(txn.clone(), params))
         }))
     }
 }
@@ -100,8 +111,10 @@ impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
 }
 
 impl<'a, T: Instance + Route + 'a> Handler<'a> for DeleteMethod<'a, T> {
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
-        Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>> {
+        Some(Box::new(move |txn, key| {
+            Box::pin(self.call(txn.clone(), key))
+        }))
     }
 }
 

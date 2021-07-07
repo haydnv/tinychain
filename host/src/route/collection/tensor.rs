@@ -22,7 +22,10 @@ use super::{Handler, Route};
 struct ConstantHandler;
 
 impl<'a> Handler<'a> for ConstantHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<(Vec<u64>, Number)>() {
@@ -41,7 +44,10 @@ struct CreateHandler {
 }
 
 impl<'a> Handler<'a> for CreateHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<Schema>() {
@@ -71,7 +77,10 @@ where
     T: TensorTransform + Send + 'a,
     Tensor: From<T::Expand>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let axis = key.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
@@ -95,7 +104,10 @@ impl<T> From<T> for ExpandHandler<T> {
 struct RangeHandler;
 
 impl<'a> Handler<'a> for RangeHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<(Vec<u64>, Number, Number)>() {
@@ -126,7 +138,10 @@ where
     T: TensorTransform + Send + 'a,
     Tensor: From<T::Transpose>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let transpose = if key.is_none() {
@@ -188,7 +203,10 @@ impl DualHandler {
 }
 
 impl<'a> Handler<'a> for DualHandler {
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let l = self.tensor;
@@ -232,11 +250,14 @@ impl<'a, T: TensorReduce<fs::Dir> + Clone + Sync> Handler<'a> for ReduceHandler<
 where
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_none() {
-                    (self.reduce_all)(self.tensor, txn)
+                    (self.reduce_all)(self.tensor, txn.clone())
                         .map_ok(Value::from)
                         .map_ok(State::from)
                         .await
@@ -268,7 +289,10 @@ where
     <T as TensorTransform>::Slice: TensorAccess + Send,
     Tensor: From<<T as TensorTransform>::Slice>,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 debug!("GET Tensor: {}", key);
@@ -282,10 +306,13 @@ where
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(move |txn, key, value| {
             debug!("PUT Tensor: {} <- {}", key, value);
-            Box::pin(write(self.tensor, txn, key, value))
+            Box::pin(write(self.tensor, txn.clone(), key, value))
         }))
     }
 }
@@ -308,7 +335,10 @@ impl UnaryHandler {
 }
 
 impl<'a> Handler<'a> for UnaryHandler {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let tensor = if key.is_none() {
@@ -339,15 +369,20 @@ impl<'a, F> Handler<'a> for UnaryHandlerAsync<F>
 where
     F: Future<Output = TCResult<bool>> + Send + 'a,
 {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_none() {
-                    (self.op)(self.tensor, txn).map_ok(State::from).await
+                    (self.op)(self.tensor, txn.clone())
+                        .map_ok(State::from)
+                        .await
                 } else {
                     let bounds = cast_bounds(self.tensor.shape(), key.into())?;
                     let slice = self.tensor.slice(bounds)?;
-                    (self.op)(slice, txn).map_ok(State::from).await
+                    (self.op)(slice, txn.clone()).map_ok(State::from).await
                 }
             })
         }))

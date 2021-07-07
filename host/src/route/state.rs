@@ -13,7 +13,10 @@ struct SelfHandler<'a> {
 }
 
 impl<'a> Handler<'a> for SelfHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_none() {
@@ -31,7 +34,10 @@ struct ClassHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ClassHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, _key| {
             Box::pin(async move { Ok(Link::from(self.subject.class().path()).into()) })
         }))

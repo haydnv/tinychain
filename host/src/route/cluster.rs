@@ -19,7 +19,10 @@ struct AuthorizeHandler<'a> {
 }
 
 impl<'a> Handler<'a> for AuthorizeHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, scope| {
             Box::pin(async move {
                 let scope = scope
@@ -63,13 +66,19 @@ impl<'a> ClusterHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ClusterHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|_txn, key| {
             Box::pin(future::ready(self.handle_get(key)))
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_some() {
@@ -84,7 +93,10 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
         }))
     }
 
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
                 // TODO: authorize request using a scope
@@ -97,7 +109,7 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                 }
 
                 if txn.is_leader(self.cluster.path()) {
-                    self.cluster.distribute_commit(txn).await?;
+                    self.cluster.distribute_commit(txn.clone()).await?;
                 } else {
                     self.cluster.write_ahead(txn.id()).await;
                     self.cluster.commit(txn.id()).await;
@@ -108,13 +120,16 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
         }))
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 key.expect_none()?;
 
                 if txn.is_leader(self.cluster.path()) {
-                    self.cluster.distribute_rollback(txn).await;
+                    self.cluster.distribute_rollback(txn.clone()).await;
                 } else {
                     self.cluster.finalize(txn.id()).await;
                 }
@@ -136,7 +151,10 @@ struct GrantHandler<'a> {
 }
 
 impl<'a> Handler<'a> for GrantHandler<'a> {
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let scope = params.require(&label("scope").into())?;
@@ -144,7 +162,7 @@ impl<'a> Handler<'a> for GrantHandler<'a> {
                 let context = params.or_default(&label("context").into())?;
                 params.expect_empty()?;
 
-                self.cluster.grant(txn, scope, op, context).await
+                self.cluster.grant(txn.clone(), scope, op, context).await
             })
         }))
     }
@@ -161,7 +179,10 @@ struct InstallHandler<'a> {
 }
 
 impl<'a> Handler<'a> for InstallHandler<'a> {
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, link, scopes| {
             Box::pin(async move {
                 let link = link.try_cast_into(|v| {
@@ -191,7 +212,10 @@ struct ReplicaHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ReplicaHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 key.expect_none()?;
@@ -203,7 +227,10 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
         }))
     }
 
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, key, link| {
             Box::pin(async move {
                 key.expect_none()?;
@@ -217,14 +244,17 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
         }))
     }
 
-    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
         Some(Box::new(|txn, replicas| {
             Box::pin(async move {
                 let replicas = Tuple::<Link>::try_cast_from(replicas, |v| {
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.remove_replicas(&txn, &replicas).await
+                self.cluster.remove_replicas(txn, &replicas).await
             })
         }))
     }
