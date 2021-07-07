@@ -162,7 +162,7 @@ impl<'a> Handler<'a> for GrantHandler<'a> {
                 let context = params.or_default(&label("context").into())?;
                 params.expect_empty()?;
 
-                self.cluster.grant(txn.clone(), scope, op, context).await
+                self.cluster.grant(txn, scope, op, context).await
             })
         }))
     }

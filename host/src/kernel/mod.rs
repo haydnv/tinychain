@@ -198,7 +198,7 @@ impl Kernel {
 
             if Vec::<(Id, State)>::can_cast_from(&data) {
                 let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
-                OpDef::call(op_def, txn, context).await
+                OpDef::call(op_def, &txn, context).await
             } else {
                 data.resolve(&ExeScope::new(&State::default(), context), &txn)
                     .await

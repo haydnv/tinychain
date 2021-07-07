@@ -162,7 +162,7 @@ impl OpDef {
 
     pub async fn call<S: Into<State>, I: IntoIterator<Item = (Id, State)>>(
         op_def: Vec<(Id, S)>,
-        txn: Txn,
+        txn: &Txn,
         context: I,
     ) -> TCResult<State> {
         let capture = if let Some((id, _)) = op_def.last() {

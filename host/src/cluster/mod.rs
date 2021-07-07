@@ -149,7 +149,7 @@ impl Cluster {
     /// Grant the given `scope` to the `txn` and use it to resolve the given `OpRef`.
     pub async fn grant(
         &self,
-        txn: Txn,
+        txn: &Txn,
         scope: Scope,
         op: OpDef,
         context: Map<State>,
@@ -161,7 +161,7 @@ impl Cluster {
             .grant(&self.actor, self.link.path().clone(), vec![scope])
             .await?;
 
-        OpDef::call(op.into_form(), txn, context).await
+        OpDef::call(op.into_form(), &txn, context).await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.

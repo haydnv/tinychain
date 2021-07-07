@@ -18,7 +18,7 @@ struct GetMethod<'a, T: Instance> {
 }
 
 impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
-    async fn call(self, txn: Txn, key: Value) -> TCResult<State> {
+    async fn call(self, txn: &Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -33,9 +33,7 @@ impl<'a, T: Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
     where
         'b: 'a,
     {
-        Some(Box::new(move |txn, key| {
-            Box::pin(self.call(txn.clone(), key))
-        }))
+        Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
     }
 }
 
@@ -46,7 +44,7 @@ struct PutMethod<'a, T: Instance> {
 }
 
 impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
-    async fn call(self, txn: Txn, key: Value, value: State) -> TCResult<()> {
+    async fn call(self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -64,7 +62,7 @@ impl<'a, T: Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
         'b: 'a,
     {
         Some(Box::new(move |txn, key, value| {
-            Box::pin(self.call(txn.clone(), key, value))
+            Box::pin(self.call(txn, key, value))
         }))
     }
 }
@@ -76,7 +74,7 @@ struct PostMethod<'a, T: Instance> {
 }
 
 impl<'a, T: Instance + Route + 'a> PostMethod<'a, T> {
-    async fn call(self, txn: Txn, params: Map<State>) -> TCResult<State> {
+    async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
         call_method(txn, self.subject, self.path, params, self.method).await
     }
 }
@@ -87,7 +85,7 @@ impl<'a, T: Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
         'b: 'a,
     {
         Some(Box::new(move |txn, params| {
-            Box::pin(self.call(txn.clone(), params))
+            Box::pin(self.call(txn, params))
         }))
     }
 }
@@ -99,7 +97,7 @@ struct DeleteMethod<'a, T: Instance> {
 }
 
 impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
-    async fn call(self, txn: Txn, key: Value) -> TCResult<()> {
+    async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -111,10 +109,11 @@ impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
 }
 
 impl<'a, T: Instance + Route + 'a> Handler<'a> for DeleteMethod<'a, T> {
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>> {
-        Some(Box::new(move |txn, key| {
-            Box::pin(self.call(txn.clone(), key))
-        }))
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
     }
 }
 
@@ -161,7 +160,7 @@ impl<T: Instance + Route> Route for InstanceExt<T> {
 }
 
 async fn call_method<T: Instance + Route>(
-    txn: Txn,
+    txn: &Txn,
     subject: &InstanceExt<T>,
     path: &[PathSegment],
     context: Map<State>,

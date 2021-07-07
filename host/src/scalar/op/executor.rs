@@ -16,14 +16,14 @@ use crate::txn::Txn;
 
 /// An `OpDef` executor.
 pub struct Executor<'a, T> {
-    txn: Txn,
+    txn: &'a Txn,
     scope: Scope<'a, T>,
 }
 
 impl<'a, T: Instance + Public> Executor<'a, T> {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
-        txn: Txn,
+        txn: &'a Txn,
         subject: &'a T,
         data: I,
     ) -> Self {
@@ -32,7 +32,7 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
     }
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
-        txn: Txn,
+        txn: &'a Txn,
         subject: &'a T,
         context: Map<State>,
         iter: I,

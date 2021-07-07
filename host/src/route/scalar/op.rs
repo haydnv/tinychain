@@ -20,7 +20,7 @@ impl<'a> Handler<'a> for OpHandler<'a> {
             Some(Box::new(|txn, key| {
                 Box::pin(async move {
                     let context = iter::once((key_name, State::from(key)));
-                    OpDef::call(op_def, txn.clone(), context).await
+                    OpDef::call(op_def, txn, context).await
                 })
             }))
         } else {
@@ -36,7 +36,7 @@ impl<'a> Handler<'a> for OpHandler<'a> {
             Some(Box::new(|txn, key, value| {
                 Box::pin(async move {
                     let context = vec![(key_name, key.into()), (value_name, value)];
-                    OpDef::call(op_def, txn.clone(), context).await?;
+                    OpDef::call(op_def, txn, context).await?;
                     Ok(())
                 })
             }))
@@ -51,7 +51,7 @@ impl<'a> Handler<'a> for OpHandler<'a> {
     {
         if let OpDef::Post(op_def) = self.op_def.clone() {
             Some(Box::new(|txn, params| {
-                Box::pin(async move { OpDef::call(op_def, txn.clone(), params).await })
+                Box::pin(async move { OpDef::call(op_def, txn, params).await })
             }))
         } else {
             None
@@ -66,7 +66,7 @@ impl<'a> Handler<'a> for OpHandler<'a> {
             Some(Box::new(|txn, key| {
                 Box::pin(async move {
                     let context = iter::once((key_name, State::from(key)));
-                    OpDef::call(op_def, txn.clone(), context).await?;
+                    OpDef::call(op_def, txn, context).await?;
                     Ok(())
                 })
             }))
