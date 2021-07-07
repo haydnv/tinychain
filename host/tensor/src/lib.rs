@@ -26,8 +26,9 @@ pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 
 mod bounds;
 mod dense;
-mod sparse;
 #[allow(dead_code)]
+mod einsum;
+mod sparse;
 mod stream;
 #[allow(dead_code)]
 mod transform;
