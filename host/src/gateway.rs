@@ -240,7 +240,7 @@ impl Gateway {
                 cluster.add_replica(&txn, self_link).await?;
 
                 // send a commit message
-                cluster.distribute_commit(txn).await?;
+                cluster.distribute_commit(&txn).await?;
 
                 log::info!("{} is now online", cluster);
             }

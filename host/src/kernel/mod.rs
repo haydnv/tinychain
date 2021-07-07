@@ -350,10 +350,10 @@ fn execute<
 
             if result.is_ok() {
                 debug!("commit {}", cluster);
-                cluster.distribute_commit(txn).await?;
+                cluster.distribute_commit(&txn).await?;
             } else {
                 debug!("rollback {}", cluster);
-                cluster.distribute_rollback(txn).await;
+                cluster.distribute_rollback(&txn).await;
             }
 
             result

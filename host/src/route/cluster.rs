@@ -109,7 +109,7 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                 }
 
                 if txn.is_leader(self.cluster.path()) {
-                    self.cluster.distribute_commit(txn.clone()).await?;
+                    self.cluster.distribute_commit(txn).await?;
                 } else {
                     self.cluster.write_ahead(txn.id()).await;
                     self.cluster.commit(txn.id()).await;
@@ -129,7 +129,7 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                 key.expect_none()?;
 
                 if txn.is_leader(self.cluster.path()) {
-                    self.cluster.distribute_rollback(txn.clone()).await;
+                    self.cluster.distribute_rollback(txn).await;
                 } else {
                     self.cluster.finalize(txn.id()).await;
                 }

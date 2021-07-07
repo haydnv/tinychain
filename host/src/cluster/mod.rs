@@ -366,11 +366,11 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn distribute_commit(&self, txn: Txn) -> TCResult<()> {
+    pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
         let replicas = self.replicas.read(txn.id()).await?;
 
         if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            owner.commit(&txn).await?;
+            owner.commit(txn).await?;
         }
 
         self.write_ahead(txn.id()).await;
@@ -398,11 +398,11 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn distribute_rollback(&self, txn: Txn) {
+    pub async fn distribute_rollback(&self, txn: &Txn) {
         let replicas = self.replicas.read(txn.id()).await;
 
         if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            if let Err(cause) = owner.rollback(&txn).await {
+            if let Err(cause) = owner.rollback(txn).await {
                 warn!("failed to rollback transaction: {}", cause);
             }
         }
