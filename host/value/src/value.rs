@@ -662,12 +662,6 @@ impl TryFrom<Value> for Tuple<Value> {
     }
 }
 
-impl CastFrom<Value> for String {
-    fn cast_from(value: Value) -> String {
-        value.to_string()
-    }
-}
-
 impl TryCastFrom<Value> for Bytes {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -749,6 +743,28 @@ impl TryCastFrom<Value> for Number {
             }
             Value::Tuple(_) => None,
             Value::String(s) => f64::from_str(&s).map(Float::F64).map(Self::Float).ok(),
+        }
+    }
+}
+
+impl TryCastFrom<Value> for String {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::Id(_) => true,
+            Value::Number(_) => true,
+            Value::String(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Some(link.to_string()),
+            Value::Id(id) => Some(id.to_string()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::String(s) => Some(s),
+            _ => None,
         }
     }
 }

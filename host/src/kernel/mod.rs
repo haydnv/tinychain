@@ -15,7 +15,7 @@ use tcgeneric::*;
 use crate::cluster::Cluster;
 use crate::collection::CollectionType;
 use crate::object::InstanceExt;
-use crate::route::{Public, Route};
+use crate::route::{Public, Route, Static};
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
@@ -61,7 +61,7 @@ impl Kernel {
                 ))
             }
         } else if let Some(class) = StateType::from_path(path) {
-            construct_state(txn, class, key).await
+            class.get(txn, path, key).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
@@ -97,7 +97,7 @@ impl Kernel {
                 Err(TCError::not_found(TCPath::from(path)))
             }
         } else {
-            Err(TCError::not_found(TCPath::from(path)))
+            Static.get(txn, path, key).await
         }
     }
 
@@ -175,7 +175,7 @@ impl Kernel {
             })
             .await
         } else {
-            Err(TCError::not_found(TCPath::from(path)))
+            Static.put(txn, path, key, value).await
         }
     }
 
@@ -224,7 +224,8 @@ impl Kernel {
                 .await
             }
         } else {
-            Err(TCError::not_found(TCPath::from(path)))
+            let params = data.try_into()?;
+            Static.post(txn, path, params).await
         }
     }
 
@@ -305,7 +306,7 @@ impl Kernel {
                 Err(TCError::not_found(TCPath::from(path)))
             }
         } else {
-            Err(TCError::not_found(TCPath::from(path)))
+            Static.delete(txn, path, key).await
         }
     }
 }
@@ -359,47 +360,6 @@ fn execute<
             result
         }
     })
-}
-
-async fn construct_state(txn: &Txn, class: StateType, value: Value) -> TCResult<State> {
-    match class {
-        StateType::Collection(class) => {
-            if let Some(handler) = class.route(&[]) {
-                if let Some(handler) = handler.get() {
-                    return handler(txn, value).await;
-                }
-            }
-
-            Err(TCError::not_implemented(format!(
-                "constructor handler for {}",
-                class
-            )))
-        }
-        StateType::Chain(ct) => Err(TCError::not_implemented(format!("GET {}", ct))),
-        StateType::Map => {
-            let value = Tuple::<(Id, Value)>::try_cast_from(value, |v| {
-                TCError::bad_request("invalid Map", v)
-            })?;
-
-            let map = value
-                .into_iter()
-                .map(|(id, value)| (id, State::from(value)))
-                .collect();
-
-            Ok(State::Map(map))
-        }
-        StateType::Object(ot) => Err(TCError::not_implemented(format!("GET {}", ot))),
-        StateType::Scalar(class) => {
-            let err = format!("Cannot cast into {} from {}", class, value);
-            State::Scalar(Scalar::Value(value))
-                .into_type(StateType::Scalar(class))
-                .ok_or_else(|| TCError::unsupported(err))
-        }
-        StateType::Tuple => {
-            let value: Tuple<Value> = value.try_into()?;
-            Ok(State::Tuple(value.into_iter().map(State::from).collect()))
-        }
-    }
 }
 
 fn error_type(err_type: &Id) -> Option<ErrorType> {

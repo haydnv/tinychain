@@ -29,7 +29,7 @@ mod view;
 pub use view::StateView;
 
 /// The [`Class`] of a [`State`].
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
     Collection(CollectionType),
     Chain(ChainType),
@@ -493,6 +493,22 @@ impl TryCastFrom<State> for bool {
 }
 
 impl TryCastFrom<State> for Bytes {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for String {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Scalar(scalar) => Self::can_cast_from(scalar),

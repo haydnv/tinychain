@@ -21,6 +21,6 @@ num_cpus = "1.13"
 safecast = "0.1"
 tc-error = "~0.2.3"
 tc-transact = { path = "../transact" }
-tc-value = "~0.1.11"
+tc-value = { path = "../value" }
 tcgeneric = "~0.1.9"
 uuid = "0.8"

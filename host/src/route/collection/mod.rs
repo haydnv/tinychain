@@ -4,6 +4,9 @@ use crate::collection::{Collection, CollectionType};
 
 use super::{Handler, Route};
 
+#[cfg(feature = "tensor")]
+pub use tensor::{EinsumHandler, EINSUM};
+
 mod btree;
 mod table;
 

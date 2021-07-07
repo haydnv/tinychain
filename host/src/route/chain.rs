@@ -7,9 +7,15 @@ use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{Instance, PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, Subject, SUBJECT};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject, SUBJECT};
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
+
+impl Route for ChainType {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        None
+    }
+}
 
 impl Route for Subject {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

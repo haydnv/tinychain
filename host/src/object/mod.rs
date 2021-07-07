@@ -24,7 +24,7 @@ const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; us
 const PREFIX: PathLabel = path_label(&["state", "object"]);
 
 /// The type of a user-defined [`Object`].
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ObjectType {
     Class,
     Instance,

@@ -21,12 +21,12 @@ use tcgeneric::{
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
+pub use einsum::einsum;
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 
 mod bounds;
 mod dense;
-#[allow(dead_code)]
 mod einsum;
 mod sparse;
 mod stream;

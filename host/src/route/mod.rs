@@ -11,6 +11,8 @@ use crate::scalar::{OpRefType as ORT, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
+pub use r#static::Static;
+
 mod chain;
 mod cluster;
 mod collection;
@@ -18,6 +20,7 @@ mod generic;
 mod object;
 mod scalar;
 mod state;
+mod r#static;
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> GetFuture<'a> + Send + 'a>;

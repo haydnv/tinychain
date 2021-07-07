@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
+use tcgeneric::{label, path_label, PathLabel, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -18,6 +18,8 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Handler, Route};
+
+pub const EINSUM: PathLabel = path_label(&["state", "collection", "tensor", "einsum"]);
 
 struct ConstantHandler;
 
@@ -63,6 +65,25 @@ impl<'a> Handler<'a> for CreateHandler {
                         key,
                     ))
                 }
+            })
+        }))
+    }
+}
+
+pub struct EinsumHandler;
+
+impl<'a> Handler<'a> for EinsumHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let format: String = params.require(&label("format").into())?;
+                let tensors: Vec<Tensor> = params.require(&label("tensors").into())?;
+                einsum(&format, tensors)
+                    .map(Collection::from)
+                    .map(State::from)
             })
         }))
     }
@@ -378,9 +399,7 @@ where
                 let txn = txn.clone();
 
                 if key.is_none() {
-                    (self.op)(self.tensor, txn)
-                        .map_ok(State::from)
-                        .await
+                    (self.op)(self.tensor, txn).map_ok(State::from).await
                 } else {
                     let bounds = cast_bounds(self.tensor.shape(), key.into())?;
                     let slice = self.tensor.slice(bounds)?;
@@ -521,7 +540,9 @@ where
     let bounds = cast_bounds(tensor.shape(), key)?;
 
     match value {
-        State::Collection(Collection::Tensor(value)) => tensor.write(txn.clone(), bounds, value).await,
+        State::Collection(Collection::Tensor(value)) => {
+            tensor.write(txn.clone(), bounds, value).await
+        }
         State::Scalar(scalar) => {
             let value =
                 scalar.try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;

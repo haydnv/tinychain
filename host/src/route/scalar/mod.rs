@@ -1,12 +1,40 @@
+use tc_error::TCError;
 use tc_value::{Bound, Range};
 use tcgeneric::PathSegment;
 
-use crate::scalar::Scalar;
+use crate::scalar::{Scalar, ScalarType};
+use crate::state::{State, StateType};
 
-use super::{Handler, Route};
+use super::{GetHandler, Handler, Route};
 
 mod op;
 mod value;
+
+struct CastHandler {
+    class: ScalarType,
+}
+
+impl<'a> Handler<'a> for CastHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let err = format!("Cannot cast into {} from {}", self.class, key);
+                State::Scalar(Scalar::Value(key))
+                    .into_type(StateType::Scalar(self.class))
+                    .ok_or_else(|| TCError::unsupported(err))
+            })
+        }))
+    }
+}
+
+impl Route for ScalarType {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        None
+    }
+}
 
 impl Route for Range {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

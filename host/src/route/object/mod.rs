@@ -1,11 +1,17 @@
 use tcgeneric::PathSegment;
 
-use crate::object::{InstanceClass, InstanceExt, Object};
+use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
 use crate::state::State;
 
 use super::{GetHandler, Handler, Route};
 
 mod instance;
+
+impl Route for ObjectType {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        None
+    }
+}
 
 struct ClassHandler<'a> {
     class: &'a InstanceClass,
