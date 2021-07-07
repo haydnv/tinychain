@@ -65,6 +65,7 @@ class Context(object):
             self.ns[name] = 0
             return name
 
+
 def form_of(state):
     """Return the form of the given state."""
 
@@ -86,14 +87,31 @@ def get_ref(subject, name):
         return subject
 
 
+def is_python_literal(state):
+    from .ref import Ref
+    from .state import State
+
+    if isinstance(state, Ref):
+        return False
+    elif isinstance(state, State):
+        return False
+    elif isinstance(state, URI):
+        return False
+
+    return True
+
+
 class URI(object):
     """
     An absolute or relative link to a Tinychain state.
     
     Examples:
-        `URI("http://example.com/myservice/value_name")`
-        `URI("$other_state/method_name")`
-        `URI("/state/scalar/value/none")`
+        .. highlight:: python
+        .. code-block:: python
+
+            URI("https://example.com/myservice/value_name")
+            URI("$other_state/method_name")
+            URI("/state/scalar/value/none")
     """
 
     def __init__(self, root, path=[]):
@@ -107,7 +125,10 @@ class URI(object):
         Append a segment to this `URI`.
         
         Example:
-            `value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))`
+            .. highlight:: python
+            .. code-block:: python
+
+                value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
         """
 
         if not str(name):
