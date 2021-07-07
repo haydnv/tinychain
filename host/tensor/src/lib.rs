@@ -21,8 +21,8 @@ use tcgeneric::{
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
-pub use einsum::einsum;
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
+pub use einsum::einsum;
 pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 
 mod bounds;

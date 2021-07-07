@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use log::debug;
+
 use tc_error::*;
 use tc_transact::fs::Dir;
 
@@ -23,14 +25,14 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
         return Err(TCError::bad_request("invalid format for einsum", format));
     }
 
+    let f_output = parts.pop().unwrap_or("").chars().collect::<Label>();
+
     let f_inputs = parts
         .pop()
         .unwrap()
         .split(',')
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
-
-    let f_output = parts.pop().unwrap_or("").chars().collect::<Label>();
 
     let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
     for f_input in &f_inputs {
@@ -74,10 +76,11 @@ fn validate_args<T: TensorAccess>(
 
     for (f_input, tensor) in f_inputs.iter().zip(tensors.iter()) {
         if f_input.len() != tensor.ndim() {
-            return Err(TCError::bad_request(
-                "wrong tensor shape found for format string",
-                f_input.iter().collect::<String>(),
-            ));
+            return Err(TCError::unsupported(format!(
+                "tensor with {} dimensions does not match format string {}",
+                tensor.ndim(),
+                f_input.iter().cloned().collect::<String>()
+            )));
         }
 
         for (label, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
@@ -202,6 +205,11 @@ where
         + Clone,
 {
     let (f_inputs, f_output) = parse_format(format)?;
+    debug!(
+        "einsum with input labels: {:?}, output label {:?}",
+        f_inputs, f_output
+    );
+
     let dimensions = validate_args(&f_inputs, &tensors)?;
 
     let op = outer_product(&f_inputs, &dimensions, tensors)?;

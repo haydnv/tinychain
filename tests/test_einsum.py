@@ -35,9 +35,18 @@ class Tests(unittest.TestCase):
 
     def test1D(self):
         A = np.array([1, 2, 3])
-        self.run_test('i->i', A)
+        self.execute('i->', A)
+        self.execute('i->i', A)
 
-    def run_test(self, fmt, *tensors):
+    def test2D(self):
+        A = np.array([[1, 1], [2, 2], [3, 3]])
+        self.execute('ij->', A)
+        self.execute('ij->i', A)
+        self.execute('ij->j', A)
+        self.execute('ij->ij', A)
+        self.execute('ij->ji', A)
+
+    def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
         cxt = tc.Context()

@@ -467,6 +467,9 @@ where
     D::FileClass: From<TensorType>,
 {
     debug!("SparseTable::filled_at {:?}", axes);
+    if axes.is_empty() {
+        return Ok(Box::pin(stream::empty()));
+    }
 
     let sort = axes.iter().zip(0..axes.len()).any(|(x, y)| x != &y);
 
