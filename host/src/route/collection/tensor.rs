@@ -312,7 +312,7 @@ where
     {
         Some(Box::new(move |txn, key, value| {
             debug!("PUT Tensor: {} <- {}", key, value);
-            Box::pin(write(self.tensor, txn.clone(), key, value))
+            Box::pin(write(self.tensor, txn, key, value))
         }))
     }
 }
@@ -375,14 +375,16 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                let txn = txn.clone();
+
                 if key.is_none() {
-                    (self.op)(self.tensor, txn.clone())
+                    (self.op)(self.tensor, txn)
                         .map_ok(State::from)
                         .await
                 } else {
                     let bounds = cast_bounds(self.tensor.shape(), key.into())?;
                     let slice = self.tensor.slice(bounds)?;
-                    (self.op)(slice, txn.clone()).map_ok(State::from).await
+                    (self.op)(slice, txn).map_ok(State::from).await
                 }
             })
         }))
@@ -506,7 +508,7 @@ where
         .await
 }
 
-async fn write<T>(tensor: T, txn: Txn, key: Value, value: State) -> TCResult<()>
+async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>
 where
     T: TensorAccess
         + TensorIO<fs::Dir, Txn = Txn>
@@ -519,7 +521,7 @@ where
     let bounds = cast_bounds(tensor.shape(), key)?;
 
     match value {
-        State::Collection(Collection::Tensor(value)) => tensor.write(txn, bounds, value).await,
+        State::Collection(Collection::Tensor(value)) => tensor.write(txn.clone(), bounds, value).await,
         State::Scalar(scalar) => {
             let value =
                 scalar.try_cast_into(|v| TCError::bad_request("invalid tensor element", v))?;
