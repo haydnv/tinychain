@@ -91,7 +91,7 @@ Libs: -L${libdir}
 | Database tables | x | | | x | x | | x | x | | x | |
 | Document database | | | | x | | | x | | | | |
 | Distributed applications (dapps) | x | | x | | | | | | | | |
-| Graph database | \* | | | | | x | x | | | | |
+| Graph database | \*\* | | | | | x | x | | | | |
 | Hypothetical queries | x | | | | | | | | | | |
 | Large ML library | | | | | | | | | | | x |
 | JSON RPC interface | x | x | x | x | | x | | | x | | |
