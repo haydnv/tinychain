@@ -49,7 +49,7 @@ impl ChainInstance for BlockChain {
 
     async fn append_put(
         &self,
-        txn: Txn,
+        txn: &Txn,
         path: TCPathBuf,
         key: Value,
         value: State,

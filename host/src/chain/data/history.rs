@@ -66,7 +66,7 @@ impl History {
 
     pub async fn append_put(
         &self,
-        txn: Txn,
+        txn: &Txn,
         path: TCPathBuf,
         key: Value,
         value: State,
@@ -85,7 +85,7 @@ impl History {
         Ok(())
     }
 
-    async fn save_state(&self, txn: Txn, state: State) -> TCResult<Scalar> {
+    async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
         if state.is_ref() {
             return Err(TCError::bad_request(
                 "cannot update Chain with reference: {}",
@@ -323,7 +323,7 @@ impl History {
                         }
                         Mutation::Put(path, key, value) => {
                             let value = other.resolve(txn, value).await?;
-                            let value_ref = self.save_state(txn.clone(), value.clone()).await?;
+                            let value_ref = self.save_state(txn, value.clone()).await?;
 
                             if append {
                                 dest.append_put(*past_txn_id, path.clone(), key.clone(), value_ref);
@@ -596,7 +596,7 @@ impl de::Visitor for HistoryVisitor {
                 ));
             }
 
-            let mutations = parse_block_state(&history, txn.clone(), block_data)
+            let mutations = parse_block_state(&history, &txn, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -630,7 +630,7 @@ impl de::Visitor for HistoryVisitor {
                 ));
             }
 
-            let mutations = parse_block_state(&history, txn.clone(), block_data)
+            let mutations = parse_block_state(&history, &txn, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -645,7 +645,7 @@ impl de::Visitor for HistoryVisitor {
 
 async fn parse_block_state(
     history: &History,
-    txn: Txn,
+    txn: &Txn,
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>> {
     let mut mutations = BTreeMap::new();
@@ -661,7 +661,7 @@ async fn parse_block_state(
                 parsed.push(Mutation::Delete(path, key));
             } else if op.matches::<(TCPathBuf, Value, State)>() {
                 let (path, key, value) = op.opt_cast_into().unwrap();
-                let value = history.save_state(txn.clone(), value).await?;
+                let value = history.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(path, key, value));
             } else {
                 return Err(TCError::bad_request(

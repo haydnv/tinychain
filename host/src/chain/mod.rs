@@ -300,8 +300,7 @@ impl Subject {
                         .create_file_tmp(txn_id, TensorType::Dense)
                         .await?;
 
-                    let backup =
-                        tc_transact::fs::CopyFrom::copy_from(backup, file, txn.clone()).await?;
+                    let backup = tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;
 
                     tensor.restore(&backup, txn_id).await
                 }
@@ -314,8 +313,7 @@ impl Subject {
             Self::Sparse(tensor) => match backup {
                 State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
                     let dir = txn.context().create_dir_tmp(txn_id).await?;
-                    let backup =
-                        tc_transact::fs::CopyFrom::copy_from(backup, dir, txn.clone()).await?;
+                    let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
                     tensor.restore(&backup, txn_id).await
                 }
                 other => Err(TCError::bad_request(
@@ -427,8 +425,13 @@ pub trait ChainInstance {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(&self, txn: Txn, path: TCPathBuf, key: Value, value: State)
-        -> TCResult<()>;
+    async fn append_put(
+        &self,
+        txn: &Txn,
+        path: TCPathBuf,
+        key: Value,
+        value: State,
+    ) -> TCResult<()>;
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
 
@@ -523,7 +526,7 @@ impl ChainInstance for Chain {
 
     async fn append_put(
         &self,
-        txn: Txn,
+        txn: &Txn,
         path: TCPathBuf,
         key: Value,
         value: State,

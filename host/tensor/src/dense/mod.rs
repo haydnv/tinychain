@@ -773,7 +773,11 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    async fn copy_from(instance: DenseTensor<FD, FS, D, T, B>, file: FD, txn: T) -> TCResult<Self> {
+    async fn copy_from(
+        instance: DenseTensor<FD, FS, D, T, B>,
+        file: FD,
+        txn: &T,
+    ) -> TCResult<Self> {
         BlockListFile::copy_from(instance.blocks, file, txn)
             .map_ok(Self::from)
             .await

@@ -725,7 +725,7 @@ where
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
         store: Self::Store,
-        txn: Self::Txn,
+        txn: &Self::Txn,
     ) -> TCResult<Self> {
         SparseTable::copy_from(instance, store, txn)
             .map_ok(Self::from)

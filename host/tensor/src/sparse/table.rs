@@ -200,15 +200,15 @@ where
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
         store: D,
-        txn: T,
+        txn: &T,
     ) -> TCResult<Self> {
+        let txn_id = *txn.id();
         let shape = instance.shape().clone();
         let dtype = instance.dtype();
         let schema = Schema { shape, dtype };
-        let accessor = SparseTable::create(&store, schema, *txn.id()).await?;
+        let accessor = SparseTable::create(&store, schema, txn_id).await?;
 
-        let txn_id = *txn.id();
-        let filled = instance.accessor.filled(txn).await?;
+        let filled = instance.accessor.filled(txn.clone()).await?;
 
         filled
             .map_ok(|(coord, value)| accessor.write_value(txn_id, coord, value))

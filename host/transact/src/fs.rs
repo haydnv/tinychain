@@ -289,7 +289,7 @@ pub trait CopyFrom<D: Dir, I>: Persist<D> {
     async fn copy_from(
         instance: I,
         store: <Self as Persist<D>>::Store,
-        txn: <Self as Persist<D>>::Txn,
+        txn: &<Self as Persist<D>>::Txn,
     ) -> TCResult<Self>;
 }
 

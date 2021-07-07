@@ -994,7 +994,7 @@ where
     F: TryFrom<D::File, Error = TCError>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
-    async fn copy_from(source: I, dir: D, txn: Txn) -> TCResult<Self> {
+    async fn copy_from(source: I, dir: D, txn: &Txn) -> TCResult<Self> {
         let txn_id = *txn.id();
         let schema = source.schema();
         let key_len = schema.primary().key().len();

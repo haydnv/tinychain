@@ -480,11 +480,11 @@ where
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    async fn copy_from(other: B, file: FD, txn: T) -> TCResult<Self> {
+    async fn copy_from(other: B, file: FD, txn: &T) -> TCResult<Self> {
         let txn_id = *txn.id();
         let dtype = other.dtype();
         let shape = other.shape().clone();
-        let blocks = other.block_stream(txn).await?;
+        let blocks = other.block_stream(txn.clone()).await?;
         Self::from_blocks(file, txn_id, Some(shape), dtype, blocks).await
     }
 }

@@ -757,7 +757,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T>
 impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
     for BTreeFile<F, D, T>
 {
-    async fn copy_from(source: I, file: F, txn: T) -> TCResult<Self> {
+    async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {
         let txn_id = *txn.id();
         let schema = source.schema().clone();
         let dest = Self::create(file, schema, txn_id).await?;

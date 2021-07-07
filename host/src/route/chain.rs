@@ -191,7 +191,7 @@ impl<'a> Handler<'a> for AppendHandler<'a> {
 
                         let path = self.path.to_vec().into();
                         self.chain
-                            .append_put(txn.clone(), path, key.clone(), value.clone())
+                            .append_put(txn, path, key.clone(), value.clone())
                             .await?;
 
                         put_handler(txn, key, value).await
