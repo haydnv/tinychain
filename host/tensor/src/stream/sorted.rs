@@ -105,9 +105,6 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Coords>> + Unpin>(
 ) -> impl Stream<Item = TCResult<Offsets>> {
     coords.map_ok(move |coords| {
         debug_assert_eq!(coords.ndim(), shape.len());
-
-        debug!("coords {:?} to offsets with shape {}", coords.to_vec(), shape);
-
         coords.to_offsets(&shape)
     })
 }

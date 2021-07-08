@@ -48,8 +48,23 @@ class Tests(unittest.TestCase):
 
     def test2Dto3D(self):
         A = np.array([[0, 1], [1, 2], [2, 3]])
-#        self.execute('ij,ik->ijk', A, A)
+        self.execute('ij,ik->ijk', A, A)
         self.execute('ij,ik->', A, A)
+
+    def test2Dmulti(self):
+        A = np.array([[1, 2], [3, 4]])
+        B = np.array([[5, 6], [7, 8]])
+
+        self.execute('ik,ik,il->', A, A, A)
+        self.execute('ji,jk->ik', A, B)  # = matmul(transpose(A), B)
+        self.execute('ij,jk->ijk', A, B)
+        self.execute('ij,jk->ij', A, B)
+        self.execute('ij,jk->ik', A, B)
+        self.execute('ij,jk->jk', A, B)
+        self.execute('ij,jk->i', A, B)
+        self.execute('ij,jk->j', A, B)
+        self.execute('ij,jk->k', A, B)
+        self.execute('ij,jk->', A, B)
 
     def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])

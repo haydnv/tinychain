@@ -572,7 +572,7 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
-        debug!("SparseBroadcast::filled_at");
+        debug!("SparseBroadcast::filled_at {:?}", axes);
 
         if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
@@ -593,6 +593,7 @@ where
             .try_flatten()
             .map_ok(move |coord| stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok)))
             .try_flatten()
+            // TODO: can this happen in `Coords`?
             .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect());
 
         let filled_at = CoordBlocks::new(filled_at, ndim, PER_BLOCK);
@@ -907,7 +908,11 @@ where
             return Ok(Box::pin(stream::empty()));
         }
 
-        let shape = self.shape().to_vec();
+        let shape = {
+            let shape = self.shape();
+            axes.iter().map(|x| shape[*x]).collect()
+        };
+
         let (left, right) = try_join!(
             self.left.filled_at(txn.clone(), axes.clone()),
             self.right.filled_at(txn, axes)
