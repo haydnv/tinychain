@@ -51,7 +51,7 @@ class Tests(unittest.TestCase):
         self.execute('ij,ik->ijk', A, A)
         self.execute('ij,ik->', A, A)
 
-    def test2Dmulti(self):
+    def test2DMulti(self):
         A = np.array([[1, 2], [3, 4]])
         B = np.array([[5, 6], [7, 8]])
 
@@ -66,6 +66,18 @@ class Tests(unittest.TestCase):
         self.execute('ij,jk->k', A, B)
         self.execute('ij,jk->', A, B)
 
+    def test3DMulti(self):
+        A = np.array([[1, 1, 1],
+                      [2, 2, 2],
+                      [5, 5, 5]])
+
+        B = np.array([[0, 1, 0],
+                      [1, 1, 0],
+                      [1, 1, 1]])
+
+        self.execute('ij,jk->ijk', A, B)
+        self.execute('ij,jk->ik', A, B)
+
     def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
@@ -73,6 +85,7 @@ class Tests(unittest.TestCase):
         cxt.dense = [to_dense(t) for t in tensors]
         cxt.sparse = [to_sparse(t) for t in tensors]
         cxt.results = (tc.tensor.einsum(fmt, cxt.dense), tc.tensor.einsum(fmt, cxt.sparse))
+        print(tc.to_json(cxt))
 
         (dense, sparse) = self.host.post(ENDPOINT, cxt)
         self.assertEqual(dense, to_dense(expected))
@@ -112,10 +125,12 @@ def to_sparse(ndarray):
 
 
 def np_to_tc_dtype(dtype):
-    if dtype == np.int64:
+    if dtype == np.float64:
+        return tc.F64
+    elif dtype == np.int64:
         return tc.I64
     else:
-        raise NotImplemented("numpy dtype conversion")
+        raise NotImplementedError(f"numpy dtype conversion of {dtype}")
 
 
 if __name__ == "__main__":
