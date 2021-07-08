@@ -62,6 +62,7 @@ where
         "sort values by coordinate for Tensor with shape {}",
         source.shape()
     );
+
     let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
 
     let buffered = coords
@@ -87,6 +88,7 @@ where
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,
 {
     debug!("sort coords for Tensor with shape {}", shape);
+
     let blocks = coords_to_offsets(shape, coords).map_ok(|block| ArrayExt::from(block).into());
 
     let block_list =
@@ -101,7 +103,13 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Coords>> + Unpin>(
     shape: Shape,
     coords: S,
 ) -> impl Stream<Item = TCResult<Offsets>> {
-    coords.map_ok(move |coords| coords.to_offsets(&shape))
+    coords.map_ok(move |coords| {
+        debug_assert_eq!(coords.ndim(), shape.len());
+
+        debug!("coords {:?} to offsets with shape {}", coords.to_vec(), shape);
+
+        coords.to_offsets(&shape)
+    })
 }
 
 fn offsets_to_coords<'a, S: Stream<Item = TCResult<Offsets>> + Unpin + 'a>(

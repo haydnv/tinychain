@@ -147,7 +147,13 @@ impl Expand {
     }
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.into_iter().map(|x| self.inverted_axes[x]).collect()
+        axes.into_iter().filter_map(|x| {
+            if x == self.expand {
+                None
+            } else {
+                Some(self.inverted_axes[x])
+            }
+        }).collect()
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {

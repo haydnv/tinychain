@@ -46,6 +46,11 @@ class Tests(unittest.TestCase):
         self.execute('ij->ij', A)
         self.execute('ij->ji', A)
 
+    def test2Dto3D(self):
+        A = np.array([[0, 1], [1, 2], [2, 3]])
+#        self.execute('ij,ik->ijk', A, A)
+        self.execute('ij,ik->', A, A)
+
     def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 

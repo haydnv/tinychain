@@ -676,13 +676,6 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
 {
     pub fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
         let column_set: HashSet<&Id> = columns.iter().collect();
-        if column_set.len() != columns.len() {
-            return Err(TCError::bad_request(
-                "Tried to select duplicate column",
-                Value::from_iter(columns.into_iter()),
-            ));
-        }
-
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
 
         let source_columns = source.schema().primary().columns();

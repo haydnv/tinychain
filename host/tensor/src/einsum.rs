@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ops::Deref;
 
 use log::debug;
 
@@ -17,22 +18,25 @@ const VALID_LABELS: [char; 52] = [
 
 fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
     if !format.contains("->") {
-        return Err(TCError::bad_request("invalid format for einsum", format));
+        return Err(TCError::bad_request(
+            "invalid format for einsum (missing '->')",
+            format,
+        ));
     }
 
-    let mut parts: Vec<&str> = format.split("->").collect();
+    let mut parts: VecDeque<&str> = format.split("->").collect();
     if parts.is_empty() || parts.len() > 2 {
         return Err(TCError::bad_request("invalid format for einsum", format));
     }
 
-    let f_output = parts.pop().unwrap_or("").chars().collect::<Label>();
-
     let f_inputs = parts
-        .pop()
+        .pop_front()
         .unwrap()
         .split(',')
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
+
+    let f_output = parts.pop_back().unwrap_or("").chars().collect::<Label>();
 
     let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
     for f_input in &f_inputs {
@@ -100,7 +104,9 @@ fn validate_args<T: TensorAccess>(
     Ok(dimensions)
 }
 
-fn normalize<T: TensorAccess + TensorTransform<Expand = T, Transpose = T> + Clone>(
+fn normalize<
+    T: TensorAccess + TensorTransform<Broadcast = T, Expand = T, Transpose = T> + Clone,
+>(
     tensor: T,
     f_input: &[char],
     f_output: &[char],
@@ -134,7 +140,17 @@ fn normalize<T: TensorAccess + TensorTransform<Expand = T, Transpose = T> + Clon
         }
     }
 
-    Ok(tensor)
+    let shape = f_output
+        .iter()
+        .map(|l| dimensions.get(l).expect("tensor dimension"))
+        .cloned()
+        .collect::<Vec<u64>>();
+
+    if tensor.shape().deref() == &shape {
+        Ok(tensor)
+    } else {
+        tensor.broadcast(shape.into())
+    }
 }
 
 fn outer_product<D, T>(
@@ -146,7 +162,7 @@ where
     D: Dir,
     T: TensorAccess
         + TensorMath<D, T, Combine = T>
-        + TensorTransform<Expand = T, Transpose = T>
+        + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + Clone,
 {
     assert_eq!(f_inputs.len(), tensors.len());
@@ -200,7 +216,7 @@ where
     D: Dir,
     T: TensorAccess
         + TensorMath<D, T, Combine = T>
-        + TensorTransform<Expand = T, Transpose = T>
+        + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + TensorReduce<D, Reduce = T>
         + Clone,
 {

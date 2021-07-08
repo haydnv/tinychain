@@ -367,6 +367,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let bounds = Bounds::all(self.source.shape());
         let ndim = axes.len();
 
@@ -570,7 +574,7 @@ where
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
         debug!("SparseBroadcast::filled_at");
 
-        if self.is_empty(&txn).await? {
+        if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
         }
 
@@ -899,6 +903,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let shape = self.shape().to_vec();
         let (left, right) = try_join!(
             self.left.filled_at(txn.clone(), axes.clone()),
@@ -1055,10 +1063,15 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let axis = self.rebase.expand_axis();
         let source_axes = self.rebase.invert_axes(axes);
         let source = self.source.filled_at(txn, source_axes).await?;
         let filled_at = source.map_ok(move |coords| coords.expand_dim(axis));
+
         Ok(Box::pin(filled_at))
     }
 
@@ -1373,6 +1386,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
         let shape = self.shape().clone();
         let source_axes = self.rebase.invert_axes(axes);
         let permutation = self.rebase.map_axes(&source_axes);
