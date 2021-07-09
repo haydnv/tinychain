@@ -78,6 +78,14 @@ class Tests(unittest.TestCase):
         self.execute('ij,jk->ijk', A, B)
         self.execute('ij,jk->ik', A, B)
 
+        A = np.arange(60.).reshape(3, 4, 5)
+        B = np.arange(24.).reshape(4, 3, 2)
+        self.execute('ijk,jil->', A, B)
+        self.execute('ijk,jil->il', A, B)
+        self.execute('ijk,jil->kj', A, B)
+        self.execute('ijk,jil->lkij', A, B)
+        self.execute('ijk,jil->lij', A, B)
+
     def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
@@ -85,7 +93,6 @@ class Tests(unittest.TestCase):
         cxt.dense = [to_dense(t) for t in tensors]
         cxt.sparse = [to_sparse(t) for t in tensors]
         cxt.results = (tc.tensor.einsum(fmt, cxt.dense), tc.tensor.einsum(fmt, cxt.sparse))
-        print(tc.to_json(cxt))
 
         (dense, sparse) = self.host.post(ENDPOINT, cxt)
         self.assertEqual(dense, to_dense(expected))

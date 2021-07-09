@@ -115,12 +115,6 @@ where
             .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
             .await?;
 
-        if file.is_empty(&txn_id).await? {
-            return Err(TCError::unsupported(
-                "tried to create a dense tensor from an empty block list",
-            ));
-        }
-
         let shape = if let Some(shape) = shape {
             if shape.size() != size {
                 return Err(TCError::unsupported(format!(
@@ -198,6 +192,7 @@ where
     /// Consume this `BlockListFile` handle and return a `Stream` of `Array` blocks.
     pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
+
         let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
             .map(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
             .buffered(num_cpus::get())
@@ -209,7 +204,9 @@ where
     /// Sort the elements in this `BlockListFile`.
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
-        if num_blocks <= 1 {
+        if num_blocks == 0 {
+            return Ok(());
+        } else if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
             block.sort(true)?;
@@ -299,6 +296,11 @@ where
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let size = self.size();
+            if size == 0 {
+                let blocks: TCTryStream<'a, Array> = Box::pin(stream::empty());
+                return Ok(blocks);
+            }
+
             let file = self.file;
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
@@ -889,6 +891,11 @@ where
     }
 
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+        if self.size() == 0 {
+            let blocks: TCTryStream<'a, Array> = Box::pin(stream::empty());
+            return Box::pin(future::ready(Ok(blocks)));
+        }
+
         let txn_id = *txn.id();
         let file = self.source.file;
         let shape = self.source.schema.shape;

@@ -35,6 +35,8 @@ where
         .await?;
 
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
+    debug!("sorted coords");
+
     let offsets = offsets
         .into_stream(txn_id)
         .map_ok(|array| array.type_cast());
@@ -103,6 +105,8 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Coords>> + Unpin>(
     shape: Shape,
     coords: S,
 ) -> impl Stream<Item = TCResult<Offsets>> {
+    debug!("coords to offsets with shape {}", shape);
+
     coords.map_ok(move |coords| {
         debug_assert_eq!(coords.ndim(), shape.len());
         coords.to_offsets(&shape)
