@@ -132,7 +132,6 @@ pub struct Expand {
     source_shape: Shape,
     shape: Shape,
     expand: usize,
-    inverted_axes: Vec<usize>,
 }
 
 impl Expand {
@@ -144,15 +143,10 @@ impl Expand {
         let mut shape = source_shape.to_vec();
         shape.insert(expand, 1);
 
-        let mut inverted_axes = Vec::with_capacity(source_shape.len() + 1);
-        inverted_axes.extend(0..source_shape.len());
-        inverted_axes.insert(expand, expand);
-
         Ok(Expand {
             source_shape,
             shape: shape.into(),
             expand,
-            inverted_axes,
         })
     }
 
@@ -165,8 +159,10 @@ impl Expand {
             .filter_map(|x| {
                 if x == self.expand {
                     None
+                } else if x > self.expand {
+                    Some(x - 1)
                 } else {
-                    Some(self.inverted_axes[x])
+                    Some(x)
                 }
             })
             .collect()

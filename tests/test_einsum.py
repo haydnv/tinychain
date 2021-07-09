@@ -1,4 +1,6 @@
 import itertools
+import random
+
 import numpy as np
 import tinychain as tc
 import unittest
@@ -86,6 +88,25 @@ class Tests(unittest.TestCase):
         self.execute('ijk,jil->lkij', A, B)
         self.execute('ijk,jil->lij', A, B)
 
+    def test2DRandom(self):
+        rand_dim = lambda x: random.randint(1, x)
+
+        for i in range(1, 10):
+            x = rand_dim(i)
+            y = rand_dim(i)
+            A = (np.random.random([x, y]) * 256).astype(np.int32)
+            print(A)
+
+            self.execute("ij->i", A)
+
+            B = (np.random.random([y, x]) * 512).astype(np.int32)
+
+            print(A)
+            print(B)
+
+            self.execute("ij,jk->ik", A, B)
+            self.execute("ij,jk->ki", A, B)
+
     def execute(self, fmt, *tensors):
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
@@ -134,6 +155,8 @@ def to_sparse(ndarray):
 def np_to_tc_dtype(dtype):
     if dtype == np.float64:
         return tc.F64
+    elif dtype == np.int32:
+        return tc.I32
     elif dtype == np.int64:
         return tc.I64
     else:

@@ -1089,12 +1089,25 @@ where
             return Ok(Box::pin(stream::empty()));
         }
 
-        let axis = self.rebase.expand_axis();
+        let mut i = 0;
+        let expand = loop {
+            if axes[i] == self.rebase.expand_axis() {
+                break Some(i);
+            } else if i >= axes.len() {
+                break None;
+            } else {
+                i += 1;
+            }
+        };
+
         let source_axes = self.rebase.invert_axes(axes);
         let source = self.source.filled_at(txn, source_axes).await?;
-        let filled_at = source.map_ok(move |coords| coords.expand_dim(axis));
-
-        Ok(Box::pin(filled_at))
+        if let Some(x) = expand {
+            let filled_at = source.map_ok(move |coords| coords.expand_dim(x));
+            Ok(Box::pin(filled_at))
+        } else {
+            Ok(source)
+        }
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
