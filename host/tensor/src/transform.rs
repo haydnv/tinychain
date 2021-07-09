@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::iter;
 
 use afarray::Coords;
+use log::debug;
 
 use tc_error::*;
 use tcgeneric::Tuple;
@@ -21,12 +22,20 @@ pub struct Broadcast {
 
 impl Broadcast {
     pub fn new(source_shape: Shape, shape: Shape) -> TCResult<Broadcast> {
-        let ndim = shape.len();
-        if source_shape.len() > shape.len() {
-            return Err(TCError::bad_request(
-                &format!("cannot broadcast into {}", shape),
-                source_shape,
+        if source_shape.is_empty() {
+            return Err(TCError::unsupported("cannot broadcast an empty Tensor"));
+        } else if shape.is_empty() {
+            return Err(TCError::unsupported(
+                "cannot broadcast into an empty Tensor",
             ));
+        }
+
+        let ndim = shape.len();
+        if source_shape.len() > ndim {
+            return Err(TCError::unsupported(format!(
+                "cannot broadcast {} into {}",
+                source_shape, shape
+            )));
         }
 
         let offset = ndim - source_shape.len();
@@ -78,10 +87,14 @@ impl Broadcast {
         let source_ndim = self.source_shape.len();
         let mut source_bounds = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
-            if self.broadcast[axis + self.offset] {
-                source_bounds.push(AxisBounds::from(0))
+            if axis + self.offset < bounds.len() {
+                if self.broadcast[axis + self.offset] {
+                    source_bounds.push(AxisBounds::from(0))
+                } else {
+                    source_bounds.push(bounds[axis + self.offset].clone())
+                }
             } else {
-                source_bounds.push(bounds[axis + self.offset].clone())
+                source_bounds.push(AxisBounds::In(0..1))
             }
         }
 
@@ -89,6 +102,8 @@ impl Broadcast {
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+        debug_assert_eq!(coord.len(), self.shape.len());
+
         let source_ndim = self.source_shape.len();
         let mut source_coord = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
@@ -126,17 +141,16 @@ impl Expand {
             return Err(TCError::bad_request("axis out of bounds", expand));
         }
 
+        let mut shape = source_shape.to_vec();
+        shape.insert(expand, 1);
+
         let mut inverted_axes = Vec::with_capacity(source_shape.len() + 1);
         inverted_axes.extend(0..source_shape.len());
         inverted_axes.insert(expand, expand);
 
-        let mut shape = source_shape.to_vec();
-        shape.insert(expand, 1);
-        let shape: Shape = shape.into();
-
         Ok(Expand {
             source_shape,
-            shape,
+            shape: shape.into(),
             expand,
             inverted_axes,
         })
@@ -163,7 +177,7 @@ impl Expand {
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
-        if bounds.len() < self.expand {
+        if self.expand < bounds.len() {
             bounds.remove(self.expand);
         }
 
@@ -171,7 +185,7 @@ impl Expand {
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Coord {
-        assert_eq!(coord.len(), self.shape.len());
+        debug_assert_eq!(coord.len(), self.shape.len());
 
         let mut inverted = Vec::with_capacity(self.source_shape.len());
         inverted.extend(&coord[..self.expand]);
@@ -423,11 +437,7 @@ pub struct Transpose {
 impl Transpose {
     pub fn new(source_shape: Shape, permutation: Option<Vec<usize>>) -> TCResult<Transpose> {
         let ndim = source_shape.len();
-        let permutation = permutation.unwrap_or_else(|| {
-            let mut axes: Vec<usize> = (0..ndim).collect();
-            axes.reverse();
-            axes
-        });
+        let permutation = permutation.unwrap_or_else(|| (0..ndim).rev().collect());
 
         if permutation.len() != ndim {
             return Err(TCError::unsupported(format!(
@@ -435,6 +445,13 @@ impl Transpose {
                 source_shape,
                 Tuple::from(permutation)
             )));
+        } else if let Some(max_axis) = permutation.iter().max() {
+            if max_axis >= &ndim {
+                return Err(TCError::bad_request(
+                    "cannot transpose nonexistent axis",
+                    max_axis,
+                ));
+            }
         }
 
         let mut shape: Coord = Vec::with_capacity(ndim);
@@ -470,7 +487,7 @@ impl Transpose {
         &self.shape
     }
 
-    pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+    pub fn invert_bounds(&self, bounds: &Bounds) -> Bounds {
         let mut source_bounds = Bounds::all(&self.source_shape);
         for axis in 0..bounds.len() {
             source_bounds[self.permutation[axis]] = bounds[axis].clone();
@@ -495,15 +512,30 @@ impl Transpose {
     }
 
     pub fn invert_permutation(&self, bounds: &Bounds) -> Vec<usize> {
-        let mut permutation = Vec::with_capacity(self.shape.len());
+        debug!(
+            "source permutation is {:?}, bounds are {}",
+            self.permutation, bounds
+        );
+
+        let mut offsets = Vec::with_capacity(self.permutation.len());
+        let mut elided = 0;
+        for bound in self.invert_bounds(bounds).iter() {
+            if bound.is_index() {
+                elided += 1;
+            }
+
+            offsets.push(elided)
+        }
+
+        let mut inverted = Vec::with_capacity(self.shape.len());
         for (i, bound) in bounds.iter().enumerate() {
             if bound.is_index() {
                 // pass
             } else {
-                permutation.push(self.permutation[i]);
+                inverted.push(self.permutation[i] - offsets[self.permutation[i]]);
             }
         }
-        permutation
+        inverted
     }
 
     pub fn map_coord(&self, source_coord: Coord) -> Coord {

@@ -477,8 +477,7 @@ where
     let coords = table.select(axes.into_iter().map(Id::from).collect())?;
     let coords = coords.rows(*txn.id()).await?;
     let coords = coords.map(|r| r.and_then(expect_coord));
-    let coords = CoordBlocks::new(coords, ndim, PER_BLOCK)
-        .inspect_ok(|coords| debug!("coords: {:?}", coords.to_vec()));
+    let coords = CoordBlocks::new(coords, ndim, PER_BLOCK);
 
     if sort {
         let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, shape, coords).await?;

@@ -112,6 +112,12 @@ fn normalize<
     f_output: &[char],
     dimensions: &BTreeMap<char, u64>,
 ) -> TCResult<T> {
+    debug!(
+        "normalize tensor with shape {} from {:?} -> {:?}",
+        tensor.shape(),
+        f_input,
+        f_output
+    );
     if f_input == f_output {
         return Ok(tensor);
     }
@@ -149,6 +155,7 @@ fn normalize<
     if tensor.shape().deref() == &shape {
         Ok(tensor)
     } else {
+        debug!("broadcast {} into {:?}", tensor.shape(), shape);
         tensor.broadcast(shape.into())
     }
 }
@@ -205,6 +212,12 @@ where
     if f_input == f_output {
         Ok(op)
     } else {
+        debug!(
+            "transpose outer product with shape {} from {:?} -> {:?}",
+            op.shape(),
+            f_input,
+            f_output
+        );
         let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
         let permutation: Vec<usize> = f_output.iter().map(|l| *source.get(l).unwrap()).collect();
         op.transpose(Some(permutation))

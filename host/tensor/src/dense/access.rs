@@ -483,6 +483,13 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!(
+            "BlockListCombine::transpose {} {} {:?}",
+            self.left.shape(),
+            self.right.shape(),
+            permutation
+        );
+
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
 
@@ -578,7 +585,7 @@ where
     }
 
     fn ndim(&self) -> usize {
-        self.source.ndim()
+        self.shape().len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -648,6 +655,11 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!(
+            "BlockListTranspose {:?} (shape is {})",
+            permutation,
+            self.shape()
+        );
         BlockListTranspose::new(self, permutation)
     }
 
@@ -1012,7 +1024,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
-    type Transpose = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Transpose>;
+    type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let reduce = BlockListReduce {
@@ -1052,11 +1064,12 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let permutation = permutation.unwrap_or_else(|| (0..self.ndim()).rev().collect());
-        let reduce_axis = self.rebase.reduce_axis(&Bounds::all(self.shape()));
-        let source_axes = self.rebase.invert_axes(permutation);
-        let source = self.source.transpose(Some(source_axes))?;
-        BlockListReduce::new(source, reduce_axis, self.reductor)
+        debug!(
+            "BlockListReduce::transpose {} {:?}",
+            self.shape(),
+            permutation
+        );
+        BlockListTranspose::new(self, permutation)
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
@@ -1227,7 +1240,7 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        let bounds = self.rebase.invert_bounds(bounds);
+        let bounds = self.rebase.invert_bounds(&bounds);
         self.source.write_value(txn_id, bounds, number).await
     }
 }

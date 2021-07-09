@@ -525,13 +525,13 @@ where
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseBroadcast<FD, FS, D, T, A>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
+    type Slice = SparseBroadcast<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
     type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
@@ -618,11 +618,26 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!(
+            "SparseBroadcast::slice {} {} (source shape is {})",
+            self.shape(),
+            bounds,
+            self.source.shape()
+        );
         self.shape().validate_bounds(&bounds)?;
 
         let shape = bounds.to_shape(self.shape())?;
         let source_bounds = self.rebase.invert_bounds(bounds);
-        let source = self.source.slice(source_bounds)?;
+        debug!("source bounds are {}", source_bounds);
+        let mut source = self
+            .source
+            .slice(source_bounds)
+            .map(|source| source.accessor())?;
+        while source.ndim() < shape.len() {
+            let expand_axis = source.ndim();
+            source = SparseExpand::new(source, expand_axis).map(|source| source.accessor())?
+        }
+
         SparseBroadcast::new(source, shape)
     }
 
@@ -936,6 +951,8 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseCombinator::slice {}", bounds);
+
         let left = self.left.slice(bounds.clone())?;
         let right = self.right.slice(bounds)?;
         assert_eq!(left.shape(), right.shape());
@@ -1089,9 +1106,18 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseExpand {} slice {}", self.shape(), bounds);
         self.shape().validate_bounds(&bounds)?;
 
         let source_bounds = self.rebase.invert_bounds(bounds);
+
+        debug!(
+            "slice source {} with bounds {} (removed axis {})",
+            self.source.shape(),
+            source_bounds,
+            self.rebase.expand_axis()
+        );
+
         self.source.slice(source_bounds)
     }
 
@@ -1229,6 +1255,7 @@ where
             .try_flatten()
             .map_ok(move |coord| {
                 let source_bounds = rebase.invert_coord(&coord);
+                debug!("reduce {:?} (bounds {})", coord, source_bounds);
                 let source = source.clone();
                 let txn = txn.clone();
                 Box::pin(async move {
@@ -1263,10 +1290,13 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseReduce::slice {}", bounds);
+
         self.shape().validate_bounds(&bounds)?;
 
         let reduce_axis = self.rebase.reduce_axis(&bounds);
         let source_bounds = self.rebase.invert_bounds(bounds);
+        debug!("source bounds are {}", source_bounds);
         let source = self.source.slice(source_bounds)?;
         SparseReduce::new(source.into(), reduce_axis, self.reductor)
     }
@@ -1413,10 +1443,18 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseTranspose::slice {}", bounds);
         self.shape().validate_bounds(&bounds)?;
 
         let slice_permutation = self.rebase.invert_permutation(&bounds);
-        let source_bounds = self.rebase.invert_bounds(bounds);
+        debug!(
+            "slice permutation {}{} is {:?}",
+            self.shape(),
+            bounds,
+            slice_permutation
+        );
+
+        let source_bounds = self.rebase.invert_bounds(&bounds);
         let source = self.source.slice(source_bounds)?;
         source.transpose(Some(slice_permutation))
     }
