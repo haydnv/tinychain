@@ -358,13 +358,15 @@ impl Slice {
             use AxisBounds::*;
             match &bounds[source_axis] {
                 In(range) => {
-                    if let In(source_range) = &self.bounds[axis] {
-                        let start = range.start + source_range.start;
-                        let end = start + (range.end - range.start);
-                        source_bounds.push((start..end).into());
-                    } else {
-                        assert_eq!(range.start, 0);
-                        source_bounds.push(self.bounds[axis].clone());
+                    if axis < self.bounds.len() {
+                        if let In(source_range) = &self.bounds[axis] {
+                            let start = range.start + source_range.start;
+                            let end = start + (range.end - range.start);
+                            source_bounds.push((start..end).into());
+                        } else {
+                            assert_eq!(range.start, 0);
+                            source_bounds.push(self.bounds[axis].clone());
+                        }
                     }
                 }
                 Of(indices) => {
@@ -513,25 +515,30 @@ impl Transpose {
             self.permutation, bounds
         );
 
-        let mut offsets = Vec::with_capacity(self.permutation.len());
-        let mut elided = 0;
+        let mut offset = 0;
+        let mut offsets = Vec::with_capacity(self.shape.len());
         for bound in self.invert_bounds(bounds).iter() {
             if bound.is_index() {
-                elided += 1;
+                offset += 1;
             }
 
-            offsets.push(elided)
+            offsets.push(offset);
         }
 
-        let mut inverted = Vec::with_capacity(self.shape.len());
+        let mut permutation = Vec::with_capacity(self.permutation.len());
         for (i, bound) in bounds.iter().enumerate() {
             if bound.is_index() {
                 // pass
             } else {
-                inverted.push(self.permutation[i] - offsets[self.permutation[i]]);
+                permutation.push(self.permutation[i] - offsets[self.permutation[i]]);
             }
         }
-        inverted
+
+        for i in bounds.len()..self.shape.len() {
+            permutation.push(self.permutation[i] - offsets[self.permutation[i]]);
+        }
+
+        permutation
     }
 
     pub fn map_coord(&self, source_coord: Coord) -> Coord {
@@ -548,5 +555,45 @@ impl Transpose {
     pub fn map_coords(&self, coords: Coords) -> Coords {
         assert_eq!(coords.ndim(), self.permutation.len());
         coords.transpose(Some(&self.permutation))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invert_permutation() {
+        let rebase = Transpose::new(vec![10, 15, 20].into(), Some(vec![0, 1, 2])).unwrap();
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::At(0), AxisBounds::In(2..5)])),
+            vec![0, 1]
+        );
+
+        let rebase = Transpose::new(vec![10, 15, 20].into(), None).unwrap();
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::At(0), AxisBounds::In(2..5)])),
+            vec![1, 0]
+        );
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::In(0..2), AxisBounds::At(1)])),
+            vec![1, 0]
+        );
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::In(0..2)])),
+            vec![2, 1, 0]
+        );
+
+        let rebase = Transpose::new(vec![10, 15, 20, 25].into(), None).unwrap();
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::In(0..2), AxisBounds::At(1)])),
+            vec![2, 1, 0]
+        );
+
+        let rebase = Transpose::new(vec![10, 15, 20, 25].into(), Some(vec![3, 0, 1, 2])).unwrap();
+        assert_eq!(
+            rebase.invert_permutation(&Bounds::from(vec![AxisBounds::In(0..2), AxisBounds::At(1)])),
+            vec![2, 0, 1]
+        );
     }
 }

@@ -210,8 +210,7 @@ impl Bounds {
     /// ```
     /// # use tc_tensor::{Bounds, Shape};
     /// let mut bounds = Bounds::from(&[0u64][..]);
-    /// bounds.normalize(&Shape::from(vec![2, 3, 4]));
-    /// assert_eq!(bounds.to_shape(), Shape::from(vec![3, 4]));
+    /// assert_eq!(bounds.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
     /// ```
     pub fn normalize(&mut self, shape: &Shape) {
         assert!(self.len() <= shape.len());
