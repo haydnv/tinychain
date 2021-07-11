@@ -169,6 +169,26 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, sum(range(10)))
 
+    def testSliceAndTransposeAndSliceAndSlice(self):
+        self.maxDiff = None
+        shape = [2, 3, 4, 5]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Dense.arange(shape, 0, 120)
+        cxt.medium = cxt.big[0]
+        cxt.small = cxt.medium.transpose()[1, 1:3]
+        cxt.tiny = cxt.small[0, :-1]
+
+        expected = np.arange(0, 120).reshape(shape)
+        expected = expected[0]
+        expected = np.transpose(expected)[1, 1:3]
+        expected = expected[0, :-1]
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print(actual)
+        print(expected)
+        self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
@@ -453,7 +473,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 def expect_dense(dtype, shape, flat):
     return {
         str(tc.uri(tc.tensor.Dense)): [
-            [shape, str(tc.uri(dtype))],
+            [list(shape), str(tc.uri(dtype))],
             list(flat),
         ]
     }

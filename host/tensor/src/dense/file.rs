@@ -845,6 +845,7 @@ where
     T: Transaction<D>,
 {
     fn new(source: BlockListFile<FD, FS, D, T>, bounds: Bounds) -> TCResult<Self> {
+        debug!("BlockListFileSlice::new {} {}", source.shape(), bounds);
         let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
         Ok(Self { source, rebase })
     }
@@ -930,7 +931,8 @@ where
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(bounds)
+        let slice = self.source.slice(bounds)?;
+        Ok(slice)
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {

@@ -660,6 +660,7 @@ where
             permutation,
             self.shape()
         );
+
         BlockListTranspose::new(self, permutation)
     }
 
@@ -1069,6 +1070,7 @@ where
             self.shape(),
             permutation
         );
+
         BlockListTranspose::new(self, permutation)
     }
 
@@ -1180,8 +1182,8 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Slice = BlockListTranspose<FD, FS, D, T, B::Slice>;
-    type Transpose = Self;
+    type Slice = <<B as DenseAccess<FD, FS, D, T>>::Slice as DenseAccess<FD, FS, D, T>>::Transpose;
+    type Transpose = B::Transpose;
 
     fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let accessor = BlockListTranspose {
@@ -1218,12 +1220,24 @@ where
         })
     }
 
-    fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
-        Err(TCError::not_implemented("BlockListTranspose::slice"))
+    fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
+        bounds.normalize(self.shape());
+        let permutation = self.rebase.invert_permutation(&bounds);
+        let source_bounds = self.rebase.invert_bounds(&bounds);
+        let expected_shape = source_bounds.to_shape(self.source.shape())?;
+        let slice = self.source.slice(source_bounds)?;
+        debug_assert_eq!(slice.shape(), &expected_shape);
+        slice.transpose(Some(permutation))
     }
 
-    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        Err(TCError::not_implemented("BlockListTranspose::transpose"))
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let permutation = if let Some(permutation) = permutation {
+            self.rebase.invert_axes(permutation)
+        } else {
+            self.rebase.invert_axes((0..self.ndim()).rev().collect())
+        };
+
+        self.source.transpose(Some(permutation))
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {

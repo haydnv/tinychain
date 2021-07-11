@@ -284,7 +284,7 @@ impl Slice {
     pub fn new(source_shape: Shape, bounds: Bounds) -> TCResult<Slice> {
         source_shape.validate_bounds(&bounds)?;
 
-        let mut shape: Coord = Vec::with_capacity(bounds.len());
+        let mut shape: Coord = Vec::with_capacity(source_shape.len());
         let mut offset = HashMap::new();
         let mut elided = HashMap::new();
         let mut inverted_axes = Vec::with_capacity(bounds.len());
@@ -349,36 +349,42 @@ impl Slice {
 
         let mut source_bounds = Vec::with_capacity(self.source_shape.len());
         let mut source_axis = 0;
-        for axis in 0..self.shape.len() {
-            if let Some(c) = self.elided.get(&axis) {
+        let mut axis = 0;
+        while source_axis < self.source_shape.len() {
+            if let Some(c) = self.elided.get(&source_axis) {
+                source_axis += 1;
                 source_bounds.push(AxisBounds::At(*c));
                 continue;
             }
 
             use AxisBounds::*;
-            match &bounds[source_axis] {
+            match &bounds[axis] {
                 In(range) => {
-                    if axis < self.bounds.len() {
-                        if let In(source_range) = &self.bounds[axis] {
+                    if source_axis < self.bounds.len() {
+                        if let In(source_range) = &self.bounds[source_axis] {
                             let start = range.start + source_range.start;
                             let end = start + (range.end - range.start);
                             source_bounds.push((start..end).into());
                         } else {
                             assert_eq!(range.start, 0);
-                            source_bounds.push(self.bounds[axis].clone());
+                            source_bounds.push(self.bounds[source_axis].clone());
                         }
+                    } else {
+                        source_bounds.push(In(range.clone()));
                     }
                 }
                 Of(indices) => {
-                    let offset = self.offset.get(&axis).unwrap_or(&0);
+                    let offset = self.offset.get(&source_axis).unwrap_or(&0);
                     source_bounds.push(indices.iter().map(|i| i + offset).collect::<Coord>().into())
                 }
                 At(i) => {
-                    let offset = self.offset.get(&axis).unwrap_or(&0);
+                    let offset = self.offset.get(&source_axis).unwrap_or(&0);
                     source_bounds.push((i + offset).into())
                 }
             }
+
             source_axis += 1;
+            axis += 1;
         }
 
         source_bounds.into()
@@ -563,7 +569,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_invert_permutation() {
+    fn test_slice_invert_bounds() {
+        let rebase = Slice::new(vec![2, 3, 4, 5].into(), Bounds::from(vec![0])).unwrap();
+        assert_eq!(rebase.shape().to_vec(), vec![3, 4, 5]);
+        assert_eq!(
+            rebase.invert_bounds(Bounds::from(vec![
+                AxisBounds::In(0..3),
+                AxisBounds::In(0..4),
+                AxisBounds::At(1)
+            ])),
+            Bounds::from(vec![
+                AxisBounds::At(0),
+                AxisBounds::In(0..3),
+                AxisBounds::In(0..4),
+                AxisBounds::At(1)
+            ])
+        );
+
+        let rebase = Slice::new(
+            vec![2, 3, 4, 5].into(),
+            Bounds::from(vec![
+                AxisBounds::At(0),
+                AxisBounds::In(0..3),
+                AxisBounds::In(1..3),
+                AxisBounds::At(1),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            rebase.invert_bounds(Bounds::from(vec![AxisBounds::At(0), AxisBounds::In(0..2)])),
+            Bounds::from(vec![
+                AxisBounds::At(0),
+                AxisBounds::At(0),
+                AxisBounds::In(1..3),
+                AxisBounds::At(1)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_transpose_invert_permutation() {
         let rebase = Transpose::new(vec![10, 15, 20].into(), Some(vec![0, 1, 2])).unwrap();
         assert_eq!(
             rebase.invert_permutation(&Bounds::from(vec![AxisBounds::At(0), AxisBounds::In(2..5)])),

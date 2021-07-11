@@ -633,6 +633,7 @@ where
             .source
             .slice(source_bounds)
             .map(|source| source.accessor())?;
+
         while source.ndim() < shape.len() {
             let expand_axis = source.ndim();
             source = SparseExpand::new(source, expand_axis).map(|source| source.accessor())?

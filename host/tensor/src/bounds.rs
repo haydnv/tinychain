@@ -120,6 +120,12 @@ impl TryCastFrom<Value> for AxisBounds {
     }
 }
 
+impl fmt::Debug for AxisBounds {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for AxisBounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use AxisBounds::*;
@@ -335,6 +341,20 @@ impl TryCastFrom<Value> for Bounds {
     fn opt_cast_from(value: Value) -> Option<Bounds> {
         let bounds: Option<Vec<AxisBounds>> = value.opt_cast_into();
         bounds.map(Bounds::from)
+    }
+}
+
+impl fmt::Debug for Bounds {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.axes
+                .iter()
+                .map(|axis| format!("{:?}", axis))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
     }
 }
 
