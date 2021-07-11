@@ -15,7 +15,7 @@ use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSche
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
-use tcgeneric::{label, Id, Label, TCTryStream};
+use tcgeneric::{label, Id, Label, TCTryStream, Tuple};
 
 use crate::dense::PER_BLOCK;
 use crate::stream::{sorted_coords, Read, ReadValueAt};
@@ -97,7 +97,7 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
-    type Slice = SparseTableSlice<FD, FS, D, T>;
+    type Slice = SparseAccessor<FD, FS, D, T>;
     type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
@@ -130,9 +130,15 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let table = slice_table(self.table.clone(), &bounds)?;
-        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        Ok(SparseTableSlice::new(self, table, rebase))
+        debug!("SparseTable {} slice {}", self.shape(), bounds);
+        let table_bounds = table_bounds(self.shape(), &bounds)?;
+        if table_bounds.is_empty() {
+            Ok(self.accessor())
+        } else {
+            let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
+            let table = self.table.clone().slice(table_bounds)?;
+            Ok(SparseTableSlice::new(self, table, rebase).accessor())
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -140,6 +146,7 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.shape().validate_coord(&coord)?;
         upsert_value(&self.table, txn_id, coord, value).await
     }
 }
@@ -333,7 +340,7 @@ where
     T: Transaction<D>,
     D::FileClass: From<TensorType>,
 {
-    type Slice = Self;
+    type Slice = SparseAccessor<FD, FS, D, T>;
     type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
@@ -344,7 +351,7 @@ where
         let rebase = self.rebase;
         let rows = self.table.rows(*txn.id()).await?;
         let filled = rows
-            .and_then(|row| future::ready(expect_row(row)))
+            .map(|r| r.and_then(|row| expect_row(row)))
             .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
 
         let filled: SparseStream<'a> = Box::pin(filled);
@@ -487,29 +494,34 @@ where
     }
 }
 
-fn slice_table<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(
-    table: T,
-    bounds: &Bounds,
-) -> TCResult<T::Slice> {
+fn table_bounds(shape: &Shape, bounds: &Bounds) -> TCResult<tc_table::Bounds> {
+    assert!(bounds.len() <= shape.len());
     use AxisBounds::*;
 
     let mut table_bounds = HashMap::new();
     for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
-        let axis: Id = axis.into();
         let column_bound = match axis_bound {
-            At(x) => ColumnBound::Is(u64_into_value(x)),
+            At(x) => Some(ColumnBound::Is(u64_into_value(x))),
+            In(range) if range == (0..shape[axis]) => None,
             In(range) => {
                 let start = Bound::In(u64_into_value(range.start));
                 let end = Bound::Ex(u64_into_value(range.end));
-                (start, end).into()
+                Some((start, end).into())
             }
-            _ => todo!(),
+            Of(indices) => {
+                return Err(TCError::bad_request(
+                    "cannot select non-sequential indices from a sparse Tensor",
+                    Tuple::from(indices),
+                ))
+            }
         };
 
-        table_bounds.insert(axis, column_bound);
+        if let Some(column_bound) = column_bound {
+            table_bounds.insert(axis.into(), column_bound);
+        }
     }
 
-    table.slice(table_bounds.into())
+    Ok(table_bounds.into())
 }
 
 async fn read_value_at<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(

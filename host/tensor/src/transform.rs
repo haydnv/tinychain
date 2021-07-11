@@ -89,12 +89,16 @@ impl Broadcast {
         for axis in 0..source_ndim {
             if axis + self.offset < bounds.len() {
                 if self.broadcast[axis + self.offset] {
-                    source_bounds.push(AxisBounds::from(0))
+                    if bounds[axis + self.offset].is_index() {
+                        source_bounds.push(AxisBounds::from(0))
+                    } else {
+                        source_bounds.push(AxisBounds::In(0..1))
+                    }
                 } else {
                     source_bounds.push(bounds[axis + self.offset].clone())
                 }
             } else {
-                source_bounds.push(AxisBounds::In(0..1))
+                source_bounds.push(AxisBounds::In(0..self.source_shape[axis]))
             }
         }
 
@@ -567,6 +571,16 @@ impl Transpose {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_broadcast_invert_bounds() {
+        let shape = Shape::from(vec![2, 3, 4, 1]);
+        let rebase = Broadcast::new(shape.clone(), vec![5, 6, 2, 3, 4, 10].into()).unwrap();
+        assert_eq!(
+            rebase.invert_bounds(vec![AxisBounds::In(0..1)].into()),
+            Bounds::all(&shape)
+        )
+    }
 
     #[test]
     fn test_slice_invert_bounds() {
