@@ -37,7 +37,7 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.delete, cxt.table)
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected([]))
+        self.assertEqual(result, expected(SCHEMA, []))
 
     def testDeleteSlice(self):
         count = 50
@@ -52,7 +52,7 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.delete, cxt.table)
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected(remaining))
+        self.assertEqual(result, expected(SCHEMA, remaining))
 
     def testUpdateSlice(self):
         count = 50
@@ -114,7 +114,7 @@ class TableTests(unittest.TestCase):
 
         result = self.host.post(ENDPOINT, cxt)
         first_row = sorted(list(k + v) for k, v in zip(keys, values))[0]
-        self.assertEqual(result, expected([first_row]))
+        self.assertEqual(result, expected(SCHEMA, [first_row]))
 
     def testOrderBy(self):
         count = 50
@@ -128,7 +128,7 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.table.order_by(["views"], True))
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected(rows))
+        self.assertEqual(result, expected(SCHEMA, rows))
 
     def testSelect(self):
         count = 5
@@ -162,7 +162,7 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.table.where(name="one"))
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected([["one", 1]]))
+        self.assertEqual(result, expected(SCHEMA, [["one", 1]]))
 
     def testSliceAuxiliaryIndex(self):
         count = 50
@@ -175,7 +175,44 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.table.where(views=slice(10, 20)))
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected(list([[num2words(i), i] for i in range(10, 20)])))
+        self.assertEqual(result, expected(SCHEMA, list([[num2words(i), i] for i in range(10, 20)])))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.stop()
+
+
+class SparseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.host = start_host("test_sparse_table")
+
+    def testSlice(self):
+        schema = tc.schema.Table([
+            tc.Column("0", tc.U64),
+            tc.Column("1", tc.U64),
+            tc.Column("2", tc.U64),
+            tc.Column("3", tc.U64),
+        ], [
+            tc.Column("value", tc.Number),
+        ], {
+            "0": ["0"], "1": ["1"], "2": ["2"], "3": ["3"]
+        })
+
+        data = [
+            ([0, 0, 1, 0], 1),
+            ([0, 1, 2, 0], 2),
+            ([1, 0, 0, 0], 3),
+            ([1, 0, 1, 0], 3),
+        ]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table(schema)
+        cxt.inserts = [cxt.table.insert(coord, [value]) for (coord, value) in data]
+        cxt.result = tc.After(cxt.inserts, cxt.table.where(**{"1": 1, "2": slice(1, 3)}))
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expected(schema, [[0, 1, 2, 0, 2]]))
 
     @classmethod
     def tearDownClass(cls):
@@ -217,11 +254,11 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[2].stop()
         hosts[1].delete("/test/table/table", ["one"])
-        hosts[2].start(wait_time=5)
+        hosts[2].start()
 
         for host in hosts:
             actual = host.get("/test/table/table")
-            self.assertEqual(actual, expected([["two", 2]]))
+            self.assertEqual(actual, expected(SCHEMA, [["two", 2]]))
 
         total = 100
         for n in range(total):
@@ -252,8 +289,8 @@ class ErrorTest(unittest.TestCase):
         self.host.stop()
 
 
-def expected(rows):
-    return {str(tc.uri(tc.Table)): [tc.to_json(SCHEMA), rows]}
+def expected(schema, rows):
+    return {str(tc.uri(tc.Table)): [tc.to_json(schema), rows]}
 
 
 if __name__ == "__main__":
