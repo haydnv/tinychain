@@ -439,6 +439,17 @@ impl Shape {
         self.0.iter().product()
     }
 
+    /// Return a `TCError` if any of the given axes is out of bounds.
+    pub fn validate_axes(&self, axes: &[usize]) -> TCResult<()> {
+        match axes.iter().max() {
+            Some(max) if max > &self.len() => Err(TCError::unsupported(format!(
+                "shape {} has no axis {}",
+                self, max
+            ))),
+            _ => Ok(()),
+        }
+    }
+
     /// Return a `TCError` if the given `Bounds` don't fit within this `Shape`.
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         if self.contains_bounds(bounds) {

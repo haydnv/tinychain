@@ -16,8 +16,8 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType, Value};
-use tcgeneric::{TCBoxTryFuture, TCTryStream, Tuple};
+use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tcgeneric::{TCBoxTryFuture, TCTryStream};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::transform;
@@ -233,12 +233,7 @@ where
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        if !self.shape().contains_coord(&coord) {
-            return Err(TCError::bad_request(
-                "invalid coordinate",
-                Tuple::from(coord),
-            ));
-        }
+        self.shape().validate_coord(&coord)?;
 
         let value = value.into_type(self.dtype());
 
@@ -378,10 +373,9 @@ where
 
     async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, value: Number) -> TCResult<()> {
         debug!("BlockListFile::write_value {} at {}", value, bounds);
+        self.shape().validate_bounds(&bounds)?;
 
-        if !self.shape().contains_bounds(&bounds) {
-            return Err(TCError::bad_request("bounds out of bounds", bounds));
-        } else if bounds.len() == self.ndim() {
+        if bounds.len() == self.ndim() {
             if let Some(coord) = bounds.as_coord() {
                 return self.write_value_at(txn_id, coord, value).await;
             }
@@ -434,12 +428,7 @@ where
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         Box::pin(async move {
-            if !self.shape().contains_coord(&coord) {
-                return Err(TCError::bad_request(
-                    "coordinate is out of bounds",
-                    Value::from_iter(coord),
-                ));
-            }
+            self.shape().validate_coord(&coord)?;
 
             let offset: u64 = coord_bounds(self.shape())
                 .iter()

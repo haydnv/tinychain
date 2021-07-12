@@ -217,7 +217,7 @@ class SparseTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
-        cxt.result = tc.After(cxt.tensor[None, slice(2, -1)].write(1), cxt.tensor)
+        cxt.result = tc.After(cxt.tensor[None, 2:-1].write(1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.F32, shape, [[[0, 2], 1], [[0, 3], 1], [[1, 2], 1], [[1, 3], 1]])
@@ -338,6 +338,30 @@ class SparseTests(unittest.TestCase):
         expected[0, 1:3] = 2
         expected = expected.prod(axis)
         self.assertEqual(actual, expect_sparse(tc.I32, [2, 4, 5], expected))
+
+    def testSliceAndBroadcast(self):
+        self.maxDiff = None
+        data = [
+            [[0, 0, 3, 0], 1.],
+            [[0, 2, 0, 0], 2.],
+            [[1, 0, 0, 0], 3.],
+        ]
+        shape = [5, 6, 2, 3, 4, 10]
+
+        cxt = tc.Context()
+        cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], tc.F32, data)
+        cxt.big = cxt.small * tc.tensor.Dense.ones(shape)
+        cxt.slice = cxt.big[:-1, 1:4, 1]
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = np.zeros([2, 3, 4, 1])
+        for coord, value in data:
+            expected[tuple(coord)] = value
+        expected = expected * np.ones(shape)
+        expected = expected[:-1, 1:4, 1]
+
+        self.assertEqual(actual, expect_sparse(tc.F32, expected.shape, expected))
 
     @classmethod
     def tearDownClass(cls):
@@ -485,7 +509,7 @@ def expect_sparse(dtype, shape, values):
 
     return {
         str(tc.uri(tc.tensor.Sparse)): [
-            [shape, str(tc.uri(dtype))],
+            [list(shape), str(tc.uri(dtype))],
             list(values),
         ]
     }

@@ -6,7 +6,7 @@ use afarray::{Array, CoordBlocks, Coords};
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
 
 use tc_btree::{BTreeType, Node};
@@ -112,13 +112,26 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
-        if self.is_empty(&txn).await? {
+        self.shape().validate_axes(&axes)?;
+
+        if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
         }
 
+        let sort = axes.iter().zip(0..axes.len()).any(|(x, y)| x != &y);
+
         let shape = self.shape();
-        let shape = axes.iter().map(|x| shape[*x]).collect();
-        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
+        let shape = axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>();
+        let coords = filled_at::<FD, FS, D, T, _>(&txn, axes, self.table).await?;
+
+        let coords = CoordBlocks::new(coords, shape.len(), PER_BLOCK);
+
+        if sort {
+            let coords = sorted_coords::<FD, FS, D, T, _>(&txn, shape.into(), coords).await?;
+            Ok(Box::pin(coords))
+        } else {
+            Ok(Box::pin(coords))
+        }
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -131,6 +144,7 @@ where
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         debug!("SparseTable {} slice {}", self.shape(), bounds);
+        self.shape().validate_bounds(&bounds)?;
         let table_bounds = table_bounds(self.shape(), &bounds)?;
         if table_bounds.is_empty() {
             Ok(self.accessor())
@@ -163,13 +177,7 @@ where
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         Box::pin(async move {
-            if !self.shape().contains_coord(&coord) {
-                return Err(TCError::bad_request(
-                    "coordinate out of bounds",
-                    Bounds::from(coord),
-                ));
-            }
-
+            self.shape().validate_coord(&coord)?;
             let dtype = self.dtype();
             read_value_at(self.table, txn, coord, dtype).await
         })
@@ -359,13 +367,24 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
-        if self.is_empty(&txn).await? {
+        debug!("SparseTableSlice::filled_at");
+        self.shape().validate_axes(&axes)?;
+
+        if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
         }
 
         let shape = self.shape();
-        let shape = axes.iter().map(|x| shape[*x]).collect();
-        filled_at::<FD, FS, D, T, _>(&txn, shape, axes, self.table).await
+        let shape = axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>();
+        let source_axes = (0..self.source.ndim()).collect();
+        let rebase = self.rebase;
+        let coords = filled_at::<FD, FS, D, T, _>(&txn, source_axes, self.table).await?;
+        let coords = CoordBlocks::new(coords, self.source.ndim(), PER_BLOCK)
+            .map_ok(move |coords| rebase.map_coords(coords))
+            .map_ok(move |coords| coords.get(&axes));
+
+        let filled_at = sorted_coords::<FD, FS, D, T, _>(&txn, shape.into(), coords).await?;
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -406,13 +425,7 @@ where
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
         Box::pin(async move {
-            if !self.shape().contains_coord(&coord) {
-                return Err(TCError::bad_request(
-                    "coordinate out of bounds",
-                    Bounds::from(coord),
-                ));
-            }
-
+            self.shape().validate_coord(&coord)?;
             let dtype = self.dtype();
             let source_coord = self.rebase.invert_coord(&coord);
             read_value_at(self.table, txn, source_coord, dtype).await
@@ -461,10 +474,9 @@ where
 
 async fn filled_at<'a, FD, FS, D, Txn, T>(
     txn: &Txn,
-    shape: Shape,
     axes: Vec<usize>,
     table: T,
-) -> TCResult<TCTryStream<'a, Coords>>
+) -> TCResult<impl Stream<Item = TCResult<Coord>> + Send + Unpin>
 where
     FD: File<Array> + TryFrom<D::File, Error = TCError>,
     FS: File<Node>,
@@ -473,25 +485,10 @@ where
     T: TableInstance<FS, D, Txn>,
     D::FileClass: From<TensorType>,
 {
-    debug!("SparseTable::filled_at {:?}", axes);
-    if axes.is_empty() {
-        return Ok(Box::pin(stream::empty()));
-    }
-
-    let sort = axes.iter().zip(0..axes.len()).any(|(x, y)| x != &y);
-
-    let ndim = axes.len();
+    assert!(!axes.is_empty());
     let coords = table.select(axes.into_iter().map(Id::from).collect())?;
     let coords = coords.rows(*txn.id()).await?;
-    let coords = coords.map(|r| r.and_then(expect_coord));
-    let coords = CoordBlocks::new(coords, ndim, PER_BLOCK);
-
-    if sort {
-        let coords = sorted_coords::<FD, FS, D, Txn, _>(txn, shape, coords).await?;
-        Ok(Box::pin(coords))
-    } else {
-        Ok(Box::pin(coords))
-    }
+    Ok(coords.map(|r| r.and_then(expect_coord)))
 }
 
 fn table_bounds(shape: &Shape, bounds: &Bounds) -> TCResult<tc_table::Bounds> {

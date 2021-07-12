@@ -68,7 +68,7 @@ impl Broadcast {
     pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
         assert_eq!(source_bounds.len(), self.source_shape.len());
 
-        let mut bounds = Bounds::all(&self.shape);
+        let mut bounds = Bounds::all(self.shape());
 
         for axis in 0..self.source_shape.len() {
             if !self.broadcast[axis + self.offset] {
@@ -154,6 +154,7 @@ impl Expand {
         })
     }
 
+    #[inline]
     pub fn expand_axis(&self) -> usize {
         self.expand
     }
@@ -177,8 +178,27 @@ impl Expand {
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        assert_eq!(bounds.len(), self.shape.len());
+
         if self.expand < bounds.len() {
-            bounds.remove(self.expand);
+            let removed = bounds.remove(self.expand);
+            if !removed.is_index() {
+                if self.expand == bounds.len() {
+                    let bound = match bounds.pop().unwrap() {
+                        AxisBounds::At(i) => AxisBounds::In(i..i + 1),
+                        other => other,
+                    };
+
+                    bounds.push(bound);
+                } else {
+                    let bound = match bounds.remove(self.expand) {
+                        AxisBounds::At(i) => AxisBounds::In(i..i + 1),
+                        other => other,
+                    };
+
+                    bounds.insert(self.expand, bound);
+                }
+            }
         }
 
         bounds
@@ -231,10 +251,6 @@ impl Reduce {
             shape,
             axis,
         })
-    }
-
-    pub fn axis(&self) -> usize {
-        self.axis
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {
@@ -432,6 +448,11 @@ impl Slice {
 
         coord
     }
+
+    pub fn map_coords(&self, source_coords: Coords) -> Coords {
+        assert_eq!(source_coords.ndim(), self.source_shape.len());
+        source_coords.slice(&self.shape, &self.elided, &self.offset)
+    }
 }
 
 #[derive(Clone)]
@@ -549,17 +570,6 @@ impl Transpose {
         }
 
         permutation
-    }
-
-    pub fn map_coord(&self, source_coord: Coord) -> Coord {
-        assert_eq!(source_coord.len(), self.permutation.len());
-
-        let mut coord = vec![0; source_coord.len()];
-        for axis in 0..source_coord.len() {
-            coord[self.permutation[axis]] = source_coord[axis];
-        }
-
-        coord
     }
 
     pub fn map_coords(&self, coords: Coords) -> Coords {

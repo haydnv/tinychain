@@ -44,6 +44,8 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>>;
 
     /// Return an ordered stream of unique [`Coord`]s on the given axes with nonzero values.
+    ///
+    /// TODO: add `sort` parameter to make sorting results optional.
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>>;
 
     /// Return the number of nonzero values in this [`SparseTensor`].
@@ -531,7 +533,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Slice = SparseBroadcast<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
+    type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
     type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
@@ -550,10 +552,11 @@ where
             return Ok(Box::pin(stream::empty()));
         }
 
-        let source_axes = (0..self.source.ndim()).collect();
+        let source_axes: Vec<usize> = (0..self.source.ndim()).collect();
         let ndim = self.ndim();
 
         let rebase = self.rebase.clone();
+
         let filled_at = self
             .source
             .clone()
@@ -563,7 +566,8 @@ where
         let coords = filled_at
             .map_ok(move |coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
-            .map_ok(move |coord| stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok)))
+            .map_ok(move |coord| rebase.map_coord(coord))
+            .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
             .try_flatten();
 
         let coords = CoordBlocks::new(coords, ndim, PER_BLOCK);
@@ -573,6 +577,7 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
         debug!("SparseBroadcast::filled_at {:?}", axes);
+        self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
@@ -583,20 +588,22 @@ where
             axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>()
         });
 
+        let ndim = self.ndim();
         let rebase = self.rebase;
         let source_axes = (0..self.source.ndim()).collect();
-        let ndim = axes.len();
 
         let filled_at = self.source.filled_at(txn.clone(), source_axes).await?;
         let filled_at = filled_at
             .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
-            .map_ok(move |coord| stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok)))
-            .try_flatten()
-            // TODO: can this happen in `Coords`?
-            .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect());
+            .map_ok(move |coord| rebase.map_coord(coord))
+            // TODO: can this happen in `Coords`? maybe a new stream generator type?
+            .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
+            .try_flatten();
 
-        let filled_at = CoordBlocks::new(filled_at, ndim, PER_BLOCK);
+        let filled_at =
+            CoordBlocks::new(filled_at, ndim, PER_BLOCK).map_ok(move |coords| coords.get(&axes));
+
         let filled_at = sorted_coords::<FD, FS, D, T, _>(&txn, shape, filled_at).await?;
 
         Ok(Box::pin(filled_at))
@@ -614,31 +621,16 @@ where
     }
 
     async fn is_empty(&self, txn: &T) -> TCResult<bool> {
+        debug!("SparseBroadcast::is_empty?");
         self.source.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!(
-            "SparseBroadcast::slice {} {} (source shape is {})",
-            self.shape(),
-            bounds,
-            self.source.shape()
-        );
         self.shape().validate_bounds(&bounds)?;
 
         let shape = bounds.to_shape(self.shape())?;
         let source_bounds = self.rebase.invert_bounds(bounds);
-        debug!("source bounds are {}", source_bounds);
-        let mut source = self
-            .source
-            .slice(source_bounds)
-            .map(|source| source.accessor())?;
-
-        while source.ndim() < shape.len() {
-            let expand_axis = source.ndim();
-            source = SparseExpand::new(source, expand_axis).map(|source| source.accessor())?
-        }
-
+        let source = self.source.slice(source_bounds)?;
         SparseBroadcast::new(source, shape)
     }
 
@@ -663,13 +655,15 @@ where
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
-        let source_coord = self.rebase.invert_coord(&coord);
-        let read = self
-            .source
-            .read_value_at(txn, source_coord)
-            .map_ok(|(_, val)| (coord, val));
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
 
-        Box::pin(read)
+            let source_coord = self.rebase.invert_coord(&coord);
+            self.source
+                .read_value_at(txn, source_coord)
+                .map_ok(|(_, val)| (coord, val))
+                .await
+        })
     }
 }
 
@@ -920,6 +914,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        self.shape().validate_axes(&axes)?;
+
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
@@ -1086,16 +1082,18 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+        self.shape().validate_axes(&axes)?;
+
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
 
         let mut i = 0;
         let expand = loop {
-            if axes[i] == self.rebase.expand_axis() {
-                break Some(i);
-            } else if i >= axes.len() {
+            if i >= axes.len() {
                 break None;
+            } else if axes[i] == self.rebase.expand_axis() {
+                break Some(i);
             } else {
                 i += 1;
             }
@@ -1119,9 +1117,10 @@ where
         self.source.is_empty(txn).await
     }
 
-    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
         debug!("SparseExpand {} slice {}", self.shape(), bounds);
         self.shape().validate_bounds(&bounds)?;
+        bounds.normalize(self.shape());
 
         let source_bounds = self.rebase.invert_bounds(bounds);
 

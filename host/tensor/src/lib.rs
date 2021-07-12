@@ -30,7 +30,6 @@ mod dense;
 mod einsum;
 mod sparse;
 mod stream;
-#[allow(dead_code)]
 mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);

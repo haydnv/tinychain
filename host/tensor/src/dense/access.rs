@@ -912,7 +912,9 @@ where
         self.source.value_stream(txn)
     }
 
-    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+        bounds.normalize(self.shape());
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.slice(bounds) // TODO: expand the result
     }
@@ -931,7 +933,9 @@ where
         self.source.write(txn, value).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, mut bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
+        bounds.normalize(self.shape());
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.write_value(txn_id, bounds, number).await
     }
@@ -1058,6 +1062,7 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
         let reduce_axis = self.rebase.reduce_axis(&bounds);
         let source_bounds = self.rebase.invert_bounds(bounds);
         let slice = self.source.slice(source_bounds)?;
@@ -1112,6 +1117,7 @@ where
 
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
             let reductor = self.reductor;
             let source_bounds = self.rebase.invert_coord(&coord);
             let slice = self.source.slice(source_bounds)?;
@@ -1254,6 +1260,7 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
         let bounds = self.rebase.invert_bounds(&bounds);
         self.source.write_value(txn_id, bounds, number).await
     }
@@ -1271,13 +1278,14 @@ where
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
-        let source_coord = self.rebase.invert_coord(&coord);
-        let read = self
-            .source
-            .read_value_at(txn, source_coord)
-            .map_ok(|(_, val)| (coord, val));
-
-        Box::pin(read)
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
+            let source_coord = self.rebase.invert_coord(&coord);
+            self.source
+                .read_value_at(txn, source_coord)
+                .map_ok(|(_, val)| (coord, val))
+                .await
+        })
     }
 }
 
@@ -1347,6 +1355,7 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
         let slice = self.source.slice(bounds)?;
         Ok(slice.into())
     }
@@ -1392,6 +1401,7 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
         stream::iter(bounds.affected())
             .map(|coord| self.source.write_value(txn_id, coord, number))
             .buffer_unordered(num_cpus::get())
