@@ -209,10 +209,12 @@ class SparseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(schema)
         cxt.inserts = [cxt.table.insert(coord, [value]) for (coord, value) in data]
-        cxt.result = tc.After(cxt.inserts, cxt.table.where(**{"1": 1, "2": slice(1, 3)}))
+        cxt.result = tc.After(cxt.inserts, cxt.table.where(**{
+            "0": slice(2), "1": slice(3), "2": slice(4), "3": slice(1)
+        }))
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expected(schema, [[0, 1, 2, 0, 2]]))
+        self.assertEqual(actual, expected(schema, [coord + [value] for coord, value in data]))
 
     @classmethod
     def tearDownClass(cls):
