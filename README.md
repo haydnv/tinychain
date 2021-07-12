@@ -35,7 +35,7 @@ With Tinychain, data scientists can easily analyze live replicas of a production
 
 ### For product owners & executives
 
-Tinychain is designed with many unique features to minimize the operational risk of hosting your users' data. For example, Tinychain is the only database which supports *hypothetical queries*, which allow developers to examine the real consequences of potentially-destructive database updates without actually applying the updates. Tinychain is also the only database, and the only blockchain platform, designed from the ground up for compliance with data privacy laws like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act).
+Tinychain is designed with many unique features to minimize the operational risk of hosting your customers' data. For example, Tinychain is the only database which supports *hypothetical queries*, which allow developers to examine the real consequences of potentially-destructive database updates without actually applying the updates. Tinychain is also the only database, and the only blockchain platform, designed from the ground up for compliance with data privacy laws like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act).
 
 Tinychain's all-in-one approach can also reduce operational costs by removing the need for developers to maintain a broad familiarity with a wide variety of specific platform tools, and removing the operational separation between application development and data science: Tinychain is a single platform which is useful to both developers and data scientists.
 
@@ -61,21 +61,7 @@ There are instructions for setting up a Cluster in the [client README](https://g
 
 You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
 
-To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm) and add a package config file for ArrayFire to your `$PKG_CONFIG_PATH` (example below). Then, download the lastest tinychain-gpu binary or run `cargo install tinychain --features=tensor`. Please [start a discussion](https://github.com/haydnv/tinychain/discussions) if you run into any problems.
-
-```
-# Example arrayfire.pc file
-
-prefix=/usr
-exec_prefix=${prefix}
-includedir=${prefix}/include
-libdir=${exec_prefix}/lib64
-
-Name: arrayfire
-Description: the ArrayFire library
-Version: 3.8
-Libs: -L${libdir}
-```
+To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm). Then, follow the instructions for the [ArrayFire Rust wrapper](https://github.com/arrayfire/arrayfire-rust#use-from-cratesio--) to set the `LD_LIBRARY_PATH` and `AF_PATH` environment variables.
 
 ## Key features
 
@@ -130,7 +116,7 @@ Libs: -L${libdir}
 
  * **Cluster**: a collection of **Chain**s and **Op**s responsible for managing consensus relative to other **Cluster**s on the network
  * **Chain**: A record of mutations applied to a subject **Collection** or **Value**
-    * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. in the event of a power failure)
+    * **SyncChain**: A **Chain** with one block, which contains only the data necessary to recover from a transaction failure (e.g. in the event of a power failure)
     * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age, and replaced with a copy of the **Chain**'s subject at that time
     * **BlockChain**: A **Chain** with a record of every mutation in the history of its **Collection** or **Value**
     * **CompliantChain**\*: A **Chain** which retains all history by default, but which allows purging all data owned by a given (anonymous) user ID, for compliance with legal requirements like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act)
@@ -138,8 +124,8 @@ Libs: -L${libdir}
  * **Collection**
     * **BTree**: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
     * **Table**: A database table, which supports one or more **BTree** indices
-    * **Tensor**: An n-dimensional array of numbers which supports both sparse\*\* and dense representations, useful for machine learning applications
-    * **Graph**\*: A graph database which uses a sparse **Tensor** to compute relationships between rows in its **Table**s
+    * **Tensor**: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
+    * **Graph**\*\*: A graph database which uses a sparse **Tensor** to compute relationships between rows in its **Table**s
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a transaction
