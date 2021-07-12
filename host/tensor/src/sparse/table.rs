@@ -374,7 +374,7 @@ where
 
     async fn is_empty(&self, txn: &T) -> TCResult<bool> {
         let mut rows = self.table.clone().rows(*txn.id()).await?;
-        rows.try_next().map_ok(|v| v.is_some()).await
+        rows.try_next().map_ok(|v| v.is_none()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
