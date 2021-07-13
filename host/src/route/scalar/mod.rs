@@ -5,7 +5,7 @@ use tcgeneric::{label, Label, PathSegment};
 use crate::scalar::{Scalar, ScalarType, Value};
 use crate::state::{State, StateType};
 
-use super::{GetHandler, Handler, Route};
+use super::{EchoHandler, GetHandler, Handler, Route};
 
 mod op;
 mod value;
@@ -78,7 +78,7 @@ pub struct Static;
 impl Route for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
-            return None;
+            return Some(Box::new(EchoHandler));
         }
 
         if path[0] == value::PREFIX {

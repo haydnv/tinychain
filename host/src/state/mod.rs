@@ -118,6 +118,20 @@ impl From<ValueType> for StateType {
     }
 }
 
+impl TryFrom<StateType> for ScalarType {
+    type Error = TCError;
+
+    fn try_from(st: StateType) -> TCResult<Self> {
+        match st {
+            StateType::Scalar(st) => Ok(st),
+            other => Err(TCError::bad_request(
+                "expected Scalar class but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -378,6 +392,12 @@ impl From<Map<State>> for State {
 impl From<Map<Scalar>> for State {
     fn from(map: Map<Scalar>) -> Self {
         State::Scalar(map.into())
+    }
+}
+
+impl From<Object> for State {
+    fn from(object: Object) -> Self {
+        State::Object(object)
     }
 }
 

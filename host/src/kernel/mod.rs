@@ -13,9 +13,8 @@ use tc_error::*;
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
-use crate::collection::CollectionType;
 use crate::object::InstanceExt;
-use crate::route::{Public, Route, Static};
+use crate::route::{Public, Static};
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
@@ -57,7 +56,9 @@ impl Kernel {
                 Err(TCError::not_found(key))
             }
         } else if let Some(class) = StateType::from_path(path) {
-            class.get(txn, path, key).await
+            let class = class.try_into()?;
+            let state = Scalar::Value(key).into_type(class).map(State::Scalar);
+            state.ok_or_else(|| TCError::bad_request("invalid value for instance of", class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
@@ -67,31 +68,6 @@ impl Kernel {
             );
 
             cluster.get(&txn, suffix, key).await
-        } else if path.len() > 1 && &path[..2] == &crate::collection::PREFIX[..] {
-            let mut i = path.len() - 1;
-            while i > 0 {
-                if let Some(class) = CollectionType::from_path(&path[..i]) {
-                    if let Some(handler) = class.route(&path[i..]) {
-                        if let Some(handler) = handler.get() {
-                            return handler(txn, key).await;
-                        }
-                    }
-                }
-
-                i -= 1;
-            }
-
-            Err(TCError::not_found(TCPath::from(path)))
-        } else if &path[0] == "error" && path.len() == 2 {
-            let message = String::try_cast_from(key, |v| {
-                TCError::bad_request("cannot cast into error message string from", v)
-            })?;
-
-            if let Some(err_type) = error_type(&path[1]) {
-                Err(TCError::new(err_type, message))
-            } else {
-                Err(TCError::not_found(TCPath::from(path)))
-            }
         } else {
             Static.get(txn, path, key).await
         }
@@ -199,6 +175,9 @@ impl Kernel {
                 data.resolve(&ExeScope::new(&State::default(), context), &txn)
                     .await
             }
+        } else if let Some(class) = StateType::from_path(path) {
+            let params = data.try_into()?;
+            class.post(txn, path, params).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params: Map<State> = data.try_into()?;
 
@@ -238,6 +217,12 @@ impl Kernel {
                     TCPath::from(path),
                 ))
             }
+        } else if let Some(class) = StateType::from_path(path) {
+            Err(TCError::method_not_allowed(
+                OpRefType::Post,
+                class,
+                TCPath::default(),
+            ))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             if suffix.is_empty() && key.is_none() {
                 // it's a rollback message
@@ -291,16 +276,6 @@ impl Kernel {
                 cluster.replicate_write(txn.clone(), write).await
             })
             .await
-        } else if &path[0] == "error" && path.len() == 2 {
-            if let Some(class) = error_type(&path[1]) {
-                Err(TCError::method_not_allowed(
-                    OpRefType::Delete,
-                    class,
-                    TCPath::from(path),
-                ))
-            } else {
-                Err(TCError::not_found(TCPath::from(path)))
-            }
         } else {
             Static.delete(txn, path, key).await
         }
@@ -356,22 +331,6 @@ fn execute<
             result
         }
     })
-}
-
-fn error_type(err_type: &Id) -> Option<ErrorType> {
-    match err_type.as_str() {
-        "bad_gateway" => Some(ErrorType::BadGateway),
-        "bad_request" => Some(ErrorType::BadRequest),
-        "conflict" => Some(ErrorType::Conflict),
-        "forbidden" => Some(ErrorType::Forbidden),
-        "internal" => Some(ErrorType::Internal),
-        "method_not_allowed" => Some(ErrorType::MethodNotAllowed),
-        "not_found" => Some(ErrorType::NotFound),
-        "not_implemented" => Some(ErrorType::NotImplemented),
-        "timeout" => Some(ErrorType::Timeout),
-        "unauthorized" => Some(ErrorType::Unauthorized),
-        _ => None,
-    }
 }
 
 async fn maybe_claim_leadership(cluster: &Cluster, txn: &Txn) -> TCResult<Txn> {

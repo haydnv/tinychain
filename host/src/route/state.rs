@@ -1,4 +1,4 @@
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 use std::convert::TryInto;
 
 use tc_error::*;
@@ -6,6 +6,7 @@ use tcgeneric::{
     label, path_label, Id, Instance, Label, NativeClass, PathLabel, PathSegment, Tuple,
 };
 
+use crate::object::{InstanceClass, Object};
 use crate::scalar::Link;
 use crate::state::{State, StateType};
 
@@ -25,6 +26,27 @@ impl<'a> Handler<'a> for ClassHandler {
     {
         Some(Box::new(|_txn, _key| {
             Box::pin(async move { Ok(Link::from(self.class.path()).into()) })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, params| {
+            Box::pin(async move {
+                let mut proto = Map::new();
+                for (id, member) in params.into_iter() {
+                    let member = member.try_cast_into(|s| {
+                        TCError::bad_request("invalid member for object prototype", s)
+                    })?;
+
+                    proto.insert(id, member);
+                }
+
+                let class = InstanceClass::new(Some(self.class.path().into()), proto);
+                Ok(Object::Class(class).into())
+            })
         }))
     }
 }
@@ -127,7 +149,7 @@ pub struct Static;
 impl Route for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
-            return None;
+            return Some(Box::new(EchoHandler));
         }
 
         if path[0] == collection::PREFIX {

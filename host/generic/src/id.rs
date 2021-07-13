@@ -474,6 +474,12 @@ pub struct TCPath<'a> {
     inner: &'a [PathSegment],
 }
 
+impl Default for TCPath<'static> {
+    fn default() -> Self {
+        Self { inner: &[] }
+    }
+}
+
 impl<'a> From<&'a [PathSegment]> for TCPath<'a> {
     fn from(inner: &'a [PathSegment]) -> TCPath<'a> {
         TCPath { inner }

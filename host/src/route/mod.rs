@@ -3,9 +3,10 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::Future;
+use safecast::TryCastFrom;
 
 use tc_error::*;
-use tcgeneric::{Map, PathSegment, TCPath};
+use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::scalar::{OpRefType as ORT, Value};
 use crate::state::State;
@@ -144,6 +145,36 @@ impl<T: Route + fmt::Display> Public for T {
     }
 }
 
+struct EchoHandler;
+
+impl<'a> Handler<'a> for EchoHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>> where 'b: 'a {
+        Some(Box::new(|_txn, key| Box::pin(async move {
+            Ok(key.into())
+        })))
+    }
+}
+
+struct ErrorHandler {
+    code: Id,
+}
+
+impl<'a> Handler<'a> for ErrorHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>> where 'b: 'a {
+        Some(Box::new(|_txn, key| Box::pin(async move {
+            let message = String::try_cast_from(key, |v| {
+                TCError::bad_request("cannot cast into error message string from", v)
+            })?;
+
+            if let Some(err_type) = error_type(&self.code) {
+                Err(TCError::new(err_type, message))
+            } else {
+                Err(TCError::not_found(self.code))
+            }
+        })))
+    }
+}
+
 struct SelfHandler<'a, T> {
     subject: &'a T,
 }
@@ -184,6 +215,12 @@ impl Route for Static {
 
         if path[0] == state::PREFIX {
             state::Static.route(&path[1..])
+        } else if path[0].as_str() == "error" {
+            if path.len() == 2 {
+                Some(Box::new(ErrorHandler{ code: path[1].clone() }))
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -193,5 +230,21 @@ impl Route for Static {
 impl fmt::Display for Static {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("static context")
+    }
+}
+
+fn error_type(err_type: &Id) -> Option<ErrorType> {
+    match err_type.as_str() {
+        "bad_gateway" => Some(ErrorType::BadGateway),
+        "bad_request" => Some(ErrorType::BadRequest),
+        "conflict" => Some(ErrorType::Conflict),
+        "forbidden" => Some(ErrorType::Forbidden),
+        "internal" => Some(ErrorType::Internal),
+        "method_not_allowed" => Some(ErrorType::MethodNotAllowed),
+        "not_found" => Some(ErrorType::NotFound),
+        "not_implemented" => Some(ErrorType::NotImplemented),
+        "timeout" => Some(ErrorType::Timeout),
+        "unauthorized" => Some(ErrorType::Unauthorized),
+        _ => None,
     }
 }

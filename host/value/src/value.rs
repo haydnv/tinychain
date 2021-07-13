@@ -743,7 +743,7 @@ impl TryCastFrom<Value> for Number {
                 }
             }
             Value::Tuple(_) => None,
-            Value::String(s) => f64::from_str(&s).map(Float::F64).map(Self::Float).ok(),
+            Value::String(s) => Number::from_str(&s).ok(),
         }
     }
 }

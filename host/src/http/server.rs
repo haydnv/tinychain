@@ -268,7 +268,7 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
             let encoded = destream_json::encode(err).expect("encode error");
             let encoded = encoded.chain(delimiter(b"\n"));
             Body::wrap_stream(encoded)
-        },
+        }
         Encoding::Tbon => Body::wrap_stream(tbon::en::encode(err).expect("encode error")),
     };
 

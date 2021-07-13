@@ -673,7 +673,11 @@ impl Route for Static {
             return None;
         }
 
-        if path == &["einsum"] {
+        if path[0].as_str() == "dense" {
+            TensorType::Dense.route(&path[1..])
+        } else if path[0].as_str() == "sparse" {
+            TensorType::Sparse.route(&path[1..])
+        } else if path == &["einsum"] {
             Some(Box::new(EinsumHandler))
         } else {
             None
