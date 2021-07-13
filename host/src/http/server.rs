@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
@@ -39,7 +39,10 @@ impl HTTPServer {
     ) -> Result<Response<Body>, hyper::Error> {
         match tokio::time::timeout(self.gateway.request_ttl(), self.handle(request)).await {
             Ok(result) => result,
-            Err(cause) => Ok(transform_error(TCError::timeout(cause))),
+            Err(cause) => Ok(transform_error(
+                TCError::timeout(cause),
+                Encoding::default(),
+            )),
         }
     }
 
@@ -50,37 +53,38 @@ impl HTTPServer {
         let (params, txn, accept_encoding, request_encoding) =
             match self.process_headers(&request).await {
                 Ok(header_data) => header_data,
-                Err(cause) => return Ok(transform_error(cause)),
+                Err(cause) => return Ok(transform_error(cause, Encoding::default())),
             };
 
         let state = match self.route(request_encoding, &txn, params, request).await {
             Ok(state) => state,
-            Err(cause) => return Ok(transform_error(cause)),
+            Err(cause) => return Ok(transform_error(cause, accept_encoding)),
         };
 
         let view = match state.into_view(txn).await {
             Ok(view) => view,
-            Err(cause) => return Ok(transform_error(cause)),
+            Err(cause) => return Ok(transform_error(cause, accept_encoding)),
         };
 
-        let response = match accept_encoding {
+        let body = match accept_encoding {
             Encoding::Json => match destream_json::encode(view) {
-                Ok(response) => Body::wrap_stream(
-                    response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n"))))),
-                ),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause))),
+                Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
+                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Json)),
             },
             Encoding::Tbon => match tbon::en::encode(view) {
                 Ok(response) => Body::wrap_stream(response.map_err(TCError::internal)),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause))),
+                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Tbon)),
             },
         };
 
-        let mut response = Response::new(response);
+        let mut response = Response::new(body);
 
         response.headers_mut().insert(
             hyper::header::CONTENT_TYPE,
-            accept_encoding.to_string().parse().unwrap(),
+            accept_encoding
+                .to_string()
+                .parse()
+                .expect("content type header"),
         );
 
         Ok(response)
@@ -245,12 +249,8 @@ fn get_param<T: DeserializeOwned>(
     }
 }
 
-fn transform_error(err: TCError) -> hyper::Response<Body> {
-    let mut response = hyper::Response::new(Body::from(format!("{}\r\n", err.message())));
-
-    use hyper::StatusCode;
-    use tc_error::ErrorType::*;
-    *response.status_mut() = match err.code() {
+fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
+    let code = match err.code() {
         BadGateway => StatusCode::BAD_GATEWAY,
         BadRequest => StatusCode::BAD_REQUEST,
         Forbidden => StatusCode::FORBIDDEN,
@@ -263,9 +263,33 @@ fn transform_error(err: TCError) -> hyper::Response<Body> {
         Unauthorized => StatusCode::UNAUTHORIZED,
     };
 
+    let body = match encoding {
+        Encoding::Json => {
+            let encoded = destream_json::encode(err).expect("encode error");
+            let encoded = encoded.chain(delimiter(b"\n"));
+            Body::wrap_stream(encoded)
+        },
+        Encoding::Tbon => Body::wrap_stream(tbon::en::encode(err).expect("encode error")),
+    };
+
+    let mut response = hyper::Response::new(body);
+
+    response.headers_mut().insert(
+        hyper::header::CONTENT_TYPE,
+        encoding.to_string().parse().expect("content type header"),
+    );
+
+    use hyper::StatusCode;
+    use tc_error::ErrorType::*;
+    *response.status_mut() = code;
+
     response
 }
 
 async fn shutdown_signal() {
     tokio::signal::ctrl_c().await.expect("SIGTERM handler")
+}
+
+fn delimiter<E>(content: &'static [u8]) -> impl Stream<Item = Result<Bytes, E>> {
+    stream::once(future::ready(Ok(Bytes::from_static(content))))
 }
