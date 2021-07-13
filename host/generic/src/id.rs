@@ -26,14 +26,11 @@ pub struct Label {
     id: &'static str,
 }
 
-/// Return a [`Label`] with the given static `str`.
-pub const fn label(id: &'static str) -> Label {
-    Label { id }
-}
+impl Deref for Label {
+    type Target = str;
 
-impl fmt::Display for Label {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.id)
+    fn deref(&self) -> &Self::Target {
+        self.id
     }
 }
 
@@ -43,6 +40,23 @@ impl From<Label> for Id {
             id: l.id.to_string(),
         }
     }
+}
+
+impl PartialEq<Id> for Label {
+    fn eq(&self, other: &Id) -> bool {
+        self.id == other.as_str()
+    }
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.id)
+    }
+}
+
+/// Return a [`Label`] with the given static `str`.
+pub const fn label(id: &'static str) -> Label {
+    Label { id }
 }
 
 impl From<uuid::Uuid> for Id {
@@ -65,6 +79,7 @@ pub struct Id {
 
 impl Id {
     /// Borrows the String underlying this `Id`.
+    #[inline]
     pub fn as_str(&self) -> &str {
         self.id.as_str()
     }

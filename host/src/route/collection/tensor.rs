@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, path_label, PathLabel, PathSegment, TCBoxTryFuture, Tuple};
+use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -19,7 +19,7 @@ use crate::txn::Txn;
 
 use super::{Handler, Route};
 
-pub const EINSUM: PathLabel = path_label(&["state", "collection", "tensor", "einsum"]);
+pub const PREFIX: Label = label("tensor");
 
 struct ConstantHandler;
 
@@ -70,7 +70,7 @@ impl<'a> Handler<'a> for CreateHandler {
     }
 }
 
-pub struct EinsumHandler;
+struct EinsumHandler;
 
 impl<'a> Handler<'a> for EinsumHandler {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
@@ -662,5 +662,21 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
             Ok(Bounds { axes })
         }
         other => Err(TCError::bad_request("invalid tensor bounds", other)),
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path == &["einsum"] {
+            Some(Box::new(EinsumHandler))
+        } else {
+            None
+        }
     }
 }

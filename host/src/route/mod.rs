@@ -11,8 +11,6 @@ use crate::scalar::{OpRefType as ORT, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
-pub use r#static::Static;
-
 mod chain;
 mod cluster;
 mod collection;
@@ -20,7 +18,6 @@ mod generic;
 mod object;
 mod scalar;
 mod state;
-mod r#static;
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> GetFuture<'a> + Send + 'a>;
@@ -144,5 +141,57 @@ impl<T: Route + fmt::Display> Public for T {
                 TCPath::from(path),
             ))
         }
+    }
+}
+
+struct SelfHandler<'a, T> {
+    subject: &'a T,
+}
+
+impl<'a, T: Clone + Send + Sync> Handler<'a> for SelfHandler<'a, T>
+where
+    State: From<T>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    Ok(self.subject.clone().into())
+                } else {
+                    Err(TCError::not_found(key))
+                }
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for SelfHandler<'a, T> {
+    fn from(subject: &'a T) -> Self {
+        Self { subject }
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path[0] == state::PREFIX {
+            state::Static.route(&path[1..])
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for Static {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("static context")
     }
 }

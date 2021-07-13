@@ -78,9 +78,10 @@ where
                     let i = Number::try_cast_from(key, |v| {
                         TCError::bad_request("invalid tuple index", v)
                     })?;
+
                     let i = usize::cast_from(i);
+
                     self.tuple
-                        .deref()
                         .get(i)
                         .cloned()
                         .map(State::from)
@@ -100,7 +101,7 @@ where
         if path.is_empty() {
             Some(Box::new(TupleHandler { tuple: self }))
         } else if let Ok(i) = usize::from_str(path[0].as_str()) {
-            if let Some(state) = self.deref().get(i) {
+            if let Some(state) = self.get(i) {
                 state.route(&path[1..])
             } else {
                 None

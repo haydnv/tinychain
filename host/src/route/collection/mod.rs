@@ -1,17 +1,16 @@
-use tcgeneric::PathSegment;
+use tcgeneric::{label, Label, PathSegment};
 
 use crate::collection::{Collection, CollectionType};
 
 use super::{Handler, Route};
-
-#[cfg(feature = "tensor")]
-pub use tensor::{EinsumHandler, EINSUM};
 
 mod btree;
 mod table;
 
 #[cfg(feature = "tensor")]
 mod tensor;
+
+pub const PREFIX: Label = label("collection");
 
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -32,5 +31,22 @@ impl Route for Collection {
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.route(path),
         }
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        #[cfg(feature = "tensor")]
+        if path[0] == tensor::PREFIX {
+            return tensor::Static.route(&path[1..]);
+        }
+
+        None
     }
 }

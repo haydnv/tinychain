@@ -2,7 +2,9 @@ use safecast::TryCastFrom;
 use std::convert::TryInto;
 
 use tc_error::*;
-use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel, PathSegment, Tuple};
+use tcgeneric::{
+    label, path_label, Id, Instance, Label, NativeClass, PathLabel, PathSegment, Tuple,
+};
 
 use crate::scalar::Link;
 use crate::state::{State, StateType};
@@ -10,6 +12,7 @@ use crate::state::{State, StateType};
 use super::*;
 
 const CLASS: PathLabel = path_label(&["class"]);
+pub const PREFIX: Label = label("state");
 
 struct ClassHandler {
     class: StateType,
@@ -94,27 +97,6 @@ impl Route for StateType {
     }
 }
 
-struct SelfHandler<'a> {
-    subject: &'a State,
-}
-
-impl<'a> Handler<'a> for SelfHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                if key.is_none() {
-                    Ok(self.subject.clone())
-                } else {
-                    Err(TCError::not_found(key))
-                }
-            })
-        }))
-    }
-}
-
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
@@ -134,6 +116,24 @@ impl Route for State {
             Some(Box::new(SelfHandler { subject: self }))
         } else if path == &CLASS[..] {
             Some(Box::new(ClassHandler::from(self.class())))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path[0] == collection::PREFIX {
+            collection::Static.route(&path[1..])
+        } else if path[0] == scalar::PREFIX {
+            scalar::Static.route(&path[1..])
         } else {
             None
         }

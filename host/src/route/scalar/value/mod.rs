@@ -1,9 +1,17 @@
-use tcgeneric::PathSegment;
+use bytes::Bytes;
+use safecast::TryCastFrom;
+use uuid::Uuid;
 
-use crate::route::{GetHandler, Handler, Route};
+use tc_error::TCError;
+use tcgeneric::{label, Label, PathSegment};
+
+use crate::route::{GetHandler, Handler, Route, SelfHandler};
 use crate::scalar::Value;
+use crate::state::State;
 
 mod number;
+
+pub const PREFIX: Label = label("value");
 
 struct EqHandler<F> {
     call: F,
@@ -42,8 +50,60 @@ impl Route for Value {
                 "ne" => Some(Box::new(EqHandler::from(move |other| self != &other))),
                 _ => None,
             }
+        } else if path.is_empty() {
+            Some(Box::new(SelfHandler::from(self)))
         } else {
             None
+        }
+    }
+}
+
+struct UuidHandler<'a> {
+    dtype: &'a str,
+}
+
+impl<'a> Handler<'a> for UuidHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let uuid = if key.is_some() {
+                    Uuid::try_cast_from(key, |v| TCError::bad_request("invalid UUID", v))?
+                } else {
+                    Uuid::new_v4()
+                };
+
+                let value = match self.dtype {
+                    "bytes" => Value::Bytes(Bytes::copy_from_slice(uuid.as_bytes())),
+                    "id" => Value::Id(uuid.into()),
+                    "string" => Value::String(uuid.to_string()),
+                    other => return Err(TCError::not_found(other)),
+                };
+
+                Ok(State::from(value))
+            })
+        }))
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        match path[0].as_str() {
+            "bytes" | "id" | "string" if path.len() == 2 => match path[1].as_str() {
+                "uuid" => Some(Box::new(UuidHandler {
+                    dtype: path[0].as_str(),
+                })),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

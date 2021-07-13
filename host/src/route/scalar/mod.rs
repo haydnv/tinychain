@@ -1,14 +1,16 @@
 use tc_error::TCError;
 use tc_value::{Bound, Range};
-use tcgeneric::PathSegment;
+use tcgeneric::{label, Label, PathSegment};
 
-use crate::scalar::{Scalar, ScalarType};
+use crate::scalar::{Scalar, ScalarType, Value};
 use crate::state::{State, StateType};
 
 use super::{GetHandler, Handler, Route};
 
 mod op;
 mod value;
+
+pub const PREFIX: Label = label("scalar");
 
 struct CastHandler {
     class: ScalarType,
@@ -21,7 +23,7 @@ impl<'a> Handler<'a> for CastHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let err = format!("Cannot cast into {} from {}", self.class, key);
+                let err = format!("cannot cast into {} from {}", self.class, key);
                 State::Scalar(Scalar::Value(key))
                     .into_type(StateType::Scalar(self.class))
                     .ok_or_else(|| TCError::unsupported(err))
@@ -45,12 +47,12 @@ impl Route for Range {
                 "start" => match &self.start {
                     Bound::In(value) => value.route(&path[1..]),
                     Bound::Ex(value) => value.route(&path[1..]),
-                    _ => None,
+                    Bound::Un => Value::None.route(&path[1..]),
                 },
                 "end" => match &self.end {
                     Bound::In(value) => value.route(&path[1..]),
                     Bound::Ex(value) => value.route(&path[1..]),
-                    _ => None,
+                    Bound::Un => Value::None.route(&path[1..]),
                 },
                 _ => None,
             }
@@ -67,6 +69,22 @@ impl Route for Scalar {
             Self::Ref(_) => None,
             Self::Value(value) => value.route(path),
             Self::Tuple(tuple) => tuple.route(path),
+        }
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path[0] == value::PREFIX {
+            value::Static.route(&path[1..])
+        } else {
+            None
         }
     }
 }

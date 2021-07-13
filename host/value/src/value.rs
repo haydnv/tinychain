@@ -1,7 +1,7 @@
 //! A generic [`Value`] which supports collation
 
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
 use std::str::FromStr;
@@ -16,6 +16,7 @@ use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use uuid::Uuid;
 
 use tc_error::*;
 use tcgeneric::*;
@@ -764,6 +765,29 @@ impl TryCastFrom<Value> for String {
             Value::Id(id) => Some(id.to_string()),
             Value::Number(n) => Some(n.to_string()),
             Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Uuid {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Bytes(bytes) => bytes.len() == 16,
+            Value::Id(id) => Uuid::from_str(id.as_str()).is_ok(),
+            Value::String(s) => Uuid::from_str(s).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Bytes(bytes) if bytes.len() == 16 => {
+                let bytes = bytes.to_vec().try_into().expect("16-byte UUID");
+                Some(Uuid::from_bytes(bytes))
+            }
+            Value::Id(id) => id.as_str().parse().ok(),
+            Value::String(s) => s.parse().ok(),
             _ => None,
         }
     }

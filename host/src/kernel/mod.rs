@@ -54,11 +54,7 @@ impl Kernel {
             if key.is_none() {
                 Ok(Value::from(Bytes::copy_from_slice(self.actor.public_key().as_bytes())).into())
             } else {
-                Err(TCError::method_not_allowed(
-                    OpRefType::Get,
-                    self,
-                    TCPath::from(path),
-                ))
+                Err(TCError::not_found(key))
             }
         } else if let Some(class) = StateType::from_path(path) {
             class.get(txn, path, key).await
