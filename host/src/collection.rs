@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
+use safecast::{CastInto, TryCastFrom};
 
 use tc_btree::BTreeView;
 use tc_error::*;
@@ -20,6 +21,8 @@ use tcgeneric::{
 };
 
 use crate::fs;
+use crate::scalar::{OpRef, Scalar, Value};
+use crate::state::StateClass;
 use crate::txn::Txn;
 
 pub use tc_btree::BTreeType;
@@ -87,6 +90,39 @@ impl NativeClass for CollectionType {
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.path(),
         }
+    }
+}
+
+impl StateClass for CollectionType {
+    type Get = OpRef;
+
+    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
+        let schema = match self {
+            Self::BTree(_) => {
+                let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid BTree schema", v)
+                })?;
+
+                Value::Tuple(schema.into_iter().collect())
+            }
+            Self::Table(_) => {
+                let schema = tc_table::TableSchema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Table schema", v)
+                })?;
+
+                schema.cast_into()
+            }
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_) => {
+                let schema = tc_tensor::Schema::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Tensor schema", v)
+                })?;
+
+                schema.cast_into()
+            }
+        };
+
+        Ok(OpRef::Get((self.path().into(), Scalar::Value(schema))))
     }
 }
 

@@ -11,7 +11,7 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -24,15 +24,24 @@ use crate::route::Public;
 use crate::scalar::*;
 use crate::txn::Txn;
 
+pub use view::StateView;
+
 mod view;
 
-pub use view::StateView;
+pub trait StateClass: Class
+where
+    State: From<Self::Get>,
+{
+    type Get;
+
+    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get>;
+}
 
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
-    Collection(CollectionType),
     Chain(ChainType),
+    Collection(CollectionType),
     Map,
     Object(ObjectType),
     Scalar(ScalarType),
@@ -77,6 +86,35 @@ impl NativeClass for StateType {
             Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
+        }
+    }
+}
+
+impl StateClass for StateType {
+    type Get = State;
+
+    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
+        match self {
+            Self::Chain(ct) => ct.try_cast_from_value(value).map(State::from),
+            Self::Collection(ct) => ct.try_cast_from_value(value).map(State::from),
+            Self::Map => {
+                let contents: Tuple<Value> = value.try_into()?;
+                let contents: Vec<(Id, Value)> = contents
+                    .try_cast_into(|v| TCError::bad_request("cannot cast into Map from", v))?;
+
+                Ok(State::Map(
+                    contents
+                        .into_iter()
+                        .map(|(id, value)| (id, State::from(value)))
+                        .collect(),
+                ))
+            }
+            Self::Object(ot) => ot.try_cast_from_value(value).map(State::from),
+            Self::Scalar(st) => st.try_cast_from_value(value).map(State::Scalar),
+            Self::Tuple => {
+                let contents: Tuple<Value> = value.try_into()?;
+                Ok(State::Tuple(contents.into_iter().collect()))
+            }
         }
     }
 }
@@ -179,23 +217,6 @@ impl State {
             Self::Scalar(scalar) => scalar.is_ref(),
             Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
             _ => false,
-        }
-    }
-
-    /// Cast this `State` into the given [`StateType`], if possible.
-    pub fn into_type(self, class: StateType) -> Option<Self> {
-        if self.class() == class {
-            return Some(self);
-        }
-
-        match class {
-            StateType::Scalar(class) => {
-                debug!("cast into {} from {}", class, self);
-                Scalar::opt_cast_from(self)
-                    .and_then(|scalar| scalar.into_type(class))
-                    .map(Self::Scalar)
-            }
-            _ => None,
         }
     }
 }

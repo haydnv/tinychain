@@ -148,30 +148,38 @@ impl<T: Route + fmt::Display> Public for T {
 struct EchoHandler;
 
 impl<'a> Handler<'a> for EchoHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>> where 'b: 'a {
-        Some(Box::new(|_txn, key| Box::pin(async move {
-            Ok(key.into())
-        })))
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move { Ok(key.into()) })
+        }))
     }
 }
 
-struct ErrorHandler {
-    code: Id,
+struct ErrorHandler<'a> {
+    code: &'a Id,
 }
 
-impl<'a> Handler<'a> for ErrorHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>> where 'b: 'a {
-        Some(Box::new(|_txn, key| Box::pin(async move {
-            let message = String::try_cast_from(key, |v| {
-                TCError::bad_request("cannot cast into error message string from", v)
-            })?;
+impl<'a> Handler<'a> for ErrorHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let message = String::try_cast_from(key, |v| {
+                    TCError::bad_request("cannot cast into error message string from", v)
+                })?;
 
-            if let Some(err_type) = error_type(&self.code) {
-                Err(TCError::new(err_type, message))
-            } else {
-                Err(TCError::not_found(self.code))
-            }
-        })))
+                if let Some(err_type) = error_type(self.code) {
+                    Err(TCError::new(err_type, message))
+                } else {
+                    Err(TCError::not_found(self.code))
+                }
+            })
+        }))
     }
 }
 
@@ -217,7 +225,8 @@ impl Route for Static {
             state::Static.route(&path[1..])
         } else if path[0].as_str() == "error" {
             if path.len() == 2 {
-                Some(Box::new(ErrorHandler{ code: path[1].clone() }))
+                let code = &path[1];
+                Some(Box::new(ErrorHandler { code }))
             } else {
                 None
             }

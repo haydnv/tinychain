@@ -19,7 +19,7 @@ use tc_error::*;
 use tcgeneric::*;
 
 use crate::route::Public;
-use crate::state::State;
+use crate::state::{State, StateClass};
 use crate::txn::Txn;
 
 pub use op::*;
@@ -84,6 +84,16 @@ impl NativeClass for ScalarType {
             Self::Value(vt) => vt.path(),
             Self::Tuple => prefix.append(label("tuple")),
         }
+    }
+}
+
+impl StateClass for ScalarType {
+    type Get = Scalar;
+
+    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
+        Scalar::Value(value)
+            .into_type(self)
+            .ok_or_else(|| TCError::bad_request("invalid instance of", self))
     }
 }
 

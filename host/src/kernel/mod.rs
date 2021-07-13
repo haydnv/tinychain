@@ -56,9 +56,7 @@ impl Kernel {
                 Err(TCError::not_found(key))
             }
         } else if let Some(class) = StateType::from_path(path) {
-            let class = class.try_into()?;
-            let state = Scalar::Value(key).into_type(class).map(State::Scalar);
-            state.ok_or_else(|| TCError::bad_request("invalid value for instance of", class))
+            class.try_cast_from_value(key)
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",

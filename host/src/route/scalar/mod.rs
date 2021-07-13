@@ -3,7 +3,7 @@ use tc_value::{Bound, Range};
 use tcgeneric::{label, Label, PathSegment};
 
 use crate::scalar::{Scalar, ScalarType, Value};
-use crate::state::{State, StateType};
+use crate::state::State;
 
 use super::{EchoHandler, GetHandler, Handler, Route};
 
@@ -24,8 +24,10 @@ impl<'a> Handler<'a> for CastHandler {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let err = format!("cannot cast into {} from {}", self.class, key);
-                State::Scalar(Scalar::Value(key))
-                    .into_type(StateType::Scalar(self.class))
+
+                Scalar::Value(key)
+                    .into_type(self.class)
+                    .map(State::Scalar)
                     .ok_or_else(|| TCError::unsupported(err))
             })
         }))
