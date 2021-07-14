@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
@@ -215,7 +215,7 @@ struct Inner<F, D, T> {
     schema: RowSchema,
     order: usize,
     collator: ValueCollator,
-    root: TxnLock<Mutable<NodeId>>,
+    root: TxnLock<NodeId>,
     dir: PhantomData<D>,
     txn: PhantomData<T>,
 }
@@ -609,6 +609,7 @@ where
             .file
             .read_block(txn_id, (*root_id).clone())
             .await?;
+
         Ok(root.keys.is_empty())
     }
 

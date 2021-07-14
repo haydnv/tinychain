@@ -9,7 +9,6 @@ use futures::TryFutureExt;
 use log::debug;
 
 use tc_transact::fs::BlockData;
-use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
 use tcgeneric::{TCPathBuf, Tuple};
 
@@ -174,19 +173,6 @@ impl ChainBlock {
     /// The hash of the previous block in the chain.
     pub fn last_hash(&self) -> &Bytes {
         &self.hash
-    }
-}
-
-#[async_trait]
-impl Mutate for ChainBlock {
-    type Pending = Self;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
-        self.clone()
-    }
-
-    async fn converge(&mut self, new_value: Self::Pending) {
-        *self = new_value;
     }
 }
 

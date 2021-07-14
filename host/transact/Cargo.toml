@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.7.1"
+version = "0.8.0"
 authors = ["haydnv"]
 edition = "2018"
 description = "Traits and locking utilities for a Tinychain transaction. Unstable."
@@ -32,5 +32,5 @@ tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tokio = { version = "1.6", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
-uplock = "~0.1.1"
+uplock = "~0.1.2"
 uuid = { version = "0.8", features = ["v4"] }
