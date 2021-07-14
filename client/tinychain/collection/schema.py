@@ -31,13 +31,17 @@ class BTree(object):
 class Table(object):
     """A `Table` schema which comprises a primary key and value :class:`Column` s."""
 
-    def __init__(self, key, values=[], indices=Tuple([])):
+    def __init__(self, key, values=[]):
         self.key = key
         self.values = values
-        self.indices = indices
+        self.indices = []
 
     def __json__(self):
         return to_json([[self.key, self.values], Tuple(self.indices)])
+
+    def add_index(self, name, columns):
+        self.indices.append((name, columns))
+        return self
 
 
 class Tensor(object):
