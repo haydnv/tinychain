@@ -26,7 +26,7 @@ log = { version = "0.4", features = [] }
 rand = "0.8"
 serde = { version = "1.0", features = [] }
 sha2 = "0.9"
-tbon = { version = "~0.3.3", features = ["tokio-io"] }
+tbon = { version = "~0.3.4", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }

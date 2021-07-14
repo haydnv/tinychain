@@ -1,3 +1,4 @@
+from tinychain.state import Map, Tuple
 from tinychain.util import to_json, uri
 from tinychain.value import F32
 
@@ -6,15 +7,15 @@ class Column(object):
     """A column in the schema of a :class:`BTree` or :class:`Table`."""
 
     def __init__(self, name, dtype, max_size=None):
-        self.name = str(name)
-        self.dtype = uri(dtype)
+        self.name = name
+        self.dtype = dtype
         self.max_size = max_size
 
     def __json__(self):
         if self.max_size is None:
-            return to_json((self.name, str(self.dtype)))
+            return to_json((self.name, self.dtype))
         else:
-            return to_json((self.name, str(self.dtype), self.max_size))
+            return to_json((self.name, self.dtype, self.max_size))
 
 
 class BTree(object):
@@ -30,13 +31,13 @@ class BTree(object):
 class Table(object):
     """A `Table` schema which comprises a primary key and value :class:`Column` s."""
 
-    def __init__(self, key, values=[], indices={}):
+    def __init__(self, key, values=[], indices=Tuple([])):
         self.key = key
         self.values = values
         self.indices = indices
 
     def __json__(self):
-        return to_json([[self.key, self.values], list(self.indices.items())])
+        return to_json([[self.key, self.values], Tuple(self.indices)])
 
 
 class Tensor(object):
@@ -51,4 +52,4 @@ class Tensor(object):
         self.dtype = dtype
 
     def __json__(self):
-        return to_json([self.shape, str(uri(self.dtype))])
+        return to_json([self.shape, self.dtype])
