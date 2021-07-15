@@ -5,6 +5,32 @@ from pydoc import locate
 from .meta import Meta
 
 
+def _get_rtype(fn, default_rtype):
+    if is_op(fn):
+        return fn.rtype
+
+    rtype = default_rtype
+
+    if inspect.isfunction(fn):
+        annotation = inspect.signature(fn).return_annotation
+        rtype = resolve_class(fn, annotation, rtype)
+
+    return rtype
+
+
+def is_none(state):
+    from tinychain.value import Nil
+
+    return state is None or state == Nil
+
+
+def is_op(fn):
+    from .method import Method
+    from .op import Op
+
+    return isinstance(fn, Method) or isinstance(fn, Op)
+
+
 def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:
         return default
