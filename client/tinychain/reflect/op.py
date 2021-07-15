@@ -3,9 +3,12 @@ import inspect
 from tinychain import op, ref
 from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
-from tinychain.value import Value
+from tinychain.value import Nil, Value
 
-from . import resolve_class
+from . import _get_rtype, resolve_class
+
+
+EMPTY = inspect.Parameter.empty
 
 
 class Op(object):
@@ -56,6 +59,14 @@ class Get(Op):
 class Put(Op):
     __uri__ = uri(op.Put)
 
+    def __init__(self, form):
+        rtype = _get_rtype(form, None)
+        if rtype not in [None, Nil]:
+            raise ValueError(f"Put op can only return None, not f{rtype}")
+
+        self.rtype = rtype
+        Op.__init__(self, form)
+
     def __form__(self):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
@@ -90,6 +101,10 @@ class Put(Op):
 class Post(Op):
     __uri__ = uri(op.Post)
 
+    def __init__(self, form):
+        self.rtype = _get_rtype(form, State)
+        Op.__init__(self, form)
+
     def __form__(self):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
@@ -114,6 +129,14 @@ class Post(Op):
 
 class Delete(Op):
     __uri__ = uri(op.Delete)
+
+    def __init__(self, form):
+        rtype = _get_rtype(form, None)
+        if rtype not in [None, Nil]:
+            raise ValueError(f"Delete op can only return None, not f{rtype}")
+
+        self.rtype = rtype
+        Op.__init__(self, form)
 
     def __form__(self):
         return Get.__form__(self)

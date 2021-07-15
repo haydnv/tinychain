@@ -14,6 +14,22 @@ class Tensor(Collection):
 
     __uri__ = uri(Collection) + "/tensor"
 
+    @classmethod
+    def load(cls, shape, dtype, data):
+        """
+        Load a `Tensor` from a Python iterable of coordinates and values.
+
+        Example:
+            .. highlight:: python
+            .. code-block:: python
+
+                coords = [[0, 0, 1], [0, 1, 0]]
+                values = [1, 2]
+                sparse = tc.tensor.Sparse.load([2, 3, 4], tc.I32, zip(coords, values))
+        """
+
+        return super().load(schema.Tensor(shape, dtype), data)
+
     def __getitem__(self, bounds):
         bounds = _handle_bounds(bounds)
         return self._get("", bounds, Tensor)
@@ -217,26 +233,6 @@ class Dense(Tensor):
 
         return cls.constant(shape, dtype(0))
 
-    @classmethod
-    def load(cls, shape, dtype, data):
-        """
-        Load a `Dense` Tensor from a Python iterable.
-
-        Example:
-            .. highlight:: python
-            .. code-block:: python
-
-                elements = range(10)
-                dense = tc.tensor.Dense([2, 5], tc.I32, elements)
-        """
-
-        if is_python_literal(data):
-            data = list(data)
-        else:
-            raise ValueError(f"{data} is not a Python literal")
-
-        return cls(ref.Put(cls, schema.Tensor(shape, dtype), data))
-
 
 class Sparse(Tensor):
     """An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values."""
@@ -252,27 +248,6 @@ class Sparse(Tensor):
         """
 
         return cls(schema.Tensor(shape, dtype))
-
-    @classmethod
-    def load(cls, shape, dtype, data):
-        """
-        Load a `Sparse` Tensor from a Python iterable of coordinates and values.
-
-        Example:
-            .. highlight:: python
-            .. code-block:: python
-
-                coords = [[0, 0, 1], [0, 1, 0]]
-                values = [1, 2]
-                sparse = tc.tensor.Sparse.load([2, 3, 4], tc.I32, zip(coords, values))
-        """
-
-        if is_python_literal(data):
-            data = list(data)
-        else:
-            raise ValueError(f"{data} is not a Python literal")
-
-        return cls(ref.Put(cls, schema.Tensor(shape, dtype), data))
 
 
 def einsum(fmt, tensors):

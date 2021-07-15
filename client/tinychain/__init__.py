@@ -15,6 +15,6 @@ from tinychain.collection.table import Table
 from tinychain.decorators import *
 from tinychain.ref import After, If, Case
 from tinychain.reflect.meta import Meta
-from tinychain.state import Class, Instance, Map, State, Scalar, Tuple
+from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple
 from tinychain.value import *
 from tinychain.util import form_of, to_json, uri, use, Context, URI
