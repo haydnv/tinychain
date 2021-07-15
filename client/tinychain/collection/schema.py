@@ -19,13 +19,33 @@ class Column(object):
 
 
 class BTree(object):
-    """A `BTree` schema which comprises a tuple of :class:`Column` s."""
+    """A :class:`BTree` schema which comprises a tuple of :class:`Column` s."""
 
     def __init__(self, *columns):
         self.columns = columns
 
     def __json__(self):
         return to_json(self.columns)
+
+
+class Graph(object):
+    """A :class:`Graph` schema which comprises a set of :class:`Table` s and edges between :class:`Table` columns."""
+
+    def __init__(self):
+        self.tables = {}
+        self.edges = {}
+
+    def add_table(self, name, schema):
+        """Add a :class:`Table` to this `Graph`."""
+
+        self.tables[name] = schema
+        return self
+
+    def add_edge(self, name, from_node, to_node):
+        """Add an edge between tables in this `Graph`."""
+
+        self.edged[name] = (from_node, to_node)
+        return self
 
 
 class Table(object):
