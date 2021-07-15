@@ -26,7 +26,9 @@ def to_feet(_txn, meters: tc.Number) -> tc.Number:
         tc.error.BadRequest("negative distance is not supported"))
 
 
-class Distance(tc.Number):
+# Specifying `metaclass=tc.Meta` provides JSON encoding functionality for user-defined classes.
+# It's only required when subclassing a native class--subclasses of `Distance` automatically inherit its metaclass.
+class Distance(tc.Number, metaclass=tc.Meta):
     __uri__ = tc.URI(LINK) + "/Distance"
 
     @tc.get_method
@@ -66,6 +68,7 @@ class AreaService(tc.Cluster):
     __uri__ = tc.URI(LINK)
 
     def _configure(self):
+        # make sure to include your app's classes here so your clients can find them!
         self.Distance = Distance
         self.Feet = Feet
         self.Meters = Meters

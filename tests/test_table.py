@@ -8,9 +8,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.schema.Table(
-    [tc.Column("name", tc.String, 512)],
-    [tc.Column("views", tc.UInt)],
-    {"views": ["views", "name"]})
+        [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).add_index("views", ["views"])
 
 
 class TableTests(unittest.TestCase):
@@ -22,6 +20,7 @@ class TableTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
         cxt.result = tc.After(cxt.table.insert(("name",), (0,)), cxt.table.count())
+
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
 
@@ -79,12 +78,12 @@ class TableTests(unittest.TestCase):
         cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, {
+        self.assertEqual(result, tc.to_json({
             str(tc.uri(tc.Table)): [
-                [[[], [['views', str(tc.uri(tc.UInt))]]], []],
+                [[[], [['views', tc.UInt]]], []],
                 [[0], [1]]
             ]
-        })
+        }))
 
     def testInsert(self):
         for x in range(0, 100, 10):
@@ -195,9 +194,10 @@ class SparseTests(unittest.TestCase):
             tc.Column("3", tc.U64),
         ], [
             tc.Column("value", tc.Number),
-        ], {
-            "0": ["0"], "1": ["1"], "2": ["2"], "3": ["3"]
-        })
+        ])
+
+        for i in range(4):
+            schema.add_index(str(i), [str(i)])
 
         data = [
             ([0, 0, 1, 0], 1),

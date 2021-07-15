@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{self, BlockData, BlockId, Store};
-use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
 use tcgeneric::TCBoxTryFuture;
 
@@ -121,7 +121,7 @@ where
 pub struct File<B> {
     path: PathBuf,
     cache: Cache,
-    contents: TxnLock<Mutable<HashSet<BlockId>>>,
+    contents: TxnLock<HashSet<BlockId>>,
     mutated: RwLock<HashMap<TxnId, HashSet<BlockId>>>,
     phantom: PhantomData<B>,
 }
@@ -133,7 +133,7 @@ impl<B: BlockData> File<B> {
         File {
             path,
             cache,
-            contents: TxnLock::new(lock_name, block_ids.into()),
+            contents: TxnLock::new(lock_name, block_ids),
             mutated: RwLock::new(HashMap::new()),
             phantom: PhantomData,
         }

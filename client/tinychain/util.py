@@ -247,6 +247,8 @@ def to_json(obj):
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):
             return type(obj).__json__(obj)
+        elif hasattr(obj, "__uri__"):
+            return to_json({str(uri(obj)): {}})
 
     if hasattr(obj, "__json__"):
         return obj.__json__()

@@ -18,7 +18,7 @@ use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorType;
 use tc_transact::fs::{self, BlockData};
-use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{Id, PathSegment};
 
@@ -203,7 +203,7 @@ impl fmt::Display for DirEntry {
 pub struct Dir {
     path: PathBuf,
     cache: Cache,
-    contents: TxnLock<Mutable<HashMap<PathSegment, DirEntry>>>,
+    contents: TxnLock<HashMap<PathSegment, DirEntry>>,
 }
 
 impl Dir {
@@ -246,7 +246,7 @@ impl Dir {
                 Ok(Dir {
                     path,
                     cache,
-                    contents: TxnLock::new(lock_name, contents.into()),
+                    contents: TxnLock::new(lock_name, contents),
                 })
             } else {
                 Err(TCError::internal(format!(
@@ -317,7 +317,7 @@ impl fs::Dir for Dir {
             cache: self.cache.clone(),
             contents: TxnLock::new(
                 format!("transactional subdirectory at {}", name),
-                HashMap::new().into(),
+                HashMap::new(),
             ),
         };
 

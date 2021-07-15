@@ -29,7 +29,7 @@ if __name__ == "__main__":
 
 ## Overview
 
-The Tinychain client provides a developer-friendly API to build Tinychain transactions (i.e., distributed compute graphs) using the familiar Python language, but without any of the associated restrictions on performance or locality. A Tinychain transaction can span any number of networked hosts and automatically takes advantage of the hosts' concurrent and parallel computing resources (like multiple cores and GPU acceleration) without any extra application code. A Tinychain service defined using the Python client can be packaged using familiar distribution mechanisms like [Pip](http://pypi.org/project/pip) so that other Tinychain developers can use it just like a regular Python developer would use a regular Python library. This can save your clients a lot of time and hassle when integrating your cloud API into their service.
+The Tinychain client provides a developer-friendly API to build Tinychain transactions (i.e., distributed compute graphs) using the familiar Python language, but without any of the associated restrictions on performance or locality. A Tinychain transaction can span any number of networked hosts and automatically takes advantage of the hosts' concurrent and parallel computing resources (like multiple cores and GPU acceleration) without any extra application code. A Tinychain service defined using the Python client can be packaged using familiar distribution mechanisms like [Pip](http://pypi.org/project/pip) so that other Tinychain developers can use it just like any other Python developer would use any other Python library. This can save your clients a lot of time and effort when integrating your cloud API into their service.
 
 Every value in a Tinychain service is either a `State`, representing a Tinychain state like a `Number` or a `Chain`, or a `Ref`, which tells a Tinychain transaction how to access or calculate a particular `State`. For example:
 
@@ -102,7 +102,9 @@ from __future__ import annotations # needed until Python 3.10
 
 LINK = "http://example.com/app/area" # <-- edit this
 
-class Distance(tc.Number):
+# Specifying `metaclass=tc.Meta` provides JSON encoding functionality for user-defined classes.
+# It's only required when subclassing a native class--subclasses of `Distance` automatically inherit its metaclass.
+class Distance(tc.Number, metaclass=tc.Meta):
     __uri__ = tc.URI(LINK) + "/Distance"
 
     @tc.get_method
@@ -186,6 +188,7 @@ class AreaService(tc.Cluster):
     __uri__ = tc.URI(LINK)
 
     def _configure(self):
+        # make sure to include your app's classes here so your clients can find them!
         self.Distance = Distance
         self.Feet = Feet
         self.Meters = Meters

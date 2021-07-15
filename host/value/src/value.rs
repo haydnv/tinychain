@@ -263,6 +263,7 @@ impl From<NumberType> for ValueType {
 impl TryCastFrom<Value> for ValueType {
     fn can_cast_from(value: &Value) -> bool {
         match value {
+            Value::Link(l) if l.host().is_none() => Self::from_path(l.path()).is_some(),
             Value::String(s) => {
                 if let Ok(path) = TCPathBuf::from_str(s) {
                     Self::from_path(&path).is_some()
@@ -299,7 +300,17 @@ impl de::FromStream for ValueType {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        debug!("ValueType::from_stream");
         decoder.decode_any(ValueTypeVisitor).await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for ValueType {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.path(), Map::<Value>::default())?;
+        map.end()
     }
 }
 
@@ -355,7 +366,7 @@ impl DestreamVisitor for ValueTypeVisitor {
                     Err(DestreamError::invalid_value(map, "empty map"))
                 }
             } else {
-                Err(DestreamError::custom("invalid Value type"))
+                Err(de::Error::custom("invalid Value class"))
             }
         } else {
             Err(DestreamError::invalid_length(0, Self::expecting()))
@@ -1055,6 +1066,14 @@ impl ValueVisitor {
         map: &mut A,
     ) -> Result<Value, A::Error> {
         use ValueType as VT;
+
+        if let Ok(map) = map.next_value::<Map<Value>>(()).await {
+            return if map.is_empty() {
+                Ok(Value::Link(class.path().into()))
+            } else {
+                Err(de::Error::invalid_value(map, "a Value class"))
+            };
+        }
 
         return match class {
             VT::Bytes => {

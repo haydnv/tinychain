@@ -7,7 +7,7 @@ from tinychain.util import uri
 
 # Scalar value types
 
-class Value(Scalar, metaclass=Meta):
+class Value(Scalar):
     """A scalar `Value` which supports equality and collation."""
 
     __uri__ = uri(Scalar) + "/value"

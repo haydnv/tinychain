@@ -30,10 +30,10 @@ class Host(object):
     def _handle(self, req):
         response = req()
         status = response.status_code
-        response = response.text
+        response = json.loads(response.text)
 
         if status == 200:
-            return json.loads(response)
+            return response
         elif status == 204:
             return None
         elif status == 400:

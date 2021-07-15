@@ -15,7 +15,7 @@ use safecast::TryCastFrom;
 use uplock::RwLock;
 
 use tc_error::*;
-use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
@@ -55,8 +55,8 @@ pub struct Cluster {
     classes: Map<InstanceClass>,
     confirmed: RwLock<TxnId>,
     owned: RwLock<HashMap<TxnId, Owner>>,
-    installed: TxnLock<Mutable<HashMap<Link, HashSet<Scope>>>>,
-    replicas: TxnLock<Mutable<HashSet<Link>>>,
+    installed: TxnLock<HashMap<Link, HashSet<Scope>>>,
+    replicas: TxnLock<HashSet<Link>>,
 }
 
 impl Cluster {

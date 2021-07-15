@@ -7,6 +7,7 @@ import tinychain.host
 import tinychain.op
 import tinychain.ref
 
+from tinychain.app import Graph
 from tinychain.cluster import Cluster, write_cluster
 from tinychain.collection.btree import BTree
 from tinychain.collection.schema import Column

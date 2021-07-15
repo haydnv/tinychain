@@ -13,7 +13,7 @@ use safecast::*;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Link, NumberType, Value, ValueCollator, ValueType};
+use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
 pub use file::{BTreeFile, Node};
@@ -250,12 +250,10 @@ impl de::FromStream for Column {
 
 impl<'en> en::IntoStream<'en> for Column {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        let dtype = Value::Link(Link::from(self.dtype.path()));
-
         if let Some(max_len) = self.max_len {
-            (self.name, dtype.to_string(), max_len).into_stream(encoder)
+            (self.name, self.dtype, max_len).into_stream(encoder)
         } else {
-            (self.name, dtype.to_string()).into_stream(encoder)
+            (self.name, self.dtype).into_stream(encoder)
         }
     }
 }

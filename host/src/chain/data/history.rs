@@ -16,7 +16,7 @@ use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
-use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{
     label, Id, Instance, Label, Map, NativeClass, TCPathBuf, TCStream, TCTryStream, Tuple,
@@ -38,12 +38,12 @@ const DATA: Label = label("data");
 pub struct History {
     dir: fs::Dir,
     file: fs::File<ChainBlock>,
-    latest: TxnLock<Mutable<u64>>,
+    latest: TxnLock<u64>,
 }
 
 impl History {
     fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
-        let latest = TxnLock::new("latest block ordinal", latest.into());
+        let latest = TxnLock::new("latest block ordinal", latest);
         Self { dir, latest, file }
     }
 

@@ -125,9 +125,9 @@ pub async fn instantiate(
         owned: RwLock::new(HashMap::new()),
         installed: TxnLock::new(
             format!("Cluster {} installed deps", link),
-            HashMap::new().into(),
+            HashMap::new(),
         ),
-        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas.into()),
+        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
     };
 
     let class = InstanceClass::new(Some(link), cluster_proto.into());
