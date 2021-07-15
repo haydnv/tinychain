@@ -1,4 +1,5 @@
 """Tinychain `State` s, such as `Map`, `Tuple`, and `Op`."""
+import inspect
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -115,6 +116,34 @@ class Scalar(State):
 
     def __json__(self):
         return to_json(form_of(self))
+
+
+# A stream of `State` s
+
+class Stream(State):
+    """A stream of states which supports functional methods like `fold` and `map`."""
+
+    __uri__ = uri(State) + "/stream"
+
+    def for_each(self, initial_value, op):
+        if inspect.isfunction(op) and not reflect.is_op(op):
+            op = reflect.op.Post(op)
+
+        return self._post("for_each", acc=initial_value, op=op)
+
+    def fold(self, initial_value, op):
+        if inspect.isfunction(op) and not reflect.is_op(op):
+            op = reflect.op.Get(op)
+
+        rtype = op.rtype if hasattr(op, "rtype") else State
+        return self._post("fold", acc=initial_value, op=op, rtype=rtype)
+
+    def map(self, op):
+        if inspect.isfunction(op) and not reflect.is_op(op):
+            op = reflect.op.Get(op)
+
+        rtype = op.rtype if hasattr(op, "rtype") else State
+        return self._get("fold", op, rtype)
 
 
 # User-defined object types

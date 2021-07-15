@@ -14,7 +14,7 @@ def gen_headers(instance):
 
 
 class Meta(type):
-    """The metaclass of a :class:`State`."""
+    """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
 
     def __form__(cls):
         mro = cls.mro()

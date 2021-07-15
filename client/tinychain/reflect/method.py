@@ -5,7 +5,7 @@ from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
 from tinychain.value import Nil, Value
 
-from . import resolve_class
+from . import _get_rtype, is_none, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -29,10 +29,12 @@ class Method(object):
 class Get(Method):
     __uri__ = uri(op.Get)
 
+    def __init__(self, header, form, name):
+        self.rtype = _get_rtype(form, State)
+        Method.__init__(self, header, form, name)
+
     def __call__(self, key=None):
-        rtype = inspect.signature(self.form).return_annotation
-        rtype = resolve_class(self.form, rtype, Nil)
-        return rtype(ref.Get(uri(self.header).append(self.name), key))
+        return self.rtype(ref.Get(uri(self.header).append(self.name), key))
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -60,6 +62,14 @@ class Get(Method):
 
 class Put(Method):
     __uri__ = uri(op.Put)
+
+    def __init__(self, header, form, name):
+        rtype = _get_rtype(form, None)
+
+        if not is_none(rtype):
+            raise ValueError(f"Put method must return None, not f{rtype}")
+
+        Method.__init__(self, header, form, name)
 
     def __call__(self, key, value):
         return ref.Put(uri(self.header).append(self.name), key, value)
@@ -108,6 +118,10 @@ class Put(Method):
 class Post(Method):
     __uri__ = uri(op.Post)
 
+    def __init__(self, header, form, name):
+        self.rtype = _get_rtype(form, State)
+        Method.__init__(self, header, form, name)
+
     def __call__(self, **params):
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
@@ -138,6 +152,14 @@ class Post(Method):
 
 class Delete(Method):
     __uri__ = uri(op.Delete)
+
+    def __init__(self, header, form, name):
+        rtype = _get_rtype(form, None)
+
+        if not is_none(rtype):
+            raise ValueError(f"Delete method must return None, not f{rtype}")
+
+        Method.__init__(header, form, name)
 
     def __call__(self, key=None):
         return ref.Delete(uri(self.header).append(self.name), key)
