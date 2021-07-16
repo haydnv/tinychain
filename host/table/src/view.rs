@@ -9,10 +9,11 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, Node};
 use tc_error::*;
+use tc_stream::GroupStream;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{GroupStream, Id, Instance, TCBoxTryStream};
+use tcgeneric::{Id, Instance, TCBoxTryStream};
 
 use super::index::TableIndex;
 use super::{Bounds, Column, IndexSchema, Row, Table, TableInstance, TableSchema, TableType};
