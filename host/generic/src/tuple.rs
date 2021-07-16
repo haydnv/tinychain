@@ -15,23 +15,23 @@ use safecast::*;
 
 /// A generic tuple type, based on [`Vec`]
 #[derive(Clone, Default, Eq, PartialEq)]
-pub struct Tuple<T: Clone> {
+pub struct Tuple<T> {
     inner: Vec<T>,
 }
 
-impl<T: Clone> Tuple<T> {
+impl<T> Tuple<T> {
     pub fn into_inner(self) -> Vec<T> {
         self.inner
     }
 }
 
-impl<T: Clone> AsRef<Vec<T>> for Tuple<T> {
+impl<T> AsRef<Vec<T>> for Tuple<T> {
     fn as_ref(&self) -> &Vec<T> {
         &self.inner
     }
 }
 
-impl<T: Clone> Deref for Tuple<T> {
+impl<T> Deref for Tuple<T> {
     type Target = Vec<T>;
 
     fn deref(&'_ self) -> &'_ Self::Target {
@@ -39,54 +39,58 @@ impl<T: Clone> Deref for Tuple<T> {
     }
 }
 
-impl<T: Clone> DerefMut for Tuple<T> {
+impl<T> DerefMut for Tuple<T> {
     fn deref_mut(&'_ mut self) -> &'_ mut <Self as Deref>::Target {
         &mut self.inner
     }
 }
 
-impl<T: Clone + CastFrom<F>, F> FromIterator<F> for Tuple<T> {
+impl<T: CastFrom<F>, F> FromIterator<F> for Tuple<T> {
     fn from_iter<I: IntoIterator<Item = F>>(iter: I) -> Self {
         let inner = Vec::from_iter(iter.into_iter().map(|f| f.cast_into()));
         Self { inner }
     }
 }
 
-impl<T: Clone> From<Vec<T>> for Tuple<T> {
+impl<T> From<Vec<T>> for Tuple<T> {
     fn from(inner: Vec<T>) -> Self {
         Self { inner }
     }
 }
 
-impl<T: Clone> From<(T,)> for Tuple<T> {
+impl<T> From<(T,)> for Tuple<T> {
     fn from(inner: (T,)) -> Self {
         let (a,) = inner;
         Self { inner: vec![a] }
     }
 }
 
-impl<T: Clone> From<(T, T)> for Tuple<T> {
+impl<T> From<(T, T)> for Tuple<T> {
     fn from(inner: (T, T)) -> Self {
         let (a, b) = inner;
         Self { inner: vec![a, b] }
     }
 }
 
-impl<T: Clone> From<(T, T, T)> for Tuple<T> {
+impl<T> From<(T, T, T)> for Tuple<T> {
     fn from(inner: (T, T, T)) -> Self {
         let (a, b, c) = inner;
-        Self { inner: vec![a, b, c] }
+        Self {
+            inner: vec![a, b, c],
+        }
     }
 }
 
-impl<T: Clone> From<(T, T, T, T)> for Tuple<T> {
+impl<T> From<(T, T, T, T)> for Tuple<T> {
     fn from(inner: (T, T, T, T)) -> Self {
         let (a, b, c, d) = inner;
-        Self { inner: vec![a, b, c, d] }
+        Self {
+            inner: vec![a, b, c, d],
+        }
     }
 }
 
-impl<T: Clone> IntoIterator for Tuple<T> {
+impl<T> IntoIterator for Tuple<T> {
     type Item = T;
     type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
 
@@ -95,7 +99,7 @@ impl<T: Clone> IntoIterator for Tuple<T> {
     }
 }
 
-impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
+impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
     fn can_cast_from(tuple: &Tuple<F>) -> bool {
         tuple.iter().all(T::can_cast_from)
     }
@@ -114,7 +118,7 @@ impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
     }
 }
 
-impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
+impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
     fn can_cast_from(source: &Tuple<F>) -> bool {
         source.len() == 1 && T::can_cast_from(&source[0])
     }
@@ -128,7 +132,7 @@ impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
     }
 }
 
-impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T1, T2) {
+impl<F, T1: TryCastFrom<F>, T2: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T1, T2) {
     fn can_cast_from(source: &Tuple<F>) -> bool {
         source.len() == 2 && T1::can_cast_from(&source[0]) && T2::can_cast_from(&source[1])
     }
@@ -147,7 +151,7 @@ impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>> TryCastFrom<Tuple<F>> for
     }
 }
 
-impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>> TryCastFrom<Tuple<F>>
+impl<F, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>> TryCastFrom<Tuple<F>>
     for (T1, T2, T3)
 {
     fn can_cast_from(source: &Tuple<F>) -> bool {
@@ -172,7 +176,7 @@ impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>> TryCa
     }
 }
 
-impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>, T4: TryCastFrom<F>>
+impl<F, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>, T4: TryCastFrom<F>>
     TryCastFrom<Tuple<F>> for (T1, T2, T3, T4)
 {
     fn can_cast_from(source: &Tuple<F>) -> bool {
@@ -202,7 +206,7 @@ impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>, T4: T
 }
 
 #[async_trait]
-impl<T: Clone + FromStream> FromStream for Tuple<T>
+impl<T: FromStream> FromStream for Tuple<T>
 where
     T::Context: Copy,
 {
@@ -214,7 +218,7 @@ where
     }
 }
 
-impl<'en, T: Clone + 'en> IntoStream<'en> for Tuple<T>
+impl<'en, T: 'en> IntoStream<'en> for Tuple<T>
 where
     T: IntoStream<'en>,
 {
@@ -223,7 +227,7 @@ where
     }
 }
 
-impl<'en, T: Clone + 'en> ToStream<'en> for Tuple<T>
+impl<'en, T: 'en> ToStream<'en> for Tuple<T>
 where
     T: ToStream<'en>,
 {
@@ -232,7 +236,7 @@ where
     }
 }
 
-impl<T: Clone + fmt::Debug> fmt::Debug for Tuple<T> {
+impl<T: fmt::Debug> fmt::Debug for Tuple<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -246,7 +250,7 @@ impl<T: Clone + fmt::Debug> fmt::Debug for Tuple<T> {
     }
 }
 
-impl<T: Clone + fmt::Display> fmt::Display for Tuple<T> {
+impl<T: fmt::Display> fmt::Display for Tuple<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,

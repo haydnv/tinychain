@@ -16,11 +16,11 @@ use super::{Id, Tuple};
 
 /// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
 #[derive(Clone)]
-pub struct Map<T: Clone> {
+pub struct Map<T> {
     inner: BTreeMap<Id, T>,
 }
 
-impl<T: Clone> Map<T> {
+impl<T> Map<T> {
     pub fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
@@ -70,27 +70,27 @@ impl<T: Clone> Map<T> {
     }
 }
 
-impl<T: Clone> Default for Map<T> {
+impl<T> Default for Map<T> {
     fn default() -> Map<T> {
         BTreeMap::new().into()
     }
 }
 
-impl<T: Clone + PartialEq> PartialEq for Map<T> {
+impl<T: PartialEq> PartialEq for Map<T> {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 }
 
-impl<T: Clone + PartialEq + Eq> Eq for Map<T> {}
+impl<T: PartialEq + Eq> Eq for Map<T> {}
 
-impl<T: Clone> AsRef<BTreeMap<Id, T>> for Map<T> {
+impl<T> AsRef<BTreeMap<Id, T>> for Map<T> {
     fn as_ref(&self) -> &BTreeMap<Id, T> {
         &self.inner
     }
 }
 
-impl<T: Clone> Deref for Map<T> {
+impl<T> Deref for Map<T> {
     type Target = BTreeMap<Id, T>;
 
     fn deref(&'_ self) -> &'_ Self::Target {
@@ -98,13 +98,13 @@ impl<T: Clone> Deref for Map<T> {
     }
 }
 
-impl<T: Clone> DerefMut for Map<T> {
+impl<T> DerefMut for Map<T> {
     fn deref_mut(&'_ mut self) -> &'_ mut <Self as Deref>::Target {
         &mut self.inner
     }
 }
 
-impl<T: Clone> IntoIterator for Map<T> {
+impl<T> IntoIterator for Map<T> {
     type Item = (Id, T);
     type IntoIter = <BTreeMap<Id, T> as IntoIterator>::IntoIter;
 
@@ -113,20 +113,20 @@ impl<T: Clone> IntoIterator for Map<T> {
     }
 }
 
-impl<T: Clone> FromIterator<(Id, T)> for Map<T> {
+impl<T> FromIterator<(Id, T)> for Map<T> {
     fn from_iter<I: IntoIterator<Item = (Id, T)>>(iter: I) -> Self {
         let inner = BTreeMap::from_iter(iter);
         Map { inner }
     }
 }
 
-impl<T: Clone> From<BTreeMap<Id, T>> for Map<T> {
+impl<T> From<BTreeMap<Id, T>> for Map<T> {
     fn from(inner: BTreeMap<Id, T>) -> Self {
         Map { inner }
     }
 }
 
-impl<F: Clone, T: Clone> TryCastFrom<Tuple<F>> for Map<T>
+impl<F, T> TryCastFrom<Tuple<F>> for Map<T>
 where
     (Id, T): TryCastFrom<F>,
 {
@@ -150,7 +150,7 @@ where
 }
 
 #[async_trait]
-impl<T: Clone + FromStream<Context = ()>> FromStream for Map<T>
+impl<T: FromStream<Context = ()>> FromStream for Map<T>
 where
     T::Context: Copy,
 {
@@ -162,19 +162,19 @@ where
     }
 }
 
-impl<'en, T: Clone + IntoStream<'en> + 'en> IntoStream<'en> for Map<T> {
+impl<'en, T: IntoStream<'en> + 'en> IntoStream<'en> for Map<T> {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.into_stream(encoder)
     }
 }
 
-impl<'en, T: Clone + ToStream<'en> + 'en> ToStream<'en> for Map<T> {
+impl<'en, T: ToStream<'en> + 'en> ToStream<'en> for Map<T> {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.to_stream(encoder)
     }
 }
 
-impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
+impl<F, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
     fn can_cast_from(map: &Map<F>) -> bool {
         map.values().all(|f| T::can_cast_from(f))
     }
@@ -194,7 +194,7 @@ impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
     }
 }
 
-impl<T: Clone + fmt::Debug> fmt::Debug for Map<T> {
+impl<T: fmt::Debug> fmt::Debug for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_empty() {
             return f.write_str("{}");
@@ -212,7 +212,7 @@ impl<T: Clone + fmt::Debug> fmt::Debug for Map<T> {
     }
 }
 
-impl<T: Clone + fmt::Display> fmt::Display for Map<T> {
+impl<T: fmt::Display> fmt::Display for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_empty() {
             return f.write_str("{}");
