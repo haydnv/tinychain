@@ -1,11 +1,14 @@
 use std::collections::HashSet;
+use std::iter::FromIterator;
 
-use futures::future::try_join_all;
-use log::debug;
+use futures::future::{try_join_all, FutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::{debug, warn};
 
 use uplock::RwLock;
 
 use tc_error::*;
+use tc_transact::Transaction;
 use tcgeneric::Map;
 
 use crate::scalar::{Link, Value};
@@ -46,20 +49,22 @@ impl Owner {
         Ok(())
     }
 
-    pub async fn rollback(&self, txn: &Txn) -> TCResult<()> {
+    pub async fn rollback(&self, txn: &Txn) {
         let mut mutated = self.mutated.write().await;
 
         if mutated.is_empty() {
             debug!("no dependencies to roll back");
         }
 
-        let mutated = mutated.drain();
-        try_join_all(mutated.into_iter().map(|link| {
-            debug!("sending commit message to dependency at {}", link);
-            txn.delete(link, Value::None)
-        }))
-        .await?;
+        let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dependent| {
+            debug!("sending commit message to dependency at {}", dependent);
+            txn.delete(dependent.clone(), Value::None).map(|result| (dependent, result))
+        }));
 
-        Ok(())
+        while let Some((dependent, result)) = rollbacks.next().await {
+            if let Err(cause) = result {
+                warn!("cluster at {} failed rollback of transaction {}: {}", dependent, txn.id(), cause);
+            }
+        }
     }
 }

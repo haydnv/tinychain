@@ -402,9 +402,7 @@ impl Cluster {
         let replicas = self.replicas.read(txn.id()).await;
 
         if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            if let Err(cause) = owner.rollback(txn).await {
-                warn!("failed to rollback transaction: {}", cause);
-            }
+            owner.rollback(txn).await;
         }
 
         if let Ok(replicas) = replicas {
