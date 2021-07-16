@@ -17,7 +17,7 @@ use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::transform;
@@ -288,11 +288,11 @@ where
         DenseAccessor::File(self)
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
             let size = self.size();
             if size == 0 {
-                let blocks: TCTryStream<'a, Array> = Box::pin(stream::empty());
+                let blocks: TCBoxTryStream<'a, Array> = Box::pin(stream::empty());
                 return Ok(blocks);
             }
 
@@ -304,7 +304,7 @@ where
                     .map_ok(|block| (*block).clone()),
             );
 
-            let block_stream: TCTryStream<Array> = Box::pin(block_stream);
+            let block_stream: TCBoxTryStream<Array> = Box::pin(block_stream);
             Ok(block_stream)
         })
     }
@@ -880,9 +880,9 @@ where
         DenseAccessor::Slice(self)
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         if self.size() == 0 {
-            let blocks: TCTryStream<'a, Array> = Box::pin(stream::empty());
+            let blocks: TCBoxTryStream<'a, Array> = Box::pin(stream::empty());
             return Box::pin(future::ready(Ok(blocks)));
         }
 
@@ -914,7 +914,7 @@ where
             })
         });
 
-        let blocks: TCTryStream<Array> = Box::pin(values);
+        let blocks: TCBoxTryStream<Array> = Box::pin(values);
         Box::pin(future::ready(Ok(blocks)))
     }
 

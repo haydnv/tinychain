@@ -25,10 +25,10 @@ pub mod tuple;
 pub type TCBoxTryFuture<'a, T> = Pin<Box<dyn Future<Output = TCResult<T>> + Send + 'a>>;
 
 /// A pinned [`Stream`]
-pub type TCStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
+pub type TCBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
 
 /// A pinned `TryStream` with error type [`TCError`]
-pub type TCTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
+pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
 /// A generic class trait
 pub trait Class: fmt::Display + Sized {}

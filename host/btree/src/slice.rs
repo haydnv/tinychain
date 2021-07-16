@@ -4,7 +4,7 @@ use tc_error::{TCError, TCResult};
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
-use tcgeneric::{Instance, TCTryStream};
+use tcgeneric::{Instance, TCBoxTryStream};
 
 use super::{
     validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema,
@@ -116,7 +116,7 @@ where
         self.source.insert(txn_id, key).await
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {
         self.source
             .rows_in_range(txn_id, self.range, self.reverse)
             .await

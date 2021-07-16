@@ -21,12 +21,12 @@ use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{Instance, TCBoxTryFuture, TCTryStream, Tuple};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
 use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
 
 type Selection<'a> = FuturesOrdered<
-    Pin<Box<dyn Future<Output = TCResult<TCTryStream<'a, Key>>> + Send + Unpin + 'a>>,
+    Pin<Box<dyn Future<Output = TCResult<TCBoxTryStream<'a, Key>>> + Send + Unpin + 'a>>,
 >;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
@@ -393,7 +393,7 @@ where
         txn_id: TxnId,
         node: B,
         range: Range,
-    ) -> TCResult<TCTryStream<'a, Key>>
+    ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
@@ -426,7 +426,7 @@ where
 
                 if !node.keys[i].deleted {
                     let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
-                    let key_at_i: TCTryStream<Key> =
+                    let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
                     selected.push(Box::pin(future::ready(Ok(key_at_i))));
@@ -450,7 +450,7 @@ where
         txn_id: TxnId,
         node: B,
         range: Range,
-    ) -> TCResult<TCTryStream<'a, Key>>
+    ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
@@ -493,7 +493,7 @@ where
 
                 if !node.keys[i].deleted {
                     let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
-                    let key_at_i: TCTryStream<Key> =
+                    let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
                     selected.push(Box::pin(future::ready(Ok(key_at_i))));
@@ -511,7 +511,7 @@ where
         txn_id: TxnId,
         range: Range,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Key>>
+    ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
@@ -687,7 +687,7 @@ where
         }
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>> {
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {
         self.rows_in_range(txn_id, Range::default(), false).await
     }
 }

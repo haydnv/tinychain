@@ -18,7 +18,7 @@ use tokio_util::io::StreamReader;
 
 use tc_error::*;
 use tc_value::Value;
-use tcgeneric::{Id, PathSegment, TCBoxTryFuture, TCTryStream};
+use tcgeneric::{Id, PathSegment, TCBoxTryFuture, TCBoxTryStream};
 
 use super::{Transaction, TxnId};
 
@@ -321,7 +321,7 @@ pub trait Hash<'en, D: Dir> {
         Ok(Bytes::from(digest.to_vec()))
     }
 
-    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCTryStream<'en, Self::Item>>;
+    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCBoxTryStream<'en, Self::Item>>;
 }
 
 async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(

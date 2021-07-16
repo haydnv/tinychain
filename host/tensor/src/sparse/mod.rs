@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor};
 use super::{
@@ -745,7 +745,7 @@ where
     type Item = SparseRow;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCTryStream<'en, SparseRow>> {
+    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCBoxTryStream<'en, SparseRow>> {
         self.accessor.clone().filled(txn.clone()).await
     }
 }

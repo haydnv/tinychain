@@ -12,7 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCStream, TCTryStream};
+use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
@@ -42,7 +42,7 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
     fn accessor(self) -> DenseAccessor<FD, FS, D, T>;
 
     /// Return a stream of the [`Array`]s which this [`DenseTensor`] comprises.
-    fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
             let blocks = self.value_stream(txn).await?;
             let blocks = blocks
@@ -50,13 +50,13 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
                 .map(|values| values.into_iter().collect::<TCResult<Vec<Number>>>())
                 .map_ok(Array::from);
 
-            let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+            let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
         })
     }
 
     /// Return a stream of the elements of this [`DenseTensor`].
-    fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
         Box::pin(async move {
             let values = self.block_stream(txn).await?;
 
@@ -66,7 +66,7 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
                 .map_ok(futures::stream::iter)
                 .try_flatten();
 
-            let values: TCTryStream<'a, Number> = Box::pin(values);
+            let values: TCBoxTryStream<'a, Number> = Box::pin(values);
             Ok(values)
         })
     }
@@ -187,7 +187,7 @@ where
         self
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         match self {
             Self::File(file) => file.block_stream(txn),
             Self::Slice(slice) => slice.block_stream(txn),
@@ -202,7 +202,7 @@ where
         }
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
         match self {
             Self::File(file) => file.value_stream(txn),
             Self::Slice(slice) => slice.value_stream(txn),
@@ -450,7 +450,7 @@ where
         DenseAccessor::Combine(Box::new(combine))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         debug!("BlockListCombine::block_stream");
 
         Box::pin(async move {
@@ -464,7 +464,7 @@ where
                 .map(|(l, r)| Ok((l?, r?)))
                 .map_ok(move |(l, r)| combinator(&l, &r));
 
-            let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+            let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
         })
     }
@@ -621,7 +621,7 @@ where
         DenseAccessor::Broadcast(Box::new(broadcast))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         let shape = self.shape().clone();
         let size = self.size();
         let rebase = self.rebase;
@@ -641,7 +641,7 @@ where
             .map(move |coords| source.clone().read_values(txn.clone(), coords))
             .buffered(num_cpus::get());
 
-        let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+        let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
         Box::pin(future::ready(Ok(blocks)))
     }
 
@@ -771,12 +771,12 @@ where
         DenseAccessor::Cast(Box::new(cast))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
             let dtype = self.dtype;
-            let blocks: TCStream<'a, TCResult<Array>> = self.source.block_stream(txn).await?;
+            let blocks: TCBoxStream<'a, TCResult<Array>> = self.source.block_stream(txn).await?;
             let cast = blocks.map_ok(move |array| array.cast_into(dtype));
-            let cast: TCTryStream<'a, Array> = Box::pin(cast);
+            let cast: TCBoxTryStream<'a, Array> = Box::pin(cast);
             Ok(cast)
         })
     }
@@ -904,11 +904,11 @@ where
         DenseAccessor::Expand(Box::new(expand))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         self.source.block_stream(txn)
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
         self.source.value_stream(txn)
     }
 
@@ -1041,7 +1041,7 @@ where
         DenseAccessor::Reduce(Box::new(reduce))
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
         Box::pin(async move {
             let values = stream::iter(Bounds::all(self.shape()).affected())
                 .map(move |coord| {
@@ -1056,7 +1056,7 @@ where
                 })
                 .buffered(num_cpus::get());
 
-            let values: TCTryStream<'a, Number> = Box::pin(values);
+            let values: TCBoxTryStream<'a, Number> = Box::pin(values);
             Ok(values)
         })
     }
@@ -1201,7 +1201,7 @@ where
         DenseAccessor::Transpose(Box::new(accessor))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
             let size = self.size();
             let shape = self.shape().clone();
@@ -1221,7 +1221,7 @@ where
                 .map(move |coords| self.clone().read_values(txn.clone(), coords))
                 .buffered(num_cpus::get());
 
-            let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
+            let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
         })
     }
@@ -1341,7 +1341,7 @@ where
         })
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
         debug!("BlockListSparse::value_stream");
 
         Box::pin(async move {
@@ -1349,7 +1349,7 @@ where
             let zero = self.dtype().zero();
             let filled = self.source.filled(txn).await?;
             let values = SparseValueStream::new(filled, bounds, zero).await?;
-            let values: TCTryStream<'a, Number> = Box::pin(values);
+            let values: TCBoxTryStream<'a, Number> = Box::pin(values);
             Ok(values)
         })
     }
@@ -1517,11 +1517,11 @@ where
         DenseAccessor::Unary(Box::new(unary))
     }
 
-    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
             let transform = self.transform;
             let blocks = self.source.block_stream(txn).await?;
-            let blocks: TCTryStream<'a, Array> =
+            let blocks: TCBoxTryStream<'a, Array> =
                 Box::pin(blocks.map_ok(move |array| transform(&array)));
 
             Ok(blocks)

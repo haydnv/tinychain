@@ -67,7 +67,7 @@ pub trait BTreeInstance: Clone + Instance {
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
 
     /// Return a `Stream` of this `BTree`'s [`Key`]s.
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a;
 
@@ -91,7 +91,7 @@ impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> Hash<'en, D> for BTree<F, D,
     type Item = Key;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
+    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
         self.clone().keys(*txn.id()).await
     }
 }
@@ -388,7 +388,7 @@ where
         }
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
@@ -547,7 +547,7 @@ where
 /// A view of a [`BTree`] within a single [`Transaction`], used in serialization.
 pub struct BTreeView<'en> {
     schema: Vec<Column>,
-    keys: TCTryStream<'en, Key>,
+    keys: TCBoxTryStream<'en, Key>,
 }
 
 impl<'en> en::IntoStream<'en> for BTreeView<'en> {
