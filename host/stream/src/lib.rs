@@ -9,13 +9,7 @@ use futures::stream::{Fuse, Stream, StreamExt};
 use futures::task::{Context, Poll};
 use pin_project::pin_project;
 
-use super::TCResult;
-
-/// A pinned [`Stream`]
-pub type TCBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
-
-/// A pinned `TryStream` with error type [`TCError`]
-pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
+use tc_error::TCResult;
 
 /// A [`Stream`] which groups an ordered input stream into only its unique entries using [`Eq`]
 #[pin_project]
