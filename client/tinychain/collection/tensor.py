@@ -17,7 +17,7 @@ class Tensor(Collection):
     @classmethod
     def load(cls, shape, dtype, data):
         """
-        Load a `Tensor` from a Python iterable of coordinates and values.
+        Load a `Tensor` from an existing data set.
 
         Example:
             .. highlight:: python
@@ -26,6 +26,7 @@ class Tensor(Collection):
                 coords = [[0, 0, 1], [0, 1, 0]]
                 values = [1, 2]
                 sparse = tc.tensor.Sparse.load([2, 3, 4], tc.I32, zip(coords, values))
+                dense = tc.tensor.Dense.load([2, 3, 4], tc.i32, values)
         """
 
         return super().load(schema.Tensor(shape, dtype), data)
