@@ -15,7 +15,7 @@ use tc_transact::fs::{Dir, File, Hash};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
-    path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, TCTryStream,
+    path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryStream, TCPathBuf,
 };
 
 use index::*;
@@ -115,7 +115,7 @@ pub trait TableInstance<F: File<Node>, D: Dir, Txn: Transaction<D>>:
     }
 
     /// Return a stream of the rows in this `Table`.
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>>;
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>>;
 
     /// Return an error if this table does not support the given [`Bounds`].
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
@@ -399,7 +399,7 @@ where
         }
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         match self {
             Self::Index(index) => index.rows(txn_id).await,
             Self::ROIndex(index) => index.rows(txn_id).await,
@@ -493,7 +493,7 @@ impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en, D> for Table<F, 
     type Item = Vec<Value>;
     type Txn = Txn;
 
-    async fn hashable(&'en self, txn: &'en Txn) -> TCResult<TCTryStream<'en, Self::Item>> {
+    async fn hashable(&'en self, txn: &'en Txn) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
         self.clone().rows(*txn.id()).await
     }
 }
@@ -631,7 +631,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F
 /// A view of a [`Table`] within a single [`Transaction`], used for serialization.
 pub struct TableView<'en> {
     schema: TableSchema,
-    rows: TCTryStream<'en, Vec<Value>>,
+    rows: TCBoxTryStream<'en, Vec<Value>>,
 }
 
 impl<'en> en::IntoStream<'en> for TableView<'en> {
