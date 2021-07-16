@@ -5,7 +5,7 @@
 use std::fmt;
 use std::pin::Pin;
 
-use futures::{Future, Stream};
+use futures::Future;
 
 use tc_error::*;
 
@@ -15,20 +15,17 @@ pub use stream::*;
 pub use time::*;
 pub use tuple::*;
 
-pub mod id;
-pub mod map;
-pub mod stream;
-pub mod time;
-pub mod tuple;
+mod id;
+mod map;
+mod stream;
+mod time;
+mod tuple;
+
+/// A pinned future
+pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A pinned future which returns a [`TCResult`]
 pub type TCBoxTryFuture<'a, T> = Pin<Box<dyn Future<Output = TCResult<T>> + Send + 'a>>;
-
-/// A pinned [`Stream`]
-pub type TCBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
-
-/// A pinned `TryStream` with error type [`TCError`]
-pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
 /// A generic class trait
 pub trait Class: fmt::Display + Sized {}
