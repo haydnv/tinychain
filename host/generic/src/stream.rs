@@ -11,6 +11,12 @@ use pin_project::pin_project;
 
 use super::TCResult;
 
+/// A pinned [`Stream`]
+pub type TCBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
+
+/// A pinned `TryStream` with error type [`TCError`]
+pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
+
 /// A [`Stream`] which groups an ordered input stream into only its unique entries using [`Eq`]
 #[pin_project]
 pub struct GroupStream<T, S: Stream<Item = TCResult<T>>> {
