@@ -12,7 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::dense::{DenseAccess, DenseAccessor, DenseTensor, PER_BLOCK};
 use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
@@ -46,7 +46,7 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     /// Return an ordered stream of unique [`Coord`]s on the given axes with nonzero values.
     ///
     /// TODO: add `sort` parameter to make sorting results optional.
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>>;
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>>;
 
     /// Return the number of nonzero values in this [`SparseTensor`].
     async fn filled_count(self, txn: T) -> TCResult<u64>;
@@ -181,7 +181,7 @@ where
         }
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         match self {
             Self::Broadcast(broadcast) => broadcast.filled_at(txn, axes).await,
             Self::Cast(cast) => cast.filled_at(txn, axes).await,
@@ -368,7 +368,7 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
@@ -575,7 +575,7 @@ where
         Ok(Box::pin(broadcast))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         debug!("SparseBroadcast::filled_at {:?}", axes);
         self.shape().validate_axes(&axes)?;
 
@@ -736,7 +736,7 @@ where
         Ok(Box::pin(cast))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         self.source.filled_at(txn, axes).await
     }
 
@@ -913,7 +913,7 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -1081,7 +1081,7 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -1283,7 +1283,7 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         let source_axes = self.rebase.invert_axes(axes);
         self.source.filled_at(txn, source_axes).await
     }
@@ -1433,7 +1433,7 @@ where
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
@@ -1574,7 +1574,7 @@ where
         Ok(Box::pin(cast))
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         self.source.filled_at(txn, axes).await
     }
 

@@ -15,7 +15,7 @@ use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSche
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
-use tcgeneric::{label, Id, Label, TCTryStream, Tuple};
+use tcgeneric::{label, Id, Label, TCBoxTryStream, Tuple};
 
 use crate::dense::PER_BLOCK;
 use crate::stream::{sorted_coords, Read, ReadValueAt};
@@ -111,7 +111,7 @@ where
         Ok(filled)
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() || self.is_empty(&txn).await? {
@@ -366,7 +366,7 @@ where
         Ok(filled)
     }
 
-    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCTryStream<'a, Coords>> {
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         debug!("SparseTableSlice::filled_at");
         self.shape().validate_axes(&axes)?;
 

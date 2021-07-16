@@ -14,7 +14,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Id, Instance, Label, TCTryStream, Tuple};
+use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, Tuple};
 
 use super::view::{MergeSource, Merged, TableSlice};
 use super::{
@@ -86,7 +86,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.validate_bounds(&bounds)?;
         let range = bounds.into_btree_range(&self.schema.columns())?;
         self.btree.slice(range, reverse)?.keys(txn_id).await
@@ -155,7 +155,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for In
         self.index_slice(bounds).map(|is| is.into())
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         debug!("Index::rows");
         self.btree.keys(txn_id).await
     }
@@ -372,7 +372,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Re
             .map(|index| ReadOnly { index })
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.index.rows(txn_id).await
     }
 
@@ -542,7 +542,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.inner
             .primary
             .clone()
@@ -743,7 +743,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn>
         }
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.inner.primary.clone().rows(txn_id).await
     }
 
