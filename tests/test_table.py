@@ -222,6 +222,7 @@ class SparseTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
+    CACHE_SIZE = "1G"
     NAME = "table"
 
     def cluster(self, chain_type):
@@ -237,7 +238,18 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         row1 = {"name": "one", "views": 1}
         row2 = {"name": "two", "views": 2}
 
-        hosts[0].put("/test/table/table", ["one"], [1])
+        replica_set = set(str(tc.uri(host) + "/test/table") for host in hosts)
+        def check_replicas():
+            for i in range(len(hosts)):
+                replicas = {}
+                for replica in hosts[i].get("/test/table/replicas"):
+                    replicas.update(replica)
+
+                self.assertEqual(set(replicas.keys()), replica_set)
+
+        check_replicas()
+
+        self.assertIsNone(hosts[0].put("/test/table/table", ["one"], [1]))
 
         for host in hosts:
             actual = host.get("/test/table/table", ["one"])
@@ -247,29 +259,39 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         hosts[2].put("/test/table/table", ["two"], [2])
         hosts[1].start()
 
-        for host in hosts:
-            actual = host.get("/test/table/table", ["one"])
+        check_replicas()
+
+        for i in range(len(hosts)):
+            actual = hosts[i].get("/test/table/table", ["one"])
             self.assertEqual(actual, row1)
 
-            actual = host.get("/test/table/table", ["two"])
+            actual = hosts[i].get("/test/table/table", ["two"])
             self.assertEqual(actual, row2)
 
         hosts[2].stop()
-        hosts[1].delete("/test/table/table", ["one"])
+        self.assertIsNone(hosts[1].delete("/test/table/table", ["one"]))
         hosts[2].start()
 
-        for host in hosts:
-            actual = host.get("/test/table/table")
-            self.assertEqual(actual, expected(SCHEMA, [["two", 2]]))
-
-        total = 100
-        for n in range(total):
-            i = random.choice(range(self.NUM_HOSTS))
-            hosts[i].put("/test/table/table", [num2words(n)], [n])
+        check_replicas()
 
         for i in range(len(hosts)):
+            actual = hosts[i].get("/test/table/table")
+            self.assertEqual(actual, expected(SCHEMA, [["two", 2]]), f"host {i}")
+
+        self.assertIsNone(hosts[0].delete("/test/table/table"))
+        for i in range(len(hosts)):
             count = hosts[i].get("/test/table/table/count")
-            self.assertEqual(total, count, f"host {i}")
+            self.assertEqual(0, count, f"host {i}")
+
+        total = 100
+        for n in range(1, total):
+            i = random.choice(range(self.NUM_HOSTS))
+            print(f"host {i} insert {n}")
+            self.assertIsNone(hosts[i].put("/test/table/table", [num2words(n)], [n]))
+
+            for i in range(len(hosts)):
+                count = hosts[i].get("/test/table/table/count")
+                self.assertEqual(n, count, f"host {i}")
 
 
 class ErrorTest(unittest.TestCase):
