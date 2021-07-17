@@ -227,6 +227,8 @@ pub struct Cache {
 impl Cache {
     /// Construct a new cache with the given size.
     pub fn new(max_size: u64) -> Self {
+        assert!(max_size > 0);
+
         let (tx, rx) = mpsc::channel(1024);
         let cache = Self {
             tx,
@@ -373,7 +375,7 @@ impl Cache {
         cache.insert(path, block.into()).await;
 
         if cache.is_full() {
-            debug!("the block cache is full, triggering garbage collection...");
+            info!("the block cache is full ({} occupied out of {} capacity), triggering garbage collection...", cache.occupied(), cache.capacity());
             if let Err(err) = tx.send(Evict).await {
                 error!("the cache cleanup thread is dead! {}", err);
             }
@@ -402,11 +404,22 @@ fn spawn_cleanup_thread(cache: RwLock<LFU>, mut rx: mpsc::Receiver<Evict>) {
         info!("cache cleanup thread is running...");
 
         while rx.recv().await.is_some() {
-            debug!("got Evict message");
-            let mut lfu = cache.write().await;
-            debug!("running cache eviction with {} entries...", lfu.len());
-            lfu.evict().await;
-            debug!("cache eviction complete, {} entries remain", lfu.len());
+            let lfu = cache.read().await;
+
+            debug!(
+                "got Evict message, cache has {} entries (capacity {} bytes)",
+                lfu.len(),
+                lfu.capacity()
+            );
+
+            if lfu.is_full() {
+                let mut lfu = lfu.upgrade().await;
+                debug!("running cache eviction with {} entries...", lfu.len());
+                lfu.evict().await;
+                debug!("cache eviction complete, {} entries remain", lfu.len());
+            } else {
+                debug!("cache eviction already ran, ignoring redundant Evict message");
+            }
         }
 
         warn!("cache cleanup thread shutting down");

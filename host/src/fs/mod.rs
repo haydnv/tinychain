@@ -12,13 +12,13 @@ use tokio::fs;
 use tc_error::*;
 use tcgeneric::{label, Label, PathSegment};
 
-mod cache;
-mod dir;
-mod file;
-
 pub use cache::*;
 pub use dir::*;
 pub use file::*;
+
+mod cache;
+mod dir;
+mod file;
 
 const VERSION: Label = label(".version");
 const TMP: &'static str = "tmp";

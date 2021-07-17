@@ -173,6 +173,7 @@ async fn main() -> Result<(), TokioError> {
     let kernel = tinychain::Kernel::new(clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
+    log::info!("starting server, cache size is {}", config.cache_size);
     if let Err(cause) = gateway.listen().await {
         log::error!("server error: {}", cause);
     }
