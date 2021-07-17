@@ -29,7 +29,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         cluster_path = "/app/test/replication"
 
         # check that the replica set is correctly updated across the cluster
-        expected = set("http://" + tc.uri(host) + cluster_path for host in hosts)
+        expected = set(str(tc.uri(host) + cluster_path) for host in hosts)
         for host in hosts:
             actual = {}
             for link in host.get(cluster_path + "/replicas"):

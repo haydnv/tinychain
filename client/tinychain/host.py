@@ -10,7 +10,7 @@ import time
 import urllib.parse
 
 from tinychain.error import *
-from tinychain.util import to_json, uri
+from tinychain.util import to_json, uri, URI
 
 
 DEFAULT_PORT = 8702
@@ -25,7 +25,13 @@ class Host(object):
         return urllib.parse.urlencode({k: json.dumps(v) for k, v in params.items()})
 
     def __init__(self, address):
-        self.__uri__ = address
+        if "://" not in address:
+            raise ValueError(f"host address missing protocol: {address}")
+
+        self.__uri__ = URI(address)
+
+        if uri(self).path():
+            raise ValueError(f"Host address should not include the application path {uri(self).path()}")
 
     def _handle(self, req):
         response = req()
@@ -54,7 +60,7 @@ class Host(object):
     def link(self, path):
         """Return a link to the given path at this host."""
 
-        return "http://{}{}".format(uri(self), path)
+        return uri(self) + path
 
     def get(self, path, key=None, auth=None):
         """Execute a GET request."""
@@ -135,7 +141,7 @@ class Local(Host):
         if data_dir:
             maybe_create_dir(data_dir, force_create)
 
-        address = "{}:{}".format(self.ADDRESS, port)
+        address = "http://{}:{}".format(self.ADDRESS, port)
         Host.__init__(self, address)
 
         args = [

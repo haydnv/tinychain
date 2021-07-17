@@ -117,6 +117,9 @@ class URI(object):
     def __init__(self, root, path=[]):
         assert root is not None
 
+        if root.startswith("$$"):
+            raise ValueError(f"invalid reference: {root}")
+
         self._root = str(root)
         self._path = path
 
@@ -143,6 +146,9 @@ class URI(object):
             return None
 
         start = self._root.index("://") + 3
+        if '/' not in self._root[start:]:
+            return self._root[start:]
+
         end = (
             self._root.index(':', start) if ':' in self._root[start:]
             else self._root.index('/', start))
@@ -159,6 +165,10 @@ class URI(object):
             return URI(self._root) + "/".join(self._path)
 
         start = self._root.index("://")
+
+        if '/' not in self._root[(start + 3):]:
+            return None
+
         start = self._root.index('/', start + 3)
 
         prefix = URI(self._root[start:])
