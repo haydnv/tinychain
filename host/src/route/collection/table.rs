@@ -140,6 +140,40 @@ impl<T> From<T> for GroupHandler<T> {
     }
 }
 
+struct KeyHandler<'a, T> {
+    table: &'a T,
+}
+
+impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for KeyHandler<'a, T> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                let key = self
+                    .table
+                    .key()
+                    .iter()
+                    .map(|col| &col.name)
+                    .cloned()
+                    .map(Value::Id)
+                    .collect();
+
+                Ok(Value::Tuple(key).into())
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for KeyHandler<'a, T> {
+    fn from(table: &'a T) -> Self {
+        Self { table }
+    }
+}
+
 struct LimitHandler<T> {
     table: T,
 }
@@ -399,6 +433,10 @@ fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
     if path.is_empty() {
         Some(Box::new(TableHandler::from(table)))
     } else if path.len() == 1 {
+        if path == &["key"] {
+            return Some(Box::new(KeyHandler::from(table)));
+        }
+
         let table = table.clone();
 
         match path[0].as_str() {

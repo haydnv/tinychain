@@ -1,6 +1,7 @@
+from tinychain.decorators import delete_method
 from tinychain.error import BadRequest
 from tinychain.ref import If
-from tinychain.state import Map
+from tinychain.state import Map, Tuple, Stream
 from tinychain.util import uri
 from tinychain.value import Bool, UInt, Nil
 
@@ -32,14 +33,20 @@ class Table(Collection):
 
         return self._get("count", rtype=UInt)
 
-    def delete(self, where=None):
+    @delete_method
+    def delete(self, txn, **where):
         """
         Delete all contents of this `Table` matching the specified where clause.
 
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        return self._delete("", where)
+        return self.select(self.key()).rows(**where).for_each(lambda key: self.delete_row(key))
+
+    def delete_row(self, key):
+        """Delete the row with the given key from this `Table`, if it exists."""
+
+        return self._delete("", key)
 
     def group_by(self, columns):
         """
@@ -67,6 +74,11 @@ class Table(Collection):
 
         return self._get("is_empty", rtype=Bool)
 
+    def key(self):
+        """Return the `Id` s of the key columns of this `Table`."""
+
+        return self._get("key", rtype=Tuple)
+
     def limit(self, limit):
         """Limit the number of rows returned from this `Table`."""
 
@@ -81,23 +93,25 @@ class Table(Collection):
 
         return self._get("order", (columns, reverse), Table)
 
+    def rows(self, **where):
+        """Return a :class:`Stream` of the rows in this `Table`."""
+
+        return Stream(self._get("", where))
+
     def select(self, *columns):
         """Return a `Table` containing only the specified columns."""
 
         return self._get("select", columns, Table)
 
-    def update(self, **values):
-        """Update this `Table`\'s rows to the given values."""
+    def update(self, where, values):
+        """Update the specified rows of this table with the given `values`."""
 
-        return self._put("", None, values)
+        return self.where(where).index(self.key()).keys().for_each(lambda key: self.update_row(key, values))
 
-    def update_where(self, where, values):
-        """Update this `Table`\'s rows to the given values."""
+    def update_row(self, key, values):
+        """Update the specified row with the given `values`."""
 
-        if isinstance(where, dict):
-            where = _handle_where(where)
-
-        return self._put("", where, values)
+        return self._put("", key, values)
 
     def upsert(self, key, values=[]):
         """

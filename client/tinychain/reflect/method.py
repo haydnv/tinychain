@@ -159,7 +159,7 @@ class Delete(Method):
         if not is_none(rtype):
             raise ValueError(f"Delete method must return None, not f{rtype}")
 
-        Method.__init__(header, form, name)
+        Method.__init__(self, header, form, name)
 
     def __call__(self, key=None):
         return ref.Delete(uri(self.header).append(self.name), key)

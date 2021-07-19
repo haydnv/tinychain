@@ -125,11 +125,11 @@ class Stream(State):
 
     __uri__ = uri(State) + "/stream"
 
-    def for_each(self, initial_value, op):
+    def for_each(self, op):
         if inspect.isfunction(op) and not reflect.is_op(op):
             op = reflect.op.Post(op)
 
-        return self._post("for_each", acc=initial_value, op=op)
+        return self._post("for_each", op=op)
 
     def fold(self, initial_value, op):
         if inspect.isfunction(op) and not reflect.is_op(op):
