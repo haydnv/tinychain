@@ -19,7 +19,7 @@ use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{
-    label, Id, Instance, Label, Map, NativeClass, TCPathBuf, TCStream, TCTryStream, Tuple,
+    label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
 };
 
 use crate::chain::{ChainType, Subject, CHAIN, NULL_HASH};
@@ -678,7 +678,7 @@ async fn parse_block_state(
 }
 
 pub type HistoryView<'en> =
-    en::SeqStream<TCResult<HistoryBlockView<'en>>, TCTryStream<'en, HistoryBlockView<'en>>>;
+    en::SeqStream<TCResult<HistoryBlockView<'en>>, TCBoxTryStream<'en, HistoryBlockView<'en>>>;
 
 #[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for History {
@@ -709,16 +709,16 @@ impl<'en> IntoView<'en, fs::Dir> for History {
                         let mutations = stream::iter(mutations)
                             .then(move |op| Box::pin(load_history(this.clone(), op, txn.clone())));
 
-                        let mutations: TCTryStream<'en, MutationView<'en>> = Box::pin(mutations);
+                        let mutations: TCBoxTryStream<'en, MutationView<'en>> = Box::pin(mutations);
                         let mutations = en::SeqStream::from(mutations);
                         (past_txn_id, Ok(mutations))
                     });
 
-                let map: TCStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)> = Box::pin(map);
+                let map: TCBoxStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)> = Box::pin(map);
                 (block.last_hash().clone(), en::MapStream::from(map))
             });
 
-        let seq: TCTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
+        let seq: TCBoxTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
         Ok(en::SeqStream::from(seq))
     }
 }
@@ -749,14 +749,14 @@ async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<
 }
 
 type MutationViewSeq<'en> =
-    en::SeqStream<TCResult<MutationView<'en>>, TCTryStream<'en, MutationView<'en>>>;
+    en::SeqStream<TCResult<MutationView<'en>>, TCBoxTryStream<'en, MutationView<'en>>>;
 
 type HistoryBlockView<'en> = (
     Bytes,
     en::MapStream<
         TxnId,
         TCResult<MutationViewSeq<'en>>,
-        TCStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)>,
+        TCBoxStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)>,
     >,
 );
 

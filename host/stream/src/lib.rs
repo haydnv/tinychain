@@ -4,12 +4,54 @@ use std::fmt;
 use std::mem;
 use std::pin::Pin;
 
-use futures::ready;
-use futures::stream::{Fuse, Stream, StreamExt};
+use async_trait::async_trait;
+use destream::en;
+use futures::stream::{Fuse, Stream, StreamExt, TryStreamExt};
 use futures::task::{Context, Poll};
+use futures::{ready, Future};
 use pin_project::pin_project;
 
-use super::TCResult;
+use tc_error::TCResult;
+use tc_transact::fs::Dir;
+use tc_transact::Transaction;
+use tcgeneric::TCBoxTryStream;
+
+#[async_trait]
+pub trait Functional<'en, D: Dir>: Clone + Send + Sync + 'en {
+    type Item: en::IntoStream<'en>;
+    type Stream: Stream<Item = TCResult<Self::Item>> + Send + Unpin;
+    type Txn: Transaction<D>;
+
+    async fn into_stream(self, txn: Self::Txn) -> TCResult<Self::Stream>;
+
+    async fn fold<A, Fut, F>(self, txn: Self::Txn, acc: A, op: F) -> TCResult<A>
+    where
+        A: Send + 'en,
+        Fut: Future<Output = TCResult<A>> + Send + Unpin + 'en,
+        F: Fn(A, Self::Item) -> Fut + Send + 'en,
+    {
+        let stream = self.into_stream(txn).await?;
+        stream.try_fold(acc, op).await
+    }
+
+    async fn for_each<Fut, F>(self, txn: Self::Txn, op: F) -> TCResult<()>
+    where
+        Fut: Future<Output = TCResult<()>> + Send + Unpin + 'en,
+        F: Fn(Self::Item) -> Fut + Send + 'en,
+    {
+        let stream = self.into_stream(txn).await?;
+        stream.try_for_each(op).await
+    }
+
+    async fn map<M, Fut, F>(self, txn: Self::Txn, op: F) -> TCResult<TCBoxTryStream<'en, M>>
+    where
+        Fut: Future<Output = TCResult<M>> + Send + Unpin + 'en,
+        F: Fn(Self::Item) -> Fut + Send + 'en,
+    {
+        let stream = self.into_stream(txn).await?;
+        Ok(Box::pin(stream.and_then(op)))
+    }
+}
 
 /// A [`Stream`] which groups an ordered input stream into only its unique entries using [`Eq`]
 #[pin_project]

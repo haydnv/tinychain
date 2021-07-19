@@ -8,7 +8,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.schema.Table(
-        [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).add_index("views", ["views"])
+        [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
 
 
 class TableTests(unittest.TestCase):
@@ -197,7 +197,7 @@ class SparseTests(unittest.TestCase):
         ])
 
         for i in range(4):
-            schema.add_index(str(i), [str(i)])
+            schema.create_index(str(i), [str(i)])
 
         data = [
             ([0, 0, 1, 0], 1),

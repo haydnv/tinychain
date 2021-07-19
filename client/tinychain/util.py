@@ -265,7 +265,7 @@ def to_json(obj):
     elif isinstance(obj, list) or isinstance(obj, tuple):
         return [to_json(i) for i in obj]
     elif isinstance(obj, dict):
-        return {to_json(k): to_json(v) for k, v in obj.items()}
+        return {str(k): to_json(v) for k, v in obj.items()}
     else:
         return obj
 

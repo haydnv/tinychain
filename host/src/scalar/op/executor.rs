@@ -91,7 +91,7 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
             {
                 let mut providers = FuturesUnordered::new();
                 for id in pending.into_iter() {
-                    let state = self.scope.resolve_id(&id)?.clone();
+                    let state = self.scope.resolve_id(&id)?;
                     providers.push(state.resolve(&self.scope, &self.txn).map(|r| (id, r)));
                 }
 

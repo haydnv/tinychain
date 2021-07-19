@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
@@ -757,7 +757,7 @@ where
     type Item = Array;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCTryStream<'en, Self::Item>> {
+    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
         self.blocks.clone().block_stream(txn.clone()).await
     }
 }
@@ -961,7 +961,7 @@ impl<'en> en::IntoStream<'en> for DenseTensorView<'en> {
 
 struct BlockStreamView<'en> {
     dtype: NumberType,
-    blocks: TCTryStream<'en, Array>,
+    blocks: TCBoxTryStream<'en, Array>,
 }
 
 impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
@@ -971,7 +971,7 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
         };
 
         fn encodable<'en, T: af::HasAfEnum + Clone + Default + 'en>(
-            blocks: TCTryStream<'en, Array>,
+            blocks: TCBoxTryStream<'en, Array>,
         ) -> impl Stream<Item = Vec<T>> + 'en {
             // an error can't be encoded within an array
             // so in case of a read error, let the receiver figure out that the tensor
@@ -1010,7 +1010,7 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
     }
 }
 
-fn encodable_c32<'en>(blocks: TCTryStream<'en, Array>) -> impl Stream<Item = Vec<f32>> + 'en {
+fn encodable_c32<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = Vec<f32>> + 'en {
     blocks
         .take_while(|r| future::ready(r.is_ok()))
         .map(|block| block.expect("tensor block"))
@@ -1031,7 +1031,7 @@ fn encodable_c32<'en>(blocks: TCTryStream<'en, Array>) -> impl Stream<Item = Vec
         })
 }
 
-fn encodable_c64<'en>(blocks: TCTryStream<'en, Array>) -> impl Stream<Item = Vec<f64>> + 'en {
+fn encodable_c64<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = Vec<f64>> + 'en {
     blocks
         .take_while(|r| future::ready(r.is_ok()))
         .map(|block| block.expect("tensor block"))

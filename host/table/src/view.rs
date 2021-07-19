@@ -9,10 +9,11 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, Node};
 use tc_error::*;
+use tc_stream::GroupStream;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{GroupStream, Id, Instance, TCTryStream};
+use tcgeneric::{Id, Instance, TCBoxTryStream};
 
 use super::index::TableIndex;
 use super::{Bounds, Column, IndexSchema, Row, Table, TableInstance, TableSchema, TableType};
@@ -84,9 +85,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>
         })
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let grouped = self.source.rows(txn_id).map_ok(GroupStream::from).await?;
-        let grouped: TCTryStream<Vec<Value>> = Box::pin(grouped);
+        let grouped: TCBoxTryStream<Vec<Value>> = Box::pin(grouped);
         Ok(grouped)
     }
 
@@ -206,7 +207,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let reverse = self.reverse ^ reverse;
         let range = bounds.into_btree_range(&self.schema.columns())?;
         self.source.slice(range, reverse)?.keys(txn_id).await
@@ -276,7 +277,7 @@ where
         Ok(self.into_reversed())
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.source
             .slice(self.range.clone(), self.reverse)?
             .keys(txn_id)
@@ -387,9 +388,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Li
         Err(TCError::unsupported(ERR_LIMITED_REVERSE))
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let rows = self.source.rows(txn_id).await?;
-        let rows: TCTryStream<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
+        let rows: TCBoxTryStream<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
     }
 
@@ -456,7 +457,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         match self {
             Self::Table(table) => table.slice_rows(txn_id, bounds, reverse).await,
             Self::Merge(merged) => merged.slice_rows(txn_id, bounds, reverse).await,
@@ -521,7 +522,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let these_bounds = self.bounds;
         let source = self.left.into_source();
         let bounds = source.merge_bounds(vec![these_bounds, bounds])?;
@@ -604,7 +605,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance<F, D, Txn> for Me
         source.slice(bounds)
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let key_columns = self.key().to_vec();
         let key_names = key_columns.iter().map(|col| &col.name).cloned().collect();
         let keys = self.right.select(key_names)?.rows(txn_id).await?;
@@ -789,14 +790,14 @@ where
         self.source.reversed()?.select(self.columns.to_vec())
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         let indices = self.indices.to_vec();
         let selected = self.source.rows(txn_id).await?.map_ok(move |row| {
             let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
             selection
         });
 
-        let selected: TCTryStream<Vec<Value>> = Box::pin(selected);
+        let selected: TCBoxTryStream<Vec<Value>> = Box::pin(selected);
         Ok(selected)
     }
 
@@ -901,7 +902,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn> {
         txn_id: TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.slice.slice_rows(txn_id, bounds, reverse).await
     }
 }
@@ -981,7 +982,7 @@ where
         source.slice(bounds)
     }
 
-    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+    async fn rows<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Vec<Value>>> {
         self.slice.rows(txn_id).await
     }
 

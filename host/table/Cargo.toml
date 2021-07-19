@@ -21,6 +21,7 @@ num_cpus = "1.13"
 safecast = "0.1"
 tc-btree = { path = "../btree" }
 tc-error = { path = "../error" }
+tc-stream = { path = "../stream" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
