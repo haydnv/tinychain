@@ -72,7 +72,10 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
                 let uuid = if key.is_some() {
                     Uuid::try_cast_from(key, |v| TCError::bad_request("invalid UUID", v))?
                 } else {
-                    Uuid::new_v4()
+                    return Err(TCError::bad_request(
+                        "missing UUID to cast into",
+                        self.dtype,
+                    ));
                 };
 
                 let value = match self.dtype {
