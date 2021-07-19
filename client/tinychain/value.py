@@ -30,9 +30,15 @@ class Value(Scalar):
 
 
 class Nil(Value):
-    """A Tinychain `None` Value."""
+    """A `Value` to represent `None`."""
 
     __uri__ = uri(Value) + "/none"
+
+
+class Bytes(Value):
+    """A binary `Value`"""
+
+    __uri__ = uri(Value) + "/bytes"
 
 
 class String(Value):
