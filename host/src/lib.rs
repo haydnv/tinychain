@@ -44,7 +44,10 @@ pub async fn mount(
     cache_size: u64,
 ) -> tc_error::TCResult<(fs::Dir, Option<fs::Dir>)> {
     if cache_size < MIN_CACHE_SIZE {
-        return Err(error::TCError::unsupported(format!("the minimum cache size is {} bytes", MIN_CACHE_SIZE)));
+        return Err(error::TCError::unsupported(format!(
+            "the minimum cache size is {} bytes",
+            MIN_CACHE_SIZE
+        )));
     }
 
     let cache = fs::Cache::new(cache_size);
