@@ -1,3 +1,4 @@
+from tinychain.chain import Chain
 from tinychain.state import Map, Tuple
 from tinychain.util import to_json, uri
 from tinychain.value import F32
@@ -31,20 +32,29 @@ class BTree(object):
 class Graph(object):
     """A :class:`Graph` schema which comprises a set of :class:`Table` s and edges between :class:`Table` columns."""
 
-    def __init__(self):
+    def __init__(self, chain):
+        if not issubclass(chain, Chain):
+            raise ValueError(f"default Chain type must be a subclass of Chain, not {chain}")
+
+        self.chain = chain
         self.tables = {}
         self.edges = {}
 
-    def add_table(self, name, schema):
+    def add_model(self, model):
+        """Configure this `Graph` to store the given data model."""
+
+        raise NotImplementedError
+
+    def create_table(self, name, schema):
         """Add a :class:`Table` to this `Graph`."""
 
         self.tables[name] = schema
         return self
 
-    def add_edge(self, name, from_node, to_node):
+    def create_edge(self, name, from_node, to_node):
         """Add an edge between tables in this `Graph`."""
 
-        self.edged[name] = (from_node, to_node)
+        self.edges[name] = (from_node, to_node)
         return self
 
 
@@ -59,7 +69,7 @@ class Table(object):
     def __json__(self):
         return to_json([[self.key, self.values], Tuple(self.indices)])
 
-    def add_index(self, name, columns):
+    def create_index(self, name, columns):
         self.indices.append((name, columns))
         return self
 

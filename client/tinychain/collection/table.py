@@ -118,6 +118,7 @@ class Table(Collection):
         where = _handle_where(where)
         return self._post("", Table, **where)
 
+
 def _handle_where(where):
     return {
         col: Range.from_slice(val) if isinstance(val, slice) else val
