@@ -9,7 +9,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tcgeneric::{Id, Instance, TCPathBuf};
+use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
 
 use crate::route::Public;
 use crate::scalar::{Number, Scalar, Scope, Value};
@@ -17,7 +17,6 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
-use crate::generic::PathSegment;
 
 /// A conditional reference.
 #[derive(Clone, Eq, PartialEq)]

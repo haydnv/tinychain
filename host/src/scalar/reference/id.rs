@@ -11,7 +11,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tcgeneric::{Id, Instance, Label};
+use tcgeneric::{Id, Instance, Label, PathSegment, TCPathBuf};
 
 use crate::route::Public;
 use crate::scalar::{Scope, Value, SELF};
@@ -19,7 +19,6 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::Refer;
-use crate::generic::{PathSegment, TCPathBuf};
 
 const EMPTY_SLICE: &[usize] = &[];
 

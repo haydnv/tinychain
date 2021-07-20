@@ -24,10 +24,12 @@ pub use case::Case;
 pub use id::*;
 pub use op::*;
 pub use r#if::IfRef;
+pub use with::With;
 
 mod after;
 mod case;
 mod r#if;
+mod with;
 
 pub mod id;
 pub mod op;
@@ -72,6 +74,7 @@ pub enum RefType {
     Id,
     If,
     Op(OpRefType),
+    With,
 }
 
 impl Class for RefType {}
@@ -85,6 +88,7 @@ impl NativeClass for RefType {
                 "id" if path.len() == 4 => Some(Self::Id),
                 "if" if path.len() == 4 => Some(Self::If),
                 "op" => OpRefType::from_path(path).map(RefType::Op),
+                "with" if path.len() == 4 => Some(Self::With),
                 _ => None,
             }
         } else {
@@ -99,6 +103,7 @@ impl NativeClass for RefType {
             Self::Id => "id",
             Self::If => "if",
             Self::Op(ort) => return ort.path(),
+            Self::With => "with",
         };
 
         TCPathBuf::from(PREFIX).append(label(suffix))
@@ -113,6 +118,7 @@ impl fmt::Display for RefType {
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
             Self::Op(ort) => fmt::Display::fmt(ort, f),
+            Self::With => f.write_str("With"),
         }
     }
 }
@@ -125,6 +131,7 @@ pub enum TCRef {
     Id(IdRef),
     If(Box<IfRef>),
     Op(OpRef),
+    With(Box<With>),
 }
 
 impl Instance for TCRef {
@@ -137,6 +144,7 @@ impl Instance for TCRef {
             Self::Id(_) => RefType::Id,
             Self::If(_) => RefType::If,
             Self::Op(op_ref) => RefType::Op(op_ref.class()),
+            Self::With(_) => RefType::With,
         }
     }
 }
@@ -159,6 +167,10 @@ impl Refer for TCRef {
                 Self::If(Box::new(if_ref))
             }
             Self::Op(op_ref) => Self::Op(op_ref.dereference_self(path)),
+            Self::With(with) => {
+                let with = with.dereference_self(path);
+                Self::With(Box::new(with))
+            }
         }
     }
 
@@ -169,6 +181,7 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.is_derived_write(),
             Self::If(if_ref) => if_ref.is_derived_write(),
             Self::Op(op_ref) => op_ref.is_derived_write(),
+            Self::With(with) => with.is_derived_write(),
         }
     }
 
@@ -179,6 +192,7 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.is_inter_service_write(cluster_path),
             Self::If(if_ref) => if_ref.is_inter_service_write(cluster_path),
             Self::Op(op_ref) => op_ref.is_inter_service_write(cluster_path),
+            Self::With(with) => with.is_inter_service_write(cluster_path),
         }
     }
 
@@ -198,6 +212,10 @@ impl Refer for TCRef {
                 Self::If(Box::new(if_ref))
             }
             Self::Op(op_ref) => Self::Op(op_ref.reference_self(path)),
+            Self::With(with) => {
+                let with = with.reference_self(path);
+                Self::With(Box::new(with))
+            }
         }
     }
 
@@ -208,6 +226,7 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::If(if_ref) => if_ref.requires(deps),
             Self::Op(op_ref) => op_ref.requires(deps),
+            Self::With(with) => with.requires(deps),
         }
     }
 
@@ -226,6 +245,7 @@ impl Refer for TCRef {
                 Self::Id(id_ref) => id_ref.resolve(context, txn).await,
                 Self::If(if_ref) => if_ref.resolve(context, txn).await,
                 Self::Op(op_ref) => op_ref.resolve(context, txn).await,
+                Self::With(with) => with.resolve(context, txn).await,
             }?;
         }
 
@@ -287,6 +307,13 @@ impl RefVisitor {
             RefType::Op(ort) => {
                 OpRefVisitor::visit_map_value(ort, access)
                     .map_ok(TCRef::Op)
+                    .await
+            }
+            RefType::With => {
+                access
+                    .next_value(())
+                    .map_ok(Box::new)
+                    .map_ok(TCRef::With)
                     .await
             }
         }
@@ -362,6 +389,7 @@ impl<'en> ToStream<'en> for TCRef {
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
+            Self::With(with) => map.encode_value(with),
         }?;
 
         map.end()
@@ -386,6 +414,7 @@ impl<'en> IntoStream<'en> for TCRef {
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
+            Self::With(with) => map.encode_value(with),
         }?;
 
         map.end()
@@ -400,6 +429,7 @@ impl fmt::Debug for TCRef {
             Self::Id(id_ref) => fmt::Debug::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Debug::fmt(if_ref, f),
             Self::Op(op_ref) => fmt::Debug::fmt(op_ref, f),
+            Self::With(with) => fmt::Debug::fmt(with, f),
         }
     }
 }
@@ -412,6 +442,7 @@ impl fmt::Display for TCRef {
             Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Display::fmt(if_ref, f),
             Self::Op(op_ref) => fmt::Display::fmt(op_ref, f),
+            Self::With(with) => fmt::Display::fmt(with, f),
         }
     }
 }

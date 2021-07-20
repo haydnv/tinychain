@@ -64,6 +64,23 @@ class If(Ref):
         deanonymize(self.or_else, cxt)
 
 
+class With(Ref):
+    """A flow control operator to limit the scope of a lambda Op"""
+
+    __uri__ = uri(Ref) + "/with"
+
+    def __init__(self, subject, op):
+        self.subject = subject
+        self.op = op
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.subject, self.op])}
+
+    def __ns__(self, cxt):
+        deanonymize(self.subject, cxt)
+        deanonymize(self.op, cxt)
+
+
 class Op(Ref):
     """A reference to an :class:`Op`."""
 
@@ -107,6 +124,9 @@ class Get(Op):
         else:
             return {str(subject): to_json(self.args)}
 
+    def __repr__(self):
+        return f"GET Op ref {self.subject} {self.args}"
+
 
 class Put(Op):
     """A reference to an instance of :class:`Op.Put`."""
@@ -116,6 +136,9 @@ class Put(Op):
     def __init__(self, subject, key, value):
         Op.__init__(self, subject, (key, value))
 
+    def __repr__(self):
+        return f"PUT Op ref {self.subject} {self.args}"
+
 
 class Post(Op):
     """A reference to an instance of :class:`Op.Post`."""
@@ -124,6 +147,9 @@ class Post(Op):
 
     def __init__(self, subject, **kwargs):
         Op.__init__(self, subject, kwargs)
+
+    def __repr__(self):
+        return f"POST Op ref {self.subject} {self.args}"
 
 
 class Delete(Op):
@@ -136,6 +162,9 @@ class Delete(Op):
 
     def __json__(self):
         return {str(uri(self)): to_json([self.subject, self.args])}
+
+    def __repr__(self):
+        return f"DELETE Op ref {self.subject} {self.args}"
 
 
 class MethodSubject(object):

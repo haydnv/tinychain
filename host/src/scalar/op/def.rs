@@ -119,6 +119,16 @@ impl OpDef {
         .iter()
     }
 
+    pub fn last(&self) -> Option<&Id> {
+        match self {
+            Self::Get((_, form)) => form.last(),
+            Self::Put((_, _, form)) => form.last(),
+            Self::Post(form) => form.last(),
+            Self::Delete((_, form)) => form.last(),
+        }
+        .map(|(id, _)| id)
+    }
+
     pub fn is_derived_write(&self) -> bool {
         self.form()
             .map(|(_, provider)| provider)
