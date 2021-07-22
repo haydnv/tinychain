@@ -4,7 +4,6 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::Future;
 use safecast::TryCastFrom;
-
 use tc_error::*;
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
@@ -13,12 +12,14 @@ use crate::state::State;
 use crate::txn::Txn;
 
 mod chain;
+mod closure;
 mod cluster;
 mod collection;
 mod generic;
 mod object;
 mod scalar;
 mod state;
+mod stream;
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> GetFuture<'a> + Send + 'a>;
