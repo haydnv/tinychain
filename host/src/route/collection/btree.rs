@@ -1,6 +1,6 @@
 use std::iter::FromIterator;
 
-use futures::{TryFutureExt, TryStreamExt};
+use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeInstance, BTreeType, Range};
@@ -144,7 +144,51 @@ impl<'a, T> From<&'a T> for BTreeHandler<'a, T> {
 struct CopyHandler;
 
 impl<'a> Handler<'a> for CopyHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+        where
+            'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let schema: Value = params.require(&label("schema").into())?;
+                let schema = tc_btree::RowSchema::try_cast_from(schema, |v| {
+                    TCError::bad_request("invalid BTree schema", v)
+                })?;
 
+                let source: TCStream = params.require(&label("source").into())?;
+                params.expect_empty()?;
+
+                let txn_id = *txn.id();
+
+                let file = txn
+                    .context()
+                    .create_file_tmp(*txn.id(), BTreeType::default())
+                    .await?;
+
+                let btree = BTreeFile::create(file, schema, txn_id).await?;
+
+                let keys = source.into_stream(txn.clone()).await?;
+                keys.map(|r| {
+                    r.and_then(|state| {
+                        Value::try_cast_from(state, |s| {
+                            TCError::bad_request("invalid BTree key", s)
+                        })
+                    })
+                })
+                    .map(|r| {
+                        r.and_then(|value| {
+                            value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))
+                        })
+                    })
+                    .map_ok(|key| btree.insert(txn_id, key))
+                    .try_buffer_unordered(num_cpus::get())
+                    .try_fold((), |(), ()| future::ready(Ok(())))
+                    .await?;
+
+                Ok(State::Collection(btree.into()))
+            })
+        }))
+    }
 }
 
 struct StreamHandler<T> {
