@@ -712,7 +712,7 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
     }
 }
 
-impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
+impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),

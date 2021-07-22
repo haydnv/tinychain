@@ -14,7 +14,7 @@ use strided::Stride;
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::fs::{BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
@@ -134,7 +134,7 @@ where
     }
 
     /// Construct a new `BlockListFile` from the given `Stream` of elements.
-    pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
+    pub async fn from_values<S: Stream<Item = TCResult<Number>> + Send + Unpin>(
         file: FD,
         txn_id: TxnId,
         shape: Shape,
@@ -145,8 +145,9 @@ where
 
         let mut i = 0u64;
         let mut size = 0u64;
-        let mut values = values.chunks((Array::max_size() as usize) / dtype.size());
+        let mut values = values.chunks(PER_BLOCK);
         while let Some(chunk) = values.next().await {
+            let chunk = chunk.into_iter().collect::<TCResult<Vec<Number>>>()?;
             size += chunk.len() as u64;
             let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
@@ -184,7 +185,8 @@ where
 
         let values = stream::iter(0..shape.size())
             .map(Number::from)
-            .map(|i| start + (i * step));
+            .map(|i| start + (i * step))
+            .map(Ok);
 
         Self::from_values(file, txn_id, shape, dtype, values).await
     }

@@ -1,5 +1,5 @@
 use afarray::Array;
-use futures::{Future, TryFutureExt};
+use futures::{Future, StreamExt, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -10,11 +10,12 @@ use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
-use crate::collection::{Collection, Tensor};
+use crate::collection::{Collection, DenseTensor, DenseTensorFile, Tensor};
 use crate::fs;
 use crate::route::{GetHandler, PostHandler, PutHandler};
 use crate::scalar::{Bound, Number, NumberClass, Range, Value};
 use crate::state::State;
+use crate::stream::TCStream;
 use crate::txn::Txn;
 
 use super::{Handler, Route};
@@ -28,12 +29,14 @@ impl<'a> Handler<'a> for ConstantHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.matches::<(Vec<u64>, Number)>() {
-                    let (shape, value): (Vec<u64>, Number) = key.opt_cast_into().unwrap();
-                    constant(&txn, shape, value).await
-                } else {
-                    Err(TCError::bad_request("invalid tensor schema", key))
-                }
+                let (shape, value): (Vec<u64>, Number) =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+
+                constant(&txn, shape.into(), value)
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -41,7 +44,39 @@ impl<'a> Handler<'a> for ConstantHandler {
 
 struct CopyDenseHandler;
 
-impl<'a> Handler<'a> for CopyDenseHandler {}
+impl<'a> Handler<'a> for CopyDenseHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let schema: Value = params.require(&label("schema").into())?;
+                let Schema { shape, dtype } = schema.opt_cast_into().unwrap();
+
+                let source: TCStream = params.require(&label("source").into())?;
+                params.expect_empty()?;
+
+                let elements = source.into_stream(txn.clone()).await?;
+                let elements = elements.map(|r| {
+                    r.and_then(|n| {
+                        Number::try_cast_from(n, |n| {
+                            TCError::bad_request("invalid Tensor element", n)
+                        })
+                    })
+                });
+
+                let txn_id = *txn.id();
+                let file = create_file(txn).await?;
+                DenseTensorFile::from_values(file, txn_id, shape, dtype, elements)
+                    .map_ok(DenseTensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::Collection)
+                    .await
+            })
+        }))
+    }
+}
 
 struct CopySparseHandler;
 
@@ -58,18 +93,18 @@ impl<'a> Handler<'a> for CreateHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.matches::<Schema>() {
-                    let Schema { shape, dtype } = key.opt_cast_into().unwrap();
+                let Schema { shape, dtype } =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
-                    match self.class {
-                        TensorType::Dense => constant(&txn, shape, dtype.zero()).await,
-                        TensorType::Sparse => Err(TCError::not_implemented("create sparse tensor")),
+                match self.class {
+                    TensorType::Dense => {
+                        constant(&txn, shape, dtype.zero())
+                            .map_ok(Tensor::from)
+                            .map_ok(Collection::from)
+                            .map_ok(State::from)
+                            .await
                     }
-                } else {
-                    Err(TCError::bad_request(
-                        "invalid schema for constant tensor",
-                        key,
-                    ))
+                    TensorType::Sparse => Err(TCError::not_implemented("create sparse tensor")),
                 }
             })
         }))
@@ -423,9 +458,7 @@ where
     }
 }
 
-impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
-    for DenseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, B>
-{
+impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for DenseTensor<B> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
@@ -547,17 +580,13 @@ impl Route for Static {
     }
 }
 
-async fn constant<S>(txn: &Txn, shape: S, value: Number) -> TCResult<State>
-where
-    Shape: From<S>,
-{
+async fn constant(
+    txn: &Txn,
+    shape: Shape,
+    value: Number,
+) -> TCResult<DenseTensor<DenseTensorFile>> {
     let file = create_file(txn).await?;
-
-    DenseTensor::constant(file, *txn.id(), shape, value)
-        .map_ok(Tensor::from)
-        .map_ok(Collection::from)
-        .map_ok(State::from)
-        .await
+    DenseTensor::constant(file, *txn.id(), shape, value).await
 }
 
 async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>
