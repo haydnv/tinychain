@@ -230,7 +230,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
     NAME = "table"
 
     def cluster(self, chain_type):
-        class Persistent(tc.Cluster):
+        class Persistent(tc.Cluster, metaclass=tc.Meta):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
 
             def _configure(self):
@@ -300,7 +300,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
 class ErrorTest(unittest.TestCase):
     def setUp(self):
-        class Persistent(tc.Cluster):
+        class Persistent(tc.Cluster, metaclass=tc.Meta):
             __uri__ = tc.URI(f"/test/table")
 
             def _configure(self):

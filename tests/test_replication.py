@@ -8,7 +8,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
     NAME = "replication"
 
     def cluster(self, chain_type):
-        class Rev(tc.Cluster):
+        class Rev(tc.Cluster, metaclass=tc.Meta):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/test/replication")
 
             def _configure(self):
