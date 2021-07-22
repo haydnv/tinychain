@@ -1,6 +1,6 @@
 use std::iter::FromIterator;
 
-use futures::{future, TryFutureExt, TryStreamExt};
+use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use safecast::*;
 
 use tc_btree::Node;
@@ -9,19 +9,61 @@ use tc_table::{Bounds, ColumnBound, TableInstance, TableType};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::{Bound, Value};
-use tcgeneric::{Id, Map, PathSegment, Tuple};
+use tcgeneric::{label, Id, Map, PathSegment, Tuple};
 
 use crate::collection::{Collection, Table, TableIndex};
 use crate::fs;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
+use crate::stream::TCStream;
 use crate::txn::Txn;
 
 struct CopyHandler;
 
 impl<'a> Handler<'a> for CopyHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let schema: Value = params.require(&label("schema").into())?;
+                let schema = tc_table::TableSchema::try_cast_from(schema, |v| {
+                    TCError::bad_request("invalid Table schema", v)
+                })?;
 
+                let source: TCStream = params.require(&label("source").into())?;
+                params.expect_empty()?;
+
+                let txn_id = *txn.id();
+
+                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                let table = TableIndex::create(&dir, schema, *txn.id()).await?;
+
+                let rows = source.into_stream(txn.clone()).await?;
+                rows.map(|r| {
+                    r.and_then(|state| {
+                        Value::try_cast_from(state, |s| {
+                            TCError::bad_request("invalid Table row", s)
+                        })
+                    })
+                })
+                .map(|r| {
+                    r.and_then(|value| {
+                        value.try_cast_into(|v| TCError::bad_request("invalid Table row", v))
+                    })
+                })
+                .map(|r| r.and_then(|row| table.schema().primary().key_values_from_tuple(row)))
+                .map_ok(|(key, values)| table.upsert(txn_id, key, values))
+                .try_buffer_unordered(num_cpus::get())
+                .try_fold((), |(), ()| future::ready(Ok(())))
+                .await?;
+
+                Ok(State::Collection(table.into()))
+            })
+        }))
+    }
 }
 
 struct CreateHandler;

@@ -58,7 +58,10 @@ impl IndexSchema {
     /// Given a [`Row`], return a `(key, values)` tuple.
     pub fn key_values_from_row(&self, mut row: Row) -> TCResult<(Vec<Value>, Vec<Value>)> {
         if self.len() != row.len() {
-            return Err(TCError::bad_request("Invalid row for schema", self));
+            return Err(TCError::unsupported(format!(
+                "{} is not a valid row for schema {}",
+                row, self
+            )));
         }
 
         let mut key = Vec::with_capacity(self.key().len());
@@ -66,6 +69,7 @@ impl IndexSchema {
             let value = row
                 .remove(col.name())
                 .ok_or(TCError::not_found(col.name()))?;
+
             key.push(value);
         }
 
@@ -74,9 +78,24 @@ impl IndexSchema {
             let value = row
                 .remove(col.name())
                 .ok_or(TCError::not_found(col.name()))?;
+
             values.push(value);
         }
 
+        Ok((key, values))
+    }
+
+    /// Given a [`Row`], return a `(key, values)` tuple.
+    pub fn key_values_from_tuple(&self, tuple: Tuple<Value>) -> TCResult<(Vec<Value>, Vec<Value>)> {
+        if self.len() != tuple.len() {
+            return Err(TCError::unsupported(format!(
+                "{} is not a valid row for schema {}",
+                tuple, self
+            )));
+        }
+
+        let mut key = tuple.into_inner();
+        let values = key.split_off(self.key.len());
         Ok((key, values))
     }
 

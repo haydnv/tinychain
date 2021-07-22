@@ -41,15 +41,11 @@ impl<'a> Handler<'a> for ConstantHandler {
 
 struct CopyDenseHandler;
 
-impl<'a> Handler<'a> for CopyDenseHandler {
-
-}
+impl<'a> Handler<'a> for CopyDenseHandler {}
 
 struct CopySparseHandler;
 
-impl<'a> Handler<'a> for CopySparseHandler {
-
-}
+impl<'a> Handler<'a> for CopySparseHandler {}
 
 struct CreateHandler {
     class: TensorType,
@@ -214,11 +210,11 @@ impl Route for TensorType {
                 "constant" => Some(Box::new(ConstantHandler)),
                 "range" => Some(Box::new(RangeHandler)),
                 _ => None,
-            }
+            },
             Self::Sparse => match path[0].as_str() {
                 "copy_from" => Some(Box::new(CopySparseHandler)),
                 _ => None,
-            }
+            },
         }
     }
 }

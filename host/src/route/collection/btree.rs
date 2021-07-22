@@ -145,8 +145,8 @@ struct CopyHandler;
 
 impl<'a> Handler<'a> for CopyHandler {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-        where
-            'b: 'a,
+    where
+        'b: 'a,
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
@@ -175,15 +175,15 @@ impl<'a> Handler<'a> for CopyHandler {
                         })
                     })
                 })
-                    .map(|r| {
-                        r.and_then(|value| {
-                            value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))
-                        })
+                .map(|r| {
+                    r.and_then(|value| {
+                        value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))
                     })
-                    .map_ok(|key| btree.insert(txn_id, key))
-                    .try_buffer_unordered(num_cpus::get())
-                    .try_fold((), |(), ()| future::ready(Ok(())))
-                    .await?;
+                })
+                .map_ok(|key| btree.insert(txn_id, key))
+                .try_buffer_unordered(num_cpus::get())
+                .try_fold((), |(), ()| future::ready(Ok(())))
+                .await?;
 
                 Ok(State::Collection(btree.into()))
             })
