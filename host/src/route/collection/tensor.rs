@@ -1,5 +1,5 @@
 use afarray::Array;
-use futures::{Future, StreamExt, TryFutureExt};
+use futures::{future, Future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -52,7 +52,8 @@ impl<'a> Handler<'a> for CopyDenseHandler {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
-                let Schema { shape, dtype } = schema.opt_cast_into().unwrap();
+                let Schema { dtype, shape } =
+                    schema.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
                 let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
@@ -80,7 +81,56 @@ impl<'a> Handler<'a> for CopyDenseHandler {
 
 struct CopySparseHandler;
 
-impl<'a> Handler<'a> for CopySparseHandler {}
+impl<'a> Handler<'a> for CopySparseHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let schema: Value = params.require(&label("schema").into())?;
+                let schema: Schema =
+                    schema.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+
+                let source: TCStream = params.require(&label("source").into())?;
+                params.expect_empty()?;
+
+                let elements = source.into_stream(txn.clone()).await?;
+
+                let txn_id = *txn.id();
+                let dir = txn.context().create_dir_tmp(txn_id).await?;
+                let tensor = SparseTensor::create(&dir, schema, txn_id).await?;
+
+                let elements = elements
+                    .map(|r| {
+                        r.and_then(|state| {
+                            Value::try_cast_from(state, |s| {
+                                TCError::bad_request("invalid sparse Tensor element", s)
+                            })
+                        })
+                    })
+                    .map(|r| {
+                        r.and_then(|row| {
+                            row.try_cast_into(|v| {
+                                TCError::bad_request(
+                                    "sparse Tensor expected a (Coord, Number) tuple, found",
+                                    v,
+                                )
+                            })
+                        })
+                    });
+
+                elements
+                    .map_ok(|(coord, value)| tensor.write_value_at(txn_id, coord, value))
+                    .try_buffer_unordered(num_cpus::get())
+                    .try_fold((), |(), ()| future::ready(Ok(())))
+                    .await?;
+
+                Ok(Collection::Tensor(tensor.into()).into())
+            })
+        }))
+    }
+}
 
 struct CreateHandler {
     class: TensorType,
@@ -93,18 +143,27 @@ impl<'a> Handler<'a> for CreateHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let Schema { shape, dtype } =
+                let schema: Schema =
                     key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
                 match self.class {
                     TensorType::Dense => {
-                        constant(&txn, shape, dtype.zero())
+                        constant(&txn, schema.shape, schema.dtype.zero())
                             .map_ok(Tensor::from)
-                            .map_ok(Collection::from)
-                            .map_ok(State::from)
+                            .map_ok(Collection::Tensor)
+                            .map_ok(State::Collection)
                             .await
                     }
-                    TensorType::Sparse => Err(TCError::not_implemented("create sparse tensor")),
+                    TensorType::Sparse => {
+                        let txn_id = *txn.id();
+                        let dir = txn.context().create_dir_tmp(txn_id).await?;
+
+                        SparseTensor::create(&dir, schema, txn_id)
+                            .map_ok(Tensor::from)
+                            .map_ok(Collection::Tensor)
+                            .map_ok(State::Collection)
+                            .await
+                    }
                 }
             })
         }))
