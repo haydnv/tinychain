@@ -61,7 +61,7 @@ class Cluster(object, metaclass=Meta):
 
         return ref.Get(uri(self) + "/authorize", scope)
 
-    def grant(self, scope, op: Op, **context):
+    def grant(self, scope, op: Op, context={}):
         """Execute the given `op` after granting it the given `scope`."""
 
         params = {
@@ -72,7 +72,7 @@ class Cluster(object, metaclass=Meta):
         if context:
             params["context"] = context
 
-        return ref.Post(uri(self) + "/grant", **params)
+        return ref.Post(uri(self) + "/grant", params)
 
     @put_method
     def install(self, txn, cluster_link: URI, scopes: Tuple):

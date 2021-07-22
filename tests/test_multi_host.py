@@ -24,7 +24,7 @@ class Left(Balance):
         txn.total = CONSERVED
         txn.update = tc.After(
             self.weight.set(weight),
-            right.weigh(weight=(txn.total - weight)))
+            right.weigh({"weight": (txn.total - weight)}))
 
         return tc.If(self.weight == weight, None, txn.update)
 
@@ -39,7 +39,7 @@ class Right(Balance):
         txn.total = CONSERVED
         txn.update = tc.After(
             self.weight.set(weight),
-            left.weigh(weight=(txn.total - weight)))
+            left.weigh({"weight": (txn.total - weight)}))
 
         return tc.If(self.weight == weight, None, txn.update)
 

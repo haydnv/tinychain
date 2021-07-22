@@ -122,7 +122,7 @@ class Table(Collection):
 
         return self._put("", key, values)
 
-    def where(self, **where):
+    def where(self, where):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
@@ -130,7 +130,7 @@ class Table(Collection):
         """
 
         where = _handle_where(where)
-        return self._post("", Table, **where)
+        return self._post("", where, Table)
 
 
 def _handle_where(where):

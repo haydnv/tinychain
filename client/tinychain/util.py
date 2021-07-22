@@ -4,7 +4,6 @@ import inspect
 
 from collections import OrderedDict
 
-
 class Context(object):
     """A transaction context."""
 
@@ -14,8 +13,7 @@ class Context(object):
 
         if context:
             if isinstance(context, self.__class__):
-                for name, value in context.form.items():
-                    setattr(self, name, value)
+                raise ValueError("cannot assign a Context to a Context", context)
             else:
                 for name, value in dict(context).items():
                     setattr(self, name, value)
@@ -49,6 +47,9 @@ class Context(object):
         return to_json(list(self.form.items()))
 
     def __setattr__(self, name, state):
+        if state is self:
+            raise ValueError(f"cannot assign transaction Context to itself")
+
         deanonymize(state, self)
 
         if name in object.__getattribute__(self, "form"):
@@ -138,6 +139,15 @@ class URI(object):
             return self
 
         return URI(str(self), [name])
+
+    def is_id(self):
+        if str(self).startswith('/'):
+            return False
+
+        if "://" in str(self):
+            return False
+
+        return True
 
     def host(self):
         """Return the host segment of this `URI`, if present."""

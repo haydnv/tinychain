@@ -69,15 +69,22 @@ class With(Ref):
 
     __uri__ = uri(Ref) + "/with"
 
-    def __init__(self, subject, op):
-        self.subject = subject
+    def __init__(self, capture, op):
+        self.capture = []
+        for ref in capture:
+            ref = uri(ref)
+            if ref.is_id():
+                self.capture.append(ref)
+            else:
+                raise ValueError(f"reference in a Closure must specify an ID in the current scope, not {ref}")
+
         self.op = op
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.subject, self.op])}
+        return {str(uri(self)): to_json([self.capture, self.op])}
 
     def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
+        deanonymize(self.capture, cxt)
         deanonymize(self.op, cxt)
 
 
@@ -110,15 +117,23 @@ class Get(Op):
     __uri__ = uri(Op) + "/get"
 
     def __init__(self, subject, key=None):
+        if subject is None:
+            raise ValueError("Get op ref subject cannot be None")
+
         Op.__init__(self, subject, (key,))
 
     def __json__(self):
         if isinstance(self.subject, Ref):
             subject = self.subject
+            is_scalar = True
         else:
             subject = uri(self.subject)
+            if subject is None:
+                raise ValueError(f"subject of Get op ref {self} has no URI")
 
-        if str(uri(subject)).startswith("/state/scalar"):
+            is_scalar = subject.startswith("/state/scalar")
+
+        if is_scalar:
             (value,) = self.args
             return {str(subject): to_json(value)}
         else:
@@ -145,8 +160,8 @@ class Post(Op):
 
     __uri__ = uri(Op) + "/post"
 
-    def __init__(self, subject, **kwargs):
-        Op.__init__(self, subject, kwargs)
+    def __init__(self, subject, args):
+        Op.__init__(self, subject, args)
 
     def __repr__(self):
         return f"POST Op ref {self.subject} {self.args}"

@@ -72,7 +72,7 @@ class Put(Op):
         parameters = list(sig.parameters.items())
 
         if len(parameters) not in [0, 1, 3]:
-            raise ValueError(f"{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)")
+            raise ValueError(f"{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)--found {parameters}")
 
         args = []
 
@@ -112,7 +112,7 @@ class Post(Op):
         args = []
 
         cxt = Context()
-        if len(parameters):
+        if parameters:
             args.append(cxt)
 
         kwargs = {}

@@ -229,5 +229,5 @@ class ClientService(tc.Cluster):
         area_service = tc.use(AreaService)
         txn.length = area_service.Meters(dimensions[0])
         txn.width = area_service.Meters(dimensions[1])
-        return area_service.area(length=txn.length, width=txn.width)
+        return area_service.area({"length": txn.length, "width": txn.width)
 ```

@@ -1,6 +1,6 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
-from tinychain.state import Map
+from tinychain.state import Map, Stream
 from tinychain.util import uri
 from tinychain.value import UInt
 
@@ -23,7 +23,7 @@ class BTree(Collection):
 
         prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
 
-        return self._post("", BTree, **{"range": prefix})
+        return self._post("", Map(range=prefix), BTree)
 
     def count(self):
         """
@@ -61,6 +61,14 @@ class BTree(Collection):
         """
 
         return self._put("", value=key)
+
+    def keys(self, prefix=None):
+        """Return a :class:`Stream` of the keys in this `BTree`."""
+
+        if prefix is None:
+            return self._get("keys", rtype=Stream)
+        else:
+            return self._get("keys", prefix, Stream)
 
     def reverse(self):
         """

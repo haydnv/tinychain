@@ -1,8 +1,8 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from tinychain.reflect import Meta
+from tinychain.ref import Ref
 from tinychain.state import Scalar
-from tinychain.util import uri
+from tinychain.util import form_of, to_json, uri, URI
 
 
 # Scalar value types
@@ -34,11 +34,36 @@ class Nil(Value):
 
     __uri__ = uri(Value) + "/none"
 
+    def __json__(self):
+        form = form_of(self)
+        print("form of Nil", form)
+
+        if isinstance(form, Ref) or isinstance(form, URI):
+            return to_json(form)
+        else:
+            return None
+
 
 class Bytes(Value):
     """A binary `Value`"""
 
     __uri__ = uri(Value) + "/bytes"
+
+
+class Id(Value):
+    """An identifier"""
+
+    __uri__ = uri(Value) + "/id"
+
+    def __json__(self):
+        form = form_of(self)
+        if isinstance(form, Ref):
+            return to_json(form)
+        else:
+            return {str(self): []}
+
+    def __str__(self):
+        return str(form_of(self))
 
 
 class String(Value):

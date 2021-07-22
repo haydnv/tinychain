@@ -63,10 +63,14 @@ class State(object):
         subject = self._method(name)
         return Nil(ref.Put(subject, key, value))
 
-    def _post(self, _method_name, rtype=None, **params):
+    def _post(self, _method_name, params, rtype):
+        from .value import Nil
+
         subject = self._method(_method_name)
-        rtype = State if rtype is None else rtype
-        return rtype(ref.Post(subject, **params))
+        if rtype is None:
+            return Nil(ref.Post(subject.params))
+        else:
+            return rtype(ref.Post(subject, params))
 
     def _delete(self, name, key=None):
         from .value import Nil
@@ -83,6 +87,16 @@ class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
     __uri__ = uri(State) + "/map"
+
+    def __init__(self, *args, **kwargs):
+        if args:
+            if kwargs:
+                raise ValueError(f"Map accepts a form or kwargs, not both (got {kwargs})")
+
+            [form] = args
+            State.__init__(self, form)
+        else:
+            State.__init__(self, kwargs)
 
     def __getitem__(self, key):
         return self._get("", key)
@@ -101,6 +115,10 @@ class Tuple(State):
 
     def __getitem__(self, key):
         return self._get("", key)
+
+    def map(self, op):
+        rtype = op.rtype if hasattr(op, "rtype") else State
+        return self._post("map", Map(op=op), rtype)
 
 
 # Scalar types
@@ -125,25 +143,19 @@ class Stream(State):
 
     __uri__ = uri(State) + "/stream"
 
-    def for_each(self, op):
-        if inspect.isfunction(op) and not reflect.is_op(op):
-            op = reflect.op.Post(op)
+    def aggregate(self, initial_value, op):
+        return self._post("aggregate", Map(acc=initial_value, op=op), type(initial_value))
 
-        return self._post("for_each", op=op)
+    def for_each(self, op):
+        rtype = op.rtype if hasattr(op, "rtype") else State
+        return self._post("for_each", Map(op=op), rtype)
 
     def fold(self, initial_value, op):
-        if inspect.isfunction(op) and not reflect.is_op(op):
-            op = reflect.op.Get(op)
-
-        rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("fold", acc=initial_value, op=op, rtype=rtype)
+        return self._post("fold", Map(acc=initial_value, op=op), type(initial_value))
 
     def map(self, op):
-        if inspect.isfunction(op) and not reflect.is_op(op):
-            op = reflect.op.Get(op)
-
         rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._get("fold", op, rtype)
+        return self._post("fold", Map(op=op), rtype)
 
 
 # User-defined object types

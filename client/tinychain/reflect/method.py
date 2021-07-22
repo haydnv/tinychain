@@ -122,10 +122,10 @@ class Post(Method):
         self.rtype = _get_rtype(form, State)
         Method.__init__(self, header, form, name)
 
-    def __call__(self, **params):
+    def __call__(self, params):
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
-        return rtype(ref.Post(uri(self.header).append(self.name), **params))
+        return rtype(ref.Post(uri(self.header).append(self.name), params))
 
     def __form__(self):
         sig = inspect.signature(self.form)

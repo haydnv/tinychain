@@ -41,8 +41,8 @@ class Retailer(tc.Cluster):
     @tc.post_method
     def buy(self, _txn, quantity: tc.Number):
         wholesaler = tc.use(Wholesaler)
-        op = tc.post_op(lambda txn, quantity: wholesaler.buy(quantity=quantity))
-        return self.grant(SCOPE, op, quantity=quantity)
+        op = tc.post_op(lambda txn, quantity: wholesaler.buy({"quantity": quantity}))
+        return self.grant(SCOPE, op, {"quantity": quantity})
 
 
 class InteractionTests(unittest.TestCase):
