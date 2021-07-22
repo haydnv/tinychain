@@ -18,6 +18,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 use tc_error::*;
 use tcgeneric::*;
 
+use crate::closure::Closure;
 use crate::route::Public;
 use crate::state::{State, StateClass};
 use crate::txn::Txn;
@@ -550,6 +551,16 @@ impl TryCastFrom<Scalar> for Bytes {
     }
 }
 
+impl TryCastFrom<Scalar> for Closure {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        OpDef::can_cast_from(scalar)
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        OpDef::opt_cast_from(scalar).map(Self::from)
+    }
+}
+
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -837,6 +848,7 @@ impl TryCastFrom<Scalar> for Id {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Value(value) => Self::can_cast_from(value),
+            Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
             _ => false,
         }
     }
@@ -844,6 +856,7 @@ impl TryCastFrom<Scalar> for Id {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Value(value) => Self::opt_cast_from(value),
+            Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
             _ => None,
         }
     }

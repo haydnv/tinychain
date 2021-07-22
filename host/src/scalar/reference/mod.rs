@@ -264,6 +264,22 @@ impl TryFrom<TCRef> for OpRef {
     }
 }
 
+impl TryCastFrom<TCRef> for Id {
+    fn can_cast_from(tc_ref: &TCRef) -> bool {
+        match tc_ref {
+            TCRef::Id(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(tc_ref: TCRef) -> Option<Self> {
+        match tc_ref {
+            TCRef::Id(id_ref) => Some(id_ref.into_id()),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<TCRef> for OpRef {
     fn can_cast_from(tc_ref: &TCRef) -> bool {
         match tc_ref {
@@ -352,6 +368,7 @@ impl de::Visitor for RefVisitor {
         if let Subject::Link(link) = &subject {
             if link.host().is_none() {
                 if let Some(class) = RefType::from_path(link.path()) {
+                    debug!("RefVisitor visiting instance of {}...", class);
                     return Self::visit_map_value(class, &mut access).await;
                 }
             }

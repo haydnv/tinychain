@@ -1,6 +1,6 @@
-use safecast::{TryCastFrom, TryCastInto};
 use std::convert::TryInto;
 
+use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
 use tcgeneric::{
     label, path_label, Id, Instance, Label, NativeClass, PathLabel, PathSegment, Tuple,
@@ -122,11 +122,13 @@ impl Route for StateType {
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
-            Self::Collection(collection) => collection.route(path),
             Self::Chain(chain) => chain.route(path),
+            Self::Closure(closure) => closure.route(path),
+            Self::Collection(collection) => collection.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),
             Self::Scalar(scalar) => scalar.route(path),
+            Self::Stream(stream) => stream.route(path),
             Self::Tuple(tuple) => tuple.route(path),
         };
 

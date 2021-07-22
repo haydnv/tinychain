@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
 use futures::future::TryFutureExt;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -18,10 +18,12 @@ use tc_transact::Transaction;
 use tcgeneric::*;
 
 use crate::chain::*;
+use crate::closure::*;
 use crate::collection::*;
 use crate::object::{Object, ObjectType};
 use crate::route::Public;
 use crate::scalar::*;
+use crate::stream::TCStream;
 use crate::txn::Txn;
 
 pub use view::StateView;
@@ -42,9 +44,11 @@ where
 pub enum StateType {
     Chain(ChainType),
     Collection(CollectionType),
+    Closure,
     Map,
     Object(ObjectType),
     Scalar(ScalarType),
+    Stream,
     Tuple,
 }
 
@@ -82,9 +86,11 @@ impl NativeClass for StateType {
         match self {
             Self::Collection(ct) => ct.path(),
             Self::Chain(ct) => ct.path(),
+            Self::Closure => path_label(&["state", "closure"]).into(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
+            Self::Stream => path_label(&["state", "stream"]).into(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
     }
@@ -97,6 +103,7 @@ impl StateClass for StateType {
         match self {
             Self::Chain(ct) => ct.try_cast_from_value(value).map(State::from),
             Self::Collection(ct) => ct.try_cast_from_value(value).map(State::from),
+            Self::Closure => Err(TCError::bad_request("cannot cast into closure from", value)),
             Self::Map => {
                 let contents: Tuple<Value> = value.try_into()?;
                 let contents: Vec<(Id, Value)> = contents
@@ -109,8 +116,9 @@ impl StateClass for StateType {
                         .collect(),
                 ))
             }
-            Self::Object(ot) => ot.try_cast_from_value(value).map(State::from),
+            Self::Object(ot) => ot.try_cast_from_value(value).map(State::Object),
             Self::Scalar(st) => st.try_cast_from_value(value).map(State::Scalar),
+            Self::Stream => Err(TCError::bad_request("cannot cast into Stream from", value)),
             Self::Tuple => {
                 let contents: Tuple<Value> = value.try_into()?;
                 Ok(State::Tuple(contents.into_iter().collect()))
@@ -173,11 +181,13 @@ impl TryFrom<StateType> for ScalarType {
 impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Collection(ct) => fmt::Display::fmt(ct, f),
             Self::Chain(ct) => fmt::Display::fmt(ct, f),
+            Self::Collection(ct) => fmt::Display::fmt(ct, f),
+            Self::Closure => f.write_str("closure"),
             Self::Map => f.write_str("Map<Id, State>"),
             Self::Object(ot) => fmt::Display::fmt(ot, f),
             Self::Scalar(st) => fmt::Display::fmt(st, f),
+            Self::Stream => f.write_str("Stream"),
             Self::Tuple => f.write_str("Tuple<State>"),
         }
     }
@@ -188,9 +198,11 @@ impl fmt::Display for StateType {
 pub enum State {
     Collection(Collection),
     Chain(Chain),
+    Closure(Closure),
     Map(Map<Self>),
     Object(Object),
     Scalar(Scalar),
+    Stream(TCStream),
     Tuple(Tuple<Self>),
 }
 
@@ -323,7 +335,7 @@ impl Refer for State {
 
         match self {
             Self::Map(map) => {
-                let mut resolved = stream::iter(map)
+                let mut resolved = futures::stream::iter(map)
                     .map(|(id, state)| state.resolve(context, txn).map_ok(|state| (id, state)))
                     .buffer_unordered(num_cpus::get());
 
@@ -337,7 +349,7 @@ impl Refer for State {
             Self::Scalar(scalar) => scalar.resolve(context, txn).await,
             Self::Tuple(tuple) => {
                 let len = tuple.len();
-                let mut resolved = stream::iter(tuple)
+                let mut resolved = futures::stream::iter(tuple)
                     .map(|state| state.resolve(context, txn))
                     .buffered(num_cpus::get());
 
@@ -364,11 +376,13 @@ impl Instance for State {
 
     fn class(&self) -> StateType {
         match self {
-            Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Chain(chain) => StateType::Chain(chain.class()),
+            Self::Closure(_) => StateType::Closure,
+            Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Map(_) => StateType::Map,
             Self::Object(object) => StateType::Object(object.class()),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
+            Self::Stream(_) => StateType::Stream,
             Self::Tuple(_) => StateType::Tuple,
         }
     }
@@ -380,15 +394,21 @@ impl From<()> for State {
     }
 }
 
+impl From<BTree> for State {
+    fn from(btree: BTree) -> Self {
+        Self::Collection(btree.into())
+    }
+}
+
 impl From<Chain> for State {
     fn from(chain: Chain) -> Self {
         Self::Chain(chain)
     }
 }
 
-impl From<BTree> for State {
-    fn from(btree: BTree) -> Self {
-        Self::Collection(btree.into())
+impl From<Closure> for State {
+    fn from(closure: Closure) -> Self {
+        Self::Closure(closure)
     }
 }
 
@@ -437,6 +457,12 @@ impl From<Scalar> for State {
 impl From<Table> for State {
     fn from(table: Table) -> Self {
         Self::Collection(table.into())
+    }
+}
+
+impl From<TCStream> for State {
+    fn from(stream: TCStream) -> Self {
+        Self::Stream(stream)
     }
 }
 
@@ -549,6 +575,24 @@ impl TryCastFrom<State> for Bytes {
     }
 }
 
+impl TryCastFrom<State> for Closure {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Closure(_) => true,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Closure(closure) => Some(closure),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<State> for String {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -578,6 +622,25 @@ impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
         match state {
             State::Map(map) => BTreeMap::<Id, T>::opt_cast_from(map).map(Map::from),
             State::Tuple(tuple) => Map::<T>::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for TCStream {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            // State::Chain(_) => true, // TODO
+            State::Collection(_) => true,
+            State::Stream(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => Some(Self::from(collection)),
+            State::Stream(stream) => Some(stream),
             _ => None,
         }
     }
@@ -846,11 +909,13 @@ impl TryCastFrom<State> for Number {
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Collection(collection) => fmt::Debug::fmt(collection, f),
             Self::Chain(chain) => fmt::Debug::fmt(chain, f),
+            Self::Closure(closure) => fmt::Debug::fmt(closure, f),
+            Self::Collection(collection) => fmt::Debug::fmt(collection, f),
             Self::Map(map) => fmt::Debug::fmt(map, f),
             Self::Object(object) => fmt::Debug::fmt(object, f),
             Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
+            Self::Stream(_) => f.write_str("Stream"),
             Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
         }
     }
@@ -859,11 +924,13 @@ impl fmt::Debug for State {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Collection(collection) => fmt::Display::fmt(collection, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Closure(closure) => fmt::Display::fmt(closure, f),
+            Self::Collection(collection) => fmt::Display::fmt(collection, f),
             Self::Map(map) => fmt::Display::fmt(map, f),
             Self::Object(object) => fmt::Display::fmt(object, f),
             Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Stream(_) => f.write_str("Stream"),
             Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
     }
@@ -881,16 +948,22 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
-            StateType::Collection(ct) => {
-                CollectionVisitor::new(self.txn.clone())
-                    .visit_map_value(ct, access)
-                    .map_ok(State::Collection)
-                    .await
-            }
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
                     .map_ok(State::Chain)
+                    .await
+            }
+            StateType::Closure => {
+                access
+                    .next_value(self.txn.clone())
+                    .map_ok(State::Closure)
+                    .await
+            }
+            StateType::Collection(ct) => {
+                CollectionVisitor::new(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(State::Collection)
                     .await
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
@@ -912,6 +985,7 @@ impl StateVisitor {
                     .map_ok(State::Scalar)
                     .await
             }
+            StateType::Stream => Err(de::Error::invalid_type("Stream", "a Collection")),
             StateType::Tuple => access.next_value(self.txn.clone()).await,
         }
     }

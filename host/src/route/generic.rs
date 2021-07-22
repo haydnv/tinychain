@@ -1,15 +1,18 @@
 use std::ops::Deref;
 use std::str::FromStr;
 
+use futures::stream::{self, StreamExt, TryStreamExt};
 use safecast::{CastFrom, TryCastFrom};
 
-use tc_error::TCError;
-use tcgeneric::{Id, Instance, Map, PathSegment, Tuple};
+use tc_error::*;
+use tcgeneric::{label, Id, Instance, Map, PathSegment, Tuple};
 
-use crate::scalar::Number;
+use crate::closure::Closure;
+use crate::scalar::{Number, OpDef};
 use crate::state::State;
 
-use super::{GetHandler, Handler, Route};
+use super::{GetHandler, Handler, PostHandler, Route};
+use std::iter::Cloned;
 
 struct MapHandler<'a, T: Clone> {
     map: &'a Map<T>,
@@ -54,6 +57,50 @@ where
         } else {
             None
         }
+    }
+}
+
+struct MapOpHandler<I> {
+    len: usize,
+    items: I,
+}
+
+impl<'a, I> Handler<'a> for MapOpHandler<I>
+where
+    I: IntoIterator + Send + 'a,
+    I::IntoIter: Send + 'a,
+    State: From<I::Item>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let op: Closure = params.require(&label("op").into())?;
+
+                let mut tuple = Vec::with_capacity(self.len);
+                let mut mapped = stream::iter(self.items)
+                    .map(State::from)
+                    .map(|state| op.clone().into_callable(state))
+                    .map_ok(|(context, op_def)| OpDef::call(op_def, txn, context))
+                    .try_buffered(num_cpus::get());
+
+                while let Some(item) = mapped.try_next().await? {
+                    tuple.push(item);
+                }
+
+                Ok(State::Tuple(tuple.into()))
+            })
+        }))
+    }
+}
+
+impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for MapOpHandler<Cloned<std::slice::Iter<'a, T>>> {
+    fn from(tuple: &'a Tuple<T>) -> Self {
+        let len = tuple.len();
+        let items = tuple.iter().cloned();
+        Self { len, items }
     }
 }
 
@@ -106,6 +153,8 @@ where
             } else {
                 None
             }
+        } else if path == &["map"] {
+            Some(Box::new(MapOpHandler::from(self)))
         } else {
             None
         }

@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
+use safecast::TryCastInto;
 
 use tc_error::*;
 use tcgeneric::*;
@@ -105,6 +106,32 @@ impl OpDef {
             Self::Post(form) => Self::Post(dereference_self(form, path)),
             Self::Delete((key_name, form)) => {
                 Self::Delete((key_name, dereference_self(form, path)))
+            }
+        }
+    }
+
+    pub fn into_callable(self, state: State) -> TCResult<(Map<State>, Vec<(Id, Scalar)>)> {
+        match self {
+            OpDef::Get((key_name, op_def)) | OpDef::Delete((key_name, op_def)) => {
+                let mut params = Map::new();
+                params.insert(key_name, state);
+                Ok((params, op_def))
+            }
+            OpDef::Put((key_name, value_name, op_def)) => {
+                let (key, value) = state
+                    .try_cast_into(|s| TCError::bad_request("invalid params for PUT Op", s))?;
+
+                let mut params = Map::new();
+                params.insert(key_name, key);
+                params.insert(value_name, value);
+
+                Ok((params, op_def))
+            }
+            OpDef::Post(op_def) => {
+                let params = state
+                    .try_cast_into(|s| TCError::bad_request("invalid params for POST Op", s))?;
+
+                Ok((params, op_def))
             }
         }
     }
@@ -313,13 +340,13 @@ impl fmt::Display for OpDef {
     }
 }
 
-fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
+pub fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
         .map(|(id, scalar)| (id, scalar.dereference_self(path)))
         .collect()
 }
 
-fn reference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
+pub fn reference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
         .map(|(id, scalar)| (id, scalar.reference_self(path)))
         .collect()

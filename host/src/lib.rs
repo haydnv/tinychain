@@ -26,6 +26,7 @@ mod http;
 mod route;
 
 pub mod chain;
+pub mod closure;
 pub mod cluster;
 pub mod collection;
 pub mod gateway;
@@ -33,6 +34,7 @@ pub mod kernel;
 pub mod object;
 pub mod scalar;
 pub mod state;
+pub mod stream;
 pub mod txn;
 
 const MIN_CACHE_SIZE: u64 = 5000;

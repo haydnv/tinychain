@@ -41,6 +41,10 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
         Self { txn, scope }
     }
 
+    pub fn from_scope(txn: &'a Txn, scope: Scope<'a, T>) -> Self {
+        Self { txn, scope }
+    }
+
     /// Resolve the state of the variable `capture`, including any of its dependencies.
     pub async fn capture(mut self, capture: Id) -> TCResult<State> {
         debug!("execute op & capture {}", capture);

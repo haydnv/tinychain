@@ -7,24 +7,26 @@ use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::Id;
+use tcgeneric::{Id, TCBoxTryStream};
 
 use crate::chain::ChainView;
 use crate::collection::CollectionView;
 use crate::fs;
 use crate::object::ObjectView;
-use crate::scalar::Scalar;
+use crate::scalar::{OpDef, Scalar};
 use crate::txn::Txn;
 
 use super::State;
 
 /// A view of a [`State`] within a single [`Txn`], used for serialization.
 pub enum StateView<'en> {
-    Collection(CollectionView<'en>),
     Chain(ChainView<'en>),
+    Closure((HashMap<Id, StateView<'en>>, OpDef)),
+    Collection(CollectionView<'en>),
     Map(HashMap<Id, StateView<'en>>),
     Object(Box<ObjectView<'en>>),
     Scalar(Scalar),
+    Stream(en::SeqStream<TCResult<StateView<'en>>, TCBoxTryStream<'en, StateView<'en>>>),
     Tuple(Vec<StateView<'en>>),
 }
 
@@ -35,13 +37,14 @@ impl<'en> IntoView<'en, fs::Dir> for State {
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
+            Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
+            Self::Closure(closure) => closure.into_view(txn).map_ok(StateView::Closure).await,
             Self::Collection(collection) => {
                 collection
                     .into_view(txn)
                     .map_ok(StateView::Collection)
                     .await
             }
-            Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
             Self::Map(map) => {
                 let map_view = stream::iter(map.into_iter())
                     .map(|(key, state)| state.into_view(txn.clone()).map_ok(|view| (key, view)))
@@ -59,6 +62,7 @@ impl<'en> IntoView<'en, fs::Dir> for State {
                     .await
             }
             Self::Scalar(scalar) => Ok(StateView::Scalar(scalar)),
+            Self::Stream(stream) => stream.into_view(txn).map_ok(StateView::Stream).await,
             Self::Tuple(tuple) => {
                 let tuple_view = stream::iter(tuple.into_iter())
                     .map(|state| state.into_view(txn.clone()))
@@ -76,10 +80,12 @@ impl<'en> en::IntoStream<'en> for StateView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Collection(collection) => collection.into_stream(encoder),
+            Self::Closure(closure) => closure.into_stream(encoder),
             Self::Chain(chain) => chain.into_stream(encoder),
             Self::Map(map) => map.into_stream(encoder),
             Self::Object(object) => object.into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
+            Self::Stream(stream) => stream.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_stream(encoder),
         }
     }
