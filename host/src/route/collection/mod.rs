@@ -42,11 +42,12 @@ impl Route for Static {
             return None;
         }
 
-        #[cfg(feature = "tensor")]
-        if path[0] == tensor::PREFIX {
-            return tensor::Static.route(&path[1..]);
+        match path[0].as_str() {
+            "btree" => btree::Static.route(&path[1..]),
+            "table" => table::Static.route(&path[1..]),
+            #[cfg(feature = "tensor")]
+            "tensor" => tensor::Static.route(&path[1..]),
+            _ => None,
         }
-
-        None
     }
 }

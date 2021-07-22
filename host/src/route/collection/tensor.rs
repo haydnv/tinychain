@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
+use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, Tensor};
 use crate::fs;
@@ -18,8 +18,6 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Handler, Route};
-
-pub const PREFIX: Label = label("tensor");
 
 struct ConstantHandler;
 
@@ -39,6 +37,18 @@ impl<'a> Handler<'a> for ConstantHandler {
             })
         }))
     }
+}
+
+struct CopyDenseHandler;
+
+impl<'a> Handler<'a> for CopyDenseHandler {
+
+}
+
+struct CopySparseHandler;
+
+impl<'a> Handler<'a> for CopySparseHandler {
+
 }
 
 struct CreateHandler {
@@ -193,15 +203,22 @@ impl<T> From<T> for TransposeHandler<T> {
 impl Route for TensorType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
-            Some(Box::new(CreateHandler { class: *self }))
-        } else if path.len() == 1 && self == &Self::Dense {
-            match path[0].as_str() {
+            return Some(Box::new(CreateHandler { class: *self }));
+        } else if path.len() != 1 {
+            return None;
+        }
+
+        match self {
+            Self::Dense => match path[0].as_str() {
+                "copy_from" => Some(Box::new(CopyDenseHandler)),
                 "constant" => Some(Box::new(ConstantHandler)),
                 "range" => Some(Box::new(RangeHandler)),
                 _ => None,
             }
-        } else {
-            None
+            Self::Sparse => match path[0].as_str() {
+                "copy_from" => Some(Box::new(CopySparseHandler)),
+                _ => None,
+            }
         }
     }
 }
@@ -514,6 +531,26 @@ where
     }
 }
 
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path[0].as_str() == "dense" {
+            TensorType::Dense.route(&path[1..])
+        } else if path[0].as_str() == "sparse" {
+            TensorType::Sparse.route(&path[1..])
+        } else if path == &["einsum"] {
+            Some(Box::new(EinsumHandler))
+        } else {
+            None
+        }
+    }
+}
+
 async fn constant<S>(txn: &Txn, shape: S, value: Number) -> TCResult<State>
 where
     Shape: From<S>,
@@ -662,25 +699,5 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
             Ok(Bounds { axes })
         }
         other => Err(TCError::bad_request("invalid tensor bounds", other)),
-    }
-}
-
-pub struct Static;
-
-impl Route for Static {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            return None;
-        }
-
-        if path[0].as_str() == "dense" {
-            TensorType::Dense.route(&path[1..])
-        } else if path[0].as_str() == "sparse" {
-            TensorType::Sparse.route(&path[1..])
-        } else if path == &["einsum"] {
-            Some(Box::new(EinsumHandler))
-        } else {
-            None
-        }
     }
 }

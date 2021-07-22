@@ -14,6 +14,17 @@ use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
+use crate::stream::TCStream;
+
+impl Route for BTreeType {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if self == &Self::default() {
+            Static.route(path)
+        } else {
+            None
+        }
+    }
+}
 
 struct CreateHandler;
 
@@ -39,16 +50,6 @@ impl<'a> Handler<'a> for CreateHandler {
                     .await
             })
         }))
-    }
-}
-
-impl Route for BTreeType {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() && self == &Self::File {
-            Some(Box::new(CreateHandler))
-        } else {
-            None
-        }
     }
 }
 
@@ -140,6 +141,16 @@ impl<'a, T> From<&'a T> for BTreeHandler<'a, T> {
     }
 }
 
+struct CopyHandler;
+
+impl<'a> Handler<'a> for CopyHandler {
+
+}
+
+struct StreamHandler<T> {
+    btree: T,
+}
+
 struct CountHandler<'a, T> {
     btree: &'a T,
 }
@@ -206,6 +217,36 @@ impl<'a, T> From<&'a T> for FirstHandler<'a, T> {
     }
 }
 
+impl<'a, T> Handler<'a> for StreamHandler<T>
+where
+    T: BTreeInstance + 'a,
+    BTree: From<T>,
+    BTree: From<T::Slice>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    Ok(TCStream::from(BTree::from(self.btree)).into())
+                } else {
+                    let range = cast_into_range(Scalar::Value(key))?;
+                    let slice = self.btree.slice(range, false)?;
+                    Ok(TCStream::from(BTree::from(slice)).into())
+                }
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for StreamHandler<T> {
+    fn from(btree: T) -> Self {
+        Self { btree }
+    }
+}
+
 struct ReverseHandler<T> {
     btree: T,
 }
@@ -258,6 +299,7 @@ fn route<'a, T: BTreeInstance>(
     path: &'a [PathSegment],
 ) -> Option<Box<dyn Handler<'a> + 'a>>
 where
+    BTree: From<T>,
     BTree: From<T::Slice>,
 {
     if path.is_empty() {
@@ -271,6 +313,20 @@ where
         }
     } else {
         None
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CreateHandler))
+        } else if path == &["copy_from"] {
+            Some(Box::new(CopyHandler))
+        } else {
+            None
+        }
     }
 }
 

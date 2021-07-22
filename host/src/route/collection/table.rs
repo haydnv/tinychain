@@ -18,6 +18,12 @@ use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 
+struct CopyHandler;
+
+impl<'a> Handler<'a> for CopyHandler {
+
+}
+
 struct CreateHandler;
 
 impl<'a> Handler<'a> for CreateHandler {
@@ -450,6 +456,20 @@ fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
         }
     } else {
         None
+    }
+}
+
+pub struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            None
+        } else if path == &["copy_from"] {
+            Some(Box::new(CopyHandler))
+        } else {
+            None
+        }
     }
 }
 
