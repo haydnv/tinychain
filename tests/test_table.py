@@ -65,7 +65,7 @@ class TableTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.update = tc.After(cxt.inserts, cxt.table.update({"views": slice(10), {"views": 0}))
+        cxt.update = tc.After(cxt.inserts, cxt.table.update({"views": slice(10)}, {"views": 0}))
         cxt.result = tc.After(cxt.update, cxt.table.where({"views": slice(1)}).count())
 
         result = self.host.post(ENDPOINT, cxt)
