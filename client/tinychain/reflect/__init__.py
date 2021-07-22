@@ -31,6 +31,13 @@ def is_op(fn):
     return isinstance(fn, Method) or isinstance(fn, Op)
 
 
+def is_ref(state):
+    from tinychain.ref import Ref
+    from tinychain.util import URI
+
+    return isinstance(state, Ref) or isinstance(state, URI)
+
+
 def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:
         return default

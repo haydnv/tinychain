@@ -1,6 +1,7 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
 from tinychain import ref
+from tinychain.reflect import is_ref
 from tinychain.reflect.meta import Meta
 from tinychain.state import State
 from tinychain.util import uri, URI
@@ -11,20 +12,20 @@ class Chain(State, metaclass=Meta):
 
     __uri__ = uri(State) + "/chain"
 
-    def __new__(cls, spec):
-        if isinstance(spec, ref.Ref) or isinstance(spec, URI):
+    def __new__(cls, form):
+        if is_ref(form):
             return State.__new__(cls)
 
-        elif isinstance(spec, State):
+        elif isinstance(form, State):
 
-            class _Chain(cls, type(spec)):
+            class _Chain(cls, type(form)):
                 def __json__(self):
                     return cls.__json__(self)
 
             return State.__new__(_Chain)
 
         else:
-            raise ValueError(f"Chain subject must be a State, not {spec}")
+            raise ValueError(f"Chain subject must be a State, not {form}")
 
     def set(self, value):
         """Update the value of this `Chain`."""
