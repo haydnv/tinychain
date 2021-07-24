@@ -41,41 +41,30 @@ class State(object):
     def __repr__(self):
         return f"{self.__class__.__name__}({form_of(self)})"
 
-    def _method(self, name):
-        if isinstance(form_of(self), ref.Op):
-            return ref.MethodSubject(self, name)
-
-        subject = uri(self).append(name)
-        if subject.startswith("/state") and subject.path() != uri(self.__class__):
-            raise ValueError(
-                f"cannot call instance method {name} with an absolute path: {subject}")
-
-        return subject
-
     def _get(self, name, key=None, rtype=None):
-        subject = self._method(name)
+        subject = ref.MethodSubject(self, name)
+        op_ref = ref.Get(subject, key)
         rtype = State if rtype is None else rtype
-        return rtype(ref.Get(subject, key))
+        return rtype(op_ref)
 
     def _put(self, name, key=None, value=None):
         from .value import Nil
 
-        subject = self._method(name)
+        subject = ref.MethodSubject(self, name)
         return Nil(ref.Put(subject, key, value))
 
-    def _post(self, _method_name, params, rtype):
+    def _post(self, name, params, rtype):
         from .value import Nil
 
-        subject = self._method(_method_name)
-        if rtype is None:
-            return Nil(ref.Post(subject.params))
-        else:
-            return rtype(ref.Post(subject, params))
+        subject = ref.MethodSubject(self, name)
+        op_ref = ref.Post(subject, params)
+        rtype = Nil if rtype is None else rtype
+        return rtype(op_ref)
 
     def _delete(self, name, key=None):
         from .value import Nil
 
-        subject = self._method(name)
+        subject = ref.MethodSubject(self, name)
         return Nil(ref.Delete(subject, key))
 
     def dtype(self):
@@ -118,7 +107,7 @@ class Tuple(State):
 
     def map(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("map", Map(op=op), rtype)
+        return self._post("map", {"op": op}, rtype)
 
 
 # Scalar types

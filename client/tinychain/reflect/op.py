@@ -28,7 +28,7 @@ class Get(Op):
     __uri__ = uri(op.Get)
 
     def __call__(self, key=None):
-        return ref.Get(uri(self), key)
+        return ref.Get(self, key)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -55,6 +55,9 @@ class Get(Op):
     def __ref__(self, name):
         return op.Get(URI(name))
 
+    def __repr__(self):
+        return f"GET Op with form {self.form}"
+
 
 class Put(Op):
     __uri__ = uri(op.Put)
@@ -66,6 +69,9 @@ class Put(Op):
 
         self.rtype = rtype
         Op.__init__(self, form)
+
+    def __call__(self, key=None, value=None):
+        return ref.Put(self, key, value)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -97,6 +103,9 @@ class Put(Op):
     def __ref__(self, name):
         return op.Put(URI(name))
 
+    def __repr__(self):
+        return f"PUT Op with form {self.form}"
+
 
 class Post(Op):
     __uri__ = uri(op.Post)
@@ -104,6 +113,15 @@ class Post(Op):
     def __init__(self, form):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
+
+    def __call__(self, *args, **kwargs):
+        if args and kwargs:
+            raise ValueError("POST Op takes one arg (a Map) or kwargs, but not both")
+
+        if not args:
+            args = kwargs
+
+        return ref.Get(self, args)
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -126,6 +144,9 @@ class Post(Op):
     def __ref__(self, name):
         return op.Post(URI(name))
 
+    def __repr__(self):
+        return f"POST Op with form {self.form}"
+
 
 class Delete(Op):
     __uri__ = uri(op.Delete)
@@ -138,8 +159,14 @@ class Delete(Op):
         self.rtype = rtype
         Op.__init__(self, form)
 
+    def __call__(self, key=None):
+        return ref.Get(self, key)
+
     def __form__(self):
         return Get.__form__(self)
 
     def __ref__(self, name):
         return op.Delete(URI(name))
+
+    def __repr__(self):
+        return f"DELETE Op with form {self.form}"

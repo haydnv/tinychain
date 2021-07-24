@@ -4,16 +4,17 @@ import inspect
 
 from collections import OrderedDict
 
+
 class Context(object):
     """A transaction context."""
 
     def __init__(self, context=None):
         object.__setattr__(self, "form", OrderedDict())
-        object.__setattr__(self, "ns", {})
 
         if context:
             if isinstance(context, self.__class__):
-                raise ValueError("cannot assign a Context to a Context", context)
+                for name, value in context.form.items():
+                    setattr(self, name, value)
             else:
                 for name, value in dict(context).items():
                     setattr(self, name, value)
@@ -52,19 +53,10 @@ class Context(object):
 
         deanonymize(state, self)
 
-        if name in object.__getattribute__(self, "form"):
-            raise ValueError(f"Context already has a value named {name}")
+        if name in self.form:
+            raise ValueError(f"Context already has a value named {name} (contents are {self.form}")
         else:
             self.form[name] = state
-            self.ns[name] = 0
-
-    def generate_name(self, name):
-        if name in self.ns:
-            self.ns[name] += 1
-            return f"{name}_{self.ns[name]}"
-        else:
-            self.ns[name] = 0
-            return name
 
 
 def form_of(state):
@@ -124,6 +116,34 @@ class URI(object):
         self._root = str(root)
         self._path = path
 
+    def __add__(self, other):
+        if other == "/":
+            return self
+        else:
+            return URI(str(self) + other)
+
+    def __radd__(self, other):
+        return URI(other) + str(self)
+
+    def __eq__(self, other):
+        return str(self) == str(other)
+
+    def __json__(self):
+        return {str(self): []}
+
+    def __str__(self):
+        root = str(self._root)
+        if root.startswith('/') or root.startswith('$') or "://" in root:
+            pass
+        else:
+            root = f"${root}"
+
+        if self._path:
+            path = "/".join(self._path)
+            return f"{root}/{path}"
+        else:
+            return root
+
     def append(self, name):
         """
         Append a segment to this `URI`.
@@ -141,13 +161,9 @@ class URI(object):
         return URI(str(self), [name])
 
     def is_id(self):
-        if str(self).startswith('/'):
-            return False
+        """Return `True` if this URI is a simple ID, like `$foo`."""
 
-        if "://" in str(self):
-            return False
-
-        return True
+        return '/' not in str(self)
 
     def host(self):
         """Return the host segment of this `URI`, if present."""
@@ -204,33 +220,22 @@ class URI(object):
             if i > 0:
                 return self._root[:i]
 
+    def subject(self):
+        """Return only the ID portion of this `URI`, or `None` in the case of a link."""
+
+        if "://" in self._root:
+            return None
+        elif self._root.startswith('/'):
+            return None
+
+        uri = str(self)
+        if '/' in uri:
+            return URI(uri[:uri.index('/')])
+        else:
+            return URI(uri)
+
     def startswith(self, prefix):
         return str(self).startswith(prefix)
-
-    def __add__(self, other):
-        if other == "/":
-            return self
-        else:
-            return URI(str(self) + other)
-
-    def __radd__(self, other):
-        return URI(other) + str(self)
-
-    def __json__(self):
-        return {str(self): []}
-
-    def __str__(self):
-        root = str(self._root)
-        if root.startswith('/') or root.startswith('$') or "://" in root:
-            pass
-        else:
-            root = f"${root}"
-
-        if self._path:
-            path = "/".join(self._path)
-            return f"{root}/{path}"
-        else:
-            return root
 
 
 def uri(subject):
@@ -283,7 +288,9 @@ def to_json(obj):
 def deanonymize(state, context):
     """Assign an auto-generated name to the given state within the given context."""
 
-    if hasattr(state, "__ns__"):
+    if inspect.isclass(state):
+        return
+    elif hasattr(state, "__ns__"):
         state.__ns__(context)
     elif isinstance(state, tuple) or isinstance(state, list):
         for item in state:

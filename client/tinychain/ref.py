@@ -1,5 +1,6 @@
 """Reference types."""
 
+from tinychain.reflect import is_op
 from tinychain.util import deanonymize, to_json, uri, URI
 
 
@@ -71,12 +72,16 @@ class With(Ref):
 
     def __init__(self, capture, op):
         self.capture = []
+
         for ref in capture:
-            ref = uri(ref)
-            if ref.is_id():
-                self.capture.append(ref)
-            else:
-                raise ValueError(f"reference in a Closure must specify an ID in the current scope, not {ref}")
+            captured = uri(ref).subject()
+
+            if captured is None:
+                raise ValueError(f"With can only capture states with an ID in the current context, not {ref}")
+            elif captured == "$self":
+                raise ValueError("cannot capture $self in a closure")
+
+            self.capture.append(captured)
 
         self.op = op
 
@@ -129,7 +134,7 @@ class Get(Op):
         else:
             subject = uri(self.subject)
             if subject is None:
-                raise ValueError(f"subject of Get op ref {self} has no URI")
+                raise ValueError(f"subject of Get op ref {self.subject} ({type(self.subject)}) has no URI")
 
             is_scalar = subject.startswith("/state/scalar")
 
@@ -184,14 +189,23 @@ class Delete(Op):
 
 class MethodSubject(object):
     def __init__(self, subject, method_name):
-        self.__uri__ = None
+        if uri(subject).startswith('$'):
+            self.__uri__ = uri(subject).append(method_name)
+        else:
+            self.__uri__ = None
+
         self.subject = subject
         self.method_name = method_name
 
     def __ns__(self, cxt):
-        name = cxt.generate_name(self.subject.__class__.__name__)
+        if uri(self):
+            return
+
+        name = f"{self.subject.__class__.__name__}_{format(id(self.subject), 'x')}"
         self.__uri__ = URI(name).append(self.method_name)
-        setattr(cxt, name, self.subject)
+
+        if name not in cxt.form:
+            setattr(cxt, name, self.subject)
 
     def __json__(self):
         if self.__uri__ is None:
@@ -204,3 +218,7 @@ class MethodSubject(object):
             return str(uri(self.subject).append(self.method_name))
         else:
             return str(uri(self))
+
+    def assign_uri(self, subject_uri):
+        assert self.__uri__ is None
+        self.__uri__ = subject_uri.append(self.method_name)

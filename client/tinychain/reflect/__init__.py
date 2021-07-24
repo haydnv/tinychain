@@ -2,6 +2,8 @@ import inspect
 
 from pydoc import locate
 
+from tinychain.util import form_of, uri, URI
+
 from .meta import Meta
 
 
@@ -33,7 +35,6 @@ def is_op(fn):
 
 def is_ref(state):
     from tinychain.ref import Ref
-    from tinychain.util import URI
 
     return isinstance(state, Ref) or isinstance(state, URI)
 
