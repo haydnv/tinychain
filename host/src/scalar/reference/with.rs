@@ -6,6 +6,7 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -59,7 +60,10 @@ impl Refer for With {
         let closed_over = self
             .capture
             .into_iter()
-            .map(|id| context.resolve_id(&id).map(|state| (id, state)))
+            .map(|id| context.resolve_id(&id).map(|state| {
+                debug!("{} resolved to {}", id, state);
+                (id, state)
+            }))
             .collect::<TCResult<Map<State>>>()?;
 
         Ok(Closure::new(closed_over, self.op).into())

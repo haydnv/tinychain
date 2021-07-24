@@ -184,7 +184,7 @@ async fn call_method<T: Instance + Route>(
         return Ok(State::default());
     };
 
-    Executor::with_context(txn, subject, context.into(), form)
+    Executor::with_context(txn, Some(subject), context.into(), form)
         .capture(capture)
         .await
 }

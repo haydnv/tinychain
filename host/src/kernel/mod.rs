@@ -170,8 +170,7 @@ impl Kernel {
                 let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
                 OpDef::call(op_def, &txn, context).await
             } else {
-                data.resolve(&ExeScope::new(&State::default(), context), &txn)
-                    .await
+                data.resolve(&ExeScope::new(None, context), &txn).await
             }
         } else if let Some(class) = StateType::from_path(path) {
             let params = data.try_into()?;

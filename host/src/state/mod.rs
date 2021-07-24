@@ -217,9 +217,27 @@ impl State {
         }
     }
 
+    /// Return true if this `State` variant is a [`Map`].
+    pub fn is_map(&self) -> bool {
+        match self {
+            Self::Scalar(scalar) => scalar.is_map(),
+            Self::Map(_) => true,
+            _ => false,
+        }
+    }
+
     /// Return false if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_some(&self) -> bool {
         !self.is_none()
+    }
+
+    /// Return true if this `State` variant is a [`Tuple`].
+    pub fn is_tuple(&self) -> bool {
+        match self {
+            Self::Scalar(scalar) => scalar.is_tuple(),
+            Self::Tuple(_) => true,
+            _ => false,
+        }
     }
 
     /// Return true if this `State` is a reference that needs to be resolved.
@@ -229,6 +247,31 @@ impl State {
             Self::Scalar(scalar) => scalar.is_ref(),
             Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
             _ => false,
+        }
+    }
+
+    /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
+    pub fn try_into_map<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Map<State>> {
+        match self {
+            State::Map(states) => Ok(states),
+            State::Scalar(Scalar::Map(states)) => Ok(states
+                .into_iter()
+                .map(|(id, scalar)| (id, State::Scalar(scalar)))
+                .collect()),
+            other => Err((err)(other)),
+        }
+    }
+
+    pub fn try_into_tuple<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Tuple<State>> {
+        match self {
+            State::Tuple(tuple) => Ok(tuple),
+            State::Scalar(Scalar::Tuple(tuple)) => {
+                Ok(tuple.into_iter().map(State::Scalar).collect())
+            }
+            State::Scalar(Scalar::Value(Value::Tuple(tuple))) => {
+                Ok(tuple.into_iter().map(State::from).collect())
+            }
+            other => Err((err)(other)),
         }
     }
 }
@@ -427,6 +470,12 @@ impl From<Map<Scalar>> for State {
 impl From<Object> for State {
     fn from(object: Object) -> Self {
         State::Object(object)
+    }
+}
+
+impl From<OpDef> for State {
+    fn from(op_def: OpDef) -> Self {
+        State::Scalar(Scalar::Op(op_def))
     }
 }
 

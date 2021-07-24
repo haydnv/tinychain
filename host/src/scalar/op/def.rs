@@ -206,7 +206,7 @@ impl OpDef {
             .into_iter()
             .chain(op_def.into_iter().map(|(id, s)| (id, s.into())));
 
-        Executor::new(txn, &State::default(), context)
+        Executor::<Self>::new(txn, None, context)
             .capture(capture)
             .await
     }

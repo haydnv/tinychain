@@ -24,7 +24,7 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a Txn,
-        subject: &'a T,
+        subject: Option<&'a T>,
         data: I,
     ) -> Self {
         let scope = Scope::new(subject, data);
@@ -33,7 +33,7 @@ impl<'a, T: Instance + Public> Executor<'a, T> {
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a Txn,
-        subject: &'a T,
+        subject: Option<&'a T>,
         context: Map<State>,
         iter: I,
     ) -> Self {

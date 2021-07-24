@@ -30,6 +30,7 @@ pub use tc_value::*;
 pub mod op;
 pub mod reference;
 
+const ERR_NO_SELF: &str = "Op context has no $self--consider using a method instead";
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 
 /// The label of an instance in its own method context
@@ -129,7 +130,15 @@ pub enum Scalar {
 }
 
 impl Scalar {
-    /// Return true if self is an empty tuple, default link, or `Value::None`.
+    /// Return `true` if this `Scalar` variant is a [`Map`].
+    pub fn is_map(&self) -> bool {
+        match self {
+            Self::Map(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Return `true` if self is an empty tuple, default link, or `Value::None`.
     pub fn is_none(&self) -> bool {
         match self {
             Self::Map(map) => map.is_empty(),
@@ -139,12 +148,21 @@ impl Scalar {
         }
     }
 
-    /// Return true if self is a reference type which needs to be resolved.
+    /// Return `true` if this is a reference type which needs to be resolved.
     pub fn is_ref(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(Self::is_ref),
             Self::Ref(_) => true,
             Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            _ => false,
+        }
+    }
+
+    /// Return `true` if this `Scalar` variant is a [`Tuple`].
+    pub fn is_tuple(&self) -> bool {
+        match self {
+            Self::Tuple(_) => true,
+            Self::Value(value) => value.is_tuple(),
             _ => false,
         }
     }
@@ -210,16 +228,28 @@ impl Scalar {
                         debug!("cast into DELETE ref from {}", self);
 
                         let (subject, key): (Scalar, Scalar) = self.opt_cast_into().unwrap();
-                        let delete_ref = match subject {
+                        let delete_ref: Option<(Subject, Scalar)> = match subject {
                             Scalar::Ref(tc_ref) => match *tc_ref {
                                 TCRef::Id(id_ref) => Some((id_ref.into(), key)),
                                 TCRef::Op(OpRef::Get((subject, none))) if none.is_none() => {
                                     Some((subject, key))
                                 }
-                                _ => None,
+                                other => {
+                                    debug!("invalid DELETE subject: {}", other);
+                                    None
+                                }
                             },
-                            _ => None,
+                            other => {
+                                debug!("invalid DELETE subject: {}", other);
+                                None
+                            }
                         };
+
+                        if let Some((subject, key)) = &delete_ref {
+                            debug!("DELETE ref is {}: {}", subject, key);
+                        } else {
+                            debug!("could not cast into DELETE ref");
+                        }
 
                         delete_ref.map(OpRef::Delete).map(TCRef::Op).map(Self::from)
                     } else if self.matches::<Tuple<Scalar>>() {
@@ -1178,12 +1208,15 @@ impl fmt::Display for Scalar {
 
 /// The execution scope of a [`Scalar`], such as an [`OpDef`] or [`TCRef`]
 pub struct Scope<'a, T> {
-    subject: &'a T,
+    subject: Option<&'a T>,
     data: Map<State>,
 }
 
 impl<'a, T: Instance + Public> Scope<'a, T> {
-    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: &'a T, data: I) -> Self {
+    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
+        subject: Option<&'a T>,
+        data: I,
+    ) -> Self {
         let data = data.into_iter().map(|(id, s)| (id, s.into())).collect();
 
         debug!("new execution scope: {}", data);
@@ -1191,7 +1224,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     }
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
-        subject: &'a T,
+        subject: Option<&'a T>,
         context: Map<State>,
         data: I,
     ) -> Self {
@@ -1235,14 +1268,8 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         key: Value,
     ) -> TCResult<State> {
         if subject == &SELF {
-            debug!(
-                "{} GET {}: {}",
-                self.subject.class(),
-                TCPath::from(path),
-                key
-            );
-
-            self.subject.get(txn, path, key).await
+            let subject = self.subject()?;
+            subject.get(txn, path, key).await
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.get(txn, path, key).await
         } else {
@@ -1259,7 +1286,8 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         value: State,
     ) -> TCResult<()> {
         if subject == &SELF {
-            self.subject.put(txn, path, key, value).await
+            let subject = self.subject()?;
+            subject.put(txn, path, key, value).await
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.put(txn, path, key, value).await
         } else {
@@ -1275,7 +1303,8 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         params: Map<State>,
     ) -> TCResult<State> {
         if subject == &SELF {
-            self.subject.post(txn, path, params).await
+            let subject = self.subject()?;
+            subject.post(txn, path, params).await
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.post(txn, path, params).await
         } else {
@@ -1291,18 +1320,20 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         key: Value,
     ) -> TCResult<()> {
         if subject == &SELF {
-            debug!(
-                "{} GET {}: {}",
-                self.subject.class(),
-                TCPath::from(path),
-                key
-            );
-
-            self.subject.delete(txn, path, key).await
+            let subject = self.subject()?;
+            subject.delete(txn, path, key).await
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.delete(txn, path, key).await
         } else {
             Err(TCError::not_found(subject))
+        }
+    }
+
+    fn subject(&self) -> TCResult<&T> {
+        if let Some(subject) = self.subject {
+            Ok(subject)
+        } else {
+            Err(TCError::unsupported(ERR_NO_SELF))
         }
     }
 }

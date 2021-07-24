@@ -387,6 +387,7 @@ pub enum Value {
 }
 
 impl Value {
+    /// Return a [`TCError`] if this `Value` is not none.
     #[inline]
     pub fn expect_none(&self) -> TCResult<()> {
         if self.is_none() {
@@ -396,6 +397,7 @@ impl Value {
         }
     }
 
+    /// Return `true` if this `Value` is a default [`Link`], `Value::None`, or empty [`Tuple`].
     pub fn is_none(&self) -> bool {
         match self {
             Self::Link(link) => link.host().is_none() && link.path() == &TCPathBuf::default(),
@@ -405,8 +407,17 @@ impl Value {
         }
     }
 
+    /// Return `true` if this value is *not* a default [`Link`], `Value::None`, or empty [`Tuple`].
     pub fn is_some(&self) -> bool {
         !self.is_none()
+    }
+
+    /// Return `true` if this `Value` variant is a [`Tuple`].
+    pub fn is_tuple(&self) -> bool {
+        match self {
+            Self::Tuple(_) => true,
+            _ => false,
+        }
     }
 
     pub fn into_type(self, class: ValueType) -> Option<Self> {
