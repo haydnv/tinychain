@@ -336,14 +336,6 @@ impl Refer for OpRef {
         }
     }
 
-    fn is_derived_write(&self) -> bool {
-        match self {
-            Self::Put((Subject::Ref(id_ref, _path), _, _)) => id_ref.id() != &SELF,
-            Self::Delete((Subject::Ref(id_ref, _path), _)) => id_ref.id() != &SELF,
-            _ => false,
-        }
-    }
-
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         let subject = match self {
             Self::Put((Subject::Link(link), _, _)) => Some(link),

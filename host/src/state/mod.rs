@@ -258,18 +258,6 @@ impl Refer for State {
         }
     }
 
-    fn is_derived_write(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(|state| state.is_derived_write()),
-
-            Self::Scalar(scalar) => scalar.is_derived_write(),
-
-            Self::Tuple(tuple) => tuple.iter().any(|state| state.is_derived_write()),
-
-            _ => false,
-        }
-    }
-
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::Map(map) => map

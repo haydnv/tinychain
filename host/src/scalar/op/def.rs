@@ -156,12 +156,6 @@ impl OpDef {
         .map(|(id, _)| id)
     }
 
-    pub fn is_derived_write(&self) -> bool {
-        self.form()
-            .map(|(_, provider)| provider)
-            .any(|provider| provider.is_derived_write())
-    }
-
     pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.form()
             .map(|(_, provider)| provider)

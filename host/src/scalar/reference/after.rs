@@ -35,10 +35,6 @@ impl Refer for After {
         }
     }
 
-    fn is_derived_write(&self) -> bool {
-        self.when.is_derived_write() || self.then.is_derived_write()
-    }
-
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.when.is_inter_service_write(cluster_path)
             || self.then.is_inter_service_write(cluster_path)

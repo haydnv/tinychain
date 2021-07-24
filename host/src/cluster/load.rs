@@ -79,16 +79,6 @@ pub async fn instantiate(
                     op_def.dereference_self(link.path())
                 };
 
-                for (id, provider) in op_def.form() {
-                    // make sure all writes to a chain subject are recorded
-                    if provider.is_derived_write() {
-                        return Err(TCError::unsupported(format!(
-                            "write op {} may not write to a derived view: {}",
-                            id, provider
-                        )));
-                    }
-                }
-
                 cluster_proto.insert(id, Scalar::Op(op_def));
             }
             other => {

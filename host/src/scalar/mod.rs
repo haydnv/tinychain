@@ -323,16 +323,6 @@ impl Refer for Scalar {
         }
     }
 
-    fn is_derived_write(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(|scalar| scalar.is_derived_write()),
-            Self::Op(op_def) => op_def.is_derived_write(),
-            Self::Ref(tc_ref) => tc_ref.is_derived_write(),
-            Self::Tuple(tuple) => tuple.iter().any(|scalar| scalar.is_derived_write()),
-            _ => false,
-        }
-    }
-
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::Map(map) => map
