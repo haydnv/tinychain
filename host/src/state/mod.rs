@@ -280,6 +280,7 @@ impl State {
 impl Refer for State {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
+            Self::Closure(closure) => Self::Closure(closure.dereference_self(path)),
             Self::Map(map) => {
                 let map = map
                     .into_iter()
@@ -303,6 +304,8 @@ impl Refer for State {
 
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
+            Self::Closure(closure) => closure.is_inter_service_write(cluster_path),
+
             Self::Map(map) => map
                 .values()
                 .any(|state| state.is_inter_service_write(cluster_path)),
@@ -319,6 +322,7 @@ impl Refer for State {
 
     fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
+            Self::Closure(closure) => Self::Closure(closure.reference_self(path)),
             Self::Map(map) => {
                 let map = map
                     .into_iter()

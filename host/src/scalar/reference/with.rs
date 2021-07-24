@@ -32,7 +32,7 @@ pub struct With {
 impl Refer for With {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         Self {
-            capture: self.capture,
+            capture: self.capture.into_iter().filter(|id| id != &SELF).collect(),
             op: self.op.dereference_self(path),
         }
     }
@@ -42,10 +42,17 @@ impl Refer for With {
     }
 
     fn reference_self(self, path: &TCPathBuf) -> Self {
-        Self {
-            capture: self.capture,
-            op: self.op.reference_self(path),
-        }
+        let before = self.op.clone();
+        let op = self.op.reference_self(path);
+        let capture = if op == before {
+            self.capture
+        } else {
+            let mut capture = self.capture;
+            capture.push(SELF.into());
+            capture
+        };
+
+        Self { capture, op }
     }
 
     fn requires(&self, deps: &mut HashSet<Id>) {
@@ -60,10 +67,12 @@ impl Refer for With {
         let closed_over = self
             .capture
             .into_iter()
-            .map(|id| context.resolve_id(&id).map(|state| {
-                debug!("{} resolved to {}", id, state);
-                (id, state)
-            }))
+            .map(|id| {
+                context.resolve_id(&id).map(|state| {
+                    debug!("{} resolved to {}", id, state);
+                    (id, state)
+                })
+            })
             .collect::<TCResult<Map<State>>>()?;
 
         Ok(Closure::new(closed_over, self.op).into())

@@ -8,10 +8,10 @@ use futures::stream::{FuturesUnordered, TryStreamExt};
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{Id, Map, Tuple};
+use tcgeneric::{Id, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
-use crate::scalar::{OpDef, Scalar};
+use crate::scalar::{OpDef, OpRef, Scalar, SELF};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -36,6 +36,35 @@ impl Closure {
     pub fn into_inner(self) -> (Map<State>, OpDef) {
         (self.context, self.op)
     }
+
+    pub fn dereference_self(self, path: &TCPathBuf) -> Self {
+        let mut context = self.context;
+        context.remove(&SELF.into());
+
+        let op = self.op.dereference_self(path);
+
+        Self { context, op }
+    }
+
+    pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        self.op.is_inter_service_write(cluster_path)
+    }
+
+    pub fn reference_self(self, path: &TCPathBuf) -> Self {
+        let before = self.op.clone();
+        let op = self.op.reference_self(path);
+
+        let context = if op == before {
+            self.context
+        } else {
+            let op_ref = OpRef::Get((path.clone().into(), Scalar::default()));
+            let mut context = self.context;
+            context.insert(SELF.into(), op_ref.into());
+            context
+        };
+
+        Self { context, op }
+    }
 }
 
 #[async_trait]
@@ -50,6 +79,7 @@ impl<'en> IntoView<'en, fs::Dir> for Closure {
             .into_iter()
             .map(|(id, state)| state.into_view(txn.clone()).map_ok(|view| (id, view)))
             .collect();
+
         while let Some((id, state)) = resolvers.try_next().await? {
             context.insert(id, state);
         }
