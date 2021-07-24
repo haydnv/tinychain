@@ -1,6 +1,6 @@
-from tinychain.ref import Put
+from tinychain.ref import Post, Put
 from tinychain.reflect import is_ref
-from tinychain.state import State
+from tinychain.state import Map, State
 from tinychain.util import uri
 
 
@@ -26,7 +26,7 @@ class Collection(State):
                 table = tc.table.copy_from(table_schema, btree.keys())
         """
 
-        return cls(Put(uri(cls) + "/copy_from", schema, source))
+        return cls(Post(uri(cls) + "/copy_from", Map(schema=schema, source=source)))
 
     @classmethod
     def load(cls, schema, data):
