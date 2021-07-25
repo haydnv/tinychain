@@ -39,6 +39,7 @@ pub const SELF: Label = label("self");
 /// The [`Class`] of a [`Scalar`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScalarType {
+    Cluster,
     Map,
     Op(OpDefType),
     Range,
@@ -58,6 +59,7 @@ impl NativeClass for ScalarType {
 
         if path.len() == 3 {
             match path[2].as_str() {
+                "cluster" => Some(Self::Cluster),
                 "map" => Some(Self::Map),
                 "range" => Some(Self::Range),
                 "tuple" => Some(Self::Tuple),
@@ -79,6 +81,7 @@ impl NativeClass for ScalarType {
         let prefix = TCPathBuf::from(PREFIX);
 
         match self {
+            Self::Cluster => prefix.append(label("cluster")),
             Self::Map => prefix.append(label("map")),
             Self::Op(odt) => odt.path(),
             Self::Range => prefix.append(label("range")),
@@ -108,6 +111,7 @@ impl From<ValueType> for ScalarType {
 impl fmt::Display for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Cluster => f.write_str("Cluster reference"),
             Self::Map => f.write_str("Map<Scalar>"),
             Self::Op(odt) => fmt::Display::fmt(odt, f),
             Self::Range => f.write_str("Range"),
@@ -118,9 +122,35 @@ impl fmt::Display for ScalarType {
     }
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct ClusterRef(TCPathBuf);
+
+impl ClusterRef {
+    pub fn into_path(self) -> TCPathBuf {
+        self.0
+    }
+
+    pub fn path(&self) -> &TCPathBuf {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ClusterRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "reference to Cluster at {:?}", self.0)
+    }
+}
+
+impl fmt::Display for ClusterRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "reference to Cluster at {}", self.0)
+    }
+}
+
 /// A scalar value, i.e. one which is always held in main memory and never split into blocks.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
+    Cluster(ClusterRef),
     Map(Map<Self>),
     Op(OpDef),
     Range(Range),
@@ -181,6 +211,7 @@ impl Scalar {
         use ScalarType as ST;
 
         match class {
+            ST::Cluster => self.opt_cast_into().map(ClusterRef).map(Self::Cluster),
             ST::Map => self.opt_cast_into().map(Self::Map),
             ST::Op(odt) => match odt {
                 ODT::Get => self.opt_cast_into().map(OpDef::Get).map(Self::Op),
@@ -314,6 +345,7 @@ impl Instance for Scalar {
     fn class(&self) -> ScalarType {
         use ScalarType as ST;
         match self {
+            Self::Cluster(_) => ST::Cluster,
             Self::Map(_) => ST::Map,
             Self::Op(op) => ST::Op(op.class()),
             Self::Range(_) => ST::Range,
@@ -358,11 +390,15 @@ impl Refer for Scalar {
             Self::Map(map) => map
                 .values()
                 .any(|scalar| scalar.is_inter_service_write(cluster_path)),
+
             Self::Op(op_def) => op_def.is_inter_service_write(cluster_path),
+
             Self::Ref(tc_ref) => tc_ref.is_inter_service_write(cluster_path),
+
             Self::Tuple(tuple) => tuple
                 .iter()
                 .any(|scalar| scalar.is_inter_service_write(cluster_path)),
+
             _ => false,
         }
     }
@@ -1155,6 +1191,7 @@ impl de::FromStream for Scalar {
 impl<'en> en::ToStream<'en> for Scalar {
     fn to_stream<E: en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         match self {
+            Scalar::Cluster(ClusterRef(path)) => single_entry(self.class().path(), path, e),
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
             Scalar::Range(range) => single_entry(self.class().path(), range, e),
@@ -1170,6 +1207,7 @@ impl<'en> en::IntoStream<'en> for Scalar {
         let classpath = self.class().path();
 
         match self {
+            Scalar::Cluster(ClusterRef(path)) => single_entry(classpath, path, e),
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
             Scalar::Range(range) => single_entry(classpath, range, e),
@@ -1183,6 +1221,7 @@ impl<'en> en::IntoStream<'en> for Scalar {
 impl fmt::Debug for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Scalar::Cluster(cluster) => fmt::Debug::fmt(cluster, f),
             Scalar::Map(map) => fmt::Debug::fmt(map, f),
             Scalar::Op(op) => fmt::Debug::fmt(op, f),
             Scalar::Range(range) => fmt::Debug::fmt(range, f),
@@ -1196,6 +1235,7 @@ impl fmt::Debug for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Scalar::Cluster(cluster) => fmt::Display::fmt(cluster, f),
             Scalar::Map(map) => fmt::Display::fmt(map, f),
             Scalar::Op(op) => fmt::Display::fmt(op, f),
             Scalar::Range(range) => fmt::Display::fmt(range, f),

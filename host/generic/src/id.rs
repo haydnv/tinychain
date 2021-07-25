@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::iter;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -317,12 +317,6 @@ impl<Idx: std::slice::SliceIndex<[PathSegment]>> std::ops::Index<Idx> for TCPath
     }
 }
 
-impl Extend<PathSegment> for TCPathBuf {
-    fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
-        self.segments.extend(iter)
-    }
-}
-
 impl IntoIterator for TCPathBuf {
     type Item = PathSegment;
     type IntoIter = std::vec::IntoIter<Self::Item>;
@@ -339,10 +333,16 @@ impl std::borrow::Borrow<[PathSegment]> for TCPathBuf {
 }
 
 impl Deref for TCPathBuf {
-    type Target = [PathSegment];
+    type Target = Vec<PathSegment>;
 
-    fn deref(&self) -> &[PathSegment] {
-        &self.segments[..]
+    fn deref(&self) -> &Vec<PathSegment> {
+        &self.segments
+    }
+}
+
+impl DerefMut for TCPathBuf {
+    fn deref_mut(&mut self) -> &mut Vec<PathSegment> {
+        &mut self.segments
     }
 }
 

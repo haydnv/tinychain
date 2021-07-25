@@ -7,6 +7,7 @@ use crate::state::State;
 
 use super::{EchoHandler, GetHandler, Handler, Route};
 
+mod cluster;
 mod op;
 mod value;
 
@@ -65,6 +66,7 @@ impl Route for Range {
 impl Route for Scalar {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
+            Self::Cluster(cluster) => cluster.route(path),
             Self::Map(map) => map.route(path),
             Self::Op(op_def) => op_def.route(path),
             Self::Range(range) => range.route(path),
