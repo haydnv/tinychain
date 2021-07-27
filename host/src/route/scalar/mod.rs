@@ -8,7 +8,6 @@ use crate::state::State;
 use super::{EchoHandler, GetHandler, Handler, Route};
 
 mod cluster;
-mod op;
 mod value;
 
 pub const PREFIX: Label = label("scalar");
@@ -68,11 +67,12 @@ impl Route for Scalar {
         match self {
             Self::Cluster(cluster) => cluster.route(path),
             Self::Map(map) => map.route(path),
-            Self::Op(op_def) => op_def.route(path),
+            Self::Op(op_def) if path.is_empty() => Some(Box::new(op_def.clone())),
             Self::Range(range) => range.route(path),
             Self::Ref(_) => None,
             Self::Value(value) => value.route(path),
             Self::Tuple(tuple) => tuple.route(path),
+            _ => None,
         }
     }
 }

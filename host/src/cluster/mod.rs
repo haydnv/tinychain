@@ -21,7 +21,7 @@ use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Link, OpDef, Scalar, Value};
+use crate::scalar::{Executor, Link, OpDef, Scalar, Value};
 use crate::state::{State, ToState};
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -161,7 +161,15 @@ impl Cluster {
             .grant(&self.actor, self.link.path().clone(), vec![scope])
             .await?;
 
-        OpDef::call(op.into_form(), &txn, context).await
+        let capture = if let Some(capture) = op.last().cloned() {
+            capture
+        } else {
+            return Ok(State::default());
+        };
+
+        Executor::with_context(&txn, Some(self), context, op.into_form())
+            .capture(capture)
+            .await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.

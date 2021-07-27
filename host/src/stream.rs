@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use destream::en;
 use futures::future;
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::TryStreamExt;
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
@@ -12,7 +12,6 @@ use tcgeneric::TCBoxTryStream;
 use crate::closure::Closure;
 use crate::collection::Collection;
 use crate::fs;
-use crate::scalar::OpDef;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 use crate::value::Value;
@@ -23,12 +22,11 @@ pub enum TCStream {
 }
 
 impl TCStream {
-    pub async fn for_each(self, txn: Txn, op: Closure) -> TCResult<()> {
+    pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
         let stream = self.into_stream(txn.clone()).await?;
 
         stream
-            .map(move |r| r.and_then(|state| op.clone().into_callable(state)))
-            .map_ok(|(context, op_def)| OpDef::call(op_def, &txn, context))
+            .map_ok(move |args| op.clone().call(&txn, args))
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |(), _none| future::ready(Ok(())))
             .await

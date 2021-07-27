@@ -11,7 +11,7 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -572,6 +572,63 @@ impl From<bool> for State {
 impl From<u64> for State {
     fn from(n: u64) -> Self {
         Self::Scalar(n.into())
+    }
+}
+
+impl<T1> CastFrom<(T1,)> for State
+where
+    State: CastFrom<T1>,
+{
+    fn cast_from(value: (T1,)) -> Self {
+        State::Tuple(vec![value.0.cast_into()].into())
+    }
+}
+
+impl<T1, T2> CastFrom<(T1, T2)> for State
+where
+    State: CastFrom<T1>,
+    State: CastFrom<T2>,
+{
+    fn cast_from(value: (T1, T2)) -> Self {
+        State::Tuple(vec![value.0.cast_into(), value.1.cast_into()].into())
+    }
+}
+
+impl<T1, T2, T3> CastFrom<(T1, T2, T3)> for State
+where
+    State: CastFrom<T1>,
+    State: CastFrom<T2>,
+    State: CastFrom<T3>,
+{
+    fn cast_from(value: (T1, T2, T3)) -> Self {
+        State::Tuple(
+            vec![
+                value.0.cast_into(),
+                value.1.cast_into(),
+                value.2.cast_into(),
+            ]
+            .into(),
+        )
+    }
+}
+
+impl<T1, T2, T3, T4> CastFrom<(T1, T2, T3, T4)> for State
+where
+    State: CastFrom<T1>,
+    State: CastFrom<T2>,
+    State: CastFrom<T3>,
+    State: CastFrom<T4>,
+{
+    fn cast_from(value: (T1, T2, T3, T4)) -> Self {
+        State::Tuple(
+            vec![
+                value.0.cast_into(),
+                value.1.cast_into(),
+                value.2.cast_into(),
+                value.3.cast_into(),
+            ]
+            .into(),
+        )
     }
 }
 

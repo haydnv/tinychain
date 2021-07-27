@@ -5,10 +5,10 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use safecast::{CastFrom, TryCastFrom};
 
 use tc_error::*;
+use tc_value::Number;
 use tcgeneric::{label, Id, Instance, Map, PathSegment, Tuple};
 
 use crate::closure::Closure;
-use crate::scalar::{Number, OpDef};
 use crate::state::State;
 
 use super::{GetHandler, Handler, PostHandler, Route};
@@ -82,9 +82,8 @@ where
                 let mut tuple = Vec::with_capacity(self.len);
                 let mut mapped = stream::iter(self.items)
                     .map(State::from)
-                    .map(|state| op.clone().into_callable(state))
-                    .map_ok(|(context, op_def)| OpDef::call(op_def, txn, context))
-                    .try_buffered(num_cpus::get());
+                    .map(|state| op.clone().call(txn, state))
+                    .buffered(num_cpus::get());
 
                 while let Some(item) = mapped.try_next().await? {
                     tuple.push(item);

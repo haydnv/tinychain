@@ -168,7 +168,14 @@ impl Kernel {
 
             if Vec::<(Id, State)>::can_cast_from(&data) {
                 let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
-                OpDef::call(op_def, &txn, context).await
+                let capture = if let Some((capture, _)) = op_def.last() {
+                    capture.clone()
+                } else {
+                    return Ok(State::default());
+                };
+
+                let executor: Executor<State> = Executor::new(&txn, None, op_def);
+                executor.capture(capture).await
             } else {
                 data.resolve(&ExeScope::new(None, context), &txn).await
             }

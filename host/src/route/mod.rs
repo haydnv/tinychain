@@ -12,7 +12,6 @@ use crate::state::State;
 use crate::txn::Txn;
 
 mod chain;
-mod closure;
 mod cluster;
 mod collection;
 mod generic;

@@ -1,20 +1,19 @@
 //! User-defined [`OpDef`]s
 
 use std::fmt;
+use std::iter;
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
-use safecast::TryCastInto;
 
-use tc_error::*;
 use tcgeneric::*;
 
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 use crate::scalar::{Executor, Refer, Scalar};
 use crate::state::State;
-use crate::txn::Txn;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
@@ -110,32 +109,6 @@ impl OpDef {
         }
     }
 
-    pub fn into_callable(self, state: State) -> TCResult<(Map<State>, Vec<(Id, Scalar)>)> {
-        match self {
-            OpDef::Get((key_name, op_def)) | OpDef::Delete((key_name, op_def)) => {
-                let mut params = Map::new();
-                params.insert(key_name, state);
-                Ok((params, op_def))
-            }
-            OpDef::Put((key_name, value_name, op_def)) => {
-                let (key, value) = state
-                    .try_cast_into(|s| TCError::bad_request("invalid params for PUT Op", s))?;
-
-                let mut params = Map::new();
-                params.insert(key_name, key);
-                params.insert(value_name, value);
-
-                Ok((params, op_def))
-            }
-            OpDef::Post(op_def) => {
-                let params = state
-                    .try_cast_into(|s| TCError::bad_request("invalid params for POST Op", s))?;
-
-                Ok((params, op_def))
-            }
-        }
-    }
-
     pub fn form(&self) -> impl Iterator<Item = &(Id, Scalar)> {
         match self {
             Self::Get((_, form)) => form,
@@ -190,25 +163,57 @@ impl OpDef {
             Self::Delete((key_name, form)) => Self::Delete((key_name, reference_self(form, path))),
         }
     }
+}
 
-    pub async fn call<S: Into<State>, I: IntoIterator<Item = (Id, State)>>(
-        op_def: Vec<(Id, S)>,
-        txn: &Txn,
-        context: I,
-    ) -> TCResult<State> {
-        let capture = if let Some((id, _)) = op_def.last() {
-            id.clone()
+impl<'a> Handler<'a> for OpDef {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if let OpDef::Get((key_name, op_def)) = *self {
+            Some(Box::new(|txn, key| {
+                Box::pin(async move {
+                    let capture = if let Some((capture, _)) = op_def.last() {
+                        capture.clone()
+                    } else {
+                        return Ok(State::default());
+                    };
+
+                    let key = State::from(key);
+                    let data = iter::once((key_name, key)).chain(
+                        op_def
+                            .into_iter()
+                            .map(|(id, provider)| (id, State::Scalar(provider))),
+                    );
+
+                    let executor: Executor<State> = Executor::new(txn, None, data);
+                    executor.capture(capture).await
+                })
+            }))
         } else {
-            return Ok(State::default());
-        };
+            None
+        }
+    }
 
-        let context = context
-            .into_iter()
-            .chain(op_def.into_iter().map(|(id, s)| (id, s.into())));
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        None
+    }
 
-        Executor::<Self>::new(txn, None, context)
-            .capture(capture)
-            .await
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        None
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        None
     }
 }
 

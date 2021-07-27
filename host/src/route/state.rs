@@ -121,18 +121,20 @@ impl Route for StateType {
 
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        let child_handler = match self {
+        if let Some(handler) = match self {
             Self::Chain(chain) => chain.route(path),
-            Self::Closure(closure) => closure.route(path),
+            Self::Closure(closure) if path.is_empty() => {
+                let handler: Box<dyn Handler<'a> + 'a> = Box::new(closure.clone());
+                Some(handler)
+            }
             Self::Collection(collection) => collection.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),
             Self::Scalar(scalar) => scalar.route(path),
             Self::Stream(stream) => stream.route(path),
             Self::Tuple(tuple) => tuple.route(path),
-        };
-
-        if let Some(handler) = child_handler {
+            _ => None,
+        } {
             return Some(handler);
         }
 

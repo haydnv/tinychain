@@ -19,10 +19,7 @@ impl<'a> Handler<'a> for ForEach {
                 let op = params.require(&label("op").into())?;
                 params.expect_empty()?;
 
-                self.source
-                    .for_each(txn.clone(), op)
-                    .map_ok(State::from)
-                    .await
+                self.source.for_each(txn, op).map_ok(State::from).await
             })
         }))
     }

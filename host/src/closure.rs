@@ -5,13 +5,15 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
+use safecast::{CastInto, TryCastInto};
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{Id, Map, PathSegment, TCPathBuf, Tuple};
+use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
-use crate::scalar::{OpDef, OpRef, Scalar, SELF};
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
+use crate::scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -24,13 +26,6 @@ pub struct Closure {
 impl Closure {
     pub fn new(context: Map<State>, op: OpDef) -> Self {
         Self { context, op }
-    }
-
-    pub fn into_callable(self, state: State) -> TCResult<(Map<State>, Vec<(Id, Scalar)>)> {
-        let mut context = self.context;
-        let (params, op_def) = self.op.into_callable(state)?;
-        context.extend(params);
-        Ok((context, op_def))
     }
 
     pub fn into_inner(self) -> (Map<State>, OpDef) {
@@ -64,6 +59,107 @@ impl Closure {
         };
 
         Self { context, op }
+    }
+
+    pub async fn call(self, txn: &Txn, args: State) -> TCResult<State> {
+        let capture = if let Some(capture) = self.op.last().cloned() {
+            capture
+        } else {
+            return Ok(State::default());
+        };
+
+        let mut context = self.context;
+        let subject = context.remove(&SELF.into());
+
+        match self.op {
+            OpDef::Get((key_name, op_def)) => {
+                let key = args.try_cast_into(|s| TCError::bad_request("invalid key", s))?;
+                context.insert(key_name, key);
+
+                Executor::with_context(txn, subject.as_ref(), context, op_def)
+                    .capture(capture)
+                    .await
+            }
+            OpDef::Put((key_name, value_name, op_def)) => {
+                let (key, value) = args
+                    .try_cast_into(|s| TCError::bad_request("invalid arguments for PUT Op", s))?;
+                context.insert(key_name, key);
+                context.insert(value_name, value);
+
+                Executor::with_context(txn, subject.as_ref(), context, op_def)
+                    .capture(capture)
+                    .await
+            }
+            OpDef::Post(op_def) => {
+                let params: Map<State> = args
+                    .try_cast_into(|s| TCError::bad_request("invalid parameters for POST Op", s))?;
+                context.extend(params);
+
+                Executor::with_context(txn, subject.as_ref(), context, op_def)
+                    .capture(capture)
+                    .await
+            }
+            OpDef::Delete((key_name, op_def)) => {
+                let key = args.try_cast_into(|s| TCError::bad_request("invalid key", s))?;
+                context.insert(key_name, key);
+
+                Executor::with_context(txn, subject.as_ref(), context, op_def)
+                    .capture(capture)
+                    .await
+            }
+        }
+    }
+}
+
+impl<'a> Handler<'a> for Closure {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.op.class() == OpDefType::Get {
+            Some(Box::new(|txn, key| Box::pin(self.call(txn, key.into()))))
+        } else {
+            None
+        }
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.op.class() == OpDefType::Put {
+            Some(Box::new(|txn, key, value| {
+                Box::pin(self.call(txn, (key, value).cast_into()).map_ok(|_| ()))
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.op.class() == OpDefType::Post {
+            Some(Box::new(|txn, params| {
+                Box::pin(self.call(txn, params.into()))
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.op.class() == OpDefType::Delete {
+            Some(Box::new(|txn, key| {
+                Box::pin(self.call(txn, key.into()).map_ok(|_| ()))
+            }))
+        } else {
+            None
+        }
     }
 }
 
