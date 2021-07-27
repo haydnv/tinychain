@@ -1,3 +1,4 @@
+use std::fmt;
 use std::iter::FromIterator;
 
 use log::debug;
@@ -8,7 +9,7 @@ use tcgeneric::{Id, Instance, Map, PathSegment, TCPath, Tuple};
 use crate::object::InstanceExt;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::*;
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 struct GetMethod<'a, T: Instance> {
@@ -17,7 +18,10 @@ struct GetMethod<'a, T: Instance> {
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> GetMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     async fn call(self, txn: &Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
@@ -28,7 +32,10 @@ impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
     }
 }
 
-impl<'a, T: Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> Handler<'a> for GetMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -43,7 +50,10 @@ struct PutMethod<'a, T: Instance> {
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> PutMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     async fn call(self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
@@ -56,7 +66,10 @@ impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
     }
 }
 
-impl<'a, T: Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> Handler<'a> for PutMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
@@ -73,13 +86,19 @@ struct PostMethod<'a, T: Instance> {
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Instance + Route + 'a> PostMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> PostMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
         call_method(txn, self.subject, self.path, params, self.method).await
     }
 }
 
-impl<'a, T: Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> Handler<'a> for PostMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
         'b: 'a,
@@ -96,7 +115,10 @@ struct DeleteMethod<'a, T: Instance> {
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> DeleteMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
@@ -108,7 +130,10 @@ impl<'a, T: Instance + Route + 'a> DeleteMethod<'a, T> {
     }
 }
 
-impl<'a, T: Instance + Route + 'a> Handler<'a> for DeleteMethod<'a, T> {
+impl<'a, T: Instance + Route + fmt::Display + 'a> Handler<'a> for DeleteMethod<'a, T>
+where
+    InstanceExt<T>: ToState,
+{
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
     where
         'b: 'a,
@@ -117,7 +142,10 @@ impl<'a, T: Instance + Route + 'a> Handler<'a> for DeleteMethod<'a, T> {
     }
 }
 
-impl<T: Instance + Route> Route for InstanceExt<T> {
+impl<T: Instance + Route + fmt::Display> Route for InstanceExt<T>
+where
+    Self: ToState,
+{
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("InstanceExt::route {}", TCPath::from(path));
 
@@ -159,13 +187,16 @@ impl<T: Instance + Route> Route for InstanceExt<T> {
     }
 }
 
-async fn call_method<T: Instance + Route>(
+async fn call_method<T: Instance + Route + fmt::Display>(
     txn: &Txn,
     subject: &InstanceExt<T>,
     path: &[PathSegment],
     context: Map<State>,
     form: Vec<(Id, Scalar)>,
-) -> TCResult<State> {
+) -> TCResult<State>
+where
+    InstanceExt<T>: ToState,
+{
     debug!(
         "call method with form {:?}",
         form.iter()

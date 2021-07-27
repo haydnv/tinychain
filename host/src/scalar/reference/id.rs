@@ -15,7 +15,7 @@ use tcgeneric::{Id, Instance, Label, PathSegment, TCPathBuf};
 
 use crate::route::Public;
 use crate::scalar::{Scope, Value, SELF};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::Refer;
@@ -62,7 +62,7 @@ impl Refer for IdRef {
         }
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         _txn: &'a Txn,

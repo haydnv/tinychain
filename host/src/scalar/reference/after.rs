@@ -13,7 +13,7 @@ use tcgeneric::{Id, Instance};
 
 use crate::route::Public;
 use crate::scalar::{Scalar, Scope};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::Refer;
@@ -52,7 +52,7 @@ impl Refer for After {
         self.then.requires(deps);
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,

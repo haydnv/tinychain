@@ -13,7 +13,7 @@ use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
 
 use crate::route::Public;
 use crate::scalar::{Number, Scalar, Scope, Value};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
@@ -54,7 +54,7 @@ impl Refer for IfRef {
         self.cond.requires(deps);
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,

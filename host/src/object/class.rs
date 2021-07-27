@@ -4,6 +4,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use safecast::CastFrom;
 
 use tcgeneric::{path_label, Id, Map, PathLabel, TCPathBuf};
 
@@ -53,6 +54,18 @@ impl tcgeneric::Instance for InstanceClass {
 
     fn class(&self) -> ObjectType {
         ObjectType::Class
+    }
+}
+
+impl CastFrom<InstanceClass> for Scalar {
+    fn cast_from(class: InstanceClass) -> Self {
+        Self::Map(class.proto)
+    }
+}
+
+impl CastFrom<InstanceClass> for Value {
+    fn cast_from(class: InstanceClass) -> Self {
+        class.extends.into()
     }
 }
 

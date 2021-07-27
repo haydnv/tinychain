@@ -11,7 +11,7 @@ use tcgeneric::{Id, Instance, Map};
 
 use crate::route::Public;
 use crate::scalar::{Refer, Scope};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 /// An `OpDef` executor.
@@ -20,7 +20,7 @@ pub struct Executor<'a, T> {
     scope: Scope<'a, T>,
 }
 
-impl<'a, T: Instance + Public> Executor<'a, T> {
+impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a Txn,

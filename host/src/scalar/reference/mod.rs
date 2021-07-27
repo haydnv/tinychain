@@ -14,7 +14,7 @@ use tc_error::*;
 use tcgeneric::*;
 
 use crate::route::Public;
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::{Scalar, Scope, Value};
@@ -56,7 +56,7 @@ pub trait Refer {
     fn requires(&self, deps: &mut HashSet<Id>);
 
     /// Resolve this reference with respect to the given context.
-    async fn resolve<'a, T: Public + Instance>(
+    async fn resolve<'a, T: ToState + Public + Instance>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
@@ -216,13 +216,15 @@ impl Refer for TCRef {
         }
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("TCRef::resolve {}", self);
 
+        // the Op executor will take care of references that resolve to a reference in general
+        // but this is necessary specifically in the case of flow controls like `If` and `After`
         let mut state = State::from(self);
         while let State::Scalar(Scalar::Ref(tc_ref)) = state {
             state = match *tc_ref {

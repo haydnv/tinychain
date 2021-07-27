@@ -12,7 +12,7 @@ use tcgeneric::{Id, Instance, Tuple};
 
 use crate::route::Public;
 use crate::scalar::{Scalar, Scope, Value};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
@@ -84,7 +84,7 @@ impl Refer for Case {
         }
     }
 
-    async fn resolve<'a, T: Public + Instance>(
+    async fn resolve<'a, T: ToState + Public + Instance>(
         mut self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,

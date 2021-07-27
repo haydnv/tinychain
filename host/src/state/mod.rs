@@ -39,6 +39,19 @@ where
     fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get>;
 }
 
+pub trait ToState {
+    fn to_state(&self) -> State;
+}
+
+impl<T: Clone> ToState for T
+where
+    State: From<T>,
+{
+    fn to_state(&self) -> State {
+        self.clone().into()
+    }
+}
+
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
@@ -361,7 +374,7 @@ impl Refer for State {
         }
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
@@ -853,6 +866,7 @@ impl TryCastFrom<State> for Scalar {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Map(map) => BTreeMap::<Id, Scalar>::can_cast_from(map),
+            State::Object(object) => Self::can_cast_from(object),
             State::Scalar(_) => true,
             State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
             _ => false,
@@ -864,6 +878,8 @@ impl TryCastFrom<State> for Scalar {
             State::Map(map) => BTreeMap::<Id, Scalar>::opt_cast_from(map)
                 .map(Map::from)
                 .map(Scalar::Map),
+
+            State::Object(object) => Self::opt_cast_from(object),
 
             State::Scalar(scalar) => Some(scalar),
 
@@ -912,6 +928,7 @@ impl TryCastFrom<State> for TCPathBuf {
 impl TryCastFrom<State> for Value {
     fn can_cast_from(state: &State) -> bool {
         match state {
+            State::Object(object) => Self::can_cast_from(object),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
             _ => false,
@@ -920,6 +937,8 @@ impl TryCastFrom<State> for Value {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
+            State::Object(object) => Self::opt_cast_from(object),
+
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
 
             State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)

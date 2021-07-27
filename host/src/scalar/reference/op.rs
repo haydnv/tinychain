@@ -18,7 +18,7 @@ use tcgeneric::*;
 
 use crate::route::Public;
 use crate::scalar::{Link, Scalar, Scope, Value, SELF};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::{IdRef, Refer, TCRef};
@@ -392,7 +392,7 @@ impl Refer for OpRef {
         }
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
@@ -423,7 +423,9 @@ impl Refer for OpRef {
 
                     let value = value.resolve(context, txn).await?;
 
-                    txn.put(link, key, value).map_ok(State::from).await
+                    txn.put(link, key, value)
+                        .map_ok(|()| State::default())
+                        .await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn);
@@ -434,7 +436,7 @@ impl Refer for OpRef {
 
                     context
                         .resolve_put(txn, id_ref.id(), &path, key, value)
-                        .map_ok(State::from)
+                        .map_ok(|()| State::default())
                         .await
                 }
             },
@@ -455,7 +457,7 @@ impl Refer for OpRef {
                     let key = key.resolve(context, txn).await?;
                     let key = key.try_cast_into(invalid_key)?;
 
-                    txn.delete(link, key).map_ok(State::from).await
+                    txn.delete(link, key).map_ok(|()| State::default()).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;
@@ -463,7 +465,7 @@ impl Refer for OpRef {
 
                     context
                         .resolve_delete(txn, id_ref.id(), &path, key)
-                        .map_ok(State::from)
+                        .map_ok(|()| State::default())
                         .await
                 }
             },

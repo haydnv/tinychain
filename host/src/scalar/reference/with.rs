@@ -15,7 +15,7 @@ use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 use crate::closure::Closure;
 use crate::route::Public;
 use crate::scalar::{OpDef, Scalar, Scope, SELF};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 use crate::value::Value;
 
@@ -59,7 +59,7 @@ impl Refer for With {
         deps.extend(self.capture.iter().filter(|id| *id != &SELF).cloned())
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         _txn: &'a Txn,

@@ -5,19 +5,19 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::{TCError, TCResult};
 use tc_transact::IntoView;
 use tcgeneric::{label, path_label, Instance, Map, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs::Dir;
-use crate::scalar::Value;
+use crate::scalar::{Scalar, Value};
 use crate::state::{State, StateClass};
 use crate::txn::Txn;
 
 pub use class::*;
 pub use instance::*;
-use safecast::TryCastInto;
 
 mod class;
 mod instance;
@@ -115,6 +115,38 @@ impl From<InstanceClass> for Object {
 impl From<InstanceExt<State>> for Object {
     fn from(instance: InstanceExt<State>) -> Object {
         Object::Instance(instance)
+    }
+}
+
+impl TryCastFrom<Object> for Scalar {
+    fn can_cast_from(object: &Object) -> bool {
+        match object {
+            Object::Class(class) => Self::can_cast_from(class),
+            Object::Instance(instance) => Self::can_cast_from(instance),
+        }
+    }
+
+    fn opt_cast_from(object: Object) -> Option<Self> {
+        match object {
+            Object::Class(class) => Self::opt_cast_from(class),
+            Object::Instance(instance) => Self::opt_cast_from(instance),
+        }
+    }
+}
+
+impl TryCastFrom<Object> for Value {
+    fn can_cast_from(object: &Object) -> bool {
+        match object {
+            Object::Class(class) => Self::can_cast_from(class),
+            Object::Instance(instance) => Self::can_cast_from(instance),
+        }
+    }
+
+    fn opt_cast_from(object: Object) -> Option<Self> {
+        match object {
+            Object::Class(class) => Self::opt_cast_from(class),
+            Object::Instance(instance) => Self::opt_cast_from(instance),
+        }
     }
 }
 

@@ -20,7 +20,7 @@ use tcgeneric::*;
 
 use crate::closure::Closure;
 use crate::route::Public;
-use crate::state::{State, StateClass};
+use crate::state::{State, StateClass, ToState};
 use crate::txn::Txn;
 
 pub use op::*;
@@ -132,6 +132,12 @@ impl ClusterRef {
 
     pub fn path(&self) -> &TCPathBuf {
         &self.0
+    }
+}
+
+impl From<TCPathBuf> for ClusterRef {
+    fn from(path: TCPathBuf) -> Self {
+        Self(path)
     }
 }
 
@@ -447,7 +453,7 @@ impl Refer for Scalar {
         }
     }
 
-    async fn resolve<'a, T: Instance + Public>(
+    async fn resolve<'a, T: ToState + Instance + Public>(
         self,
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
@@ -1252,7 +1258,7 @@ pub struct Scope<'a, T> {
     data: Map<State>,
 }
 
-impl<'a, T: Instance + Public> Scope<'a, T> {
+impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         subject: Option<&'a T>,
         data: I,
@@ -1284,11 +1290,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
 
     pub fn resolve_id(&self, id: &Id) -> TCResult<State> {
         if id == &SELF {
-            let subject = Subject::from((IdRef::from(Id::from(SELF)), TCPathBuf::default()));
-
-            Ok(State::Scalar(Scalar::Ref(Box::new(TCRef::Op(OpRef::Get(
-                (subject, Scalar::default()),
-            ))))))
+            self.subject().map(|subject| subject.to_state())
         } else {
             debug!("resolve ID {}", id);
 

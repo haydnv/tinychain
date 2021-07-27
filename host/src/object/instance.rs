@@ -6,14 +6,17 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{en, EncodeMap};
+use log::debug;
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::IntoView;
+use tc_value::Value;
 use tcgeneric::Map;
 
 use crate::fs::Dir;
 use crate::scalar::Scalar;
-use crate::state::{State, StateView};
+use crate::state::{State, StateView, ToState};
 use crate::txn::Txn;
 
 use super::{InstanceClass, Object};
@@ -97,27 +100,64 @@ impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     }
 }
 
-impl<T: tcgeneric::Instance> From<InstanceExt<T>> for State
+impl<T: tcgeneric::Instance + fmt::Display> TryCastFrom<InstanceExt<T>> for Scalar
 where
-    State: From<T>,
+    Scalar: TryCastFrom<T>,
 {
-    fn from(instance: InstanceExt<T>) -> State {
-        let parent = Box::new((*instance.parent).into());
-        let class = instance.class;
+    fn can_cast_from(instance: &InstanceExt<T>) -> bool {
+        debug!("Scalar::can_cast_from {}?", instance);
+
+        Self::can_cast_from(&(*instance).parent)
+    }
+
+    fn opt_cast_from(instance: InstanceExt<T>) -> Option<Self> {
+        Self::opt_cast_from(*instance.parent)
+    }
+}
+
+impl<T: tcgeneric::Instance + fmt::Display> TryCastFrom<InstanceExt<T>> for Value
+where
+    Value: TryCastFrom<T>,
+{
+    fn can_cast_from(instance: &InstanceExt<T>) -> bool {
+        debug!("Value::can_cast_from {}?", instance);
+
+        Self::can_cast_from(&(*instance).parent)
+    }
+
+    fn opt_cast_from(instance: InstanceExt<T>) -> Option<Self> {
+        Self::opt_cast_from(*instance.parent)
+    }
+}
+
+impl<T: tcgeneric::Instance + ToState> ToState for InstanceExt<T> {
+    fn to_state(&self) -> State {
+        let parent = Box::new(self.parent.to_state());
+        let class = self.class.clone();
         let instance = InstanceExt { parent, class };
         State::Object(Object::Instance(instance))
     }
 }
 
-impl<T: tcgeneric::Instance> fmt::Debug for InstanceExt<T> {
+impl<T: tcgeneric::Instance + fmt::Debug> fmt::Debug for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
+        write!(
+            f,
+            "{:?} instance: {:?}",
+            tcgeneric::Instance::class(self),
+            self.parent
+        )
     }
 }
 
-impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
+impl<T: tcgeneric::Instance + fmt::Display> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} instance", tcgeneric::Instance::class(self))
+        write!(
+            f,
+            "{} instance: {}",
+            tcgeneric::Instance::class(self),
+            self.parent
+        )
     }
 }
 

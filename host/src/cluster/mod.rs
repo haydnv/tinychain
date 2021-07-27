@@ -21,8 +21,8 @@ use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Link, OpDef, Value};
-use crate::state::State;
+use crate::scalar::{Link, OpDef, Scalar, Value};
+use crate::state::{State, ToState};
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
 use owner::Owner;
@@ -479,6 +479,12 @@ impl Transact for Cluster {
             self.installed.finalize(txn_id),
             self.replicas.finalize(txn_id)
         );
+    }
+}
+
+impl ToState for Cluster {
+    fn to_state(&self) -> State {
+        State::Scalar(Scalar::Cluster(self.link.path().clone().into()))
     }
 }
 
