@@ -24,8 +24,8 @@ class Cluster(object, metaclass=Meta):
             if isinstance(attr, MethodStub):
                 setattr(instance, name, attr.method(instance, name))
             elif inspect.isclass(attr) and issubclass(attr, State):
-                if not str(uri(cls)).startswith(str(uri(attr))):
-                    logging.warning(f"cluster at {uri(cls)} serves class at {uri(attr)}")
+                if not uri(cls).startswith(uri(attr)):
+                    logging.warning(f"cluster at {uri(cls)} serves class with different URI: {uri(attr)}")
 
                 @get_method
                 def ctr(self, txn, form) -> attr:

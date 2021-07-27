@@ -235,7 +235,7 @@ class URI(object):
             return URI(uri)
 
     def startswith(self, prefix):
-        return str(self).startswith(prefix)
+        return str(self).startswith(str(prefix))
 
 
 def uri(subject):
