@@ -13,10 +13,10 @@ RUN apt-get install -y python3 python3-venv python3-pip make build-essential lib
 
 WORKDIR /tmp
 
-RUN curl -sSL https://arrayfire.s3.amazonaws.com/3.8.0/ArrayFire-v3.8.0_Linux_x86_64.sh --output ArrayFire-v3.8.0_Linux_x86_64.sh
-
-RUN chmod +x ArrayFire-v3.8.0_Linux_x86_64.sh && \
-    bash ArrayFire-v3.8.0_Linux_x86_64.sh --include-subdir --prefix=/opt --skip-license
+RUN curl -sSL https://arrayfire.s3.amazonaws.com/3.8.0/ArrayFire-v3.8.0_Linux_x86_64.sh --output ArrayFire-v3.8.0_Linux_x86_64.sh && \ 
+    chmod +x ArrayFire-v3.8.0_Linux_x86_64.sh && \
+    bash ArrayFire-v3.8.0_Linux_x86_64.sh --include-subdir --prefix=/opt --skip-license && \
+    rm -rf /tmp/ArrayFire-*
 
 RUN sh -c "echo '/opt/arrayfire/lib64' > /etc/ld.so.conf.d/arrayfire.conf" \
     ldconfig
