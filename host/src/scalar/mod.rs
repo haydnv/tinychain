@@ -12,7 +12,7 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -1289,16 +1289,27 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
     }
 
     pub fn resolve_id(&self, id: &Id) -> TCResult<State> {
-        if id == &SELF {
+        debug!("resolve ID {}", id);
+
+        let result = if id == &SELF {
             self.subject().map(|subject| subject.to_state())
         } else {
-            debug!("resolve ID {}", id);
-
             self.data
                 .deref()
                 .get(id)
                 .cloned()
                 .ok_or_else(|| TCError::not_found(id))
+        };
+
+        match result {
+            Ok(state) => {
+                debug!("{} resolved to {:?}", id, state);
+                Ok(state)
+            }
+            Err(cause) => {
+                warn!("error resolving {}: {}", id, cause);
+                Err(cause)
+            }
         }
     }
 

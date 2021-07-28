@@ -136,7 +136,7 @@ pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {
         -> TCBoxTryFuture<<<F as File<B>>::Block as Block<B, F>>::WriteLock>;
 }
 
-pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> + Send {
+pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> + Send + Sync {
     fn downgrade(
         self,
         file: &F,

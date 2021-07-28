@@ -5,10 +5,10 @@ import unittest
 from num2words import num2words
 from testutils import PORT, start_host, PersistenceTest
 
-
 ENDPOINT = "/transact/hypothetical"
-SCHEMA = tc.schema.Table(
-        [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
+SCHEMA = (
+    tc.schema.Table([tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
+)
 
 
 class TableTests(unittest.TestCase):
@@ -34,15 +34,12 @@ class TableTests(unittest.TestCase):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.delete = tc.After(cxt.inserts, cxt.table.delete())
         cxt.result = tc.After(cxt.delete, cxt.table)
-        print(tc.to_json(cxt))
-        return
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, []))
 
-    @unittest.skip
     def testDeleteSlice(self):
-        count = 50
+        count = 2
         values = [[v] for v in range(count)]
         keys = [[num2words(i)] for i in range(count)]
         remaining = sorted([k + v for k, v in zip(keys, values) if v[0] >= 40])
@@ -50,27 +47,26 @@ class TableTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.delete = tc.After(cxt.inserts, cxt.table.where({"views": slice(40)}).delete())
+        cxt.delete = tc.After(cxt.inserts, cxt.table.delete(tc.Map(views=slice(40))))
         cxt.result = tc.After(cxt.delete, cxt.table)
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, remaining))
 
-    @unittest.skip
     def testUpdateSlice(self):
         count = 50
         values = [[v] for v in range(count)]
         keys = [[num2words(i)] for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
-        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.update = tc.After(cxt.inserts, cxt.table.update({"views": slice(10)}, {"views": 0}))
+        cxt.table = tc.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.update = cxt.table.update({"views": 0}, {"views": slice(10)})
         cxt.result = tc.After(cxt.update, cxt.table.where({"views": slice(1)}).count())
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, 10)
 
+    @unittest.skip
     def testGroupBy(self):
         count = 50
         values = [(v % 2,) for v in range(count)]
@@ -141,7 +137,7 @@ class TableTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.result = tc.After(cxt.inserts, cxt.table.select("name"))
+        cxt.result = tc.After(cxt.inserts, cxt.table.select(["name"]))
 
         expected = {
             str(tc.uri(tc.Table)): [
@@ -191,6 +187,7 @@ class SparseTests(unittest.TestCase):
         cls.host = start_host("test_sparse_table")
 
     def testSlice(self):
+        self.maxDiff = None
         schema = tc.schema.Table([
             tc.Column("0", tc.U64),
             tc.Column("1", tc.U64),
@@ -214,11 +211,15 @@ class SparseTests(unittest.TestCase):
         cxt.table = tc.Table(schema)
         cxt.inserts = [cxt.table.insert(coord, [value]) for (coord, value) in data]
         cxt.result = tc.After(cxt.inserts, cxt.table.where({
-            "0": slice(2), "1": slice(3), "2": slice(4), "3": slice(1)
+            "0": slice(2),
+            "1": slice(3),
+            "2": slice(4),
+            "3": slice(1)
         }))
 
+        expect = expected(schema, [coord + [value] for coord, value in data])
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expected(schema, [coord + [value] for coord, value in data]))
+        self.assertEqual(actual, expect)
 
     @classmethod
     def tearDownClass(cls):
@@ -228,6 +229,7 @@ class SparseTests(unittest.TestCase):
 class ChainTests(PersistenceTest, unittest.TestCase):
     CACHE_SIZE = "1G"
     NAME = "table"
+    NUM_HOSTS = 4
 
     def cluster(self, chain_type):
         class Persistent(tc.Cluster, metaclass=tc.Meta):
@@ -236,20 +238,25 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             def _configure(self):
                 self.table = tc.chain.Block(tc.Table(SCHEMA))
 
+            @tc.delete_method
+            def truncate(self):
+                return self.table.delete()
+
         return Persistent
 
     def execute(self, hosts):
-        row1 = {"name": "one", "views": 1}
-        row2 = {"name": "two", "views": 2}
+        row1 = ["one", 1]
+        row2 = ["two", 2]
 
         replica_set = set(str(tc.uri(host) + "/test/table") for host in hosts)
+
         def check_replicas():
             for i in range(len(hosts)):
                 replicas = {}
                 for replica in hosts[i].get("/test/table/replicas"):
                     replicas.update(replica)
 
-                self.assertEqual(set(replicas.keys()), replica_set)
+                self.assertEqual(set(replicas.keys()), replica_set, f"host {i}")
 
         check_replicas()
 
@@ -282,7 +289,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             actual = hosts[i].get("/test/table/table")
             self.assertEqual(actual, expected(SCHEMA, [["two", 2]]), f"host {i}")
 
-        self.assertIsNone(hosts[0].delete("/test/table/table"))
+        self.assertIsNone(hosts[0].delete("/test/table/truncate"))
         for i in range(len(hosts)):
             count = hosts[i].get("/test/table/table/count")
             self.assertEqual(0, count, f"host {i}")
@@ -290,7 +297,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         total = 100
         for n in range(1, total):
             i = random.choice(range(self.NUM_HOSTS))
-            print(f"host {i} insert {n}")
+
             self.assertIsNone(hosts[i].put("/test/table/table", [num2words(n)], [n]))
 
             for i in range(len(hosts)):
@@ -323,4 +330,3 @@ def expected(schema, rows):
 
 if __name__ == "__main__":
     unittest.main()
-

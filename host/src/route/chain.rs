@@ -151,18 +151,6 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
     }
 }
 
-impl Route for Chain {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("Chain::route {}", TCPath::from(path));
-
-        if path.len() == 1 && path[0].as_str() == "chain" {
-            Some(Box::new(ChainHandler::from(self)))
-        } else {
-            Some(Box::new(AppendHandler::new(self, path)))
-        }
-    }
-}
-
 struct AppendHandler<'a> {
     chain: &'a Chain,
     path: &'a [PathSegment],
@@ -267,5 +255,17 @@ impl<'a> Handler<'a> for ChainHandler<'a> {
                 }
             })
         }))
+    }
+}
+
+impl Route for Chain {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Chain::route {}", TCPath::from(path));
+
+        if path.len() == 1 && path[0].as_str() == "chain" {
+            Some(Box::new(ChainHandler::from(self)))
+        } else {
+            Some(Box::new(AppendHandler::new(self, path)))
+        }
     }
 }

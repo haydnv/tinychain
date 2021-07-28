@@ -5,7 +5,7 @@ use futures::stream::TryStreamExt;
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableInstance;
+use tc_table::TableStream;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::TCBoxTryStream;
 

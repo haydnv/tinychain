@@ -1,5 +1,4 @@
 """Tinychain `State` s, such as `Map`, `Tuple`, and `Op`."""
-import inspect
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -30,10 +29,7 @@ class State(object):
             return {str(uri(self)): [to_json(form)]}
 
     def __ns__(self, cxt):
-        form = form_of(self)
-
-        if isinstance(form, ref.Op):
-            deanonymize(form, cxt)
+        deanonymize(form_of(self), cxt)
 
     def __ref__(self, name):
         return self.__class__(URI(name))

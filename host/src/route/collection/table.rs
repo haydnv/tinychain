@@ -1,23 +1,32 @@
-use std::iter::FromIterator;
-
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
+use log::debug;
 use safecast::*;
 
-use tc_btree::Node;
 use tc_error::*;
-use tc_table::{Bounds, ColumnBound, TableInstance, TableType};
+use tc_table::{
+    Bounds, ColumnBound, Key, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
+    TableType, TableWrite,
+};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::{Bound, Value};
-use tcgeneric::{label, Id, Map, PathSegment, Tuple};
+use tcgeneric::{label, Id, Map, PathSegment};
 
 use crate::collection::{Collection, Table, TableIndex};
-use crate::fs;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::stream::TCStream;
-use crate::txn::Txn;
+
+impl Route for TableType {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if self == &Self::default() {
+            Static.route(path)
+        } else {
+            None
+        }
+    }
+}
 
 struct CopyHandler;
 
@@ -89,43 +98,27 @@ impl<'a> Handler<'a> for CreateHandler {
     }
 }
 
-impl Route for TableType {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() && self == &Self::Table {
-            Some(Box::new(CreateHandler))
-        } else {
-            None
-        }
-    }
+struct ContainsHandler<'a, T> {
+    table: &'a T,
 }
 
-struct ContainsHandler<T> {
-    table: T,
-}
-
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for ContainsHandler<T> {
+impl<'a, T: TableRead + 'a> Handler<'a> for ContainsHandler<'a, T> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = primary_key(key, &self.table)?;
-                let slice = self.table.slice(key)?;
-
-                let mut rows = slice.rows(*txn.id()).await?;
-                rows.try_next()
-                    .map_ok(|row| row.is_some())
-                    .map_ok(Value::from)
-                    .map_ok(State::from)
-                    .await
+                let key = primary_key(key, self.table)?;
+                let row = self.table.read(txn.id(), &key).await?;
+                Ok(Value::from(row.is_some()).into())
             })
         }))
     }
 }
 
-impl<T> From<T> for ContainsHandler<T> {
-    fn from(table: T) -> Self {
+impl<'a, T> From<&'a T> for ContainsHandler<'a, T> {
+    fn from(table: &'a T) -> Self {
         Self { table }
     }
 }
@@ -134,7 +127,7 @@ struct CountHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for CountHandler<T> {
+impl<'a, T: TableStream + 'a> Handler<'a> for CountHandler<T> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -160,73 +153,14 @@ impl<T> From<T> for CountHandler<T> {
     }
 }
 
-struct GroupHandler<T> {
-    table: T,
-}
-
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for GroupHandler<T> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                let columns = key.try_cast_into(|v| {
-                    TCError::bad_request("invalid column list to group by", v)
-                })?;
-
-                let grouped = self.table.group_by(columns)?;
-                Ok(Collection::Table(grouped.into()).into())
-            })
-        }))
-    }
-}
-
-impl<T> From<T> for GroupHandler<T> {
-    fn from(table: T) -> Self {
-        Self { table }
-    }
-}
-
-struct KeyHandler<'a, T> {
-    table: &'a T,
-}
-
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for KeyHandler<'a, T> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                key.expect_none()?;
-
-                let key = self
-                    .table
-                    .key()
-                    .iter()
-                    .map(|col| &col.name)
-                    .cloned()
-                    .map(Value::Id)
-                    .collect();
-
-                Ok(Value::Tuple(key).into())
-            })
-        }))
-    }
-}
-
-impl<'a, T> From<&'a T> for KeyHandler<'a, T> {
-    fn from(table: &'a T) -> Self {
-        Self { table }
-    }
-}
-
 struct LimitHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for LimitHandler<T> {
+impl<'a, T: TableStream + 'a> Handler<'a> for LimitHandler<T>
+where
+    Table: From<T::Limit>,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -249,11 +183,20 @@ impl<T> From<T> for LimitHandler<T> {
     }
 }
 
+struct LoadHandler;
+
+impl<'a> Handler<'a> for LoadHandler {
+    // TODO
+}
+
 struct OrderHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for OrderHandler<T> {
+impl<'a, T: TableOrder + 'a> Handler<'a> for OrderHandler<T>
+where
+    Table: From<T::OrderBy>,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -286,7 +229,12 @@ struct TableHandler<'a, T> {
     table: &'a T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHandler<'a, T> {
+impl<'a, T> Handler<'a> for TableHandler<'a, T>
+where
+    T: TableRead + TableSlice + TableWrite + Clone + 'a,
+    Table: From<T>,
+    Table: From<T::Slice>,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -294,22 +242,12 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let bounds = primary_key(key.clone(), self.table)?;
-                    let slice = self.table.clone().slice(bounds)?;
-                    let mut rows = slice.rows(*txn.id()).await?;
-                    if let Some(row) = rows.try_next().await? {
-                        let schema = self.table.schema();
-                        let columns = schema.primary().column_names().cloned();
-
-                        Ok(State::Scalar(
-                            Map::<Scalar>::from_iter(
-                                columns.zip(row.into_iter().map(Scalar::Value)),
-                            )
-                            .into(),
-                        ))
-                    } else {
-                        Err(TCError::not_found(key))
-                    }
+                    let key = primary_key(key.clone(), self.table)?;
+                    self.table
+                        .read(txn.id(), &key)
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await
                 } else {
                     Ok(Collection::Table(self.table.clone().into()).into())
                 }
@@ -323,40 +261,38 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
     {
         Some(Box::new(|txn, key, values| {
             Box::pin(async move {
-                if key.is_none() {
-                    if let State::Collection(Collection::Table(table)) = values {
-                        let txn_id = *txn.id();
-                        let key_len = self.table.key().len();
-                        let rows = table.rows(txn_id).await?;
+                debug!("Table PUT {:?} <- {:?}", key, values);
 
-                        return rows
-                            .map_ok(|mut row| (row.drain(..key_len).collect(), row))
-                            .map_ok(|(key, values)| self.table.upsert(txn_id, key, values))
-                            .try_buffer_unordered(num_cpus::get())
-                            .try_fold((), |(), ()| future::ready(Ok(())))
-                            .await;
-                    }
-                }
+                let key = primary_key(key, self.table)?;
 
-                if values.matches::<Map<Value>>() {
-                    let values = values.opt_cast_into().unwrap();
-                    let bounds = cast_into_bounds(Scalar::Value(key))?;
-                    self.table.clone().slice(bounds)?.update(&txn, values).await
-                } else if values.matches::<Value>() {
-                    let key = key
-                        .try_cast_into(|k| TCError::bad_request("invalid key for Table row", k))?;
+                if values.is_map() {
+                    let values =
+                        values.try_into_map(|s| TCError::bad_request("invalid row values", s))?;
 
-                    let values = Value::try_cast_from(values, |s| {
-                        TCError::bad_request("invalid values for Table row", s)
-                    })?;
+                    let values = values
+                        .into_iter()
+                        .map(|(id, state)| {
+                            state
+                                .try_cast_into(|s| TCError::bad_request("invalid column value", s))
+                                .map(|value| (id, value))
+                        })
+                        .collect::<TCResult<Map<Value>>>()?;
 
-                    let values = values.try_cast_into(|v| {
-                        TCError::bad_request("invalid values for Table row", v)
-                    })?;
+                    self.table.update(*txn.id(), key, values).await
+                } else if values.is_tuple() {
+                    let values =
+                        values.try_into_tuple(|s| TCError::bad_request("invalid row values", s))?;
+
+                    let values = values
+                        .into_iter()
+                        .map(|state| {
+                            state.try_cast_into(|s| TCError::bad_request("invalid column value", s))
+                        })
+                        .collect::<TCResult<Vec<Value>>>()?;
 
                     self.table.upsert(*txn.id(), key, values).await
                 } else {
-                    Err(TCError::bad_request("invalid row value", values))
+                    Err(TCError::bad_request("invalid row values", values))
                 }
             })
         }))
@@ -386,12 +322,33 @@ impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>> Handler<'a> for TableHa
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    let key = primary_key(key, self.table)?;
-                    self.table.clone().slice(key)?.delete(*txn.id()).await
-                } else {
-                    self.table.delete(*txn.id()).await
-                }
+                let row = primary_key(key, self.table)?;
+                self.table.delete(*txn.id(), row).await
+            })
+        }))
+    }
+}
+
+struct SchemaHandler<'a, T> {
+    table: &'a T,
+    schema: fn(&'a T) -> Value,
+}
+
+impl<'a, T> SchemaHandler<'a, T> {
+    fn new(table: &'a T, schema: fn(&'a T) -> Value) -> Self {
+        Self { table, schema }
+    }
+}
+
+impl<'a, T: TableInstance> Handler<'a> for SchemaHandler<'a, T> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+                Ok(State::from((self.schema)(self.table)))
             })
         }))
     }
@@ -401,7 +358,10 @@ struct SelectHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for SelectHandler<T> {
+impl<'a, T: TableStream + 'a> Handler<'a> for SelectHandler<T>
+where
+    Table: From<T::Selection>,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -423,40 +383,59 @@ impl<T> From<T> for SelectHandler<T> {
     }
 }
 
-impl<'a, T> From<&'a T> for TableHandler<'a, T> {
-    fn from(table: &'a T) -> Self {
-        Self { table }
-    }
-}
-
-struct UpdateHandler<T> {
+struct StreamHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn> + 'a> Handler<'a> for UpdateHandler<T> {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+impl<'a, T: TableSlice + 'a> Handler<'a> for StreamHandler<T>
+where
+    Table: From<T>,
+    Table: From<T::Slice>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key, value| {
+        Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "table update does not accept a key",
-                        key,
-                    ));
+                if key.is_none() {
+                    Ok(TCStream::from(Table::from(self.table)).into())
+                } else {
+                    let bounds = cast_into_bounds(Scalar::Value(key))?;
+                    let slice = self.table.slice(bounds)?;
+                    Ok(TCStream::from(Table::from(slice)).into())
                 }
+            })
+        }))
+    }
 
-                let values =
-                    value.try_cast_into(|s| TCError::bad_request("invalid Table update", s))?;
-                self.table.update(&txn, values).await
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, params| {
+            Box::pin(async move {
+                let bounds = Scalar::try_cast_from(State::Map(params), |s| {
+                    TCError::bad_request("invalid Table bounds", s)
+                })?;
+
+                let bounds = cast_into_bounds(bounds)?;
+
+                let slice = self.table.slice(bounds)?;
+                Ok(TCStream::from(Table::from(slice)).into())
             })
         }))
     }
 }
 
-impl<T> From<T> for UpdateHandler<T> {
+impl<T> From<T> for StreamHandler<T> {
     fn from(table: T) -> Self {
+        Self { table }
+    }
+}
+
+impl<'a, T> From<&'a T> for TableHandler<'a, T> {
+    fn from(table: &'a T) -> Self {
         Self { table }
     }
 }
@@ -474,26 +453,28 @@ impl Route for TableIndex {
 }
 
 #[inline]
-fn route<'a, T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
-    table: &'a T,
-    path: &[PathSegment],
-) -> Option<Box<dyn Handler<'a> + 'a>> {
+fn route<'a, T>(table: &'a T, path: &[PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
+where
+    T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
+    Table: From<T>,
+    Table: From<T::Limit>,
+    Table: From<T::OrderBy>,
+    Table: From<T::Selection>,
+    Table: From<T::Slice>,
+{
     if path.is_empty() {
         Some(Box::new(TableHandler::from(table)))
     } else if path.len() == 1 {
-        if path == &["key"] {
-            return Some(Box::new(KeyHandler::from(table)));
-        }
-
-        let table = table.clone();
-
         match path[0].as_str() {
+            "columns" => Some(Box::new(SchemaHandler::new(table, column_schema))),
             "contains" => Some(Box::new(ContainsHandler::from(table))),
-            "count" => Some(Box::new(CountHandler::from(table))),
-            "limit" => Some(Box::new(LimitHandler::from(table))),
-            "group" => Some(Box::new(GroupHandler::from(table))),
-            "order" => Some(Box::new(OrderHandler::from(table))),
-            "select" => Some(Box::new(SelectHandler::from(table))),
+            "count" => Some(Box::new(CountHandler::from(table.clone()))),
+            "key_columns" => Some(Box::new(SchemaHandler::new(table, key_columns))),
+            "key_names" => Some(Box::new(SchemaHandler::new(table, key_names))),
+            "limit" => Some(Box::new(LimitHandler::from(table.clone()))),
+            "order" => Some(Box::new(OrderHandler::from(table.clone()))),
+            "select" => Some(Box::new(SelectHandler::from(table.clone()))),
+            "rows" => Some(Box::new(StreamHandler::from(table.clone()))),
             _ => None,
         }
     } else {
@@ -506,7 +487,7 @@ pub struct Static;
 impl Route for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
-            None
+            Some(Box::new(CreateHandler))
         } else if path == &["copy_from"] {
             Some(Box::new(CopyHandler))
         } else {
@@ -544,25 +525,42 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
 }
 
 #[inline]
-fn primary_key<T: TableInstance<fs::File<Node>, fs::Dir, Txn>>(
-    key: Value,
-    table: &T,
-) -> TCResult<Bounds> {
+fn primary_key<T: TableInstance>(key: Value, table: &T) -> TCResult<Key> {
     let key: Vec<Value> = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+    table.schema().primary().validate_key(key)
+}
 
-    if key.len() == table.key().len() {
-        let bounds = table
-            .key()
-            .iter()
-            .map(|col| col.name.clone())
-            .zip(key)
-            .collect();
+fn column_schema<T: TableInstance>(table: &T) -> Value {
+    let columns = table
+        .schema()
+        .primary()
+        .columns()
+        .into_iter()
+        .map(Value::from)
+        .collect();
 
-        Ok(bounds)
-    } else {
-        Err(TCError::bad_request(
-            "invalid primary key",
-            Tuple::from(key),
-        ))
-    }
+    Value::Tuple(columns)
+}
+
+fn key_columns<T: TableInstance>(table: &T) -> Value {
+    let key = table
+        .key()
+        .iter()
+        .cloned()
+        .map(|column| Value::from(column))
+        .collect();
+
+    Value::Tuple(key)
+}
+
+fn key_names<T: TableInstance>(table: &T) -> Value {
+    let key = table
+        .key()
+        .iter()
+        .map(|col| &col.name)
+        .cloned()
+        .map(Value::Id)
+        .collect();
+
+    Value::Tuple(key)
 }

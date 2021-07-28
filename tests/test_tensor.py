@@ -323,7 +323,8 @@ class SparseTests(unittest.TestCase):
         expected = np.zeros(shape, dtype=np.int32)
         expected[0, 1:3] = 2
         expected = expected.sum(axis)
-        self.assertEqual(actual, expect_sparse(tc.I32, [2, 3, 5], expected))
+        expected = expect_sparse(tc.I32, [2, 3, 5], expected)
+        self.assertEqual(actual, expected)
 
     def testProduct(self):
         shape = [2, 4, 3, 5]
@@ -460,7 +461,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def execute(self, hosts):
         hosts[0].put("/test/tensor/dense", [0, 0], 1)
-        hosts[1].put("/test/tensor/sparse", [0, 0], 1)
+        hosts[0].put("/test/tensor/sparse", [0, 0], 1)
 
         dense = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
         sparse = expect_sparse(tc.I32, [2, 3], [[[0, 0], 1]])
@@ -488,6 +489,8 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             self.assertEqual(actual, dense)
 
             actual = host.get("/test/tensor/sparse")
+            print("expected", sparse)
+            print("actual", actual)
             self.assertEqual(actual, sparse)
 
             actual = host.get("/test/tensor/eq")
