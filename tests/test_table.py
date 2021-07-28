@@ -66,7 +66,6 @@ class TableTests(unittest.TestCase):
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, 10)
 
-    @unittest.skip
     def testGroupBy(self):
         count = 50
         values = [(v % 2,) for v in range(count)]
@@ -77,13 +76,8 @@ class TableTests(unittest.TestCase):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
 
-        result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, tc.to_json({
-            str(tc.uri(tc.Table)): [
-                [[[], [['views', tc.UInt]]], []],
-                [[0], [1]]
-            ]
-        }))
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, [[0], [1]])
 
     def testInsert(self):
         for x in range(0, 100, 10):

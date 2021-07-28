@@ -55,6 +55,11 @@ class Table(Collection):
 
         return self._delete("", key)
 
+    def group_by(self, columns):
+        """Return a :class:`Stream` of the unique values of the given columns."""
+
+        return self.order_by(columns).select(columns).rows().aggregate()
+
     def index(self):
         """Build a :class:`BTree` index with the values of the given columns."""
 

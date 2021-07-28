@@ -128,8 +128,8 @@ class Stream(State):
 
     __uri__ = uri(State) + "/stream"
 
-    def aggregate(self, initial_value, op):
-        return self._post("aggregate", Map(acc=initial_value, op=op), type(initial_value))
+    def aggregate(self):
+        return self._get("aggregate", rtype=Stream)
 
     def for_each(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
