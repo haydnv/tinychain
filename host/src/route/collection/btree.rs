@@ -352,6 +352,7 @@ where
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
             "first" => Some(Box::new(FirstHandler::from(btree))),
+            "keys" => Some(Box::new(StreamHandler::from(btree.clone()))),
             "reverse" => Some(Box::new(ReverseHandler::from(btree.clone()))),
             _ => None,
         }

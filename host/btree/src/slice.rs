@@ -121,4 +121,8 @@ where
             .rows_in_range(txn_id, self.range, self.reverse)
             .await
     }
+
+    fn validate_key(&self, key: Key) -> TCResult<Key> {
+        self.source.validate_key(key)
+    }
 }

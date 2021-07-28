@@ -10,9 +10,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
-use futures::future::{self, try_join, try_join_all, Future, TryFutureExt};
+use futures::future::{self, Future, TryFutureExt};
 use futures::join;
-use futures::stream::{self, FuturesOrdered, TryStreamExt};
+use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use log::debug;
 use uuid::Uuid;
 
@@ -274,22 +274,16 @@ where
             let collator = &self.inner.collator;
             let file = &self.inner.file;
 
-            let node = file.read_block(txn_id, node_id).await?;
+            let mut node = file.write_block(txn_id, node_id).await?;
 
             #[cfg(debug_assertions)]
             node.validate(&self.inner.schema, range);
 
             let (l, r) = collator.bisect(&node.keys, range);
 
-            #[cfg(debug_assertions)]
             debug!("delete from {} [{}..{}] ({:?})", *node, l, r, range);
 
             if node.leaf {
-                if l == r {
-                    return Ok(());
-                }
-
-                let mut node = node.upgrade(file).await?;
                 for i in l..r {
                     node.keys[i].deleted = true;
                 }
@@ -297,20 +291,22 @@ where
 
                 Ok(())
             } else if r > l {
-                let mut node = node.upgrade(file).await?;
-                let mut deletes = Vec::with_capacity(r - l);
+                node.rebalance = true;
 
                 for i in l..r {
                     node.keys[i].deleted = true;
-                    deletes.push(self._delete_range(txn_id, node.children[i].clone(), range));
                 }
-                node.rebalance = true;
 
-                let child_id = node.children[r].clone();
-                let last_delete = self._delete_range(txn_id, child_id, range);
-                try_join(try_join_all(deletes), last_delete).await?;
+                let deletes: FuturesUnordered<_> = node.children[l..(r + 1)]
+                    .iter()
+                    .cloned()
+                    .map(|child_id| self._delete_range(txn_id, child_id, range))
+                    .collect();
 
-                Ok(())
+                // free the write lock on this node before deleting from the child nodes
+                std::mem::drop(node);
+
+                deletes.try_fold((), |(), ()| future::ready(Ok(()))).await
             } else {
                 let child_id = node.children[r].clone();
                 self._delete_range(txn_id, child_id, range).await
@@ -335,22 +331,28 @@ where
             let order = self.inner.order;
 
             let i = collator.bisect_left(&node.keys, &key);
-            if i < node.keys.len() && collator.compare_slice(&node.keys[i], &key) == Ordering::Equal
-            {
-                if node.keys[i].deleted {
-                    let mut node = node.upgrade(file).await?;
-                    node.keys[i].deleted = false;
-                }
-
-                return Ok(());
-            }
 
             #[cfg(debug_assertions)]
             debug!("insert at index {} into {}", i, *node);
 
             if node.leaf {
+                let key = NodeKey::new(key);
                 let mut node = node.upgrade(file).await?;
-                node.keys.insert(i, NodeKey::new(key));
+
+                if i == node.keys.len() {
+                    node.keys.insert(i, key);
+                    return Ok(());
+                }
+
+                match collator.compare_slice(&key, &node.keys[i]) {
+                    Ordering::Less => node.keys.insert(i, key),
+                    Ordering::Equal => {
+                        debug!("un-delete key at {}: {}", i, key);
+                        node.keys[i].deleted = false
+                    }
+                    Ordering::Greater => panic!("error in Collate::bisect_left"),
+                }
+
                 Ok(())
             } else {
                 let child_id = node.children[i].clone();
@@ -629,7 +631,7 @@ where
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        let key = validate_key(key, &self.inner.schema)?;
+        let key = self.validate_key(key)?;
 
         let file = &self.inner.file;
         let order = self.inner.order;
@@ -689,6 +691,20 @@ where
 
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {
         self.rows_in_range(txn_id, Range::default(), false).await
+    }
+
+    fn validate_key(&self, key: Key) -> TCResult<Key> {
+        if key.len() != self.inner.schema.len() {
+            return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
+        }
+
+        key.into_iter()
+            .zip(&self.inner.schema)
+            .map(|(val, col)| {
+                val.into_type(col.dtype)
+                    .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
+            })
+            .collect()
     }
 }
 
@@ -811,19 +827,4 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
     };
 
     Ok(order)
-}
-
-#[inline]
-fn validate_key(key: Key, schema: &RowSchema) -> TCResult<Key> {
-    if key.len() != schema.len() {
-        return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
-    }
-
-    key.into_iter()
-        .zip(schema)
-        .map(|(val, col)| {
-            val.into_type(col.dtype)
-                .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
-        })
-        .collect()
 }

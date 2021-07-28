@@ -11,6 +11,8 @@ use tc_error::*;
 use tc_value::{Value, ValueType};
 use tcgeneric::{Id, Map, Tuple};
 
+use super::{Key, Values};
+
 pub use tc_btree::Column;
 
 /// A `Table` row
@@ -55,12 +57,35 @@ impl IndexSchema {
         self.key.len() + self.values.len()
     }
 
+    /// Given a [`Row`], return its key.
+    pub fn key_from_row(&self, row: &Row) -> TCResult<Key> {
+        let mut key = Vec::with_capacity(self.key().len());
+        for col in self.key() {
+            let value = row
+                .get(col.name())
+                .cloned()
+                .ok_or(TCError::not_found(format!(
+                    "value of row {} at column {}",
+                    row, col.name
+                )))?;
+
+            key.push(value);
+        }
+
+        Ok(key)
+    }
+
     /// Given a [`Row`], return a `(key, values)` tuple.
-    pub fn key_values_from_row(&self, mut row: Row) -> TCResult<(Vec<Value>, Vec<Value>)> {
-        if self.len() != row.len() {
+    pub fn key_values_from_row(
+        &self,
+        mut row: Row,
+        reject_extras: bool,
+    ) -> TCResult<(Key, Values)> {
+        if reject_extras && self.len() != row.len() {
             return Err(TCError::unsupported(format!(
-                "{} is not a valid row for schema {}",
-                row, self
+                "invalid row for schema {}: {}",
+                self,
+                Map::from(row)
             )));
         }
 
@@ -100,7 +125,7 @@ impl IndexSchema {
     }
 
     /// Given a `key` and `values`, return a [`Row`].
-    pub fn row_from_key_values(&self, key: Vec<Value>, values: Vec<Value>) -> TCResult<Row> {
+    pub fn row_from_key_values(&self, key: Key, values: Values) -> TCResult<Row> {
         assert_eq!(key.len(), self.key.len());
         assert_eq!(values.len(), self.values.len());
 
@@ -110,7 +135,7 @@ impl IndexSchema {
     }
 
     /// Given a list of `Value`s, return a [`Row`].
-    pub fn row_from_values(&self, values: Vec<Value>) -> TCResult<Row> {
+    pub fn row_from_values(&self, values: Values) -> TCResult<Row> {
         assert_eq!(values.len(), self.len());
 
         let mut row = Map::new();
@@ -150,23 +175,23 @@ impl IndexSchema {
             .map(|c| (c.name().clone(), c))
             .collect();
 
-        let key: Vec<Column> = key
+        let key = key
             .iter()
             .map(|col_name| {
                 columns
                     .remove(col_name)
                     .ok_or_else(|| TCError::not_found(col_name))
-            })
-            .collect::<TCResult<Vec<Column>>>()?;
+            });
 
-        let values: Vec<Column> = self
+        let values = self
             .key()
             .iter()
             .filter(|c| !subset.contains(c.name()))
             .cloned()
-            .collect();
+            .map(Ok);
 
-        Ok((key, values).into())
+        let key = key.chain(values).collect::<TCResult<Vec<Column>>>()?;
+        Ok((key, vec![]).into())
     }
 
     /// Return an error if this schema does not support ordering by the given columns.
@@ -182,17 +207,38 @@ impl IndexSchema {
     }
 
     /// Return an error if the given key does not match this schema.
-    pub fn validate_key(&self, key: Vec<Value>) -> TCResult<Vec<Value>> {
+    #[inline]
+    pub fn validate_key(&self, key: Key) -> TCResult<Key> {
         if key.len() != self.key.len() {
-            let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
-            return Err(TCError::bad_request(
-                format!("invalid key {}, expected", Value::Tuple(key.into())),
-                format!("[{}]", key_columns.join(", ")),
-            ));
+            return Err(TCError::unsupported(format!(
+                "invalid key {} for schema {}",
+                Tuple::from(key),
+                self
+            )));
         }
 
         let mut validated = Vec::with_capacity(key.len());
         for (val, col) in key.into_iter().zip(self.key.iter()) {
+            let value = col.dtype.try_cast(val)?;
+            validated.push(value);
+        }
+
+        Ok(validated)
+    }
+
+    /// Return an error if the given values do not match this schema.
+    #[inline]
+    pub fn validate_values(&self, values: Values) -> TCResult<Key> {
+        if values.len() != self.values.len() {
+            return Err(TCError::unsupported(format!(
+                "invalid values {} for schema {}",
+                Tuple::from(values),
+                Tuple::<&Column>::from_iter(&self.values)
+            )));
+        }
+
+        let mut validated = Vec::with_capacity(values.len());
+        for (val, col) in values.into_iter().zip(self.values.iter()) {
             let value = col.dtype.try_cast(val)?;
             validated.push(value);
         }
@@ -259,7 +305,8 @@ impl IndexSchema {
         for column in self.columns() {
             let value = row
                 .remove(&column.name)
-                .ok_or_else(|| TCError::bad_request("Missing value for column", &column.name))?;
+                .ok_or_else(|| TCError::bad_request("missing value for column", &column.name))?;
+
             let value = column.dtype.try_cast(value)?;
             key.push(value);
         }
@@ -267,7 +314,7 @@ impl IndexSchema {
         if reject_extras && !row.is_empty() {
             return Err(TCError::bad_request(
                 &format!(
-                    "Unrecognized columns (`{}`) for schema",
+                    "unrecognized columns (`{}`) for schema",
                     row.keys()
                         .map(|c| c.to_string())
                         .collect::<Vec<String>>()

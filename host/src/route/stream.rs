@@ -1,9 +1,27 @@
 use futures::TryFutureExt;
 
 use crate::generic::{label, PathSegment};
-use crate::route::{Handler, PostHandler, Route};
+use crate::route::{GetHandler, Handler, PostHandler, Route};
 use crate::state::State;
 use crate::stream::TCStream;
+
+struct Aggregate {
+    source: TCStream,
+}
+
+impl<'a> Handler<'a> for Aggregate {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+                Ok(State::Stream(self.source.aggregate()))
+            })
+        }))
+    }
+}
 
 struct ForEach {
     source: TCStream,
@@ -25,12 +43,6 @@ impl<'a> Handler<'a> for ForEach {
     }
 }
 
-impl From<TCStream> for ForEach {
-    fn from(source: TCStream) -> Self {
-        Self { source }
-    }
-}
-
 impl Route for TCStream {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.len() != 1 {
@@ -39,7 +51,8 @@ impl Route for TCStream {
 
         let source = self.clone();
         match path[0].as_str() {
-            "for_each" => Some(Box::new(ForEach::from(source))),
+            "aggregate" => Some(Box::new(Aggregate { source })),
+            "for_each" => Some(Box::new(ForEach { source })),
             _ => None,
         }
     }

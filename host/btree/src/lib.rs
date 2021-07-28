@@ -84,6 +84,11 @@ pub trait BTreeInstance: Clone + Instance {
             .try_fold((), |(), ()| future::ready(Ok(())))
             .await
     }
+
+    /// Return an error if the given key does not match this `BTree`'s schema
+    ///
+    /// If the key is valid, this will return a copy with the data types correctly casted.
+    fn validate_key(&self, key: Key) -> TCResult<Key>;
 }
 
 #[async_trait]
@@ -395,6 +400,13 @@ where
         match self {
             Self::File(file) => file.keys(txn_id).await,
             Self::Slice(slice) => slice.keys(txn_id).await,
+        }
+    }
+
+    fn validate_key(&self, key: Key) -> TCResult<Key> {
+        match self {
+            Self::File(file) => file.validate_key(key),
+            Self::Slice(slice) => slice.validate_key(key),
         }
     }
 }

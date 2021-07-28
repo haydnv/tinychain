@@ -4,9 +4,9 @@ use std::fmt;
 use std::mem;
 use std::pin::Pin;
 
+use futures::ready;
 use futures::stream::{Fuse, Stream, StreamExt};
 use futures::task::{Context, Poll};
-use futures::ready;
 use pin_project::pin_project;
 
 use tc_error::TCResult;

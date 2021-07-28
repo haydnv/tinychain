@@ -11,7 +11,7 @@ use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_table::{Column, ColumnBound, Merged, TableIndex, TableInstance, TableSchema};
+use tc_table::{Column, ColumnBound, Merged, TableIndex, TableSchema, TableSlice, TableStream, TableWrite};
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
@@ -482,7 +482,8 @@ where
     FS: File<Node>,
     D: Dir,
     Txn: Transaction<D>,
-    T: TableInstance<FS, D, Txn>,
+    T: TableStream,
+    T::Selection: TableStream,
     D::FileClass: From<TensorType>,
 {
     assert!(!axes.is_empty());
@@ -521,12 +522,19 @@ fn table_bounds(shape: &Shape, bounds: &Bounds) -> TCResult<tc_table::Bounds> {
     Ok(table_bounds.into())
 }
 
-async fn read_value_at<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(
+async fn read_value_at<D, Txn, T>(
     table: T,
     txn: Txn,
     coord: Coord,
     dtype: NumberType,
-) -> TCResult<(Coord, Number)> {
+) -> TCResult<(Coord, Number)>
+where
+    D: Dir,
+    Txn: Transaction<D>,
+    T: TableSlice,
+    T::Slice: TableStream,
+    <T::Slice as TableStream>::Selection: TableStream
+{
     let selector: HashMap<Id, ColumnBound> = coord
         .iter()
         .enumerate()
@@ -544,19 +552,21 @@ async fn read_value_at<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInsta
     Ok((coord, value))
 }
 
-async fn upsert_value<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance<F, D, Txn>>(
+async fn upsert_value<T>(
     table: &T,
     txn_id: TxnId,
     coord: Coord,
     value: Number,
-) -> TCResult<()> {
-    let coord = coord.into_iter().map(Number::from).map(Value::Number);
+) -> TCResult<()>
+where
+    T: TableWrite,
+{
+    let coord = coord.into_iter().map(Number::from).map(Value::Number).collect();
 
     if value == value.class().zero() {
-        let key = (0..coord.len()).map(Id::from).zip(coord).collect();
-        table.delete_row(txn_id, key).await
+        table.delete(txn_id, coord).await
     } else {
-        let key = coord.collect();
+        let key = coord;
         table.upsert(txn_id, key, vec![Value::Number(value)]).await
     }
 }

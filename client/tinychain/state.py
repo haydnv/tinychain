@@ -1,5 +1,4 @@
 """Tinychain `State` s, such as `Map`, `Tuple`, and `Op`."""
-import inspect
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -30,10 +29,7 @@ class State(object):
             return {str(uri(self)): [to_json(form)]}
 
     def __ns__(self, cxt):
-        form = form_of(self)
-
-        if isinstance(form, ref.Op):
-            deanonymize(form, cxt)
+        deanonymize(form_of(self), cxt)
 
     def __ref__(self, name):
         return self.__class__(URI(name))
@@ -132,8 +128,8 @@ class Stream(State):
 
     __uri__ = uri(State) + "/stream"
 
-    def aggregate(self, initial_value, op):
-        return self._post("aggregate", Map(acc=initial_value, op=op), type(initial_value))
+    def aggregate(self):
+        return self._get("aggregate", rtype=Stream)
 
     def for_each(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State

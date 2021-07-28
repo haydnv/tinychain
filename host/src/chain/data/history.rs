@@ -257,8 +257,14 @@ impl History {
         if let Some((last_txn_id, ops)) = last_block.mutations().iter().last() {
             for op in ops {
                 let result = match op {
-                    Mutation::Delete(path, key) => subject.delete(txn, path, key.clone()).await,
+                    Mutation::Delete(path, key) => {
+                        debug!("replay DELETE {}{}: {}", subject, path, key);
+
+                        subject.delete(txn, path, key.clone()).await
+                    }
                     Mutation::Put(path, key, value) => {
+                        debug!("replay PUT {}{}: {} <- {}", subject, path, key, value);
+
                         self.resolve(txn, value.clone())
                             .and_then(|value| subject.put(txn, path, key.clone(), value))
                             .await

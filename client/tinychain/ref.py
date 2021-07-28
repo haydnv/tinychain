@@ -78,8 +78,6 @@ class With(Ref):
 
             if captured is None:
                 raise ValueError(f"With can only capture states with an ID in the current context, not {ref}")
-            elif captured == "$self":
-                raise ValueError("cannot capture $self in a closure")
 
             self.capture.append(captured)
 
@@ -111,9 +109,8 @@ class Op(Ref):
         return {str(subject): to_json(self.args)}
 
     def __ns__(self, cxt):
-        if isinstance(self.subject, MethodSubject):
-            deanonymize(self.subject, cxt)
-            deanonymize(self.args, cxt)
+        deanonymize(self.subject, cxt)
+        deanonymize(self.args, cxt)
 
 
 class Get(Op):

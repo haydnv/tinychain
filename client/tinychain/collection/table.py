@@ -1,8 +1,9 @@
-from tinychain.decorators import delete_method
+from tinychain.collection.btree import BTree
+from tinychain.decorators import delete_op, get_op, post_op
 from tinychain.error import BadRequest
-from tinychain.ref import If
-from tinychain.state import Map, Tuple, Stream
-from tinychain.util import uri
+from tinychain.ref import Delete, If, Ref, With
+from tinychain.state import Map, Tuple, State, Stream
+from tinychain.util import form_of, uri, Context, URI
 from tinychain.value import Bool, UInt, Nil
 
 from .collection import Collection
@@ -24,6 +25,11 @@ class Table(Collection):
 
         return self._get("contains", key, rtype=Bool)
 
+    def columns(self):
+        """Return the column schema of this `Table` as a :class:`Tuple`."""
+
+        return self._get("columns", rtype=Tuple)
+
     def count(self):
         """
         Return the number of rows in this `Table`.
@@ -33,15 +39,16 @@ class Table(Collection):
 
         return self._get("count", rtype=UInt)
 
-    @delete_method
-    def delete(self, txn, **where):
+    def delete(self, where={}):
         """
         Delete all contents of this `Table` matching the specified where clause.
 
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        return self.select(self.key()).rows(**where).for_each(lambda key: self.delete_row(key))
+        delete_row = With([self], delete_op(lambda cxt, key: self.delete_row(key)))
+        to_delete = self.where(where) if where else self
+        return to_delete.select(self.key_names()).rows().for_each(delete_row)
 
     def delete_row(self, key):
         """Delete the row with the given key from this `Table`, if it exists."""
@@ -49,13 +56,14 @@ class Table(Collection):
         return self._delete("", key)
 
     def group_by(self, columns):
-        """
-        Aggregate this `Table` according to the values of the specified columns.
+        """Return a :class:`Stream` of the unique values of the given columns."""
 
-        If no index supports ordering by `columns`, this will raise a :class:`BadRequest` error.
-        """
+        return self.order_by(columns).select(columns).rows().aggregate()
 
-        return self._get("group", columns, Table)
+    def index(self):
+        """Build a :class:`BTree` index with the values of the given columns."""
+
+        return BTree.copy_from(self.columns(), self.rows())
 
     def insert(self, key, values=[]):
         """
@@ -74,10 +82,15 @@ class Table(Collection):
 
         return self._get("is_empty", rtype=Bool)
 
-    def key(self):
+    def key_columns(self):
+        """Return the schema of the key columns of this `Table`."""
+
+        return self._get("key_columns", rtype=Tuple)
+
+    def key_names(self):
         """Return the `Id` s of the key columns of this `Table`."""
 
-        return self._get("key", rtype=Tuple)
+        return self._get("key_names", rtype=Tuple)
 
     def limit(self, limit):
         """Limit the number of rows returned from this `Table`."""
@@ -93,27 +106,29 @@ class Table(Collection):
 
         return self._get("order", (columns, reverse), Table)
 
-    def rows(self, **where):
+    def rows(self, where={}):
         """Return a :class:`Stream` of the rows in this `Table`."""
 
-        return Stream(self._get("", where))
+        where = _handle_where(where)
+        return self._post("rows", where, Stream)
 
-    def select(self, *columns):
+    def select(self, columns):
         """Return a `Table` containing only the specified columns."""
 
         return self._get("select", columns, Table)
 
-    def update(self, where, values):
+    def update(self, values, where={}):
         """Update the specified rows of this table with the given `values`."""
 
-        return self.where(where).index(self.key()).keys().for_each(lambda key: self.update_row(key, values))
+        update_row = With([self], get_op(lambda cxt, key: self.update_row(key, values)))
+        return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
 
     def update_row(self, key, values):
         """Update the specified row with the given `values`."""
 
         return self._put("", key, values)
 
-    def upsert(self, key, values=[]):
+    def upsert(self, key, values):
         """
         Insert the given row into this `Table`.
 
@@ -134,6 +149,16 @@ class Table(Collection):
 
 
 def _handle_where(where):
+    if where is None:
+        return {}
+    elif isinstance(where, State):
+        if isinstance(form_of(where), dict):
+            where = form_of(where)
+        else:
+            return where
+    elif isinstance(where, Ref) or isinstance(where, URI):
+        return where
+
     return {
         col: Range.from_slice(val) if isinstance(val, slice) else val
         for col, val in where.items()

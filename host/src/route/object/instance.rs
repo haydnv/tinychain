@@ -147,9 +147,10 @@ where
     Self: ToState,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("InstanceExt::route {}", TCPath::from(path));
+        debug!("{} route {}", self, TCPath::from(path));
 
         if path.is_empty() {
+            debug!("routing to parent: {}", self.parent());
             self.parent().route(path)
         } else if let Some(member) = self.proto().get(&path[0]) {
             match member {
