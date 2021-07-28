@@ -39,7 +39,7 @@ class TableTests(unittest.TestCase):
         self.assertEqual(result, expected(SCHEMA, []))
 
     def testDeleteSlice(self):
-        count = 2
+        count = 50
         values = [[v] for v in range(count)]
         keys = [[num2words(i)] for i in range(count)]
         remaining = sorted([k + v for k, v in zip(keys, values) if v[0] >= 40])

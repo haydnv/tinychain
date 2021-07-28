@@ -185,8 +185,6 @@ class DenseTests(unittest.TestCase):
         expected = expected[0, :-1]
 
         actual = self.host.post(ENDPOINT, cxt)
-        print(actual)
-        print(expected)
         self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
 
     @classmethod
@@ -461,7 +459,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def execute(self, hosts):
         hosts[0].put("/test/tensor/dense", [0, 0], 1)
-        hosts[0].put("/test/tensor/sparse", [0, 0], 1)
+        hosts[1].put("/test/tensor/sparse", [0, 0], 1)
 
         dense = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
         sparse = expect_sparse(tc.I32, [2, 3], [[[0, 0], 1]])
