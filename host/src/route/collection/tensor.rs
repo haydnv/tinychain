@@ -517,13 +517,13 @@ where
     }
 }
 
-impl<B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for DenseTensor<B> {
+impl<B: DenseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for DenseTensor<B> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
 }
 
-impl<A: SparseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
+impl<A: SparseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
     for SparseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, A>
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

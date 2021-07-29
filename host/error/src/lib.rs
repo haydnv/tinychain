@@ -116,6 +116,10 @@ impl TCError {
     /// A truly unexpected error, for which the calling application cannot define any specific
     /// handling behavior.
     pub fn internal<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}", info);
+
+        #[cfg(not(debug_assertions))]
         Self {
             code: ErrorType::Internal,
             message: info.to_string(),
@@ -211,6 +215,10 @@ impl<'en> en::IntoStream<'en> for TCError {
 #[cfg(feature = "tensor")]
 impl From<afarray::ArrayError> for TCError {
     fn from(cause: afarray::ArrayError) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}", cause);
+
+        #[cfg(not(debug_assertions))]
         Self {
             code: ErrorType::Internal,
             message: format!("tensor error: {}", cause),

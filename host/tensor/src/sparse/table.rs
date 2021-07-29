@@ -11,7 +11,9 @@ use log::debug;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_table::{Column, ColumnBound, Merged, TableIndex, TableSchema, TableSlice, TableStream, TableWrite};
+use tc_table::{
+    Column, ColumnBound, Merged, TableIndex, TableSchema, TableSlice, TableStream, TableWrite,
+};
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
@@ -23,7 +25,7 @@ use crate::transform;
 use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::SparseTranspose;
-use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor};
+use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor, SparseWrite};
 
 const VALUE: Label = label("value");
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
@@ -158,7 +160,17 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         SparseTranspose::new(self, permutation)
     }
+}
 
+#[async_trait]
+impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseTable<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    Self: SparseAccess<FD, FS, D, T>,
+{
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.shape().validate_coord(&coord)?;
         upsert_value(&self.table, txn_id, coord, value).await
@@ -405,12 +417,6 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         SparseTranspose::new(self, permutation)
     }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.shape().validate_coord(&coord)?;
-        let source_coord = self.rebase.invert_coord(&coord);
-        self.source.write_value(txn_id, source_coord, value).await
-    }
 }
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseTableSlice<FD, FS, D, T>
@@ -533,7 +539,7 @@ where
     Txn: Transaction<D>,
     T: TableSlice,
     T::Slice: TableStream,
-    <T::Slice as TableStream>::Selection: TableStream
+    <T::Slice as TableStream>::Selection: TableStream,
 {
     let selector: HashMap<Id, ColumnBound> = coord
         .iter()
@@ -552,16 +558,15 @@ where
     Ok((coord, value))
 }
 
-async fn upsert_value<T>(
-    table: &T,
-    txn_id: TxnId,
-    coord: Coord,
-    value: Number,
-) -> TCResult<()>
+async fn upsert_value<T>(table: &T, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>
 where
     T: TableWrite,
 {
-    let coord = coord.into_iter().map(Number::from).map(Value::Number).collect();
+    let coord = coord
+        .into_iter()
+        .map(Number::from)
+        .map(Value::Number)
+        .collect();
 
     if value == value.class().zero() {
         table.delete(txn_id, coord).await

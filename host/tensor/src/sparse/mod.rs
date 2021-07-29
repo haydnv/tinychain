@@ -18,17 +18,16 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
-use super::dense::{BlockListSparse, DenseTensor};
+use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
+use super::transform;
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
     TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
     TensorUnary,
 };
 
-use crate::dense::PER_BLOCK;
-
 use access::*;
-pub use access::{DenseToSparse, SparseAccess, SparseAccessor};
+pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
 
 mod access;
@@ -352,7 +351,7 @@ where
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    L: SparseAccess<FD, FS, D, T>,
+    L: SparseWrite<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
@@ -385,19 +384,25 @@ where
         bounds: Bounds,
         other: SparseTensor<FD, FS, D, T, R>,
     ) -> TCResult<()> {
-        let slice = self.slice(bounds)?;
-        if slice.shape() != other.shape() {
+        let slice_shape = bounds.to_shape(self.shape())?;
+        if &slice_shape != other.shape() {
             return Err(TCError::unsupported(format!(
                 "cannot write tensor of shape {} to slice of shape {}",
                 other.shape(),
-                slice.shape()
+                slice_shape,
             )));
         }
 
         let txn_id = *txn.id();
         let filled = other.accessor.filled(txn).await?;
+
+        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
         filled
-            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
+            .map_ok(move |(coord, value)| {
+                let coord = rebase.invert_coord(&coord);
+                (coord, value)
+            })
+            .map_ok(|(coord, value)| self.accessor.write_value(txn_id, coord, value))
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -411,7 +416,7 @@ where
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    A: SparseWrite<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -456,7 +461,7 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    A: SparseWrite<FD, FS, D, T>,
 {
     type Txn = T;
 

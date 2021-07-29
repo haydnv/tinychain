@@ -24,7 +24,7 @@ use crate::transform;
 use crate::{coord_bounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
-use super::{DenseAccess, DenseAccessor, PER_BLOCK};
+use super::{DenseAccess, DenseAccessor, DenseWrite, PER_BLOCK};
 
 const MEBIBYTE: usize = 1_048_576;
 
@@ -254,6 +254,31 @@ where
             .set_value(offset as usize, value)
             .map_err(TCError::from)
     }
+
+    async fn overwrite<B: DenseAccess<FD, FS, D, T>>(&self, txn: T, value: B) -> TCResult<()> {
+        if value.shape() != self.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot overwrite a Tensor of shape {} with one of shape {}",
+                self.shape(),
+                value.shape()
+            )));
+        }
+
+        let txn_id = *txn.id();
+        let num_blocks = div_ceil(value.size(), PER_BLOCK as u64);
+        let contents = value.block_stream(txn).await?;
+        stream::iter((0..num_blocks).map(BlockId::from))
+            .zip(contents)
+            .map(|(block_id, r)| r.map(|array| (block_id, array)))
+            .map_ok(|(block_id, array)| async {
+                let mut block = self.file.write_block(txn_id, block_id).await?;
+                *block = array;
+                Ok(())
+            })
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
 }
 
 impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS, D, T> {
@@ -347,29 +372,90 @@ where
             })
             .await
     }
+}
 
-    async fn write<B: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: B) -> TCResult<()> {
-        if value.shape() != self.shape() {
+#[async_trait]
+impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    async fn write<B: DenseAccess<FD, FS, D, T>>(
+        &self,
+        txn: Self::Txn,
+        bounds: Bounds,
+        value: B,
+    ) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
+
+        if bounds == Bounds::all(self.shape()) {
+            return self.overwrite(txn, value).await;
+        }
+
+        let slice_shape = bounds.to_shape(self.shape())?;
+        if &slice_shape != value.shape() {
             return Err(TCError::unsupported(format!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
-                self.shape(),
+                slice_shape,
                 value.shape()
             )));
         }
 
+        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
+        let size = rebase.size();
         let txn_id = *txn.id();
-        let num_blocks = div_ceil(value.size(), PER_BLOCK as u64);
-        let contents = value.block_stream(txn).await?;
-        stream::iter((0..num_blocks).map(BlockId::from))
-            .zip(contents)
-            .map(|(block_id, r)| r.map(|array| (block_id, array)))
-            .map_ok(|(block_id, array)| async {
-                let mut block = self.file.write_block(txn_id, block_id).await?;
-                *block = array;
-                Ok(())
+        let offsets = (0..size)
+            .step_by(PER_BLOCK)
+            .map(|start| {
+                let end = start + PER_BLOCK as u64;
+                if end > size {
+                    Offsets::range(start, size)
+                } else {
+                    Offsets::range(start, end)
+                }
+            })
+            .map(|offsets| Coords::from_offsets(offsets, rebase.shape()))
+            .map(|coords| rebase.invert_coords(&coords).to_offsets(self.shape()));
+
+        let blocks = value.block_stream(txn).await?;
+
+        let af_per_block = af::constant(PER_BLOCK as u64, af::Dim4::new(&[1, 1, 1, 1]));
+        stream::iter(offsets)
+            .zip(blocks)
+            .map(|(offsets, r)| r.map(|array| (offsets, array)))
+            .map_ok(|(offsets, array)| {
+                let af_per_block = af_per_block.clone();
+
+                async move {
+                    let indices: ArrayExt<u64> =
+                        af::modulo(offsets.af(), &af_per_block, true).into();
+
+                    let block_offsets = af::div(offsets.af(), &af_per_block, true);
+                    let block_ids = ArrayExt::from(af::set_unique(&block_offsets, true)).to_vec();
+
+                    let mut start = 0;
+                    for block_id in block_ids.into_iter() {
+                        let af_block_id = ArrayExt::from(&[block_id][..]);
+                        let (len, _) = af::sum_all(&af::eq(&block_offsets, af_block_id.af(), true));
+                        let end = start + len as usize;
+                        let indices = indices.slice(start, end);
+                        let array = array.slice(start, end).map_err(TCError::from)?;
+
+                        let mut block = self.file.write_block(txn_id, block_id.into()).await?;
+
+                        block.set(&indices, &array)?;
+
+                        start = end;
+                    }
+
+                    Ok(())
+                }
             })
             .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
+            .try_fold((), |(), ()| future::ready(Ok(())))
             .await
     }
 
@@ -933,84 +1019,6 @@ where
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
         let coords = self.rebase.invert_coords(&coords);
         self.source.read_values(txn, coords).await
-    }
-
-    async fn write<B: DenseAccess<FD, FS, D, T>>(&self, txn: Self::Txn, value: B) -> TCResult<()> {
-        if self.shape() != value.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot overwrite a Tensor of shape {} with one of shape {}",
-                self.shape(),
-                value.shape()
-            )));
-        }
-
-        let size = self.size();
-        let rebase = &self.rebase;
-        let txn_id = *txn.id();
-        let offsets = (0..size)
-            .step_by(PER_BLOCK)
-            .map(|start| {
-                let end = start + PER_BLOCK as u64;
-                if end > size {
-                    Offsets::range(start, size)
-                } else {
-                    Offsets::range(start, end)
-                }
-            })
-            .map(|offsets| Coords::from_offsets(offsets, self.shape()))
-            .map(|coords| {
-                rebase
-                    .invert_coords(&coords)
-                    .to_offsets(self.source.shape())
-            });
-
-        let blocks = value.block_stream(txn).await?;
-
-        let af_per_block = af::constant(PER_BLOCK as u64, af::Dim4::new(&[1, 1, 1, 1]));
-        stream::iter(offsets)
-            .zip(blocks)
-            .map(|(offsets, r)| r.map(|array| (offsets, array)))
-            .map_ok(|(offsets, array)| {
-                let af_per_block = af_per_block.clone();
-
-                async move {
-                    let indices: ArrayExt<u64> =
-                        af::modulo(offsets.af(), &af_per_block, true).into();
-                    let block_offsets = af::div(offsets.af(), &af_per_block, true);
-                    let block_ids = ArrayExt::from(af::set_unique(&block_offsets, true)).to_vec();
-
-                    let mut start = 0;
-                    for block_id in block_ids.into_iter() {
-                        let af_block_id = ArrayExt::from(&[block_id][..]);
-                        let (len, _) = af::sum_all(&af::eq(&block_offsets, af_block_id.af(), true));
-                        let end = start + len as usize;
-                        let indices = indices.slice(start, end);
-                        let array = array.slice(start, end).map_err(TCError::from)?;
-
-                        let mut block = self
-                            .source
-                            .file
-                            .write_block(txn_id, block_id.into())
-                            .await?;
-
-                        block.set(&indices, &array)?;
-
-                        start = end;
-                    }
-
-                    Ok(())
-                }
-            })
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |(), ()| future::ready(Ok(())))
-            .await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.shape().validate_bounds(&bounds)?;
-
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, number).await
     }
 }
 

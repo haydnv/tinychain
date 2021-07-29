@@ -1,8 +1,8 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.state import Map
-from tinychain.util import is_python_literal, uri
+from tinychain.state import Map, State
+from tinychain.util import form_of, uri, URI
 from tinychain.value import Bool, F32, Number
 
 from . import schema
@@ -177,22 +177,10 @@ class Tensor(Collection):
 
         return self._get("transpose", permutation, self.__class__)
 
-    def write(self, *args):
-        """
-        Write a `Tensor` or `Number` to the given slice of this one.
+    def write(self, bounds, value):
+        """Write a `Tensor` or `Number` to the given slice of this one."""
 
-        If only one argument is provided, it is assumed to be a value to write to this entire `Tensor`.
-        If two arguments are provided, the first is assumed to be the bounds of the write and the second the value.
-        """
-
-        if len(args) == 1:
-            [value] = args
-            return self.__setitem__(None, value)
-        elif len(args) == 2:
-            [bounds, value] = args
-            return self.__setitem__(bounds, value)
-        else:
-            raise TypeError(f"Tensor.write takes exactly one or two arguments, not f{args}")
+        return self.__setitem__(bounds, value)
 
 
 class Dense(Tensor):
@@ -253,12 +241,19 @@ class Sparse(Tensor):
 
 
 def einsum(fmt, tensors):
-    return Tensor(ref.Post(uri(Tensor) + "/einsum", Map(format=fmt, tensors=tensors)))
+    return Tensor(ref.Post(uri(Tensor) + "/einsum", {"format": fmt, "tensors": tensors}))
 
 
 def _handle_bounds(bounds):
-    if bounds is None:
-        return None
+    if bounds is None or isinstance(bounds, ref.Ref) or isinstance(bounds, URI):
+        return bounds
+
+    if isinstance(bounds, State):
+        form = form_of(bounds)
+        if isinstance(form, tuple) or isinstance(form, list):
+            bounds = form
+        else:
+            return bounds
 
     if hasattr(bounds, "__iter__"):
         bounds = tuple(bounds)

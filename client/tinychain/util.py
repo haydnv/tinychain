@@ -80,20 +80,6 @@ def get_ref(subject, name):
         return subject
 
 
-def is_python_literal(state):
-    from .ref import Ref
-    from .state import State
-
-    if isinstance(state, Ref):
-        return False
-    elif isinstance(state, State):
-        return False
-    elif isinstance(state, URI):
-        return False
-
-    return True
-
-
 class URI(object):
     """
     An absolute or relative link to a Tinychain state.

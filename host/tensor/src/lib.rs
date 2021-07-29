@@ -21,9 +21,9 @@ use tcgeneric::{
 };
 
 pub use bounds::{AxisBounds, Bounds, Shape};
-pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
+pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
 pub use einsum::einsum;
-pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor};
+pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor, SparseWrite};
 
 mod bounds;
 mod dense;
@@ -33,9 +33,6 @@ mod stream;
 mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
-
-const ERR_NONBIJECTIVE_WRITE: &str = "cannot write to a derived Tensor which is not a \
-bijection of its source--consider copying first, or writing directly to the source Tensor";
 
 /// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";

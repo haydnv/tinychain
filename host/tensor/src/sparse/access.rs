@@ -19,7 +19,6 @@ use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
 use crate::transform;
 use crate::{
     coord_bounds, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, TensorUnary,
-    ERR_NONBIJECTIVE_WRITE,
 };
 
 use super::combine::{coord_to_offset, SparseCombine};
@@ -61,7 +60,13 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     ///
     /// If no permutation is given, this accessor's axes will be reversed.
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+}
 
+/// Write methods for [`SparseTensor`] data
+#[async_trait]
+pub trait SparseWrite<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
+    SparseAccess<FD, FS, D, T>
+{
     /// Write the given `value` at the given `coord` of this [`SparseTensor`].
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
@@ -261,19 +266,21 @@ where
             Self::Unary(unary) => unary.transpose(permutation).map(SparseAccess::accessor),
         }
     }
+}
 
+#[async_trait]
+impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
-            Self::Broadcast(broadcast) => broadcast.write_value(txn_id, coord, value).await,
-            Self::Cast(cast) => cast.write_value(txn_id, coord, value).await,
-            Self::Combine(combine) => combine.write_value(txn_id, coord, value).await,
-            Self::Dense(dense) => dense.write_value(txn_id, coord, value).await,
-            Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
-            Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
-            Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
-            Self::Transpose(transpose) => transpose.write_value(txn_id, coord, value).await,
-            Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
+            _ => Err(TCError::unsupported("cannot write to a Tensor view")),
         }
     }
 }
@@ -440,10 +447,6 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         self.source.transpose(permutation).map(DenseToSparse::from)
-    }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.source.write_value(txn_id, coord.into(), value).await
     }
 }
 
@@ -637,10 +640,6 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         SparseTranspose::new(self, permutation)
     }
-
-    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
-        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
 }
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseBroadcast<FD, FS, D, T, A>
@@ -763,10 +762,6 @@ where
             dtype: self.dtype,
             phantom: self.phantom,
         })
-    }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.source.write_value(txn_id, coord, value).await
     }
 }
 
@@ -976,10 +971,6 @@ where
             phantom: self.phantom,
         })
     }
-
-    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
-        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
 }
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for SparseCombinator<FD, FS, D, T, L, R>
@@ -1152,11 +1143,6 @@ where
         let source = self.source.transpose(permutation)?;
         SparseExpand::new(source, expand_axis)
     }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value(txn_id, coord, value).await
-    }
 }
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseExpand<FD, FS, D, T, A>
@@ -1317,10 +1303,6 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         SparseTranspose::new(self, permutation)
     }
-
-    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
-        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
 }
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseReduce<FD, FS, D, T>
@@ -1476,12 +1458,6 @@ where
         let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
         self.source.transpose(permutation)
     }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        self.source
-            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
-            .await
-    }
 }
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseTranspose<FD, FS, D, T, A>
@@ -1602,10 +1578,6 @@ where
             dtype: self.dtype,
             transform: self.transform,
         })
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
-        Err(TCError::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 

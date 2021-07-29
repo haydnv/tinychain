@@ -27,7 +27,7 @@ use super::{
 };
 
 use access::*;
-pub use access::{BlockListSparse, DenseAccess, DenseAccessor};
+pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
 use futures::StreamExt;
 
@@ -351,7 +351,7 @@ where
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    B: DenseWrite<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -384,7 +384,7 @@ where
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    B: DenseWrite<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
@@ -401,21 +401,7 @@ where
         other: DenseTensor<FD, FS, D, T, O>,
     ) -> TCResult<()> {
         debug!("write {} to dense {}", other, bounds);
-        if bounds == Bounds::all(self.shape()) {
-            self.blocks.write(txn, other.blocks).await
-        } else {
-            let slice = self.slice(bounds)?;
-            if other.shape() != slice.shape() {
-                return Err(TCError::unsupported(format!(
-                    "cannot write a tensor of shape {} to a slice of shape {}",
-                    other.shape(),
-                    slice.shape()
-                )));
-            }
-
-            let bounds = Bounds::all(slice.shape());
-            slice.write(txn, bounds, other).await
-        }
+        self.blocks.write(txn, bounds, other.blocks).await
     }
 }
 
@@ -426,7 +412,7 @@ where
     FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    B: DenseWrite<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
