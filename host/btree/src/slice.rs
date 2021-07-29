@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::{TCError, TCResult};
 use tc_transact::fs::{Dir, File};
@@ -9,7 +10,6 @@ use tcgeneric::{Instance, TCBoxTryStream};
 use super::{
     validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema,
 };
-use futures::{TryFutureExt, TryStreamExt};
 
 /// A slice of a [`BTree`]
 #[derive(Clone)]
@@ -106,14 +106,6 @@ where
             .await?;
 
         rows.try_next().map_ok(|row| row.is_none()).await
-    }
-
-    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
-        self.source.delete_range(txn_id, &self.range).await
-    }
-
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        self.source.insert(txn_id, key).await
     }
 
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {

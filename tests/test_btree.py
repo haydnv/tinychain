@@ -85,19 +85,18 @@ class BTreeTests(unittest.TestCase):
         self.assertEqual(result, expected([]))
 
     def testDeleteSlice(self):
-        keys = [[i, num2words(i)] for i in range(100)]
-        ordered = expected(keys[:25] + keys[35:])
+        keys = [[i, num2words(i)] for i in range(10)]
+        ordered = keys[:25] + keys[35:]
 
         random.shuffle(keys)
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
-        cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.delete = tc.After(cxt.inserts, cxt.tree[25:35].delete())
+        cxt.tree = tc.BTree.load(SCHEMA, ordered)
+        cxt.delete = cxt.tree.delete([slice(25, 35)])
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
-        result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, ordered)
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expected(ordered))
 
     @classmethod
     def tearDownClass(cls):

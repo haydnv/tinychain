@@ -9,7 +9,7 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::TryStreamExt;
 use log::debug;
 
-use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
+use tc_btree::{BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
@@ -82,13 +82,8 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn> {
 
     async fn delete_inner(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         debug!("Index::delete {:?}", key);
-
-        let slice = self
-            .btree
-            .clone()
-            .slice(tc_btree::Range::with_prefix(key.to_vec()), false)?;
-
-        slice.delete(txn_id).await
+        let range = tc_btree::Range::with_prefix(key.to_vec());
+        self.btree.delete(txn_id, range).await
     }
 
     async fn delete(&self, txn_id: TxnId, mut row: Row) -> TCResult<()> {

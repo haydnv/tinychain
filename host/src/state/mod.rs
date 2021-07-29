@@ -502,6 +502,19 @@ impl From<OpRef> for State {
     }
 }
 
+impl<T> From<Option<T>> for State
+where
+    State: From<T>,
+{
+    fn from(state: Option<T>) -> Self {
+        if let Some(state) = state {
+            state.into()
+        } else {
+            Value::None.into()
+        }
+    }
+}
+
 impl From<Scalar> for State {
     fn from(scalar: Scalar) -> Self {
         State::Scalar(scalar)

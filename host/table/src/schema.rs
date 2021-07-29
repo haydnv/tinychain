@@ -175,13 +175,11 @@ impl IndexSchema {
             .map(|c| (c.name().clone(), c))
             .collect();
 
-        let key = key
-            .iter()
-            .map(|col_name| {
-                columns
-                    .remove(col_name)
-                    .ok_or_else(|| TCError::not_found(col_name))
-            });
+        let key = key.iter().map(|col_name| {
+            columns
+                .remove(col_name)
+                .ok_or_else(|| TCError::not_found(col_name))
+        });
 
         let values = self
             .key()

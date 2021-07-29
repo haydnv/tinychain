@@ -1,7 +1,8 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
-from tinychain.state import Map, Stream
-from tinychain.util import uri
+from tinychain.ref import Ref
+from tinychain.state import Map, State, Stream, Tuple
+from tinychain.util import form_of, uri, URI
 from tinychain.value import UInt
 
 from .collection import Collection
@@ -18,31 +19,31 @@ class BTree(Collection):
         Return a slice of this `BTree` containing all keys which begin with the given prefix.
         """
 
-        if not isinstance(prefix, tuple):
+        if not isinstance(prefix, Tuple) and not isinstance(prefix, tuple):
             prefix = (prefix,)
 
-        prefix = [Range.from_slice(k) if isinstance(k, slice) else k for k in prefix]
+        range = _handle_range(prefix)
+        return self._post("", {"range": range}, BTree)
 
-        return self._post("", Map(range=prefix), BTree)
-
-    def count(self):
+    def count(self, range=None):
         """
         Return the number of keys in this `BTree`.
 
-        To count the number of keys beginning with a specific prefix,
-        call `btree[prefix].count()`.
+        To count the number of keys beginning with a specific prefix, call `btree[prefix].count()`.
         """
 
-        return self._get("count", rtype=UInt)
+        range = _handle_range(range)
+        return self._get("count", range, UInt)
 
-    def delete(self, key=None):
+    def delete(self, range=None):
         """
-        Delete the contents of this `BTree` beginning with the specified prefix.
+        Delete the contents of this `BTree` within the specified range.
 
-        If no prefix is specified, the entire contents of this `BTree` will be deleted.
+        If no range is specified, the entire contents of this `BTree` will be deleted.
         """
 
-        return self._delete("", key)
+        range = _handle_range(range)
+        return self._delete("", range)
 
     def first(self):
         """
@@ -62,13 +63,11 @@ class BTree(Collection):
 
         return self._put("", value=key)
 
-    def keys(self, prefix=None):
-        """Return a :class:`Stream` of the keys in this `BTree`."""
+    def keys(self, range=None):
+        """Return a :class:`Stream` of the keys in this `BTree` within the given range (if specified)."""
 
-        if prefix is None:
-            return self._get("keys", rtype=Stream)
-        else:
-            return self._get("keys", prefix, Stream)
+        range = _handle_range(range)
+        return self._get("keys", range, Stream)
 
     def reverse(self):
         """
@@ -76,3 +75,17 @@ class BTree(Collection):
         """
 
         return self._get("reverse", rtype=BTree)
+
+
+def _handle_range(range):
+    if range is None or isinstance(range, Ref) or isinstance(range, URI):
+        return range
+
+    if isinstance(range, State):
+        form = form_of(range)
+        if isinstance(form, list) or isinstance(form, tuple):
+            range = form
+        else:
+            return range
+
+    return [Range.from_slice(k) if isinstance(k, slice) else k for k in range]

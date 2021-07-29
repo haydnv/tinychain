@@ -23,7 +23,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
-use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, Key, Range, RowSchema};
+use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, BTreeWrite, Key, Range, RowSchema};
 
 type Selection<'a> = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCBoxTryStream<'a, Key>>> + Send + Unpin + 'a>>,
@@ -312,11 +312,6 @@ where
                 self._delete_range(txn_id, child_id, range).await
             }
         })
-    }
-
-    pub(super) async fn delete_range(&self, txn_id: TxnId, range: &Range) -> TCResult<()> {
-        let root_id = self.inner.root.read(&txn_id).await?;
-        self._delete_range(txn_id, (*root_id).clone(), range).await
     }
 
     fn _insert(
@@ -615,19 +610,49 @@ where
         Ok(root.keys.is_empty())
     }
 
-    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
-        let mut root = self.inner.root.write(txn_id).await?;
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {
+        self.rows_in_range(txn_id, Range::default(), false).await
+    }
 
-        self.inner.file.truncate(txn_id).await?;
+    fn validate_key(&self, key: Key) -> TCResult<Key> {
+        if key.len() != self.inner.schema.len() {
+            return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
+        }
 
-        *root = self.inner.file.unique_id(&txn_id).await?;
+        key.into_iter()
+            .zip(&self.inner.schema)
+            .map(|(val, col)| {
+                val.into_type(col.dtype)
+                    .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
+            })
+            .collect()
+    }
+}
 
-        self.inner
-            .file
-            .create_block(txn_id, (*root).clone(), Node::new(true, None))
-            .await?;
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
+where
+    Self: Clone,
+    BTreeSlice<F, D, T>: 'static,
+{
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        if range == Range::default() {
+            let mut root = self.inner.root.write(txn_id).await?;
 
-        Ok(())
+            self.inner.file.truncate(txn_id).await?;
+
+            *root = self.inner.file.unique_id(&txn_id).await?;
+
+            self.inner
+                .file
+                .create_block(txn_id, (*root).clone(), Node::new(true, None))
+                .await?;
+
+            return Ok(());
+        }
+
+        let root_id = self.inner.root.read(&txn_id).await?;
+        self._delete_range(txn_id, (*root_id).clone(), &range).await
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
@@ -656,11 +681,7 @@ where
         #[cfg(debug_assertions)]
         debug!("root node {} is {}", *root_id, *root);
 
-        if root.leaf {
-            assert!(root.children.is_empty());
-        } else {
-            assert!(!root.children.is_empty());
-        }
+        assert_eq!(root.children.is_empty(), root.leaf);
 
         if root.keys.len() == (2 * order) - 1 {
             // split_child will need a write lock on root, so release the read lock
@@ -687,24 +708,6 @@ where
             std::mem::drop(root_id);
             self._insert(txn_id, root, key).await
         }
-    }
-
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>> {
-        self.rows_in_range(txn_id, Range::default(), false).await
-    }
-
-    fn validate_key(&self, key: Key) -> TCResult<Key> {
-        if key.len() != self.inner.schema.len() {
-            return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
-        }
-
-        key.into_iter()
-            .zip(&self.inner.schema)
-            .map(|(val, col)| {
-                val.into_type(col.dtype)
-                    .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
-            })
-            .collect()
     }
 }
 

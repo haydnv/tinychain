@@ -22,6 +22,7 @@ pub use slice::BTreeSlice;
 mod file;
 mod slice;
 
+const ERR_VIEW_WRITE: &str = "BTree view does not support write operations";
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
 /// The file extension of a [`BTree`] as stored on-disk
@@ -38,13 +39,13 @@ pub type Range = collate::Range<Value, Key>;
 pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;
 
-    /// Return a reference to this `BTree`'s collator.
+    /// Borrow this `BTree`'s collator.
     fn collator(&self) -> &ValueCollator;
 
-    /// Return a reference to this `BTree`'s schema.
+    /// Borrow to this `BTree`'s schema.
     fn schema(&self) -> &RowSchema;
 
-    /// Return a slice of this `BTree`'s with the given range.
+    /// Return a slice of this `BTree` with the given range.
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice>;
 
     /// Return the number of [`Key`]s in this `BTree`.
@@ -58,18 +59,27 @@ pub trait BTreeInstance: Clone + Instance {
     /// Return `true` if this `BTree` has no [`Key`]s.
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 
+    /// Return a `Stream` of this `BTree`'s [`Key`]s.
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
+    where
+        Self: 'a;
+
+    /// Return an error if the given key does not match this `BTree`'s schema
+    ///
+    /// If the key is valid, this will return a copy with the data types correctly casted.
+    fn validate_key(&self, key: Key) -> TCResult<Key>;
+}
+
+/// [`BTree`] write methods.
+#[async_trait]
+pub trait BTreeWrite: BTreeInstance {
     /// Delete all the [`Key`]s in this `BTree`.
-    async fn delete(&self, txn_id: TxnId) -> TCResult<()>;
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()>;
 
     /// Insert the given [`Key`] into this `BTree`.
     ///
     /// If the [`Key`] is already present, this is a no-op.
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
-
-    /// Return a `Stream` of this `BTree`'s [`Key`]s.
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
-    where
-        Self: 'a;
 
     /// Insert all the keys from the given `Stream` into this `BTree`.
     ///
@@ -84,11 +94,6 @@ pub trait BTreeInstance: Clone + Instance {
             .try_fold((), |(), ()| future::ready(Ok(())))
             .await
     }
-
-    /// Return an error if the given key does not match this `BTree`'s schema
-    ///
-    /// If the key is valid, this will return a copy with the data types correctly casted.
-    fn validate_key(&self, key: Key) -> TCResult<Key>;
 }
 
 #[async_trait]
@@ -379,20 +384,6 @@ where
         }
     }
 
-    async fn delete(&self, txn_id: TxnId) -> TCResult<()> {
-        match self {
-            Self::File(file) => file.delete(txn_id).await,
-            Self::Slice(slice) => slice.delete(txn_id).await,
-        }
-    }
-
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        match self {
-            Self::File(file) => file.insert(txn_id, key).await,
-            Self::Slice(slice) => slice.insert(txn_id, key).await,
-        }
-    }
-
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
@@ -407,6 +398,26 @@ where
         match self {
             Self::File(file) => file.validate_key(key),
             Self::Slice(slice) => slice.validate_key(key),
+        }
+    }
+}
+
+#[async_trait]
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTree<F, D, T>
+where
+    Self: 'static,
+{
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.delete(txn_id, range).await,
+            _ => Err(TCError::unsupported(ERR_VIEW_WRITE)),
+        }
+    }
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.insert(txn_id, key).await,
+            _ => Err(TCError::unsupported(ERR_VIEW_WRITE)),
         }
     }
 }
