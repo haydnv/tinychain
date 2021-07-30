@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use destream::en;
-use futures::future;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use safecast::TryCastFrom;
 
@@ -27,7 +27,7 @@ pub enum TCStream {
 }
 
 impl TCStream {
-    pub fn aggregate(self) -> TCStream {
+    pub fn aggregate(self) -> Self {
         Self::Aggregate(Box::new(self))
     }
 
@@ -45,46 +45,59 @@ impl TCStream {
         Box::pin(async move {
             match self {
                 Self::Aggregate(source) => {
-                    let source = source.into_stream(txn).await?;
-                    let values = source.map(|r| {
-                        r.and_then(|state| {
-                            Value::try_cast_from(state, |s| {
-                                TCError::bad_request("aggregate Stream requires a Value, not {}", s)
-                            })
-                        })
-                    });
-
-                    let aggregate: TCBoxTryStream<'static, State> =
-                        Box::pin(GroupStream::from(values).map_ok(State::from));
-
-                    Ok(aggregate)
+                    source
+                        .into_stream(txn)
+                        .map_ok(Self::execute_aggregate)
+                        .await
                 }
-                Self::Collection(collection) => match collection {
-                    Collection::BTree(btree) => {
-                        let keys = btree.keys(*txn.id()).await?;
-                        let keys: TCBoxTryStream<'static, State> =
-                            Box::pin(keys.map_ok(Value::from).map_ok(State::from));
-                        Ok(keys)
-                    }
-                    Collection::Table(table) => {
-                        let rows = table.rows(*txn.id()).await?;
-                        let rows: TCBoxTryStream<'static, State> =
-                            Box::pin(rows.map_ok(Value::from).map_ok(State::from));
-                        Ok(rows)
-                    }
-
-                    #[cfg(feature = "tensor")]
-                    Collection::Tensor(tensor) => match tensor {
-                        tc_tensor::Tensor::Dense(_dense) => {
-                            Err(TCError::not_implemented("DenseTensor::into_stream"))
-                        }
-                        tc_tensor::Tensor::Sparse(_sparse) => {
-                            Err(TCError::not_implemented("SparseTensor::into_stream"))
-                        }
-                    },
-                },
+                Self::Collection(collection) => Self::execute_stream(collection, txn).await,
             }
         })
+    }
+
+    fn execute_aggregate(source: TCBoxTryStream<'static, State>) -> TCBoxTryStream<'static, State> {
+        let values = source.map(|r| {
+            r.and_then(|state| {
+                Value::try_cast_from(state, |s| {
+                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
+                })
+            })
+        });
+
+        let aggregate: TCBoxTryStream<'static, State> =
+            Box::pin(GroupStream::from(values).map_ok(State::from));
+
+        aggregate
+    }
+
+    async fn execute_stream(
+        collection: Collection,
+        txn: Txn,
+    ) -> TCResult<TCBoxTryStream<'static, State>> {
+        match collection {
+            Collection::BTree(btree) => {
+                let keys = btree.keys(*txn.id()).await?;
+                let keys: TCBoxTryStream<'static, State> =
+                    Box::pin(keys.map_ok(Value::from).map_ok(State::from));
+                Ok(keys)
+            }
+            Collection::Table(table) => {
+                let rows = table.rows(*txn.id()).await?;
+                let rows: TCBoxTryStream<'static, State> =
+                    Box::pin(rows.map_ok(Value::from).map_ok(State::from));
+                Ok(rows)
+            }
+
+            #[cfg(feature = "tensor")]
+            Collection::Tensor(tensor) => match tensor {
+                tc_tensor::Tensor::Dense(_dense) => {
+                    Err(TCError::not_implemented("DenseTensor::into_stream"))
+                }
+                tc_tensor::Tensor::Sparse(_sparse) => {
+                    Err(TCError::not_implemented("SparseTensor::into_stream"))
+                }
+            },
+        }
     }
 }
 
