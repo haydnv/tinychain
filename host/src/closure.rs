@@ -109,6 +109,10 @@ impl Closure {
             }
         }
     }
+
+    pub async fn call_owned(self, txn: Txn, args: State) -> TCResult<State> {
+        self.call(&txn, args).await
+    }
 }
 
 impl<'a> Handler<'a> for Closure {

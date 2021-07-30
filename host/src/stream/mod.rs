@@ -24,6 +24,7 @@ mod group;
 pub enum TCStream {
     Aggregate(Box<TCStream>),
     Collection(Collection),
+    Map(Box<TCStream>, Closure),
 }
 
 impl TCStream {
@@ -64,6 +65,10 @@ impl TCStream {
             .await
     }
 
+    pub fn map(self, op: Closure) -> Self {
+        Self::Map(Box::new(self), op)
+    }
+
     pub fn into_stream<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'static, State>> {
         Box::pin(async move {
             match self {
@@ -74,6 +79,12 @@ impl TCStream {
                         .await
                 }
                 Self::Collection(collection) => Self::execute_stream(collection, txn).await,
+                Self::Map(source, op) => {
+                    source
+                        .into_stream(txn.clone())
+                        .map_ok(|source| Self::execute_map(source, txn, op))
+                        .await
+                }
             }
         })
     }
@@ -91,6 +102,14 @@ impl TCStream {
             Box::pin(GroupStream::from(values).map_ok(State::from));
 
         aggregate
+    }
+
+    fn execute_map(
+        source: TCBoxTryStream<'static, State>,
+        txn: Txn,
+        op: Closure,
+    ) -> TCBoxTryStream<'static, State> {
+        Box::pin(source.and_then(move |state| Box::pin(op.clone().call_owned(txn.clone(), state))))
     }
 
     async fn execute_stream(
