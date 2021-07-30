@@ -136,7 +136,7 @@ class Stream(State):
         return self._post("for_each", Map(op=op), rtype)
 
     def fold(self, initial_value, op):
-        return self._post("fold", Map(acc=initial_value, op=op), type(initial_value))
+        return self._post("fold", Map(value=initial_value, op=op), type(initial_value))
 
     def map(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State

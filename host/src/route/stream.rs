@@ -23,6 +23,27 @@ impl<'a> Handler<'a> for Aggregate {
     }
 }
 
+struct Fold {
+    source: TCStream,
+}
+
+impl<'a> Handler<'a> for Fold {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let op = params.require(&label("op").into())?;
+                let value = params.require(&label("value").into())?;
+                params.expect_empty()?;
+
+                self.source.fold(txn.clone(), value, op).map_ok(State::from).await
+            })
+        }))
+    }
+}
+
 struct ForEach {
     source: TCStream,
 }
@@ -52,6 +73,7 @@ impl Route for TCStream {
         let source = self.clone();
         match path[0].as_str() {
             "aggregate" => Some(Box::new(Aggregate { source })),
+            "fold" => Some(Box::new(Fold { source })),
             "for_each" => Some(Box::new(ForEach { source })),
             _ => None,
         }

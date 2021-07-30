@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use destream::en;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
-use safecast::TryCastFrom;
+use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
@@ -29,6 +29,29 @@ pub enum TCStream {
 impl TCStream {
     pub fn aggregate(self) -> Self {
         Self::Aggregate(Box::new(self))
+    }
+
+    pub async fn fold(self, txn: Txn, mut value: Value, op: Closure) -> TCResult<Value> {
+        let mut source = self.into_stream(txn.clone()).await?;
+        loop {
+            if let Some(state) = source.try_next().await? {
+                let mut old_value = Value::None;
+                std::mem::swap(&mut old_value, &mut value);
+                let state = op
+                    .clone()
+                    .call(&txn, (old_value, state).cast_into())
+                    .await?;
+
+                value = state.try_cast_into(|s| {
+                    TCError::bad_request(
+                        "closure provided to Stream::fold must return a Value, not",
+                        s,
+                    )
+                })?;
+            } else {
+                break Ok(value);
+            }
+        }
     }
 
     pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
