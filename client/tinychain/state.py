@@ -95,15 +95,24 @@ class Tuple(State):
 
     __uri__ = uri(State) + "/tuple"
 
+    def __add__(self, other):
+        return self.extend(other)
+
     def __json__(self):
         return to_json(form_of(self))
 
     def __getitem__(self, key):
         return self._get("", key)
 
+    def extend(self, other):
+        return self._get("extend", other, Tuple)
+
     def map(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("map", {"op": op}, rtype)
+
+    def zip(self, other):
+        return self._get("zip", other, Tuple)
 
 
 # Scalar types
