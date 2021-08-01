@@ -302,16 +302,16 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, params| {
+        Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let bounds = Scalar::try_cast_from(State::Map(params), |s| {
-                    TCError::bad_request("invalid Table bounds", s)
-                })?;
-
+                let bounds: Scalar = params.require(&label("bounds").into())?;
                 let bounds = cast_into_bounds(bounds)?;
-
-                let table = self.table.clone().slice(bounds).map(|slice| slice.into())?;
-                Ok(Collection::Table(table).into())
+                self.table
+                    .clone()
+                    .slice(bounds)
+                    .map(|slice| Table::from(slice))
+                    .map(Collection::Table)
+                    .map(State::Collection)
             })
         }))
     }

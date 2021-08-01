@@ -63,8 +63,13 @@ class State(object):
         subject = ref.MethodSubject(self, name)
         return Nil(ref.Delete(subject, key))
 
+    def cast(self, dtype):
+        """Attempt to cast this `State` into the given `dtype`."""
+
+        return dtype(ref.Get(uri(dtype), self))
+
     def dtype(self):
-        """Return the native :class:`Class` of this `State`."""
+        """Return the native base :class:`Class` of this `State`."""
         return Class(ref.Get(uri(self) + "/class"))
 
 
@@ -149,7 +154,7 @@ class Stream(State):
 
     def map(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("fold", Map(op=op), rtype)
+        return self._post("map", Map(op=op), rtype)
 
 
 # User-defined object types

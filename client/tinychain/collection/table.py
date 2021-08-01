@@ -20,6 +20,23 @@ class Table(Collection):
 
         return self._get("", key, rtype=Map)
 
+    def aggregate(self, columns, fn):
+        """
+        Apply the given callback to slices of this `Table` grouped by the given columns.
+
+        Returns a stream of tuples of the form (<unique column values>, <callback result>).
+
+        Example: `orders.aggregate(["customer_id", "product_id"], Table.count)`
+        """
+
+        @get_op
+        def group(cxt, key: Tuple) -> Tuple:
+            cxt.where = Tuple(columns).zip(key).cast(Map)
+            cxt.slice = self.where(cxt.where)
+            return key, fn(cxt.slice)
+
+        return self.group_by(columns).map(With([self], group))
+
     def contains(self, key):
         """Return `True` if this `Table` contains the given key."""
 
@@ -145,7 +162,7 @@ class Table(Collection):
         """
 
         where = _handle_where(where)
-        return self._post("", where, Table)
+        return self._post("", Map(bounds=where), Table)
 
 
 def _handle_where(where):
@@ -161,5 +178,5 @@ def _handle_where(where):
 
     return {
         col: Range.from_slice(val) if isinstance(val, slice) else val
-        for col, val in where.items()
+        for col, val in dict(where).items()
     }

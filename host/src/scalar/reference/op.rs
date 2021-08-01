@@ -515,7 +515,10 @@ impl OpRefVisitor {
                 let key = tuple.pop().unwrap();
                 Ok(OpRef::Put((subject, key, value)))
             }
-            other => Err(de::Error::invalid_value(other, "OpRef parameters")),
+            other => {
+                debug!("invalid parameters for OpRef: {:?}", other);
+                Err(de::Error::invalid_value(other, "OpRef parameters"))
+            }
         }
     }
 }

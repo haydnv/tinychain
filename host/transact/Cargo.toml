@@ -30,7 +30,7 @@ tbon = { version = "~0.3.4", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
-tokio = { version = "1.6", features = ["io-util"] }
+tokio = { version = "1.9", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "~0.1.2"
 uuid = { version = "0.8", features = ["v4"] }

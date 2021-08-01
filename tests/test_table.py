@@ -16,6 +16,19 @@ class TableTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_table")
 
+    def testAggregate(self):
+        count = 10
+        values = [(v % 2,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.result = cxt.table.aggregate(["views"], lambda group: tc.Tuple(group.count()))
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print(actual)
+        self.assertEqual(actual, [[[0], 5], [[1], 5]])
+
     def testCreate(self):
         cxt = tc.Context()
         cxt.table = tc.Table(SCHEMA)
