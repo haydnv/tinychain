@@ -21,6 +21,9 @@ class State(object):
 
         reflect.meta.gen_headers(self)
 
+    def __deps__(self):
+        return requires(form_of(self))
+
     def __json__(self):
         form = form_of(self)
         if isinstance(form, URI) or isinstance(form, ref.Op):

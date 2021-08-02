@@ -1,5 +1,20 @@
+from tinychain.ref import With
 from tinychain.reflect.meta import MethodStub
 from tinychain.reflect import method, op
+from tinychain.util import requires
+
+
+def closure(op):
+    """
+    Annotation to capture data referenced by an :class:`Op` and return a `Closure`.
+
+    The returned `Closure` can be called with the same parameters as the :class:`Op`.
+
+    **Important**: the captured data may be large (e.g. an entire `Table`) if a closure is serialized over the network.
+    For fine-grained control over what data is captured, use the :class:`With` flow control.
+    """
+
+    return With(requires(op), op)
 
 
 def get_method(form):

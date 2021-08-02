@@ -2,7 +2,7 @@ import inspect
 
 from tinychain import op, ref
 from tinychain.state import State
-from tinychain.util import form_of, to_json, uri, Context, URI
+from tinychain.util import form_of, requires, to_json, uri, Context, URI
 from tinychain.value import Nil, Value
 
 from . import _get_rtype, is_none, resolve_class
@@ -18,6 +18,9 @@ class Method(object):
         self.header = header
         self.form = form
         self.name = name
+
+    def __deps__(self):
+        return requires(form_of(self.form))
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}

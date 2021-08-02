@@ -26,7 +26,6 @@ class TableTests(unittest.TestCase):
         cxt.result = cxt.table.aggregate(["views"], lambda group: tc.Tuple(group.count()))
 
         actual = self.host.post(ENDPOINT, cxt)
-        print(actual)
         self.assertEqual(actual, [[[0], 5], [[1], 5]])
 
     def testCreate(self):

@@ -31,6 +31,15 @@ class Context(object):
 
         return concat
 
+    def __deps__(self):
+        provided = set(URI(name) for name in self.form.keys())
+
+        deps = set()
+        for state in self.form.values():
+            deps.update(requires(state))
+
+        return deps - provided
+
     def __getattr__(self, name):
         if name in self.form:
             value = self.form[name]
@@ -111,11 +120,25 @@ class URI(object):
     def __radd__(self, other):
         return URI(other) + str(self)
 
+    def __deps__(self):
+        if "://" in self._root or self.startswith('/'):
+            return set()
+        elif '/' in self._root:
+            return set([URI(self._root[:self._root.index('/')])])
+        else:
+            return set([URI(self._root)])
+
     def __eq__(self, other):
         return str(self) == str(other)
 
+    def __hash__(self):
+        return hash(str(self))
+
     def __json__(self):
         return {str(self): []}
+
+    def __repr__(self):
+        return str(self)
 
     def __str__(self):
         root = str(self._root)
@@ -222,6 +245,25 @@ class URI(object):
 
     def startswith(self, prefix):
         return str(self).startswith(str(prefix))
+
+
+def requires(subject):
+    """Return a set of the IDs of the dependencies required to resolve the given state."""
+
+    if hasattr(subject, "__deps__"):
+        return subject.__deps__()
+
+    deps = set()
+
+    if isinstance(subject, list) or isinstance(subject, tuple):
+        for item in subject:
+            deps.update(requires(item))
+
+    elif isinstance(subject, dict):
+        for item in subject.values():
+            deps.update(requires(item))
+
+    return deps
 
 
 def uri(subject):

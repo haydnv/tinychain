@@ -1,7 +1,6 @@
 """Reference types."""
 
-from tinychain.reflect import is_op
-from tinychain.util import deanonymize, to_json, uri, URI
+from tinychain.util import deanonymize, requires, to_json, uri, URI
 
 
 class Ref(object):
@@ -18,6 +17,12 @@ class After(Ref):
     def __init__(self, when, then):
         self.when = when
         self.then = then
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.when))
+        deps.update(requires(self.then))
+        return deps
 
     def __json__(self):
         return {str(uri(self)): to_json([self.when, self.then])}
@@ -37,6 +42,13 @@ class Case(Ref):
         self.switch = switch
         self.case = case
 
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.cond))
+        deps.update(requires(self.switch))
+        deps.update(requires(self.case))
+        return deps
+
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.switch, self.case])}
 
@@ -55,6 +67,13 @@ class If(Ref):
         self.cond = cond
         self.then = then
         self.or_else = or_else
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.cond))
+        deps.update(requires(self.then))
+        deps.update(requires(self.or_else))
+        return deps
 
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
@@ -83,6 +102,9 @@ class With(Ref):
 
         self.op = op
 
+    def __deps__(self):
+        return set(self.capture)
+
     def __json__(self):
         return {str(uri(self)): to_json([self.capture, self.op])}
 
@@ -99,6 +121,12 @@ class Op(Ref):
     def __init__(self, subject, args):
         self.subject = subject
         self.args = args
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.subject))
+        deps.update(requires(self.args))
+        return deps
 
     def __json__(self):
         if isinstance(self.subject, Ref):
@@ -193,6 +221,9 @@ class MethodSubject(object):
 
         self.subject = subject
         self.method_name = method_name
+
+    def __deps__(self):
+        return requires(self.subject)
 
     def __ns__(self, cxt):
         if uri(self):

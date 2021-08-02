@@ -1,7 +1,7 @@
 from tinychain.collection.btree import BTree
-from tinychain.decorators import delete_op, get_op, post_op
+from tinychain.decorators import closure, delete_op, get_op, post_op
 from tinychain.error import BadRequest
-from tinychain.ref import Delete, If, Ref, With
+from tinychain.ref import Delete, If, Ref
 from tinychain.state import Map, Tuple, State, Stream
 from tinychain.util import form_of, uri, Context, URI
 from tinychain.value import Bool, UInt, Nil
@@ -29,13 +29,14 @@ class Table(Collection):
         Example: `orders.aggregate(["customer_id", "product_id"], Table.count)`
         """
 
+        @closure
         @get_op
         def group(cxt, key: Tuple) -> Tuple:
             cxt.where = Tuple(columns).zip(key).cast(Map)
             cxt.slice = self.where(cxt.where)
             return key, fn(cxt.slice)
 
-        return self.group_by(columns).map(With([self], group))
+        return self.group_by(columns).map(group)
 
     def contains(self, key):
         """Return `True` if this `Table` contains the given key."""
@@ -63,7 +64,7 @@ class Table(Collection):
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        delete_row = With([self], delete_op(lambda cxt, key: self.delete_row(key)))
+        delete_row = closure(delete_op(lambda cxt, key: self.delete_row(key)))
         to_delete = self.where(where) if where else self
         return to_delete.select(self.key_names()).rows().for_each(delete_row)
 
@@ -126,7 +127,7 @@ class Table(Collection):
     def rows(self, where={}):
         """Return a :class:`Stream` of the rows in this `Table`."""
 
-        where = _handle_where(where)
+        where = _handle_bounds(where)
         return self._post("rows", where, Stream)
 
     def select(self, columns):
@@ -137,7 +138,7 @@ class Table(Collection):
     def update(self, values, where={}):
         """Update the specified rows of this table with the given `values`."""
 
-        update_row = With([self], get_op(lambda cxt, key: self.update_row(key, values)))
+        update_row = closure(get_op(lambda cxt, key: self.update_row(key, values)))
         return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
 
     def update_row(self, key, values):
@@ -154,29 +155,26 @@ class Table(Collection):
 
         return self._put("", key, values)
 
-    def where(self, where):
+    def where(self, bounds):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
         If there is no index which supports the given range, this will raise a :class:`BadRequest` error.
         """
 
-        where = _handle_where(where)
-        return self._post("", Map(bounds=where), Table)
+        bounds = _handle_bounds(bounds)
+        return self._post("", Map(bounds=bounds), Table)
 
 
-def _handle_where(where):
-    if where is None:
+def _handle_bounds(bounds):
+    if bounds is None:
         return {}
-    elif isinstance(where, State):
-        if isinstance(form_of(where), dict):
-            where = form_of(where)
-        else:
-            return where
-    elif isinstance(where, Ref) or isinstance(where, URI):
-        return where
+    elif isinstance(bounds, State):
+        return _handle_bounds(form_of(bounds))
+    elif isinstance(bounds, Ref) or isinstance(bounds, URI):
+        return bounds
 
     return {
         col: Range.from_slice(val) if isinstance(val, slice) else val
-        for col, val in dict(where).items()
+        for col, val in dict(bounds).items()
     }

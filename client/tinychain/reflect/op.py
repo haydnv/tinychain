@@ -2,7 +2,7 @@ import inspect
 
 from tinychain import op, ref
 from tinychain.state import State
-from tinychain.util import form_of, to_json, uri, Context, URI
+from tinychain.util import form_of, requires, to_json, uri, Context, URI
 from tinychain.value import Nil, Value
 
 from . import _get_rtype, resolve_class
@@ -16,6 +16,11 @@ class Op(object):
 
     def __init__(self, form):
         self.form = form
+
+    def __deps__(self):
+        params = inspect.signature(self.form).parameters
+        provided = set(URI(param) for param in params)
+        return requires(form_of(self)) - provided
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
@@ -56,7 +61,7 @@ class Get(Op):
         return op.Get(URI(name))
 
     def __repr__(self):
-        return f"GET Op with form {self.form}"
+        return f"GET Op with form {to_json(self)}"
 
 
 class Put(Op):
