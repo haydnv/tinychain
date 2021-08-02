@@ -1031,8 +1031,6 @@ impl ScalarVisitor {
         class: ScalarType,
         access: &mut A,
     ) -> Result<Scalar, A::Error> {
-        debug!("ScalarVisitor::visit_map_value {}", class);
-
         let scalar = access.next_value::<Scalar>(()).await?;
 
         if let Some(scalar) = scalar.clone().into_type(class) {
@@ -1046,8 +1044,6 @@ impl ScalarVisitor {
     }
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
-        debug!("ScalarVisitor::visit_subject {} {}", subject, params);
-
         if params.is_none() {
             match subject {
                 Subject::Ref(id, path) if path.is_empty() => {
@@ -1137,8 +1133,6 @@ impl de::Visitor for ScalarVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        debug!("ScalarVisitor::visit_map");
-
         let key = if let Some(key) = access.next_key::<String>(()).await? {
             key
         } else {
