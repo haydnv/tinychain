@@ -1,0 +1,8 @@
+prefix=/usr
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib64
+Name: arrayfire
+Description: the ArrayFire library
+Version: 3.8
+Libs: -L${libdir}

@@ -68,7 +68,7 @@ Tinychain's tensor feature can be installed using cargo using the command below.
 `cargo install tinychain --features=tensor`
 
 **Note** 
-Installing Tinychain feature requires to create an `arrayfire.pc` file for pkg-config. Create `arrayfire.pc` file in any folder of your choosing. Set the env variable `PKG_CONFIG_PATH` and point it to the folder you created the `arrayfire.pc` file in.
+Installing Tinychain feature requires to create an `arrayfire.pc` file for pkg-config. Create `arrayfire.pc` file in any folder. Set the env variable `PKG_CONFIG_PATH` and point to the folder containing `arrayfire.pc` file.
 
 ```arrayfire.pc
     prefix=/usr
