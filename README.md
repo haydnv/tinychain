@@ -63,6 +63,24 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 
 To use Tinychain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm). Then, follow the instructions for the [ArrayFire Rust wrapper](https://github.com/arrayfire/arrayfire-rust#use-from-cratesio--) to set the `LD_LIBRARY_PATH` and `AF_PATH` environment variables.
 
+Tinychain's tensor feature can be installed using cargo using the command below.
+
+`cargo install tinychain --features=tensor`
+
+**Note** 
+The tensor feature requires a package-config file for ArrayFire to in your environment's PKG_CONFIG_PATH. If you're not sure what to do about this, copy the file below to your Tinychain install directory and run ```export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:<path to your Tinychain install directory>/arrayfire.pc``` before building or running Tinychain with the --features=tensor flag.
+
+```arrayfire.pc
+    prefix=/usr
+    exec_prefix=${prefix}
+    includedir=${prefix}/include
+    libdir=${exec_prefix}/lib64
+    Name: arrayfire
+    Description: the ArrayFire library
+    Version: 3.8
+    Libs: -L${libdir}
+```
+
 ## Key features
 
 | | Tinychain | Django (Python) | Ethereum | MongoDB | MySQL/MariaDB | Neo4j | Oracle | Spanner | Spring + Hibernate (Java) | PostgreSQL | TensorFlow |
