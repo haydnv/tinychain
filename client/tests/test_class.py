@@ -9,9 +9,6 @@ class Meters(tc.Number, metaclass=tc.Meta):
 
 
 class ClassTests(unittest.TestCase):
-    def testNativeClass(self):
-        self.assertEqual(tc.to_json(tc.I32), tc.to_json(tc.uri(tc.I32)))
-
     def testJson(self):
         expected = {
             '/state/scalar/value/number': {
@@ -48,4 +45,3 @@ class ClassTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
