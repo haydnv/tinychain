@@ -281,6 +281,7 @@ where
 
             let (l, r) = collator.bisect(&node.keys, range);
 
+            #[cfg(debug_assertions)]
             debug!("delete from {} [{}..{}] ({:?})", *node, l, r, range);
 
             if node.leaf {
@@ -342,6 +343,7 @@ where
                 match collator.compare_slice(&key, &node.keys[i]) {
                     Ordering::Less => node.keys.insert(i, key),
                     Ordering::Equal => {
+                        #[cfg(debug_assertions)]
                         debug!("un-delete key at {}: {}", i, key);
                         node.keys[i].deleted = false
                     }
