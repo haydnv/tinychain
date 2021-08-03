@@ -1,7 +1,7 @@
 [package]
 name = "tc-value"
-version = "0.1.11"
-authors = ["haydnv"]
+version = "0.1.12"
+authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "Tinychain's representation of a value which can be collated and stored. Unstable."
 license = "Apache-2.0"
@@ -22,6 +22,6 @@ log = { version = "0.4", features = [] }
 number-general = "~0.3.9"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
+tcgeneric = "~0.2.1"
+tc-error = "~0.2.4"
 uuid = "0.8"
