@@ -1,11 +1,12 @@
 [package]
 name = "tc-error"
-version = "0.2.3"
-authors = ["haydnv"]
+version = "0.2.4"
+authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "Tinychain's generic error struct"
 license = "Apache-2.0"
 repository = "https://github.com/haydnv/tinychain.git"
+readme = "README.md"
 
 keywords = ["tinychain", "error", "service", "mesh"]
 categories = ["data-structures", "rust-patterns"]
