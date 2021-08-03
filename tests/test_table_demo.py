@@ -15,7 +15,7 @@ class Database(tc.Cluster):
         self.movies = tc.chain.Block(tc.Table(schema))
 
     @tc.get_method
-    def has_movie(self, _txn, name: tc.String):
+    def has_movie(self, name: tc.String):
         return self.movies.contains([name])
 
 
@@ -27,11 +27,11 @@ class Web(tc.Cluster):
         self.cache = tc.chain.Sync(tc.BTree(schema))
 
     @tc.get_method
-    def views(self, _txn, name: tc.String) -> tc.UInt:
+    def views(self, name: tc.String) -> tc.UInt:
         return self.cache[name].first()["views"]
 
     @tc.post_method
-    def add_movie(self, _txn, name: tc.String, year: tc.U32, description: tc.String):
+    def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
         db = tc.use(Database)
 
         return (

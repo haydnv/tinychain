@@ -40,24 +40,19 @@ class Get(Method):
         return self.rtype(ref.Get(uri(self.header).append(self.name), key))
 
     def __form__(self):
+        cxt, args = _first_params(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        if len(parameters) < 1 or len(parameters) > 3:
-            raise ValueError(f"{self.dtype()} takes 1-3 arguments: (self, cxt, key)")
-
-        args = [self.header]
-
-        cxt = Context()
-        if len(parameters) > 1:
-            _check_context_param(parameters[1])
-            args.append(cxt)
-
         key_name = "key"
-        if len(parameters) == 3:
-            key_name, param = parameters[2]
+        if len(sig.parameters) == len(args):
+            pass
+        elif len(sig.parameters) - len(args) == 1:
+            key_name = list(sig.parameters.keys())[-1]
+            param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
+        else:
+            raise ValueError(f"{self.dtype()} takes 0-3 parameters: (self, cxt, key)")
 
         cxt._return = self.form(*args)  # populate the Context
         return key_name, cxt
@@ -78,23 +73,18 @@ class Put(Method):
         return ref.Put(uri(self.header).append(self.name), key, value)
 
     def __form__(self):
+        cxt, args = _first_params(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-        if len(parameters) > 4:
-            raise ValueError("a PUT method has a maximum of four parameters")
-
-        args = [self.header]
-
-        cxt = Context()
-        if len(parameters) > 1:
-            _check_context_param(parameters[1])
-            args.append(cxt)
 
         key_name = "key"
         value_name = "value"
 
-        if len(parameters) == 3:
-            name, param = parameters[2]
+        if len(sig.parameters) == len(args):
+            pass
+        elif len(sig.parameters) - len(args) == 1:
+            name = list(sig.parameters.keys())[-1]
+            param = sig.parameters[name]
             if name == key_name:
                 dtype = resolve_class(self.form, param.annotation, Value)
                 args.append(dtype(URI(key_name)))
@@ -102,17 +92,19 @@ class Put(Method):
                 dtype = resolve_class(self.form, param.annotation, State)
                 args.append(dtype(URI(value_name)))
             else:
-                raise ValueError(
-                    f"a PUT method with three parameters must specify either 'key' or 'value', not '{name}'")
+                raise ValueError(f"{self.dtype()} with three parameters requires 'key' or 'value', not '{name}'")
+        elif len(sig.parameters) - len(args) == 2:
+            key_name, value_name = list(sig.parameters.keys())[-2:]
 
-        if len(parameters) == 4:
-            key_name, param = parameters[2]
+            param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
-            value_name, param = parameters[3]
+            param = sig.parameters[value_name]
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(URI(value_name)))
+        else:
+            raise ValueError(f"{self.dtype()} requires 0-4 parameters: (self, cxt, key, value)")
 
         cxt._return = self.form(*args)
         return key_name, value_name, cxt
@@ -131,21 +123,12 @@ class Post(Method):
         return rtype(ref.Post(uri(self.header).append(self.name), params))
 
     def __form__(self):
+        cxt, args = _first_params(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        if len(parameters) == 0:
-            raise ValueError(f"{self.dtype()} has at least one argument: (self, cxt, name1=val1, ...)")
-
-        args = [self.header]
-
-        cxt = Context()
-        if len(parameters) > 1:
-            _check_context_param(parameters[1])
-            args.append(cxt)
-
         kwargs = {}
-        for name, param in parameters[2:]:
+        for name in list(sig.parameters.keys())[len(args):]:
+            param = sig.parameters[name]
             dtype = resolve_class(self.form, param.annotation, State)
             kwargs[name] = dtype(URI(name))
 
@@ -178,3 +161,33 @@ def _check_context_param(parameter):
     else:
         raise ValueError(
             f"a method definition takes a transaction context as its second parameter, not {param.annotation}")
+
+
+def _first_params(method):
+    sig = inspect.signature(method.form)
+
+    if not sig.parameters:
+        raise ValueError(f"{method.dtype()} has at least one argument: (self, cxt, name1=val1, ...)")
+
+    args = []
+
+    param_names = list(sig.parameters.keys())
+
+    if param_names[0] == "self":
+        args.append(method.header)
+    else:
+        raise ValueError(f"first argument to {method.dtype()} must be 'self', not {param_names[0]}")
+
+    cxt = Context()
+
+    if len(args) == len(sig.parameters):
+        return cxt, args
+
+    if param_names[1] in ["cxt", "txn"]:
+        param = sig.parameters[param_names[1]]
+        if param.annotation in [EMPTY, Context]:
+            args.append(cxt)
+        else:
+            raise ValueError(f"type of {param_names[1]} must be {Context}, not {param.annotation}")
+
+    return cxt, args

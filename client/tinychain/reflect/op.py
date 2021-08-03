@@ -36,21 +36,13 @@ class Get(Op):
         return ref.Get(self, key)
 
     def __form__(self):
+        cxt, args = _maybe_first_arg(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        if len(parameters) > 2:
-            raise ValueError(f"{self.dtype()} takes 0-2 arguments: (cxt, key)")
-
-        args = []
-
-        cxt = Context()
-        if len(parameters):
-            args.append(cxt)
-
         key_name = "key"
-        if len(parameters) == 2:
-            key_name, param = parameters[1]
+        if len(sig.parameters) > len(args):
+            key_name = list(sig.parameters.keys())[len(args)]
+            param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
@@ -70,7 +62,7 @@ class Put(Op):
     def __init__(self, form):
         rtype = _get_rtype(form, None)
         if rtype not in [None, Nil]:
-            raise ValueError(f"Put op can only return None, not f{rtype}")
+            raise ValueError(f"{self.dtype()} can only return None, not f{rtype}")
 
         self.rtype = rtype
         Op.__init__(self, form)
@@ -79,28 +71,37 @@ class Put(Op):
         return ref.Put(self, key, value)
 
     def __form__(self):
+        cxt, args = _maybe_first_arg(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        if len(parameters) not in [0, 1, 3]:
-            raise ValueError(f"{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)--found {parameters}")
-
-        args = []
-
-        cxt = Context()
-        if len(parameters):
-            args.append(cxt)
-
         key_name = "key"
         value_name = "value"
-        if len(parameters) == 3:
-            key_name, param = parameters[1]
+
+        if len(sig.parameters) == len(args):
+            pass
+        elif len(sig.parameters) - len(args) == 1:
+            param_name = list(sig.parameters.keys())[-1]
+            param = sig.parameters[key_name]
+            dtype = resolve_class(self.form, param.annotation, Value)
+            if param_name in ["key", "value"]:
+                args.append(dtype(URI(param_name)))
+            else:
+                raise ValueError(f"{self.dtype()} argument {param_name} is ambiguous--use 'key' or 'value' instead")
+        elif len(sig.parameters) - len(args) == 2:
+            param_names = list(sig.parameters.keys())
+            key_name = param_names[-2]
+            param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
-            value_name, param = parameters[2]
+            value_name = param_names[-1]
+            param = sig.parameters[value_name]
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(URI(value_name)))
+        else:
+            param_names = list(sig.parameters.keys())
+            raise ValueError(
+                f"{self.dtype()} accepts a maximum of three arguments: (cxt, key, value) (found {param_names})")
 
         cxt._return = self.form(*args)
         return key_name, value_name, cxt
@@ -129,17 +130,11 @@ class Post(Op):
         return ref.Get(self, args)
 
     def __form__(self):
+        cxt, args = _maybe_first_arg(self)
+
         sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        args = []
-
-        cxt = Context()
-        if parameters:
-            args.append(cxt)
-
         kwargs = {}
-        for name, param in parameters[1:]:
+        for name, param in list(sig.parameters.items())[len(args):]:
             dtype = resolve_class(self.form, param.annotation, State)
             kwargs[name] = dtype(URI(name))
 
@@ -175,3 +170,25 @@ class Delete(Op):
 
     def __repr__(self):
         return f"DELETE Op with form {self.form}"
+
+
+def _maybe_first_arg(op):
+    sig = inspect.signature(op.form)
+    param_names = list(sig.parameters.keys())
+
+    cxt = Context()
+    args = []
+
+    if sig.parameters:
+        first_param = param_names[0]
+        if first_param == "cxt" or first_param == "txn":
+            param = sig.parameters[first_param]
+            if param.annotation == EMPTY or param.annotation is Context:
+                args.append(cxt)
+            else:
+                raise ValueError(f"{param} must be a {Context}, not {param.annotation}")
+        elif len(param_names) > 1:
+            raise ValueError(
+                f"optional first argument of {op.dtype()} must be 'cxt' or 'txn', not {param_names[0]}")
+
+    return cxt, args
