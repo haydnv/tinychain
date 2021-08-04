@@ -22,6 +22,6 @@ log = { version = "0.4", features = [] }
 number-general = "~0.3.9"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
-tcgeneric = "~0.2.1"
-tc-error = "~0.2.4"
+tcgeneric = { path = "../generic" }
+tc-error = { path = "../error" }
 uuid = "0.8"
