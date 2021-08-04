@@ -84,6 +84,9 @@ class Number(Value):
     def __add__(self, other):
         return self.add(other)
 
+    def __radd__(self, other):
+        return self.add(other)
+
     def __div__(self, other):
         return self.div(other)
 
@@ -105,14 +108,14 @@ class Number(Value):
     def __mul__(self, other):
         return self.mul(other)
 
+    def __rmul__(self, other):
+        return self.mul(other)
+
     def __ne__(self, other):
         return self.ne(other)
 
-    def __radd__(self, other):
-        return self.add(other)
-
-    def __rmul__(self, other):
-        return self.mul(other)
+    def __pow__(self, other):
+        return self.pow(other)
 
     def __sub__(self, other):
         return self.sub(other)
@@ -169,6 +172,11 @@ class Number(Value):
         """Return true if `self` is not equal to `other`."""
 
         return self._get("ne", other, Bool)
+
+    def pow(self, other):
+        """Raise `self` to the power of `other`."""
+
+        return self._get("pow", other, self.__class__)
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""
@@ -233,11 +241,27 @@ class Int(Number):
 
     __uri__ = uri(Number) + "/int"
 
+    @classmethod
+    def max(cls):
+        return cls(2**(cls.size() - 1) - 1)
+
+    @classmethod
+    def min(cls):
+        return cls(-2**(cls.size() - 1) + 1)
+
+    @staticmethod
+    def size():
+        return 64
+
 
 class I16(Int):
     """A 16-bit integer."""
 
     __uri__ = uri(Int) + "/16"
+
+    @staticmethod
+    def size():
+        return 16
 
 
 class I32(Int):
@@ -245,11 +269,19 @@ class I32(Int):
 
     __uri__ = uri(Int) + "/32"
 
+    @staticmethod
+    def size():
+        return 32
+
 
 class I64(Int):
     """A 64-bit integer."""
 
     __uri__ = uri(Int) + "/64"
+
+    @staticmethod
+    def size():
+        return 64
 
 
 class UInt(Number):
@@ -257,11 +289,27 @@ class UInt(Number):
 
     __uri__ = uri(Number) + "/uint"
 
+    @classmethod
+    def max(cls):
+        return Int(2**cls.size() - 1)
+
+    @classmethod
+    def min(cls):
+        return cls(0)
+
+    @staticmethod
+    def size():
+        return 64
+
 
 class U8(UInt):
     """An 8-bit unsigned integer (a byte)."""
 
     __uri__ = uri(UInt) + "/8"
+
+    @staticmethod
+    def size():
+        return 8
 
 
 class U16(UInt):
@@ -269,11 +317,19 @@ class U16(UInt):
 
     __uri__ = uri(UInt) + "/16"
 
+    @staticmethod
+    def size():
+        return 16
+
 
 class U32(UInt):
     """A 32-bit unsigned integer."""
 
     __uri__ = uri(UInt) + "/32"
+
+    @staticmethod
+    def size():
+        return 32
 
 
 class U64(UInt):
@@ -281,3 +337,6 @@ class U64(UInt):
 
     __uri__ = uri(UInt) + "/64"
 
+    @staticmethod
+    def size():
+        return 64

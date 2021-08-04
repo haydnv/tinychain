@@ -1,7 +1,7 @@
 use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_value::{Number, NumberInstance, Value};
+use tc_value::{Number, NumberClass, NumberInstance, Value};
 use tcgeneric::PathSegment;
 
 use crate::route::{GetHandler, Handler, Route};
@@ -19,7 +19,7 @@ impl<F> Dual<F> {
 
 impl<'a, F> Handler<'a> for Dual<F>
 where
-    F: Fn(Number) -> Number + Send + 'a,
+    F: Fn(Number) -> TCResult<Number> + Send + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -28,7 +28,7 @@ where
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 let value = value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
-                Ok(State::from(Value::from((self.op)(value))))
+                (self.op)(value).map(Value::Number).map(State::from)
             })
         }))
     }
@@ -76,15 +76,21 @@ impl Route for Number {
 
         let handler: Box<dyn Handler<'a> + 'a> = match path[0].as_str() {
             "abs" => Box::new(Unary::new("abs", move || self.abs())),
-            "add" => Box::new(Dual::new(move |other| *self + other)),
-            "div" => Box::new(Dual::new(move |other| *self / other)),
-            "mul" => Box::new(Dual::new(move |other| *self * other)),
-            "sub" => Box::new(Dual::new(move |other| *self - other)),
-            "pow" => Box::new(Dual::new(move |other| self.pow(other))),
-            "gt" => Box::new(Dual::new(move |other| (*self > other).into())),
-            "gte" => Box::new(Dual::new(move |other| (*self >= other).into())),
-            "lt" => Box::new(Dual::new(move |other| (*self < other).into())),
-            "lte" => Box::new(Dual::new(move |other| (*self <= other).into())),
+            "add" => Box::new(Dual::new(move |other| Ok(*self + other))),
+            "div" => Box::new(Dual::new(move |other: Number| {
+                if other == other.class().zero() {
+                    Err(TCError::unsupported("cannot divide by zero"))
+                } else {
+                    Ok(*self / other)
+                }
+            })),
+            "mul" => Box::new(Dual::new(move |other| Ok(*self * other))),
+            "sub" => Box::new(Dual::new(move |other| Ok(*self - other))),
+            "pow" => Box::new(Dual::new(move |other| Ok(self.pow(other)))),
+            "gt" => Box::new(Dual::new(move |other| Ok((*self > other).into()))),
+            "gte" => Box::new(Dual::new(move |other| Ok((*self >= other).into()))),
+            "lt" => Box::new(Dual::new(move |other| Ok((*self < other).into()))),
+            "lte" => Box::new(Dual::new(move |other| Ok((*self <= other).into()))),
             _ => return None,
         };
 
