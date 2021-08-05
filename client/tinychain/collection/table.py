@@ -93,7 +93,7 @@ class Table(Collection):
         return If(
             self.contains(key),
             BadRequest("cannot insert: key already exists"),
-            self._put("", key, values))
+            self.upsert(key, values))
 
     def is_empty(self):
         """Return `True` if this table contains no rows."""

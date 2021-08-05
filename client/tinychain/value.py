@@ -291,7 +291,7 @@ class UInt(Number):
 
     @classmethod
     def max(cls):
-        return Int(2**cls.size() - 1)
+        return cls(2**cls.size() - 1)
 
     @classmethod
     def min(cls):
@@ -336,6 +336,14 @@ class U64(UInt):
     """A 64-bit unsigned integer."""
 
     __uri__ = uri(UInt) + "/64"
+
+    def __json__(self):
+        form = form_of(self)
+        if isinstance(form, int):
+            if form >= 2**I32.size():
+                return {str(uri(U64)): form}
+
+        return super().__json__()
 
     @staticmethod
     def size():

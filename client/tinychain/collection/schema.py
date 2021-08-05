@@ -69,6 +69,9 @@ class Table(object):
     def __json__(self):
         return to_json([[self.key, self.values], Tuple(self.indices)])
 
+    def columns(self):
+        return self.key + self.values
+
     def create_index(self, name, columns):
         self.indices.append((name, columns))
         return self
