@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, TryStreamExt};
-use log::debug;
+use log::{debug, warn};
 
 use tc_btree::Node;
 use tc_error::*;
@@ -472,6 +472,10 @@ where
 
     fn div(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn div_array(l: &Array, r: &Array) -> Array {
+            if !r.all() {
+                warn!("divide by zero in DenseTensor::div");
+            }
+
             debug_assert_eq!(l.len(), r.len());
             l / r
         }

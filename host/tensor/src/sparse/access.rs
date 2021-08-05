@@ -11,14 +11,14 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::dense::{DenseAccess, DenseAccessor, DenseTensor, PER_BLOCK};
 use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
-use crate::transform;
 use crate::{
-    coord_bounds, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, TensorUnary,
+    coord_bounds, transform, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType,
+    TensorUnary, ERR_INF, ERR_NAN,
 };
 
 use super::combine::{coord_to_offset, SparseCombine};
@@ -836,17 +836,29 @@ where
         let right_zero = self.right.dtype().zero();
 
         let offset = move |row: &SparseRow| coord_to_offset(&row.0, &coord_bounds);
-        let combined = SparseCombine::new(left, right, offset).map_ok(move |(l, r)| match (l, r) {
-            (Some((l_coord, l)), Some((r_coord, r))) => {
-                debug_assert_eq!(l_coord, r_coord);
-                (l_coord, combinator(l, r))
-            }
-            (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
-            (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
-            (None, None) => {
-                panic!("expected a coordinate and value from one sparse tensor stream")
-            }
-        });
+        let combined = SparseCombine::new(left, right, offset)
+            .map_ok(move |(l, r)| match (l, r) {
+                (Some((l_coord, l)), Some((r_coord, r))) => {
+                    debug_assert_eq!(l_coord, r_coord);
+                    (l_coord, combinator(l, r))
+                }
+                (Some((l_coord, l)), None) => (l_coord, combinator(l, right_zero)),
+                (None, Some((r_coord, r))) => (r_coord, combinator(left_zero, r)),
+                (None, None) => {
+                    panic!("expected a coordinate and value from one sparse tensor stream")
+                }
+            })
+            .map(|result| {
+                result.and_then(|(coord, n)| {
+                    if n.is_infinite() {
+                        Err(TCError::unsupported(ERR_INF))
+                    } else if n.is_nan() {
+                        Err(TCError::unsupported(ERR_NAN))
+                    } else {
+                        Ok((coord, n))
+                    }
+                })
+            });
 
         Ok(Box::pin(combined))
     }

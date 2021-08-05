@@ -184,14 +184,20 @@ class Tensor(Collection):
 
 
 class Dense(Tensor):
-    """An n-dimensional array of numbers stored as sequential blocks."""
+    """
+    An n-dimensional array of numbers stored as sequential blocks.
+
+    **IMPORTANT**: for efficiency reasons, serialization of a `Dense` tensor will stop if a non-numeric value
+    (NaN or +/- infinity) is encountered. If you receive a `Dense` tensor without enough elements for its shape,
+    you can safely treat this response as a divide-by-zero error.
+    """
 
     __uri__ = uri(Tensor) + "/dense"
 
     @classmethod
     def arange(cls, shape, start, stop):
         """
-        Return a `DenseTensor` with the given shape containing a range of numbers
+        Return a `Dense` tensor with the given shape containing a range of numbers
         evenly distributed between `start` and `stop`.
         """
 
@@ -199,14 +205,14 @@ class Dense(Tensor):
 
     @classmethod
     def constant(cls, shape, value):
-        """Return a `DenseTensor` filled with the given `value`."""
+        """Return a `Dense` tensor filled with the given `value`."""
 
         return cls(ref.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
     def ones(cls, shape, dtype=F32):
         """
-        Return a `DenseTensor` filled with ones.
+        Return a `Dense` tensor filled with ones.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
@@ -216,7 +222,7 @@ class Dense(Tensor):
     @classmethod
     def zeros(cls, shape, dtype=F32):
         """
-        Return a `DenseTensor` filled with zeros.
+        Return a `Dense` tensor filled with zeros.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
@@ -232,7 +238,7 @@ class Sparse(Tensor):
     @classmethod
     def zeros(cls, shape, dtype=F32):
         """
-        Return a sparse tensor with the given shape and data type.
+        Return a `Sparse` tensor with the given shape and data type.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """

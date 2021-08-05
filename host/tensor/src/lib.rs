@@ -32,6 +32,9 @@ mod sparse;
 mod stream;
 mod transform;
 
+const ERR_INF: &str = "Tensor combination resulted in an infinite value";
+const ERR_NAN: &str = "Tensor combination resulted in a non-numeric value";
+
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 /// The file extension of a [`Tensor`]

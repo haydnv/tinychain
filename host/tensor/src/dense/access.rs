@@ -11,13 +11,12 @@ use tc_btree::*;
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::transform;
-use crate::{Bounds, Coord, Phantom, Shape, TensorAccess, TensorType};
+use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF, ERR_NAN};
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
@@ -468,7 +467,20 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(&l, &r));
+                .map_ok(move |(l, r)| combinator(&l, &r))
+                .map(|result| {
+                    result.and_then(|array| {
+                        if array.is_nan().any() {
+                            debug!("result {} is NaN", array);
+                            Err(TCError::unsupported(ERR_NAN))
+                        } else if array.is_infinite().any() {
+                            debug!("result {} is infinite", array);
+                            Err(TCError::unsupported(ERR_INF))
+                        } else {
+                            Ok(array)
+                        }
+                    })
+                });
 
             let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
             Ok(blocks)
@@ -514,7 +526,14 @@ where
             self.right.read_values(txn, coords)
         )?;
 
-        Ok((self.combinator)(&left, &right))
+        let values = (self.combinator)(&left, &right);
+        if values.is_infinite().any() {
+            Err(TCError::unsupported(ERR_INF))
+        } else if values.is_nan().any() {
+            Err(TCError::unsupported(ERR_NAN))
+        } else {
+            Ok(values)
+        }
     }
 }
 
@@ -536,7 +555,13 @@ where
             let right = self.right.read_value_at(txn, coord);
             let ((coord, left), (_, right)) = try_join!(left, right)?;
             let value = (self.value_combinator)(left, right);
-            Ok((coord, value))
+            if value.is_infinite() {
+                Err(TCError::unsupported(ERR_INF))
+            } else if value.is_nan() {
+                Err(TCError::unsupported(ERR_NAN))
+            } else {
+                Ok((coord, value))
+            }
         })
     }
 }
