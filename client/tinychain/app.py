@@ -3,7 +3,11 @@ from tinychain.cluster import Cluster
 from tinychain.collection.schema import Column, Graph as Schema, Table as TableSchema
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
+from tinychain.ref import After, If
 from tinychain.value import Bool, I64, U64
+
+
+NODE_ID = "node_id"
 
 
 class Graph(Cluster):
@@ -27,9 +31,8 @@ class Graph(Cluster):
             else:
                 raise ValueError(f"{node} must specify a column")
 
-            key = [col for col in schema.tables[table_name].columns() if col.name == column_name]
-            node_schema = TableSchema(key, [Column("node_id", U64)])
-            setattr(self, f"node_{table_name}_{column_name}", schema.chain(NodeTable(node_schema)))
+            [key] = [col for col in schema.tables[table_name].columns() if col.name == column_name]
+            setattr(self, f"node_{table_name}_{column_name}", schema.chain(node_table(key)))
 
         for name in schema.edges:
             setattr(self, f"edges_{name}", schema.chain(Sparse.zeros([I64.max(), I64.max()], Bool)))
@@ -38,16 +41,20 @@ class Graph(Cluster):
         return Schema(Sync)
 
 
-class NodeTable(Table):
-    def max_id(self):
-        def max(acc):
-            max_id, node_id = acc
-            return node_id if node_id > max_id else max_id
+def graph_table(graph_schema, table_name):
+    edge_source = {}
+    edge_dest = {}
 
-        return self.keys(["node_id"]).fold(0, max)
+    for edge_name in graph_schema.edges:
+        from_node, to_node = graph_schema.edges[edge_name]
+        prefix = f"{table_name}."
 
+        if from_node.startswith(prefix):
+            edge_source[edge_name] = from_node[len(prefix):]
 
-def graph_table(table_schema):
+        if to_node.startswith(prefix):
+            edge_dest[edge_name] = to_node[len(prefix):]
+
     class GraphTable(Table):
         def delete_row(self, key):
             return self._delete("", key)
@@ -58,4 +65,24 @@ def graph_table(table_schema):
         def upsert(self, key, values):
             return self._put("", key, values)
 
-    return GraphTable(table_schema)
+    return GraphTable(graph_schema.tables[table_name])
+
+
+def node_table(key_column):
+    class NodeTable(Table):
+        def create_id(self, key):
+            new_id = self.max_id()
+            return After(self.insert([key, new_id]), new_id)
+
+        def get_id(self, key):
+            return self[(key,)][NODE_ID]
+
+        def get_or_create_id(self, key):
+            return If(self.contains([key]), self.get_id(key), self.create_id(key))
+
+        def max_id(self):
+            row = self.order_by([NODE_ID], True).select([NODE_ID]).first()
+            return row[0]
+
+    schema = TableSchema([key_column], [Column(NODE_ID, U64)])
+    return NodeTable(schema.create_index(NODE_ID, [NODE_ID]))
