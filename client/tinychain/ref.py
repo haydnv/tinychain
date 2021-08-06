@@ -32,6 +32,29 @@ class After(Ref):
         deanonymize(self.then, cxt)
 
 
+class Before(Ref):
+    """A flow control operator used to delay execution conditionally."""
+
+    __uri__ = uri(Ref) + "/before"
+
+    def __init__(self, when, then):
+        self.when = when
+        self.then = then
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.when))
+        deps.update(requires(self.then))
+        return deps
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.when, self.then])}
+
+    def __ns__(self, cxt):
+        deanonymize(self.when, cxt)
+        deanonymize(self.then, cxt)
+
+
 class Case(Ref):
     """A flow control operator used to branch execution conditionally."""
 

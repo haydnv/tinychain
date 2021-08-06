@@ -20,6 +20,7 @@ use crate::txn::Txn;
 use super::{Scalar, Scope, Value};
 
 pub use after::After;
+pub use before::Before;
 pub use case::Case;
 pub use id::*;
 pub use op::*;
@@ -27,6 +28,7 @@ pub use r#if::IfRef;
 pub use with::With;
 
 mod after;
+mod before;
 mod case;
 mod r#if;
 mod with;
@@ -67,6 +69,7 @@ pub trait Refer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RefType {
     After,
+    Before,
     Case,
     Id,
     If,
@@ -78,16 +81,18 @@ impl Class for RefType {}
 
 impl NativeClass for RefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
-        if path.len() > 3 && &path[0..3] == &PREFIX[..] {
+        if path.len() == 4 && &path[0..3] == &PREFIX[..] {
             match path[3].as_str() {
-                "after" if path.len() == 4 => Some(Self::After),
-                "case" if path.len() == 4 => Some(Self::Case),
-                "id" if path.len() == 4 => Some(Self::Id),
-                "if" if path.len() == 4 => Some(Self::If),
-                "op" => OpRefType::from_path(path).map(RefType::Op),
-                "with" if path.len() == 4 => Some(Self::With),
+                "after" => Some(Self::After),
+                "before" => Some(Self::Before),
+                "case" => Some(Self::Case),
+                "id" => Some(Self::Id),
+                "if" => Some(Self::If),
+                "with" => Some(Self::With),
                 _ => None,
             }
+        } else if let Some(ort) = OpRefType::from_path(path) {
+            Some(RefType::Op(ort))
         } else {
             None
         }
@@ -96,6 +101,7 @@ impl NativeClass for RefType {
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
             Self::After => "after",
+            Self::Before => "before",
             Self::Case => "case",
             Self::Id => "id",
             Self::If => "if",
@@ -111,6 +117,7 @@ impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After => f.write_str("After"),
+            Self::Before => f.write_str("Before"),
             Self::Case => f.write_str("Case"),
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
@@ -124,6 +131,7 @@ impl fmt::Display for RefType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
     After(Box<After>),
+    Before(Box<Before>),
     Case(Box<Case>),
     Id(IdRef),
     If(Box<IfRef>),
@@ -137,6 +145,7 @@ impl Instance for TCRef {
     fn class(&self) -> Self::Class {
         match self {
             Self::After(_) => RefType::After,
+            Self::Before(_) => RefType::Before,
             Self::Case(_) => RefType::Case,
             Self::Id(_) => RefType::Id,
             Self::If(_) => RefType::If,
@@ -153,6 +162,10 @@ impl Refer for TCRef {
             Self::After(after) => {
                 let after = after.dereference_self(path);
                 Self::After(Box::new(after))
+            }
+            Self::Before(before) => {
+                let before = before.dereference_self(path);
+                Self::Before(Box::new(before))
             }
             Self::Case(case) => {
                 let case = case.dereference_self(path);
@@ -174,6 +187,7 @@ impl Refer for TCRef {
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::After(after) => after.is_inter_service_write(cluster_path),
+            Self::Before(before) => before.is_inter_service_write(cluster_path),
             Self::Case(case) => case.is_inter_service_write(cluster_path),
             Self::Id(id_ref) => id_ref.is_inter_service_write(cluster_path),
             Self::If(if_ref) => if_ref.is_inter_service_write(cluster_path),
@@ -187,6 +201,10 @@ impl Refer for TCRef {
             Self::After(after) => {
                 let after = after.reference_self(path);
                 Self::After(Box::new(after))
+            }
+            Self::Before(before) => {
+                let before = before.reference_self(path);
+                Self::Before(Box::new(before))
             }
             Self::Case(case) => {
                 let case = case.reference_self(path);
@@ -208,6 +226,7 @@ impl Refer for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::After(after) => after.requires(deps),
+            Self::Before(before) => before.requires(deps),
             Self::Case(case) => case.requires(deps),
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::If(if_ref) => if_ref.requires(deps),
@@ -229,6 +248,7 @@ impl Refer for TCRef {
         while let State::Scalar(Scalar::Ref(tc_ref)) = state {
             state = match *tc_ref {
                 Self::After(after) => after.resolve(context, txn).await,
+                Self::Before(before) => before.resolve(context, txn).await,
                 Self::Case(case) => case.resolve(context, txn).await,
                 Self::Id(id_ref) => id_ref.resolve(context, txn).await,
                 Self::If(if_ref) => if_ref.resolve(context, txn).await,
@@ -292,7 +312,20 @@ impl RefVisitor {
         access: &mut A,
     ) -> Result<TCRef, A::Error> {
         match class {
-            RefType::After => access.next_value(()).map_ok(TCRef::Id).await,
+            RefType::After => {
+                access
+                    .next_value(())
+                    .map_ok(Box::new)
+                    .map_ok(TCRef::After)
+                    .await
+            }
+            RefType::Before => {
+                access
+                    .next_value(())
+                    .map_ok(Box::new)
+                    .map_ok(TCRef::Before)
+                    .await
+            }
             RefType::Case => {
                 access
                     .next_value(())
@@ -348,10 +381,10 @@ impl de::Visitor for RefVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let subject = access
-            .next_key::<Subject>(())
-            .await?
-            .ok_or_else(|| de::Error::custom("expected a Ref or Link, found empty map"))?;
+        let subject = access.next_key::<Subject>(()).await?;
+
+        let subject =
+            subject.ok_or_else(|| de::Error::custom("expected a Ref or Link, found empty map"))?;
 
         if let Subject::Link(link) = &subject {
             if link.host().is_none() {
@@ -392,6 +425,7 @@ impl<'en> ToStream<'en> for TCRef {
             Self::Op(_) => unimplemented!("this should not be possible"),
 
             Self::After(after) => map.encode_value(after),
+            Self::Before(before) => map.encode_value(before),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
             Self::With(with) => map.encode_value(with),
@@ -417,6 +451,7 @@ impl<'en> IntoStream<'en> for TCRef {
             Self::Op(_) => unimplemented!("this should not be possible"),
 
             Self::After(after) => map.encode_value(after),
+            Self::Before(before) => map.encode_value(before),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
             Self::With(with) => map.encode_value(with),
@@ -430,6 +465,7 @@ impl fmt::Debug for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After(after) => fmt::Debug::fmt(after, f),
+            Self::Before(before) => fmt::Debug::fmt(before, f),
             Self::Case(case) => fmt::Debug::fmt(case, f),
             Self::Id(id_ref) => fmt::Debug::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Debug::fmt(if_ref, f),
@@ -443,6 +479,7 @@ impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After(after) => fmt::Display::fmt(after, f),
+            Self::Before(before) => fmt::Display::fmt(before, f),
             Self::Case(case) => fmt::Display::fmt(case, f),
             Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Display::fmt(if_ref, f),
