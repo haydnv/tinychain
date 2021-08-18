@@ -31,7 +31,7 @@ class TestApp(tc.Graph):
 
     @tc.post_method
     def create_user(self, _txn, user_id: tc.Bytes, email: tc.String, display_name: tc.String):
-        self.users.insert({"user_id": user_id, "email": email, "display_name": display_name})
+        self.users.insert([user_id], [email, display_name])
 
 
 class AppTests(unittest.TestCase):

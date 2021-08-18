@@ -4,6 +4,7 @@ from tinychain.collection.schema import Column, Graph as Schema, Table as TableS
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.ref import After, Before, If
+from tinychain.state import Map, Tuple
 from tinychain.value import Bool, I64, U64
 
 
@@ -50,6 +51,8 @@ def graph_table(graph, schema, table_name):
             edges[col_name] = getattr(graph, f"node_{table_name}_{col_name}")
 
     table_schema = schema.tables[table_name]
+    key_columns = [col.name for col in table_schema.key]
+    value_columns = [col.name for col in table_schema.values]
 
     class GraphTable(Table):
         def is_unique(self, col_name, value):
@@ -57,10 +60,9 @@ def graph_table(graph, schema, table_name):
 
         def delete_row(self, key):
             # for each edge whose source is this table
-            # check if this row's value is unique
-            # if so, delete the node from the node table
+            #   if this row's value is unique, delete the node from the node table
 
-            row = Before(Table.delete_row(self, key), self[key])
+            row = Map(Before(Table.delete_row(self, key), self[key]))
 
             deletes = []
             for col_name in edges:
@@ -71,23 +73,50 @@ def graph_table(graph, schema, table_name):
             return deletes
 
         def update_row(self, key, values):
-            # TODO:
             # for each edge whose source is this table
-            # check if this row's value is unique
-            # if so, delete the node from the node table
-            # then, in any case, insert the new value into the node table
+            #   if the value is being updated
+            #       if this row's value is unique, delete the node from the node table
+            #       insert the new value into the node table
 
-            return Table.update_row(self, key, values)
+            row = Map(Before(Table.update_row(self, key, values), self[key]))
+
+            updates = []
+            for col_name in edges:
+                edge = edges[col_name]
+                old_value = row[col_name]
+                maybe_remove = If(self.is_unique(col_name, old_value), edge.remove(old_value))
+
+                if col_name in value_columns:
+                    update = If(values.contains(col_name), (edge.add(values[col_name]), maybe_remove))
+                else:
+                    new_value = key[key_columns.index(col_name)]
+                    update = If(old_value != new_value, (edge.add(new_value), maybe_remove))
+
+                updates.append(update)
+
+            return updates
 
         def upsert(self, key, values):
-            # TODO:
             # for each edge whose source is this table
-            # check if the new value is different
-            # check if this row's value is unique
-            # if so, delete the node from the node table
-            # then, in any case, insert the new value into the node table
+            #   if the new value is different
+            #       if this row's value is unique, delete the node from the node table
+            #   insert the new value into the node table
 
-            return Table.upsert(self, key, values)
+            row = Map(Before(Table.upsert(self, key, values), self[key]))
+
+            updates = []
+            for col_name in edges:
+                if col_name in key_columns:
+                    new_value = key[key_columns.index(col_name)]
+                else:
+                    new_value = values[value_columns.index(col_name)]
+
+                edge = edges[col_name]
+                old_value = row[col_name]
+                maybe_remove = If(self.is_unique(col_name, old_value), edge.remove(old_value))
+                updates.append(If(old_value != new_value, (edge.add(new_value), maybe_remove)))
+
+            return updates
 
     return GraphTable(table_schema)
 
@@ -108,8 +137,8 @@ def node_table(key_column):
             return If(self.contains([key]), self.get_id(key), self.create_id(key))
 
         def max_id(self):
-            row = self.order_by([NODE_ID], True).select([NODE_ID]).first()
-            return row[0]
+            row = self.order_by([NODE_ID], True).select([NODE_ID]).rows().first()
+            return If(row.is_none(), 0, Tuple(row)[0])
 
         def remove(self, key):
             return self.delete_row([key])

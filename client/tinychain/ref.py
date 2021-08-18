@@ -86,7 +86,7 @@ class If(Ref):
 
     __uri__ = uri(Ref) + "/if"
 
-    def __init__(self, cond, then, or_else):
+    def __init__(self, cond, then, or_else=None):
         self.cond = cond
         self.then = then
         self.or_else = or_else
