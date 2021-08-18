@@ -15,10 +15,7 @@ class Graph(Cluster):
     def _configure(self):
         schema = self._schema()
 
-        nodes = set()
-        for from_node, to_node in schema.edges.values():
-            nodes.add(from_node)
-            nodes.add(to_node)
+        nodes = set(from_node for from_node, _ in schema.edges.values())
 
         for node in nodes:
             if '.' in node:
@@ -55,26 +52,22 @@ def graph_table(graph, schema, table_name):
     value_columns = [col.name for col in table_schema.values]
 
     class GraphTable(Table):
-        def is_unique(self, col_name, value):
-            return self.count({col_name: value}) <= 1
-
         def delete_row(self, key):
             # for each edge whose source is this table
             #   if this row's value is unique, delete the node from the node table
+            # finally, delete the row
 
-            row = Map(Before(Table.delete_row(self, key), self[key]))
+            row = self[key]
 
-            deletes = []
-            for col_name in edges:
-                value = row[col_name]
-                delete = If(self.is_unique(col_name, value), edges[col_name].remove(value))
-                deletes.append(delete)
+            deletes = [
+                If(self.count({col_name: row[col_name]}) == 1, edges[col_name].remove(row[col_name]))
+                for col_name in edges]
 
-            return deletes
+            return After(If(row.is_none(), None, deletes), Table.delete_row(key))
 
         def update_row(self, key, values):
             # for each edge whose source is this table
-            #   if the value is being updated
+            #   if the new value is different
             #       if this row's value is unique, delete the node from the node table
             #       insert the new value into the node table
 
@@ -84,7 +77,7 @@ def graph_table(graph, schema, table_name):
             for col_name in edges:
                 edge = edges[col_name]
                 old_value = row[col_name]
-                maybe_remove = If(self.is_unique(col_name, old_value), edge.remove(old_value))
+                maybe_remove = If(self.count({col_name: old_value}) == 1, edge.remove(old_value))
 
                 if col_name in value_columns:
                     update = If(values.contains(col_name), (edge.add(values[col_name]), maybe_remove))
@@ -101,8 +94,9 @@ def graph_table(graph, schema, table_name):
             #   if the new value is different
             #       if this row's value is unique, delete the node from the node table
             #   insert the new value into the node table
+            # finally, upsert the row
 
-            row = Map(Before(Table.upsert(self, key, values), self[key]))
+            row = self[key]
 
             updates = []
             for col_name in edges:
@@ -113,10 +107,10 @@ def graph_table(graph, schema, table_name):
 
                 edge = edges[col_name]
                 old_value = row[col_name]
-                maybe_remove = If(self.is_unique(col_name, old_value), edge.remove(old_value))
+                maybe_remove = If(self.count({col_name: old_value}) == 1, edge.remove(old_value))
                 updates.append(If(old_value != new_value, (edge.add(new_value), maybe_remove)))
 
-            return updates
+            return After(If(row.is_none(), None, updates), Table.upsert(self, key, values))
 
     return GraphTable(table_schema)
 

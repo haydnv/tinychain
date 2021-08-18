@@ -30,8 +30,12 @@ class TestApp(tc.Graph):
         return schema
 
     @tc.post_method
-    def create_user(self, _txn, user_id: tc.Bytes, email: tc.String, display_name: tc.String):
-        self.users.insert([user_id], [email, display_name])
+    def add_product(self, sku: tc.U32, name: tc.String, price: tc.U32):
+        return self.products.insert([sku], [name, price])
+
+    @tc.post_method
+    def create_user(self, user_id: tc.Bytes, email: tc.String, display_name: tc.String):
+        return self.users.insert([user_id], [email, display_name])
 
 
 class AppTests(unittest.TestCase):
@@ -39,9 +43,12 @@ class AppTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_app", [TestApp], overwrite=True)
 
-    def testCreateUser(self):
+    def testGraphTraversal(self):
         user = {"user_id": "MTIzNDU=", "email": "user12345@example.com", "display_name": "user 12345"}
         self.host.post("/test/graph/create_user", user)
+
+        product = {"sku": 12345, "name": "widget", "price": 399}
+        self.host.post("/test/graph/add_product", product)
 
     @classmethod
     def tearDownClass(cls):
