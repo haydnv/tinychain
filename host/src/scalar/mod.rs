@@ -465,7 +465,7 @@ impl Refer for Scalar {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("Scalar::resolve {}", self);
+        debug!("Scalar::resolve {:?}", self);
 
         match self {
             Self::Map(map) => {
@@ -1309,7 +1309,7 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
                 .deref()
                 .get(id)
                 .cloned()
-                .ok_or_else(|| TCError::not_found(id))
+                .ok_or_else(|| TCError::not_found(format!("state with ID {}", id)))
         };
 
         match result {
@@ -1318,7 +1318,12 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
                 Ok(state)
             }
             Err(cause) => {
-                warn!("error resolving {}: {}", id, cause);
+                warn!(
+                    "error resolving {} in context {}: {}",
+                    id,
+                    self.data.keys().collect::<Tuple<&Id>>(),
+                    cause
+                );
                 Err(cause)
             }
         }
@@ -1337,7 +1342,10 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.get(txn, path, key).await
         } else {
-            Err(TCError::not_found(subject))
+            Err(TCError::not_found(format!(
+                "GET method subject {}",
+                subject
+            )))
         }
     }
 
@@ -1355,7 +1363,10 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.put(txn, path, key, value).await
         } else {
-            Err(TCError::not_found(subject))
+            Err(TCError::not_found(format!(
+                "PUT method subject {}",
+                subject
+            )))
         }
     }
 
@@ -1372,7 +1383,10 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.post(txn, path, params).await
         } else {
-            Err(TCError::not_found(subject))
+            Err(TCError::not_found(format!(
+                "POST method subject {}",
+                subject
+            )))
         }
     }
 
@@ -1389,7 +1403,10 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         } else if let Some(subject) = self.data.deref().get(subject) {
             subject.delete(txn, path, key).await
         } else {
-            Err(TCError::not_found(subject))
+            Err(TCError::not_found(format!(
+                "DELETE method subject {}",
+                subject
+            )))
         }
     }
 

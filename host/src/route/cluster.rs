@@ -57,7 +57,7 @@ impl<'a> ClusterHandler<'a> {
                 .chain(&key)
                 .cloned()
                 .map(State::from)
-                .ok_or_else(|| TCError::not_found(key))
+                .ok_or_else(|| TCError::not_found(format!("{} member {}", self.cluster, key)))
         } else {
             let public_key = Bytes::from(self.cluster.public_key().to_vec());
             Ok(Value::from(public_key).into())

@@ -287,7 +287,7 @@ where
     async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()> {
         let mut contents = self.contents.write(txn_id).await?;
         if !contents.remove(&name) {
-            return Err(TCError::not_found(name));
+            return Err(TCError::not_found(format!("block named {}", name)));
         }
 
         let version = block_version(&self.path, &txn_id, &name);
@@ -302,7 +302,7 @@ where
         {
             let contents = self.contents.read(&txn_id).await?;
             if !contents.contains(&name) {
-                return Err(TCError::not_found(name));
+                return Err(TCError::not_found(format!("block named {}", name)));
             }
         }
 

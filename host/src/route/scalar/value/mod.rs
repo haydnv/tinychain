@@ -82,7 +82,9 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
                     "bytes" => Value::Bytes(Bytes::copy_from_slice(uuid.as_bytes())),
                     "id" => Value::Id(uuid.into()),
                     "string" => Value::String(uuid.to_string()),
-                    other => return Err(TCError::not_found(other)),
+                    other => {
+                        return Err(TCError::not_found(format!("{} in {}", other, self.dtype)))
+                    }
                 };
 
                 Ok(State::from(value))

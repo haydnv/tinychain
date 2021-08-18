@@ -207,7 +207,8 @@ where
     );
 
     if !path.is_empty() {
-        return Err(TCError::not_found(TCPath::from(path)));
+        let msg = format!("{} member {}", subject, TCPath::from(path));
+        return Err(TCError::not_found(msg));
     }
 
     let capture = if let Some((capture, _)) = form.last() {

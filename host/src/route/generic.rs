@@ -76,11 +76,15 @@ where
                     Ok(State::from(self.map.clone()))
                 } else {
                     let key = Id::try_cast_from(key, |v| TCError::bad_request("invalid Id", v))?;
-                    self.map
-                        .get(&key)
-                        .cloned()
-                        .map(State::from)
-                        .ok_or_else(|| TCError::not_found(key))
+                    self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
+                        let msg = format!(
+                            "{} in Map with keys {}",
+                            key,
+                            self.map.keys().collect::<Tuple<&Id>>()
+                        );
+
+                        TCError::not_found(msg)
+                    })
                 }
             })
         }))
@@ -174,7 +178,7 @@ where
                         .get(i)
                         .cloned()
                         .map(State::from)
-                        .ok_or_else(|| TCError::not_found(i))
+                        .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
                 }
             })
         }))

@@ -7,7 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::debug;
 
 use tc_error::*;
-use tcgeneric::{Id, Instance, Map};
+use tcgeneric::{Id, Instance, Map, Tuple};
 
 use crate::route::Public;
 use crate::scalar::{Refer, Scope};
@@ -75,6 +75,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     }
 
                     if ready {
+                        debug!("all deps resolved for {}", state);
                         pending.push(id);
                     } else {
                         debug!("{} still has unresolved deps", id);
@@ -104,7 +105,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                         Ok(state) => {
                             resolved.insert(id, state);
                         }
-                        Err(cause) => return Err(cause.consume(format!("error resolving {}", id))),
+                        Err(cause) => return Err(cause.consume(format!("while resolving {}", id))),
                     }
                 }
             }
@@ -112,9 +113,13 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
             self.scope.extend(resolved);
         }
 
-        self.scope
-            .into_inner()
-            .remove(&capture)
-            .ok_or_else(|| TCError::not_found(capture))
+        self.scope.remove(&capture).ok_or_else(|| {
+            let msg = format!(
+                "captured state {} in context {}",
+                capture,
+                self.scope.keys().collect::<Tuple<&Id>>()
+            );
+            TCError::not_found(msg)
+        })
     }
 }

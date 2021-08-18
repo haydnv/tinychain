@@ -200,7 +200,7 @@ where
                 if key.is_none() {
                     Ok(self.attribute.into())
                 } else {
-                    Err(TCError::not_found(key))
+                    Err(TCError::not_found(format!("attribute {}", key)))
                 }
             })
         }))
@@ -217,7 +217,7 @@ struct SelfHandler<'a, T> {
     subject: &'a T,
 }
 
-impl<'a, T: Clone + Send + Sync> Handler<'a> for SelfHandler<'a, T>
+impl<'a, T: Clone + Send + Sync + fmt::Display> Handler<'a> for SelfHandler<'a, T>
 where
     State: From<T>,
 {
@@ -230,7 +230,10 @@ where
                 if key.is_none() {
                     Ok(self.subject.clone().into())
                 } else {
-                    Err(TCError::not_found(key))
+                    Err(TCError::not_found(format!(
+                        "attribute {} of {}",
+                        key, self.subject
+                    )))
                 }
             })
         }))

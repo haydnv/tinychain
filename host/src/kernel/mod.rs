@@ -53,7 +53,11 @@ impl Kernel {
             if key.is_none() {
                 Ok(Value::from(Bytes::copy_from_slice(self.actor.public_key().as_bytes())).into())
             } else {
-                Err(TCError::not_found(key))
+                Err(TCError::not_found(format!(
+                    "{} at {}",
+                    key,
+                    TCPath::from(path)
+                )))
             }
         } else if let Some(class) = StateType::from_path(path) {
             class.try_cast_from_value(key)
