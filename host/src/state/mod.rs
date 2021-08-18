@@ -484,6 +484,12 @@ impl From<Map<Scalar>> for State {
     }
 }
 
+impl From<Number> for State {
+    fn from(n: Number) -> Self {
+        Self::Scalar(n.into())
+    }
+}
+
 impl From<Object> for State {
     fn from(object: Object) -> Self {
         State::Object(object)

@@ -183,6 +183,36 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
     }
 }
 
+struct AttributeHandler<T> {
+    attribute: T,
+}
+
+impl<'a, T: Clone + Send + Sync + 'a> Handler<'a> for AttributeHandler<T>
+where
+    State: From<T>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    Ok(self.attribute.into())
+                } else {
+                    Err(TCError::not_found(key))
+                }
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for AttributeHandler<T> {
+    fn from(attribute: T) -> Self {
+        Self { attribute }
+    }
+}
+
 struct SelfHandler<'a, T> {
     subject: &'a T,
 }

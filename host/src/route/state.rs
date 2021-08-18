@@ -2,9 +2,8 @@ use std::convert::TryInto;
 
 use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
-use tcgeneric::{
-    label, path_label, Id, Instance, Label, NativeClass, PathLabel, PathSegment, Tuple,
-};
+use tc_value::Number;
+use tcgeneric::{label, Id, Instance, Label, NativeClass, PathSegment, Tuple};
 
 use crate::object::{InstanceClass, Object};
 use crate::scalar::Link;
@@ -12,7 +11,6 @@ use crate::state::{State, StateType};
 
 use super::*;
 
-const CLASS: PathLabel = path_label(&["class"]);
 pub const PREFIX: Label = label("state");
 
 struct ClassHandler {
@@ -139,9 +137,15 @@ impl Route for State {
         }
 
         if path.is_empty() {
-            Some(Box::new(SelfHandler { subject: self }))
-        } else if path == &CLASS[..] {
-            Some(Box::new(ClassHandler::from(self.class())))
+            Some(Box::new(SelfHandler::from(self)))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "class" => Some(Box::new(ClassHandler::from(self.class()))),
+                "is_none" => Some(Box::new(AttributeHandler::from(Number::Bool(
+                    self.is_none().into(),
+                )))),
+                _ => None,
+            }
         } else {
             None
         }

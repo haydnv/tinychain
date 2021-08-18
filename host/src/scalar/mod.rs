@@ -517,6 +517,12 @@ impl From<Map<Scalar>> for Scalar {
     }
 }
 
+impl From<Number> for Scalar {
+    fn from(n: Number) -> Self {
+        Self::Value(n.into())
+    }
+}
+
 impl From<OpRef> for Scalar {
     fn from(op_ref: OpRef) -> Self {
         Self::Ref(Box::new(TCRef::Op(op_ref)))
