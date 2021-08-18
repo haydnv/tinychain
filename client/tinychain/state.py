@@ -73,7 +73,13 @@ class State(object):
 
     def dtype(self):
         """Return the native base :class:`Class` of this `State`."""
-        return Class(ref.Get(uri(self) + "/class"))
+        return self._get("class", rtype=Class)
+
+    def is_none(self):
+        """Return `Bool(true)` if this `State` is :class:`Nil`."""
+
+        from .value import Bool
+        return self._get("is_none", rtype=Bool)
 
 
 class Map(State):
@@ -147,6 +153,11 @@ class Stream(State):
 
     def aggregate(self):
         return self._get("aggregate", rtype=Stream)
+
+    def first(self):
+        """Return the first item in this `Stream`, or `Nil` if the `Stream` is empty."""
+
+        return self._get("first", rtype=Scalar)
 
     def for_each(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
