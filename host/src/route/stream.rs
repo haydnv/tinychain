@@ -1,7 +1,9 @@
-use futures::TryFutureExt;
+use futures::{TryFutureExt, TryStreamExt};
+
+use tcgeneric::TCPathBuf;
 
 use crate::generic::{label, PathSegment};
-use crate::route::{GetHandler, Handler, PostHandler, Route};
+use crate::route::{GetHandler, Handler, PostHandler, Public, Route};
 use crate::state::State;
 use crate::stream::TCStream;
 
@@ -18,6 +20,25 @@ impl<'a> Handler<'a> for Aggregate {
             Box::pin(async move {
                 key.expect_none()?;
                 Ok(State::Stream(self.source.aggregate()))
+            })
+        }))
+    }
+}
+
+struct First {
+    source: TCStream,
+}
+
+impl<'a> Handler<'a> for First {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let mut stream = self.source.into_stream(txn.clone()).await?;
+                let first = stream.try_next().map_ok(State::from).await?;
+                first.get(txn, &TCPathBuf::default(), key).await
             })
         }))
     }
@@ -96,6 +117,7 @@ impl Route for TCStream {
         let source = self.clone();
         match path[0].as_str() {
             "aggregate" => Some(Box::new(Aggregate { source })),
+            "first" => Some(Box::new(First { source })),
             "fold" => Some(Box::new(Fold { source })),
             "for_each" => Some(Box::new(ForEach { source })),
             "map" => Some(Box::new(Map { source })),
