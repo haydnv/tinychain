@@ -48,14 +48,13 @@ class Table(Collection):
 
         return self._get("columns", rtype=Tuple)
 
-    def count(self):
-        """
-        Return the number of rows in this `Table`.
+    def count(self, where=None):
+        """Return the number of rows in the given slice of this `Table` (or the entire `Table` if no bounds are given)."""
 
-        To count the number of keys which match a specific range, call `table.where(range).count()`.
-        """
-
-        return self._get("count", rtype=UInt)
+        if where is None:
+            return self._get("count", rtype=UInt)
+        else:
+            return self.where(where).count()
 
     def delete(self, where={}):
         """

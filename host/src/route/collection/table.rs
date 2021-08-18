@@ -127,21 +127,23 @@ struct CountHandler<T> {
     table: T,
 }
 
-impl<'a, T: TableStream + 'a> Handler<'a> for CountHandler<T> {
+impl<'a, T: TableSlice + TableStream + 'a> Handler<'a> for CountHandler<T>
+where
+    T::Slice: TableStream,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "Table::count does not accept a key (call Table::slice first)",
-                        key,
-                    ));
+                if key.is_none() {
+                    self.table.count(*txn.id()).map_ok(State::from).await
+                } else {
+                    let bounds = cast_into_bounds(Scalar::Value(key))?;
+                    let slice = self.table.slice(bounds)?;
+                    slice.count(*txn.id()).map_ok(State::from).await
                 }
-
-                self.table.count(*txn.id()).map_ok(State::from).await
             })
         }))
     }
@@ -456,6 +458,7 @@ impl Route for TableIndex {
 fn route<'a, T>(table: &'a T, path: &[PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
     T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
+    T::Slice: TableStream,
     Table: From<T>,
     Table: From<T::Limit>,
     Table: From<T::OrderBy>,
