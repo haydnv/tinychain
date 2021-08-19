@@ -1339,7 +1339,8 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if subject == &SELF {
             let subject = self.subject()?;
             subject.get(txn, path, key).await
-        } else if let Some(subject) = self.data.deref().get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject).cloned() {
+            let subject = subject.resolve(self, txn).await?;
             subject.get(txn, path, key).await
         } else {
             Err(TCError::not_found(format!(
@@ -1360,7 +1361,8 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if subject == &SELF {
             let subject = self.subject()?;
             subject.put(txn, path, key, value).await
-        } else if let Some(subject) = self.data.deref().get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject).cloned() {
+            let subject = subject.resolve(self, txn).await?;
             subject.put(txn, path, key, value).await
         } else {
             Err(TCError::not_found(format!(
@@ -1380,7 +1382,8 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if subject == &SELF {
             let subject = self.subject()?;
             subject.post(txn, path, params).await
-        } else if let Some(subject) = self.data.deref().get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject).cloned() {
+            let subject = subject.resolve(self, txn).await?;
             subject.post(txn, path, params).await
         } else {
             Err(TCError::not_found(format!(
@@ -1400,7 +1403,8 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if subject == &SELF {
             let subject = self.subject()?;
             subject.delete(txn, path, key).await
-        } else if let Some(subject) = self.data.deref().get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject).cloned() {
+            let subject = subject.resolve(self, txn).await?;
             subject.delete(txn, path, key).await
         } else {
             Err(TCError::not_found(format!(
