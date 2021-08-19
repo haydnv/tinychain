@@ -55,19 +55,32 @@ impl ValueType {
         Value: From<V>,
     {
         let on_err = |v: &Value| TCError::bad_request(format!("cannot cast into {} from", self), v);
+        let value = Value::from(value);
 
         match self {
-            Self::Bytes => Value::from(value).try_cast_into(on_err).map(Value::Bytes),
-            Self::Id => Value::from(value).try_cast_into(on_err).map(Value::Id),
-            Self::Link => Value::from(value).try_cast_into(on_err).map(Value::String),
+            Self::Bytes => match value {
+                Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
+                Value::Number(_) => Err(TCError::not_implemented("cast into Bytes from Number")),
+                Value::String(s) if s.ends_with('=') => base64::decode(s)
+                    .map(Bytes::from)
+                    .map(Value::Bytes)
+                    .map_err(|e| TCError::bad_request("cannot cast into Bytes", e)),
+                Value::String(s) => hex::decode(s)
+                    .map(Bytes::from)
+                    .map(Value::Bytes)
+                    .map_err(|e| TCError::bad_request("cannot cast into Bytes", e)),
+                other => Err(TCError::bad_request("cannot cast into Bytes from", other)),
+            },
+            Self::Id => value.try_cast_into(on_err).map(Value::Id),
+            Self::Link => value.try_cast_into(on_err).map(Value::String),
             Self::None => Ok(Value::None),
-            Self::Number(nt) => Value::from(value)
+            Self::Number(nt) => value
                 .try_cast_into(|v| TCError::bad_request("cannot cast into Number from", v))
                 .map(|n| nt.cast(n))
                 .map(Value::Number),
-            Self::String => Value::from(value).try_cast_into(on_err).map(Value::String),
-            Self::Tuple => Value::from(value).try_cast_into(on_err).map(Value::Tuple),
-            Self::Value => Ok(Value::from(value)),
+            Self::String => value.try_cast_into(on_err).map(Value::String),
+            Self::Tuple => value.try_cast_into(on_err).map(Value::Tuple),
+            Self::Value => Ok(value),
         }
     }
 }
