@@ -47,7 +47,13 @@ class AppTests(unittest.TestCase):
         user = {"user_id": "MTIzNDU=", "email": "user12345@example.com", "display_name": "user 12345"}
         self.host.post("/test/graph/create_user", user)
 
-        product = {"sku": 12345, "name": "widget", "price": 399}
+        user = {"user_id": "MjM0NTY=", "email": "user23456@example.com", "display_name": "user 23456"}
+        self.host.post("/test/graph/create_user", user)
+
+        product = {"sku": 12345, "name": "widget 1", "price": 399}
+        self.host.post("/test/graph/add_product", product)
+
+        product = {"sku": 23456, "name": "widget 2", "price": 499}
         self.host.post("/test/graph/add_product", product)
 
     @classmethod

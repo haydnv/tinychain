@@ -5,6 +5,7 @@ from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.ref import After, Before, If
 from tinychain.state import Map, Tuple
+from tinychain.util import uri
 from tinychain.value import Bool, I64, U64
 
 
@@ -45,7 +46,7 @@ def graph_table(graph, schema, table_name):
     for from_node, to_node in schema.edges.values():
         if from_node.startswith(prefix):
             col_name = from_node[len(prefix):]
-            edges[col_name] = getattr(graph, f"node_{table_name}_{col_name}")
+            edges[col_name] = reference_node_table(graph, table_name, col_name)
 
     table_schema = schema.tables[table_name]
     key_columns = [col.name for col in table_schema.key]
@@ -139,3 +140,8 @@ def node_table(key_column):
 
     schema = TableSchema([key_column], [Column(NODE_ID, U64)])
     return NodeTable(schema.create_index(NODE_ID, [NODE_ID]))
+
+
+def reference_node_table(graph, table_name, col_name):
+    table_class = type(getattr(graph, f"node_{table_name}_{col_name}"))
+    return table_class(uri(graph).append(table_name))
