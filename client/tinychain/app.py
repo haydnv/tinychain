@@ -28,7 +28,7 @@ class Graph(Cluster):
             setattr(self, f"node_{table_name}_{column_name}", schema.chain(node_table(key)))
 
         for name in schema.edges:
-            setattr(self, f"edges_{name}", schema.chain(Sparse.zeros([I64.max(), I64.max()], Bool)))
+            setattr(self, f"edge_{name}", schema.chain(Sparse.zeros([I64.max(), I64.max()], Bool)))
 
         for name in schema.tables:
             if hasattr(self, name):
@@ -41,12 +41,12 @@ class Graph(Cluster):
 
 
 def graph_table(graph, schema, table_name):
-    edges = {}
+    nodes = {}
     prefix = f"{table_name}."
     for from_node, to_node in schema.edges.values():
         if from_node.startswith(prefix):
             col_name = from_node[len(prefix):]
-            edges[col_name] = reference_node_table(graph, table_name, col_name)
+            nodes[col_name] = reference_node(graph, table_name, col_name)
 
     table_schema = schema.tables[table_name]
     key_columns = [col.name for col in table_schema.key]
@@ -61,8 +61,8 @@ def graph_table(graph, schema, table_name):
             row = self[key]
 
             deletes = [
-                If(self.count({col_name: row[col_name]}) == 1, edges[col_name].remove(row[col_name]))
-                for col_name in edges]
+                If(self.count({col_name: row[col_name]}) == 1, nodes[col_name].remove(row[col_name]))
+                for col_name in nodes]
 
             return After(If(row.is_none(), None, deletes), Table.delete_row(key))
 
@@ -75,16 +75,16 @@ def graph_table(graph, schema, table_name):
             row = Map(Before(Table.update_row(self, key, values), self[key]))
 
             updates = []
-            for col_name in edges:
-                edge = edges[col_name]
+            for col_name in nodes:
+                node = nodes[col_name]
                 old_value = row[col_name]
-                maybe_remove = If(self.count({col_name: old_value}) == 1, edge.remove(old_value))
+                maybe_remove = If(self.count({col_name: old_value}) == 1, node.remove(old_value))
 
                 if col_name in value_columns:
-                    update = If(values.contains(col_name), (edge.add(values[col_name]), maybe_remove))
+                    update = If(values.contains(col_name), (node.add(values[col_name]), maybe_remove))
                 else:
                     new_value = key[key_columns.index(col_name)]
-                    update = If(old_value != new_value, (edge.add(new_value), maybe_remove))
+                    update = If(old_value != new_value, (node.add(new_value), maybe_remove))
 
                 updates.append(update)
 
@@ -100,16 +100,16 @@ def graph_table(graph, schema, table_name):
             row = self[key]
 
             updates = []
-            for col_name in edges:
+            for col_name in nodes:
                 if col_name in key_columns:
                     new_value = key[key_columns.index(col_name)]
                 else:
                     new_value = values[value_columns.index(col_name)]
 
-                edge = edges[col_name]
+                node = nodes[col_name]
                 old_value = row[col_name]
-                maybe_remove = If(self.count({col_name: old_value}) == 1, edge.remove(old_value))
-                updates.append(If(old_value != new_value, (edge.add(new_value), maybe_remove)))
+                maybe_remove = If(self.count({col_name: old_value}) == 1, node.remove(old_value))
+                updates.append(If(old_value != new_value, (node.add(new_value), maybe_remove)))
 
             return After(If(row.is_none(), None, updates), Table.upsert(self, key, values))
 
@@ -142,6 +142,13 @@ def node_table(key_column):
     return NodeTable(schema.create_index(NODE_ID, [NODE_ID]))
 
 
-def reference_node_table(graph, table_name, col_name):
-    table_class = type(getattr(graph, f"node_{table_name}_{col_name}"))
-    return table_class(uri(graph).append(table_name))
+def reference_edge(graph, edge_name):
+    tensor_name = f"edge_{edge_name}"
+    edge_class = type(getattr(graph, tensor_name))
+    return edge_class(uri(graph).append(tensor_name))
+
+
+def reference_node(graph, table_name, col_name):
+    node_name = f"node_{table_name}_{col_name}"
+    table_class = type(getattr(graph, node_name))
+    return table_class(uri(graph).append(node_name))
