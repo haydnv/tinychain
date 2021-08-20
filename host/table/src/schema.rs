@@ -209,8 +209,10 @@ impl IndexSchema {
     pub fn validate_key(&self, key: Key) -> TCResult<Key> {
         if key.len() != self.key.len() {
             return Err(TCError::unsupported(format!(
-                "invalid key {} for schema {}",
+                "key {} has {} columns, but the table key has {}: {}",
                 Tuple::from(key),
+                key.len(),
+                self.key.len(),
                 self
             )));
         }
