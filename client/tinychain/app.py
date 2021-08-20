@@ -4,10 +4,9 @@ from tinychain.collection.schema import Column, Graph as Schema
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.decorators import *
-from tinychain.value import Bool, I64, U64
-
-
-NODE_ID = "node_id"
+from tinychain.ref import Get
+from tinychain.util import uri
+from tinychain.value import String, Bool, I64, U64
 
 
 class Graph(Cluster):
@@ -26,13 +25,15 @@ class Graph(Cluster):
     def _schema(self):
         return Schema(Sync)
 
-    @put_method
     def add_edge(self, label, edge):
-        raise NotImplemented
+        (from_id, to_id) = edge
+        edge = Sparse(Get(uri(self), String("edge_{{label}}").render(label=label)))
+        return edge.write([from_id, to_id], True)
 
-    @delete_method
     def remove_edge(self, label, edge):
-        raise NotImplemented
+        (from_id, to_id) = edge
+        edge = Sparse(Get(uri(self), String("edge_{{label}}").render(label=label)))
+        return edge.write([from_id, to_id], False)
 
 
 def graph_table(schema):

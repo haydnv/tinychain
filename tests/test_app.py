@@ -31,12 +31,16 @@ class TestApp(tc.Graph):
         return schema
 
     @tc.post_method
-    def add_product(self, sku: tc.U32, name: tc.String, price: tc.U32):
+    def add_product(self, sku: tc.U64, name: tc.String, price: tc.U32):
         return self.products.insert([sku], [name, price])
 
     @tc.post_method
-    def create_user(self, user_id: tc.Bytes, email: tc.String, display_name: tc.String):
+    def create_user(self, user_id: tc.U64, email: tc.String, display_name: tc.String):
         return self.users.insert([user_id], [email, display_name])
+
+    @tc.put_method
+    def add_friend(self, user_id: tc.U64, friend: tc.U64):
+        return self.add_edge("friends", (user_id, friend)), self.add_edge("friends", (friend, user_id))
 
 
 class AppTests(unittest.TestCase):
@@ -50,6 +54,8 @@ class AppTests(unittest.TestCase):
 
         user = {"user_id": 23456, "email": "user23456@example.com", "display_name": "user 23456"}
         self.host.post("/test/graph/create_user", user)
+
+        self.host.put("/test/graph/add_friend", 12345, 23456)
 
         product = {"sku": 1, "name": "widget 1", "price": 399}
         self.host.post("/test/graph/add_product", product)
