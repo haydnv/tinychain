@@ -9,21 +9,22 @@ class TestApp(tc.Graph):
 
     def _schema(self):
         users = tc.schema.Table(
-            [tc.Column("user_id", tc.Bytes, 16)],
+            [tc.Column("user_id", tc.U64)],
             [tc.Column("email", tc.String, 320), tc.Column("display_name", tc.String, 100)])
 
         products = tc.schema.Table(
-            [tc.Column("sku", tc.U32)],
+            [tc.Column("sku", tc.U64)],
             [tc.Column("name", tc.String, 256), tc.Column("price", tc.U32)])
 
         orders = tc.schema.Table(
-            [tc.Column("order_id", tc.Bytes, 16)],
+            [tc.Column("order_id", tc.U64)],
             [tc.Column("user_id", tc.Bytes, 16), tc.Column("sku", tc.U32), tc.Column("quantity", tc.UInt)])
 
         schema = (tc.schema.Graph(tc.chain.Block)
                   .create_table("users", users)
                   .create_table("products", products)
                   .create_table("orders", orders)
+                  .create_edge("friends", "users.user_id", "users.user_id")
                   .create_edge("sku", "products.sku", "orders.sku")
                   .create_edge("orders", "users.user_id", "orders.user_id"))
 
@@ -44,16 +45,16 @@ class AppTests(unittest.TestCase):
         cls.host = start_host("test_app", [TestApp], overwrite=True)
 
     def testGraphTraversal(self):
-        user = {"user_id": "MTIzNDU=", "email": "user12345@example.com", "display_name": "user 12345"}
+        user = {"user_id": 12345, "email": "user12345@example.com", "display_name": "user 12345"}
         self.host.post("/test/graph/create_user", user)
 
-        user = {"user_id": "MjM0NTY=", "email": "user23456@example.com", "display_name": "user 23456"}
+        user = {"user_id": 23456, "email": "user23456@example.com", "display_name": "user 23456"}
         self.host.post("/test/graph/create_user", user)
 
-        product = {"sku": 12345, "name": "widget 1", "price": 399}
+        product = {"sku": 1, "name": "widget 1", "price": 399}
         self.host.post("/test/graph/add_product", product)
 
-        product = {"sku": 23456, "name": "widget 2", "price": 499}
+        product = {"sku": 2, "name": "widget 2", "price": 499}
         self.host.post("/test/graph/add_product", product)
 
     @classmethod
