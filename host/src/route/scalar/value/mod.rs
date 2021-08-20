@@ -81,7 +81,7 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
                 let value = match self.dtype {
                     "bytes" => Value::Bytes(Bytes::copy_from_slice(uuid.as_bytes())),
                     "id" => Value::Id(uuid.into()),
-                    "string" => Value::String(uuid.to_string()),
+                    "string" => Value::String(uuid.to_string().into()),
                     other => {
                         return Err(TCError::not_found(format!("{} in {}", other, self.dtype)))
                     }

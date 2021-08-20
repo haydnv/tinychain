@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
-use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
@@ -16,6 +15,7 @@ use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_value::TCString;
 use tcgeneric::*;
 
 use crate::closure::Closure;
@@ -766,7 +766,7 @@ impl TryCastFrom<Scalar> for Number {
     }
 }
 
-impl TryCastFrom<Scalar> for String {
+impl TryCastFrom<Scalar> for TCString {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Value(value) => Self::can_cast_from(value),
@@ -1439,11 +1439,8 @@ impl<'a, T> DerefMut for Scope<'a, T> {
 
 impl<'a, T> fmt::Debug for Scope<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "execution scope with keys {}",
-            Value::from_iter(self.keys().map(|k| Value::String(k.to_string())))
-        )
+        let ids = self.keys().collect::<Tuple<&Id>>();
+        write!(f, "execution scope with IDs {}", ids)
     }
 }
 

@@ -15,6 +15,7 @@ use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
+use tc_value::TCString;
 use tcgeneric::*;
 
 use crate::chain::*;
@@ -723,7 +724,7 @@ impl TryCastFrom<State> for Closure {
     }
 }
 
-impl TryCastFrom<State> for String {
+impl TryCastFrom<State> for TCString {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Scalar(scalar) => Self::can_cast_from(scalar),

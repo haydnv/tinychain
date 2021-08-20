@@ -4,7 +4,9 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::Future;
 use safecast::TryCastFrom;
+
 use tc_error::*;
+use tc_value::TCString;
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::scalar::{OpRefType as ORT, Value};
@@ -169,12 +171,12 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let message = String::try_cast_from(key, |v| {
+                let message = TCString::try_cast_from(key, |v| {
                     TCError::bad_request("cannot cast into error message string from", v)
                 })?;
 
                 if let Some(err_type) = error_type(self.code) {
-                    Err(TCError::new(err_type, message))
+                    Err(TCError::new(err_type, message.to_string()))
                 } else {
                     Err(TCError::not_found(self.code))
                 }

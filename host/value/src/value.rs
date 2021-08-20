@@ -21,7 +21,7 @@ use uuid::Uuid;
 use tc_error::*;
 use tcgeneric::*;
 
-use super::Link;
+use super::{Link, TCString};
 
 pub use number_general::*;
 
@@ -61,14 +61,9 @@ impl ValueType {
             Self::Bytes => match value {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
                 Value::Number(_) => Err(TCError::not_implemented("cast into Bytes from Number")),
-                Value::String(s) if s.ends_with('=') => base64::decode(s)
-                    .map(Bytes::from)
-                    .map(Value::Bytes)
-                    .map_err(|e| TCError::bad_request("cannot cast into Bytes", e)),
-                Value::String(s) => hex::decode(s)
-                    .map(Bytes::from)
-                    .map(Value::Bytes)
-                    .map_err(|e| TCError::bad_request("cannot cast into Bytes", e)),
+                Value::String(s) => s
+                    .try_cast_into(|s| TCError::bad_request("cannot cast into Bytes from", s))
+                    .map(Value::Bytes),
                 other => Err(TCError::bad_request("cannot cast into Bytes from", other)),
             },
             Self::Id => value.try_cast_into(on_err).map(Value::Id),
@@ -278,7 +273,7 @@ impl TryCastFrom<Value> for ValueType {
         match value {
             Value::Link(l) if l.host().is_none() => Self::from_path(l.path()).is_some(),
             Value::String(s) => {
-                if let Ok(path) = TCPathBuf::from_str(s) {
+                if let Ok(path) = TCPathBuf::from_str(s.as_str()) {
                     Self::from_path(&path).is_some()
                 } else {
                     false
@@ -395,7 +390,7 @@ pub enum Value {
     Id(Id),
     None,
     Number(Number),
-    String(String),
+    String(TCString),
     Tuple(Tuple<Self>),
 }
 
@@ -448,7 +443,7 @@ impl Value {
             VT::Number(nt) => Number::opt_cast_from(self)
                 .map(|n| n.into_type(nt))
                 .map(Self::Number),
-            VT::String => Some(Value::String(self.to_string())),
+            VT::String => Some(Value::String(self.to_string().into())),
             VT::Tuple => match self {
                 Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
                 _ => None,
@@ -703,7 +698,7 @@ impl TryCastFrom<Value> for Bytes {
         match value {
             Value::Bytes(_) => true,
             Value::Tuple(tuple) => Vec::<u8>::can_cast_from(tuple),
-            Value::String(s) => base64::decode(s).is_ok(),
+            Value::String(s) => Self::can_cast_from(s),
             Value::None => true,
             _ => false,
         }
@@ -713,7 +708,7 @@ impl TryCastFrom<Value> for Bytes {
         match value {
             Value::Bytes(bytes) => Some(bytes),
             Value::Tuple(tuple) => Vec::<u8>::opt_cast_from(tuple).map(Bytes::from),
-            Value::String(s) => base64::decode(s).ok().map(Bytes::from),
+            Value::String(s) => Self::opt_cast_from(s),
             Value::None => Some(Bytes::new()),
             _ => None,
         }
@@ -783,7 +778,7 @@ impl TryCastFrom<Value> for Number {
     }
 }
 
-impl TryCastFrom<Value> for String {
+impl TryCastFrom<Value> for TCString {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Link(_) => true,
@@ -796,9 +791,9 @@ impl TryCastFrom<Value> for String {
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
-            Value::Link(link) => Some(link.to_string()),
-            Value::Id(id) => Some(id.to_string()),
-            Value::Number(n) => Some(n.to_string()),
+            Value::Link(link) => Self::opt_cast_from(link),
+            Value::Id(id) => Self::opt_cast_from(id),
+            Value::Number(n) => Self::opt_cast_from(n),
             Value::String(s) => Some(s),
             _ => None,
         }
@@ -1188,15 +1183,15 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     }
 
     fn visit_str<E: SerdeError>(self, s: &str) -> Result<Self::Value, E> {
-        Ok(Value::String(s.to_string()))
+        Ok(Value::String(s.to_string().into()))
     }
 
     fn visit_borrowed_str<E: SerdeError>(self, s: &'de str) -> Result<Self::Value, E> {
-        Ok(Value::String(s.to_string()))
+        Ok(Value::String(s.to_string().into()))
     }
 
     fn visit_string<E: SerdeError>(self, s: String) -> Result<Self::Value, E> {
-        Ok(Value::String(s))
+        Ok(Value::String(s.into()))
     }
 
     fn visit_byte_buf<E: SerdeError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
@@ -1309,7 +1304,7 @@ impl destream::de::Visitor for ValueVisitor {
     }
 
     fn visit_string<E: DestreamError>(self, s: String) -> Result<Self::Value, E> {
-        Ok(Value::String(s))
+        Ok(Value::String(s.into()))
     }
 
     fn visit_byte_buf<E: DestreamError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {

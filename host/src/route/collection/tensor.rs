@@ -8,6 +8,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
+use tc_value::TCString;
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, Tensor};
@@ -179,7 +180,7 @@ impl<'a> Handler<'a> for EinsumHandler {
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let format: String = params.require(&label("format").into())?;
+                let format: TCString = params.require(&label("format").into())?;
                 let tensors: Vec<Tensor> = params.require(&label("tensors").into())?;
                 einsum(&format, tensors)
                     .map(Collection::from)

@@ -12,10 +12,12 @@ use tcgeneric::Instance;
 
 pub use link::*;
 pub use slice::*;
+pub use string::*;
 pub use value::*;
 
 mod link;
 mod slice;
+mod string;
 mod value;
 
 /// [`Collate`] support for [`Value`]
@@ -24,7 +26,7 @@ pub struct ValueCollator {
     bytes: Collator<Bytes>,
     link: Collator<Link>,
     number: NumberCollator,
-    string: Collator<String>,
+    string: StringCollator,
 }
 
 impl Collate for ValueCollator {
