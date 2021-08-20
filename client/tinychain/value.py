@@ -70,6 +70,15 @@ class String(Value):
 
     __uri__ = uri(Value) + "/string"
 
+    def render(self, params=None, **kwargs):
+        if kwargs and params is not None:
+            raise ValueError("String.render accepts a Map or kwargs, not both:", params, kwargs)
+
+        if params:
+            return self._post("render", params, String)
+        else:
+            return self._post("render", kwargs, String)
+
 
 # Numeric types
 

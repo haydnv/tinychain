@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::*;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A generic tuple type, based on [`Vec`]
 #[derive(Clone, Default, Eq, PartialEq)]
@@ -233,6 +234,18 @@ where
 {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.to_stream(encoder)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Tuple<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<T>::deserialize(deserializer).map(|inner| Self { inner })
+    }
+}
+
+impl<T: Serialize> Serialize for Tuple<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.inner.serialize(serializer)
     }
 }
 

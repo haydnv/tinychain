@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use tc_error::*;
 
@@ -171,6 +172,18 @@ impl<'en, T: IntoStream<'en> + 'en> IntoStream<'en> for Map<T> {
 impl<'en, T: ToStream<'en> + 'en> ToStream<'en> for Map<T> {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.inner.to_stream(encoder)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Map<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        BTreeMap::deserialize(deserializer).map(|inner| Self { inner })
+    }
+}
+
+impl<T: Serialize> Serialize for Map<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.inner.serialize(serializer)
     }
 }
 

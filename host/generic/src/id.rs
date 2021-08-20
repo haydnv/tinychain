@@ -11,7 +11,7 @@ use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use regex::Regex;
 use safecast::TryCastFrom;
-use serde::de::{Deserialize, Deserializer, Error};
+use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
 use tc_error::*;
@@ -172,6 +172,20 @@ impl<'en> ToStream<'en> for Id {
 impl<'en> IntoStream<'en> for Id {
     fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         e.encode_str(&self.id)
+    }
+}
+
+impl<'de> Deserialize<'de> for Id {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(deserializer)?;
+        validate_id(&id).map_err(serde::de::Error::custom)?;
+        Ok(Self { id })
+    }
+}
+
+impl Serialize for Id {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.id.serialize(serializer)
     }
 }
 
@@ -416,7 +430,7 @@ impl iter::FromIterator<PathSegment> for TCPathBuf {
 impl<'de> Deserialize<'de> for TCPathBuf {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let path = String::deserialize(deserializer)?;
-        Self::from_str(&path).map_err(D::Error::custom)
+        Self::from_str(&path).map_err(serde::de::Error::custom)
     }
 }
 

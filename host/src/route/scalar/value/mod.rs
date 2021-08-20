@@ -10,6 +10,7 @@ use crate::scalar::Value;
 use crate::state::State;
 
 mod number;
+mod string;
 
 pub const PREFIX: Label = label("value");
 
@@ -38,6 +39,7 @@ impl Route for Value {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
             Self::Number(number) => number.route(path),
+            Self::String(s) => s.route(path),
             Self::Tuple(tuple) => tuple.route(path),
             _ => None,
         };

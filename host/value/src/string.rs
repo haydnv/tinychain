@@ -7,15 +7,27 @@ use bytes::Bytes;
 use collate::{Collate, Collator};
 use destream::{de, en};
 use futures::TryFutureExt;
+use handlebars::Handlebars;
 use safecast::TryCastFrom;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::json;
 
+use tc_error::*;
 use tcgeneric::Id;
 
 use super::{Link, Number};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct TCString(String);
+
+impl TCString {
+    pub fn render<T: Serialize>(&self, data: T) -> TCResult<TCString> {
+        Handlebars::new()
+            .render_template(&self.0, &json!(data))
+            .map(Self)
+            .map_err(|e| TCError::bad_request("error rendering template", e))
+    }
+}
 
 impl Deref for TCString {
     type Target = String;

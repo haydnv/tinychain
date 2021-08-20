@@ -18,11 +18,13 @@ bytes = "1.0"
 collate = "~0.1.9"
 destream = "0.5"
 futures = "0.3"
+handlebars = "4.1"
 hex = "0.4"
 log = { version = "0.4", features = [] }
 number-general = "~0.3.10"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
+serde_json = { version = "1.0", features = [] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 uuid = "0.8"
