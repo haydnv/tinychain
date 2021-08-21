@@ -1,7 +1,7 @@
 from tinychain.chain import Chain
 from tinychain.state import Map, Tuple
 from tinychain.util import to_json, uri
-from tinychain.value import F32
+from tinychain.value import F32, U64
 
 
 class Column(object):
@@ -12,11 +12,20 @@ class Column(object):
         self.dtype = dtype
         self.max_size = max_size
 
+    def __eq__(self, other):
+        return self.name == other.name and self.dtype == other.dtype and self.max_size == other.max_size
+
     def __json__(self):
         if self.max_size is None:
             return to_json((self.name, self.dtype))
         else:
             return to_json((self.name, self.dtype, self.max_size))
+
+    def __repr__(self):
+        if self.max_size is None:
+            return f"{self.name}: column type {self.dtype}"
+        else:
+            return f"{self.name}: column type {self.dtype}, max size {self.max_size}"
 
 
 class Edge(object):
@@ -70,6 +79,14 @@ class Graph(object):
 
     def create_edge(self, name, edge):
         """Add an :class:`Edge` between tables in this `Graph`."""
+        assert edge.from_table in self.tables
+        assert edge.to_table in self.tables
+
+        if edge.from_table != edge.to_table:
+            from_table = self.tables[edge.from_table]
+            if from_table.key != [Column(edge.column, U64)]:
+                raise ValueError(
+                    f"invalid foreign key column: {edge.from_table}.{edge.column} (key is {from_table.key})")
 
         self.edges[name] = edge
         return self
