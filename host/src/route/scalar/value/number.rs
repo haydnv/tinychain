@@ -77,6 +77,7 @@ impl Route for Number {
         let handler: Box<dyn Handler<'a> + 'a> = match path[0].as_str() {
             "abs" => Box::new(Unary::new("abs", move || self.abs())),
             "add" => Box::new(Dual::new(move |other| Ok(*self + other))),
+            "and" => Box::new(Dual::new(move |other| Ok(self.and(other)))),
             "div" => Box::new(Dual::new(move |other: Number| {
                 if other == other.class().zero() {
                     Err(TCError::unsupported("cannot divide by zero"))
@@ -85,12 +86,15 @@ impl Route for Number {
                 }
             })),
             "mul" => Box::new(Dual::new(move |other| Ok(*self * other))),
+            "not" => Box::new(Unary::new("not", move || self.not())),
             "sub" => Box::new(Dual::new(move |other| Ok(*self - other))),
             "pow" => Box::new(Dual::new(move |other| Ok(self.pow(other)))),
             "gt" => Box::new(Dual::new(move |other| Ok((*self > other).into()))),
             "gte" => Box::new(Dual::new(move |other| Ok((*self >= other).into()))),
             "lt" => Box::new(Dual::new(move |other| Ok((*self < other).into()))),
             "lte" => Box::new(Dual::new(move |other| Ok((*self <= other).into()))),
+            "or" => Box::new(Dual::new(move |other| Ok(self.or(other)))),
+            "xor" => Box::new(Dual::new(move |other| Ok(self.xor(other)))),
             _ => return None,
         };
 

@@ -198,6 +198,26 @@ class Bool(Number):
 
     __uri__ = uri(Number) + "/bool"
 
+    def logical_and(self, other):
+        """Boolean AND"""
+
+        return self._get("and", other, Bool)
+
+    def logical_not(self):
+        """Boolean NOT"""
+
+        return self._get("not", rtype=Bool)
+
+    def logical_or(self, other):
+        """Boolean OR"""
+
+        return self._get("or", other, Bool)
+
+    def logical_xor(self, other):
+        """Boolean XOR"""
+
+        return self._get("xor", other, Bool)
+
 
 class Complex(Number):
     """A complex number."""

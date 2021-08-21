@@ -81,6 +81,15 @@ class State(object):
         from .value import Bool
         return self._get("is_none", rtype=Bool)
 
+    def is_some(self):
+        """
+        Return `Bool(true)` if this `State` is not :class:`Nil`.
+
+        This is defined as `self.is_none().logical_not()`.
+        """
+
+        return self.is_none().logical_not()
+
 
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
