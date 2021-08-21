@@ -19,6 +19,23 @@ class Column(object):
             return to_json((self.name, self.dtype, self.max_size))
 
 
+class Edge(object):
+    """A directed edge between two node columns in a :class:`Graph`."""
+
+    def __init__(self, from_node, to_node, cascade=False):
+        assert '.' in from_node
+        assert '.' in to_node
+
+        self.cascade = cascade
+        self.from_table, from_column = from_node.split('.')
+        self.to_table, to_column = to_node.split('.')
+
+        if from_column == to_column:
+            self.column = from_column
+        else:
+            raise ValueError(f"edge columns must have the same name: {from_column}, {to_column}")
+
+
 class BTree(object):
     """A :class:`BTree` schema which comprises a tuple of :class:`Column` s."""
 
@@ -51,10 +68,10 @@ class Graph(object):
         self.tables[name] = schema
         return self
 
-    def create_edge(self, name, from_node, to_node):
-        """Add an edge between tables in this `Graph`."""
+    def create_edge(self, name, edge):
+        """Add an :class:`Edge` between tables in this `Graph`."""
 
-        self.edges[name] = (from_node, to_node)
+        self.edges[name] = edge
         return self
 
 

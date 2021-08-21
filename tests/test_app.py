@@ -24,9 +24,9 @@ class TestApp(tc.Graph):
                   .create_table("users", users)
                   .create_table("products", products)
                   .create_table("orders", orders)
-                  .create_edge("friends", "users.user_id", "users.user_id")
-                  .create_edge("sku", "products.sku", "orders.sku")
-                  .create_edge("orders", "users.user_id", "orders.user_id"))
+                  .create_edge("friends", tc.schema.Edge("users.user_id", "users.user_id"))
+                  .create_edge("sku", tc.schema.Edge("products.sku", "orders.sku"))
+                  .create_edge("orders", tc.schema.Edge("users.user_id", "orders.user_id")))
 
         return schema
 
