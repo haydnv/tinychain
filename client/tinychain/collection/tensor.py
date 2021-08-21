@@ -1,7 +1,8 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.state import Map, State
+from tinychain.decorators import get_op
+from tinychain.state import Map, State, Stream
 from tinychain.util import form_of, uri, URI
 from tinychain.value import Bool, F32, Number
 
@@ -229,6 +230,12 @@ class Dense(Tensor):
 
         return cls.constant(shape, dtype(0))
 
+    def elements(self, bounds):
+        """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
+
+        bounds = _handle_bounds(bounds)
+        return self._get("elements", bounds, Stream)
+
 
 class Sparse(Tensor):
     """An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values."""
@@ -244,6 +251,12 @@ class Sparse(Tensor):
         """
 
         return cls(schema.Tensor(shape, dtype))
+
+    def elements(self, bounds=None):
+        """Return a :class:`Stream` of this tensor's (:class:`Tuple`, :class:`Number`) coordinate-value elements."""
+
+        bounds = _handle_bounds(bounds)
+        return self._get("elements", bounds, Stream)
 
 
 def einsum(fmt, tensors):

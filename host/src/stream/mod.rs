@@ -121,22 +121,42 @@ impl TCStream {
                 let keys = btree.keys(*txn.id()).await?;
                 let keys: TCBoxTryStream<'static, State> =
                     Box::pin(keys.map_ok(Value::from).map_ok(State::from));
+
                 Ok(keys)
             }
             Collection::Table(table) => {
                 let rows = table.rows(*txn.id()).await?;
                 let rows: TCBoxTryStream<'static, State> =
                     Box::pin(rows.map_ok(Value::from).map_ok(State::from));
+
                 Ok(rows)
             }
 
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
-                tc_tensor::Tensor::Dense(_dense) => {
-                    Err(TCError::not_implemented("DenseTensor::into_stream"))
+                tc_tensor::Tensor::Dense(dense) => {
+                    use tc_tensor::DenseAccess;
+                    let elements = dense.into_inner().value_stream(txn).await?;
+                    Ok(Box::pin(elements.map_ok(State::from)))
                 }
-                tc_tensor::Tensor::Sparse(_sparse) => {
-                    Err(TCError::not_implemented("SparseTensor::into_stream"))
+                tc_tensor::Tensor::Sparse(sparse) => {
+                    use tc_tensor::SparseAccess;
+                    use tc_value::Number;
+                    use tcgeneric::Tuple;
+
+                    let filled = sparse.into_inner().filled(txn).await?;
+                    let filled = filled
+                        .map_ok(|(coord, value)| {
+                            let coord = coord
+                                .into_iter()
+                                .map(Number::from)
+                                .collect::<Tuple<Value>>();
+
+                            Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
+                        })
+                        .map_ok(State::from);
+
+                    Ok(Box::pin(filled))
                 }
             },
         }

@@ -11,7 +11,7 @@ use tc_transact::Transaction;
 use tc_value::TCString;
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
-use crate::collection::{Collection, DenseTensor, DenseTensorFile, Tensor};
+use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
 use crate::route::{GetHandler, PostHandler, PutHandler};
 use crate::scalar::{Bound, Number, NumberClass, Range, Value};
@@ -185,6 +185,41 @@ impl<'a> Handler<'a> for EinsumHandler {
                 einsum(&format, tensors)
                     .map(Collection::from)
                     .map(State::from)
+            })
+        }))
+    }
+}
+
+struct ElementsHandler<T> {
+    tensor: T,
+}
+
+impl<T> ElementsHandler<T> {
+    fn new(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
+impl<'a, T> Handler<'a> for ElementsHandler<T>
+where
+    T: TensorAccess + TensorTransform + Send + Sync + 'a,
+    Tensor: From<T> + From<T::Slice>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let tensor = if key.is_none() {
+                    Tensor::from(self.tensor)
+                } else {
+                    let bounds = cast_bounds(self.tensor.shape(), key)?;
+                    let slice = self.tensor.slice(bounds)?;
+                    Tensor::from(slice)
+                };
+
+                Ok(TCStream::from(Collection::Tensor(tensor)).into())
             })
         }))
     }
@@ -524,9 +559,7 @@ impl<B: DenseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for Den
     }
 }
 
-impl<A: SparseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route
-    for SparseTensor<fs::File<Array>, fs::File<Node>, fs::Dir, Txn, A>
-{
+impl<A: SparseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for SparseTensor<A> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
@@ -563,55 +596,65 @@ where
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor.clone())))
     } else if path.len() == 1 {
-        let cloned = tensor.clone();
+        match path[0].as_str() {
+            // reduce ops require borrowing
+            "product" => {
+                return Some(Box::new(ReduceHandler::new(
+                    tensor,
+                    TensorReduce::product,
+                    TensorReduce::product_all,
+                )))
+            }
+            "sum" => {
+                return Some(Box::new(ReduceHandler::new(
+                    tensor,
+                    TensorReduce::sum,
+                    TensorReduce::sum_all,
+                )))
+            }
+            _ => {}
+        };
+
+        let tensor = tensor.clone();
 
         match path[0].as_str() {
+            // to stream
+            "elements" => Some(Box::new(ElementsHandler::new(tensor))),
+
             // boolean ops
-            "and" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::and))),
-            "or" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::or))),
-            "xor" => Some(Box::new(DualHandler::new(cloned, TensorBoolean::xor))),
+            "and" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::and))),
+            "or" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::or))),
+            "xor" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::xor))),
 
             // comparison ops
-            "eq" => Some(Box::new(DualHandler::new(cloned, TensorCompare::eq))),
-            "gt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::gt))),
-            "gte" => Some(Box::new(DualHandler::new(cloned, TensorCompare::gte))),
-            "lt" => Some(Box::new(DualHandler::new(cloned, TensorCompare::lt))),
-            "lte" => Some(Box::new(DualHandler::new(cloned, TensorCompare::lte))),
-            "ne" => Some(Box::new(DualHandler::new(cloned, TensorCompare::ne))),
+            "eq" => Some(Box::new(DualHandler::new(tensor, TensorCompare::eq))),
+            "gt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gt))),
+            "gte" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gte))),
+            "lt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lt))),
+            "lte" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lte))),
+            "ne" => Some(Box::new(DualHandler::new(tensor, TensorCompare::ne))),
 
             // unary ops
-            "abs" => Some(Box::new(UnaryHandler::new(cloned.into(), TensorUnary::abs))),
+            "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
-                cloned.into(),
+                tensor.into(),
                 TensorUnary::all,
             ))),
             "any" => Some(Box::new(UnaryHandlerAsync::new(
-                cloned.into(),
+                tensor.into(),
                 TensorUnary::any,
             ))),
-            "not" => Some(Box::new(UnaryHandler::new(cloned.into(), TensorUnary::not))),
+            "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
 
             // basic math
-            "add" => Some(Box::new(DualHandler::new(cloned, TensorMath::add))),
-            "div" => Some(Box::new(DualHandler::new(cloned, TensorMath::div))),
-            "mul" => Some(Box::new(DualHandler::new(cloned, TensorMath::mul))),
-            "sub" => Some(Box::new(DualHandler::new(cloned, TensorMath::sub))),
-
-            // reduce ops
-            "product" => Some(Box::new(ReduceHandler::new(
-                tensor,
-                TensorReduce::product,
-                TensorReduce::product_all,
-            ))),
-            "sum" => Some(Box::new(ReduceHandler::new(
-                tensor,
-                TensorReduce::sum,
-                TensorReduce::sum_all,
-            ))),
+            "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),
+            "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
+            "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
+            "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
 
             // transforms
-            "expand_dims" => Some(Box::new(ExpandHandler::from(cloned))),
-            "transpose" => Some(Box::new(TransposeHandler::from(cloned))),
+            "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
+            "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
             _ => None,
         }
