@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use afarray::Array;
 use futures::{future, Future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
@@ -8,7 +10,7 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tc_value::TCString;
+use tc_value::{TCString, ValueType};
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
@@ -20,6 +22,40 @@ use crate::stream::TCStream;
 use crate::txn::Txn;
 
 use super::{Handler, Route};
+
+struct CastHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for CastHandler<T>
+where
+    T: TensorTransform + Send + Sync + 'a,
+    Tensor: From<T::Cast>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let dtype =
+                    ValueType::try_cast_from(key, |v| TCError::bad_request("not a NumberType", v))?;
+
+                let dtype = dtype.try_into()?;
+                self.tensor
+                    .cast_into(dtype)
+                    .map(Tensor::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for CastHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
 
 struct ConstantHandler;
 
@@ -589,6 +625,7 @@ where
     Tensor: From<T>,
     <T as TensorTransform>::Slice: TensorAccess + Send,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+    Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
     Tensor: From<<T as TensorTransform>::Slice>,
     Tensor: From<<T as TensorTransform>::Transpose>,
@@ -653,6 +690,7 @@ where
             "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
 
             // transforms
+            "cast" => Some(Box::new(CastHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
