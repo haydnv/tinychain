@@ -4,11 +4,11 @@ from tinychain.collection.schema import Column, Graph as Schema
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.error import BadRequest
-from tinychain.decorators import delete_op
+from tinychain.decorators import closure, put_op, delete_op
 from tinychain.ref import After, Get, If
 from tinychain.state import Tuple
-from tinychain.util import uri
-from tinychain.value import String, Bool, I64, U64
+from tinychain.util import uri, URI
+from tinychain.value import String, Bool, I64, U8, U64
 
 
 class Graph(Cluster):
@@ -106,49 +106,41 @@ def graph_table(graph, schema, table_name):
                 adjacent = Sparse(uri(graph).append(f"edge_{label}"))
 
                 if any(col.name == edge.column for col in table_schema.values):
-                    old_id = row[edge.column]
                     value_index = [col.name for col in table_schema.values].index(edge.column)
                     new_id = values[value_index]
-                    update = self._maybe_update_row(edge, adjacent, row.is_some(), old_id, new_id)
-                    updates.append(update)
                 else:
-                    # the edge column can't be updated, so don't worry about invalidating old edges
-                    if edge.from_table == table_name and edge.to_table == table_name:
-                        # this is not a foreign key, so the developer has to add edges explicitly
-                        pass
-                    else:
-                        key_index = [col.name for col in table_schema.key].index(edge.column)
-                        update = adjacent.write([key[key_index], key[key_index]], True)
-                        updates.append(update)
+                    new_id = key[0]
+
+                update = self._maybe_update_row(edge, adjacent, row, row.is_some(), new_id)
+                updates.append(update)
 
             return After(updates, Table.upsert(self, key, values))
 
-        def _maybe_update_row(self, edge, adjacent, update_cond, old_id, new_id):
-            if edge.from_table == edge.to_table:
-                add = None  # this is not a foreign key, so the developer has to add edges explicitly
+        def _maybe_update_row(self, edge, adjacent, row, cond, new_id):
+            remove_from = adjacent.write([row[edge.column]], False)
 
-                if edge.cascade:
-                    remove = (adjacent.write([old_id], False),
-                              adjacent.write([slice(None), new_id], False))
-                else:
-                    err = String("cannot delete from {{table}}: Graph still has edges to {{column}}").render(
-                        table=edge.from_table, column=edge.column)
-
-                    still_exists = adjacent[old_id].any().logical_or(adjacent[slice(None), old_id].any())
-                    remove = If(still_exists, BadRequest(err))
-            elif table_name == edge.from_table:
-                remove = (adjacent.write([old_id], False), adjacent.write([slice(None), old_id], False))
-                add = adjacent.write([new_id, new_id], True)
-            elif table_name == edge.to_table:
-                remove = If(adjacent[:, old_id].cast(U64).sum() == 1, adjacent.write([old_id, old_id], False))
-                add = adjacent.write([new_id, new_id], True)
-
-            remove = If(update_cond, remove)
-
-            if add is None:
-                return remove
+            to_table = Table(URI(f"$self/{edge.to_table}"))
+            if edge.cascade:
+                remove_to = After(
+                    to_table.delete({edge.column: row[edge.column]}),
+                    adjacent.write([slice(None), row[edge.column]], False))
             else:
-                return After(remove, add)
+                remove_to = If(
+                    adjacent[:, row[edge.column]].cast(U8).sum() > 1,
+                    BadRequest(String(
+                        "cannot delete {{column}} {{id}} because it still has edges in the Graph").render(
+                        column=edge.column, id=row[edge.column])))
+
+            if edge.from_table == table_name and edge.to_table == table_name:
+                remove = (remove_from, remove_to)
+            elif edge.from_table == table_name:
+                remove = remove_from
+            elif edge.to_table == table_name:
+                remove = remove_to
+
+            add = put_op(lambda key: adjacent.write([new_id, Tuple(key)[0]], True))  # assumes row[0] is always the key
+            add = to_table.where({edge.column: new_id}).rows().for_each(add)
+            return After(If(cond, remove), add)
 
         def max_id(self):
             row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())

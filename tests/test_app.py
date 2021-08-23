@@ -18,7 +18,8 @@ class TestApp(tc.Graph):
 
         orders = tc.schema.Table(
             [tc.Column("order_id", tc.U64)],
-            [tc.Column("user_id", tc.U64), tc.Column("sku", tc.U64), tc.Column("quantity", tc.U32)])
+            [tc.Column("user_id", tc.U64), tc.Column("sku", tc.U64), tc.Column("quantity", tc.U32)]
+        ).create_index("user", ["user_id"]).create_index("product", ["sku"])
 
         schema = (tc.schema.Graph(tc.chain.Block)
                   .create_table("users", users)

@@ -79,14 +79,36 @@ class Graph(object):
 
     def create_edge(self, name, edge):
         """Add an :class:`Edge` between tables in this `Graph`."""
+
         assert edge.from_table in self.tables
+        from_table = self.tables[edge.from_table]
+
         assert edge.to_table in self.tables
+        to_table = self.tables[edge.to_table]
+
+        if from_table.key != [Column(edge.column, U64)]:
+            raise ValueError(f"invalid foreign key column: {edge.from_table}.{edge.column} (key is {from_table.key})")
+
+        [pk] = [col for col in from_table.key if col.name == edge.column]
 
         if edge.from_table != edge.to_table:
-            from_table = self.tables[edge.from_table]
-            if from_table.key != [Column(edge.column, U64)]:
+            if len(to_table.key) != 1:
+                raise ValueError("the primary key of a Graph node type must be a single U64 column, not", to_table.key)
+
+            [fk] = [col for col in to_table.values if col.name == edge.column]
+            if pk != fk:
                 raise ValueError(
-                    f"invalid foreign key column: {edge.from_table}.{edge.column} (key is {from_table.key})")
+                    f"primary key {edge.from_table}.{pk.name} does not match foreign key {edge.to_table}.{fk.name}")
+
+            has_index = False
+            for (_name, columns) in to_table.indices:
+                if columns and columns[0] == edge.column:
+                    has_index = True
+
+            if not has_index:
+                raise ValueError(f"there is no index on {edge.to_table} to support the foreign key on {edge.column}")
+        elif to_table.key != [pk]:
+            raise ValueError(f"Graph node {edge.to_table} self-reference must be to the primary key, not {edge.column}")
 
         self.edges[name] = edge
         return self
