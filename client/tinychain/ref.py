@@ -107,6 +107,32 @@ class If(Ref):
         deanonymize(self.or_else, cxt)
 
 
+class While(Ref):
+    """A flow control operator to execute a closure repeatedly until a condition is met."""
+
+    __uri__ = uri(Ref) + "/while"
+
+    def __init__(self, cond, op, state):
+        self.cond = cond
+        self.op = op
+        self.state = state
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.cond))
+        deps.update(requires(self.op))
+        deps.update(requires(self.state))
+        return deps
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.cond, self.op, self.state])}
+
+    def __ns__(self, cxt):
+        deanonymize(self.cond, cxt)
+        deanonymize(self.op, cxt)
+        deanonymize(self.state, cxt)
+
+
 class With(Ref):
     """A flow control operator to limit the scope of a lambda Op"""
 

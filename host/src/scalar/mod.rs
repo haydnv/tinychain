@@ -325,6 +325,13 @@ impl Scalar {
                     }
                 }
 
+                RT::While => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::While)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
                 RT::With => self
                     .opt_cast_into()
                     .map(Box::new)

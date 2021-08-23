@@ -72,7 +72,7 @@ impl Refer for IfRef {
             }
         } else {
             Err(TCError::bad_request(
-                "expected boolean condition but found",
+                "expected boolean if condition but found",
                 cond,
             ))
         }
