@@ -18,7 +18,7 @@ class TestApp(tc.Graph):
 
         orders = tc.schema.Table(
             [tc.Column("order_id", tc.U64)],
-            [tc.Column("user_id", tc.Bytes, 16), tc.Column("sku", tc.U32), tc.Column("quantity", tc.UInt)])
+            [tc.Column("user_id", tc.U64), tc.Column("sku", tc.U64), tc.Column("quantity", tc.U32)])
 
         schema = (tc.schema.Graph(tc.chain.Block)
                   .create_table("users", users)
@@ -42,6 +42,11 @@ class TestApp(tc.Graph):
     def add_friend(self, user_id: tc.U64, friend: tc.U64):
         return self.add_edge("friends", (user_id, friend)), self.add_edge("friends", (friend, user_id))
 
+    @tc.post_method
+    def place_order(self, user_id: tc.U64, sku: tc.U64, quantity: tc.U64):
+        order_id = self.orders.max_id() + 1
+        return tc.After(self.orders.insert([order_id], [user_id, sku, quantity]), order_id)
+
 
 class AppTests(unittest.TestCase):
     @classmethod
@@ -62,6 +67,9 @@ class AppTests(unittest.TestCase):
 
         product = {"sku": 2, "name": "widget 2", "price": 499}
         self.host.post("/test/graph/add_product", product)
+
+        order = {"user_id": 12345, "sku": 1, "quantity": 5}
+        self.host.post("/test/graph/place_order", order)
 
     @classmethod
     def tearDownClass(cls):

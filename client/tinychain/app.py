@@ -6,6 +6,7 @@ from tinychain.collection.tensor import Sparse
 from tinychain.error import BadRequest
 from tinychain.decorators import delete_op
 from tinychain.ref import After, Get, If
+from tinychain.state import Tuple
 from tinychain.util import uri
 from tinychain.value import String, Bool, I64, U64
 
@@ -74,7 +75,7 @@ def graph_table(graph, schema, table_name):
                     deletes.append(delete)
                 elif edge.to_table == table_name:
                     delete = adjacent.write([row[edge.column], row[edge.column]], False)
-                    delete = If(self.count({edge.column: row[edge.column]}) == 1, delete)
+                    delete = If(adjacent[:, row[edge.column]].cast(U64).sum() == 1, delete)
                     deletes.append(delete)
 
             return After(deletes, Table.delete_row(self, key))
@@ -136,10 +137,10 @@ def graph_table(graph, schema, table_name):
                     still_exists = adjacent[old_id].any().logical_or(adjacent[slice(None), old_id].any())
                     remove = If(still_exists, BadRequest(err))
             elif table_name == edge.from_table:
-                remove = adjacent.write([old_id], False)
+                remove = (adjacent.write([old_id], False), adjacent.write([slice(None), old_id], False))
                 add = adjacent.write([new_id, new_id], True)
             elif table_name == edge.to_table:
-                remove = If(self.count({edge.column: old_id}) == 1, adjacent.write([old_id, old_id], False))
+                remove = If(adjacent[:, old_id].cast(U64).sum() == 1, adjacent.write([old_id, old_id], False))
                 add = adjacent.write([new_id, new_id], True)
 
             remove = If(update_cond, remove)
@@ -150,6 +151,7 @@ def graph_table(graph, schema, table_name):
                 return After(remove, add)
 
         def max_id(self):
-            return self.order_by(key_col.name, True).select([key_col.name]).rows().first()[0]
+            row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
+            return U64(If(row.is_none(), 0, row[0]))
 
     return GraphTable(table_schema)
