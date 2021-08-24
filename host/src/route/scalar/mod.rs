@@ -1,6 +1,6 @@
 use tc_error::TCError;
 use tc_value::{Bound, Range};
-use tcgeneric::{label, Label, PathSegment};
+use tcgeneric::PathSegment;
 
 use crate::scalar::{Scalar, ScalarType, Value};
 use crate::state::State;
@@ -9,8 +9,6 @@ use super::{EchoHandler, GetHandler, Handler, Route};
 
 mod cluster;
 mod value;
-
-pub const PREFIX: Label = label("scalar");
 
 struct CastHandler {
     class: ScalarType,

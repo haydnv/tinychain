@@ -20,7 +20,7 @@ use tcgeneric::*;
 
 use crate::closure::Closure;
 use crate::route::Public;
-use crate::state::{State, StateClass, ToState};
+use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 pub use op::*;
@@ -92,15 +92,15 @@ impl NativeClass for ScalarType {
     }
 }
 
-impl StateClass for ScalarType {
-    type Get = Scalar;
-
-    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
-        Scalar::Value(value)
-            .into_type(self)
-            .ok_or_else(|| TCError::bad_request("invalid instance of", self))
-    }
-}
+// impl StateClass for ScalarType {
+//     type Get = Scalar;
+//
+//     fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
+//         Scalar::Value(value)
+//             .into_type(self)
+//             .ok_or_else(|| TCError::bad_request("invalid instance of", self))
+//     }
+// }
 
 impl From<ValueType> for ScalarType {
     fn from(vt: ValueType) -> Self {

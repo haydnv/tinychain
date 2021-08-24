@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use log::debug;
-use safecast::{CastInto, TryCastFrom, TryCastInto};
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Column};
 use tc_error::*;
@@ -25,7 +25,7 @@ use crate::collection::{
 };
 use crate::fs;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
-use crate::state::{State, StateClass, StateView};
+use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 pub use block::BlockChain;
@@ -479,52 +479,6 @@ impl NativeClass for ChainType {
         };
 
         TCPathBuf::from(PREFIX).append(label(suffix))
-    }
-}
-
-impl StateClass for ChainType {
-    type Get = OpRef;
-
-    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
-        let (classpath, schema): (TCPathBuf, Value) =
-            value.try_cast_into(|v| TCError::bad_request("invalid Chain schema", v))?;
-
-        let schema = if let Some(ct) = CollectionType::from_path(&classpath) {
-            match ct {
-                CollectionType::BTree(_) => {
-                    let schema = tc_btree::RowSchema::try_cast_from(schema, |v| {
-                        TCError::bad_request("invalid BTree schema", v)
-                    })?;
-                    Value::Tuple(schema.into_iter().collect())
-                }
-                CollectionType::Table(_) => {
-                    let schema = tc_table::TableSchema::try_cast_from(schema, |v| {
-                        TCError::bad_request("invalid Table schema", v)
-                    })?;
-                    schema.cast_into()
-                }
-                #[cfg(feature = "tensor")]
-                CollectionType::Tensor(_) => {
-                    let schema = tc_tensor::Schema::try_cast_from(schema, |v| {
-                        TCError::bad_request("invalid Tensor schema", v)
-                    })?;
-                    schema.cast_into()
-                }
-            }
-        } else if let Some(vt) = ValueType::from_path(&classpath) {
-            let schema = schema
-                .into_type(vt)
-                .ok_or_else(|| TCError::bad_request("invalid instance of", vt))?;
-
-            schema.into()
-        } else {
-            return Err(TCError::bad_request(
-                "invalid class for Chain subject",
-                classpath,
-            ));
-        };
-
-        Ok(OpRef::Get((self.path().into(), Scalar::Value(schema))))
     }
 }
 

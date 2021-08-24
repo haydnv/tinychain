@@ -5,15 +5,15 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::TryCastFrom;
 
-use tc_error::{TCError, TCResult};
+use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{label, path_label, Instance, Map, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs::Dir;
 use crate::scalar::{Scalar, Value};
-use crate::state::{State, StateClass};
+use crate::state::State;
 use crate::txn::Txn;
 
 pub use class::*;
@@ -54,28 +54,6 @@ impl NativeClass for ObjectType {
         };
 
         TCPathBuf::from(PREFIX).append(label(suffix))
-    }
-}
-
-impl StateClass for ObjectType {
-    type Get = Object;
-
-    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
-        let object = match self {
-            Self::Class => {
-                let classpath =
-                    value.try_cast_into(|v| TCError::bad_request("invalid parent class", v))?;
-
-                let class = InstanceClass::new(Some(classpath), Map::default());
-                Object::Class(class)
-            }
-            Self::Instance => {
-                let class = InstanceClass::new(Some(value.class().path().into()), Map::default());
-                Object::Instance(InstanceExt::new(value.into(), class))
-            }
-        };
-
-        Ok(object)
     }
 }
 

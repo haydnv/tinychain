@@ -62,12 +62,12 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     let mut deps = HashSet::new();
                     state.requires(&mut deps);
 
+                    if deps.contains(&id) {
+                        return Err(TCError::bad_request("circular dependency", id));
+                    }
+
                     let mut ready = true;
                     for dep_id in deps.into_iter() {
-                        if dep_id == id {
-                            return Err(TCError::bad_request("circular dependency", id));
-                        }
-
                         if self.scope.resolve_id(&dep_id)?.is_ref() {
                             ready = false;
                             unvisited.push_back(dep_id);
@@ -96,13 +96,16 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
             {
                 let mut providers = FuturesUnordered::new();
                 for id in pending.into_iter() {
+                    debug!("enqueue {}", id);
                     let state = self.scope.resolve_id(&id)?;
+                    debug!("provider for {} is {}", id, state);
                     providers.push(state.resolve(&self.scope, &self.txn).map(|r| (id, r)));
                 }
 
                 while let Some((id, r)) = providers.next().await {
                     match r {
                         Ok(state) => {
+                            debug!("{} resolved to {}", id, state);
                             resolved.insert(id, state);
                         }
                         Err(cause) => return Err(cause.consume(format!("while resolving {}", id))),

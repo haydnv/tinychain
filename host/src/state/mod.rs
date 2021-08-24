@@ -11,7 +11,7 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -30,15 +30,6 @@ use crate::txn::Txn;
 pub use view::StateView;
 
 mod view;
-
-pub trait StateClass: Class
-where
-    State: From<Self::Get>,
-{
-    type Get;
-
-    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get>;
-}
 
 pub trait ToState {
     fn to_state(&self) -> State;
@@ -110,36 +101,36 @@ impl NativeClass for StateType {
     }
 }
 
-impl StateClass for StateType {
-    type Get = State;
-
-    fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
-        match self {
-            Self::Chain(ct) => ct.try_cast_from_value(value).map(State::from),
-            Self::Collection(ct) => ct.try_cast_from_value(value).map(State::from),
-            Self::Closure => Err(TCError::bad_request("cannot cast into closure from", value)),
-            Self::Map => {
-                let contents: Tuple<Value> = value.try_into()?;
-                let contents: Vec<(Id, Value)> = contents
-                    .try_cast_into(|v| TCError::bad_request("cannot cast into Map from", v))?;
-
-                Ok(State::Map(
-                    contents
-                        .into_iter()
-                        .map(|(id, value)| (id, State::from(value)))
-                        .collect(),
-                ))
-            }
-            Self::Object(ot) => ot.try_cast_from_value(value).map(State::Object),
-            Self::Scalar(st) => st.try_cast_from_value(value).map(State::Scalar),
-            Self::Stream => Err(TCError::bad_request("cannot cast into Stream from", value)),
-            Self::Tuple => {
-                let contents: Tuple<Value> = value.try_into()?;
-                Ok(State::Tuple(contents.into_iter().collect()))
-            }
-        }
-    }
-}
+// impl StateClass for StateType {
+//     type Get = State;
+//
+//     fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
+//         match self {
+//             Self::Chain(ct) => ct.try_cast_from_value(value).map(State::from),
+//             Self::Collection(ct) => ct.try_cast_from_value(value).map(State::from),
+//             Self::Closure => Err(TCError::bad_request("cannot cast into closure from", value)),
+//             Self::Map => {
+//                 let contents: Tuple<Value> = value.try_into()?;
+//                 let contents: Vec<(Id, Value)> = contents
+//                     .try_cast_into(|v| TCError::bad_request("cannot cast into Map from", v))?;
+//
+//                 Ok(State::Map(
+//                     contents
+//                         .into_iter()
+//                         .map(|(id, value)| (id, State::from(value)))
+//                         .collect(),
+//                 ))
+//             }
+//             Self::Object(ot) => ot.try_cast_from_value(value).map(State::Object),
+//             Self::Scalar(st) => st.try_cast_from_value(value).map(State::Scalar),
+//             Self::Stream => Err(TCError::bad_request("cannot cast into Stream from", value)),
+//             Self::Tuple => {
+//                 let contents: Tuple<Value> = value.try_into()?;
+//                 Ok(State::Tuple(contents.into_iter().collect()))
+//             }
+//         }
+//     }
+// }
 
 impl From<BTreeType> for StateType {
     fn from(btt: BTreeType) -> Self {

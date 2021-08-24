@@ -160,12 +160,12 @@ impl Route for Static {
             return Some(Box::new(EchoHandler));
         }
 
-        if path[0] == collection::PREFIX {
-            collection::Static.route(&path[1..])
-        } else if path[0] == scalar::PREFIX {
-            scalar::Static.route(&path[1..])
-        } else {
-            None
+        match path[0].as_str() {
+            "collection" => collection::Static.route(&path[1..]),
+            "scalar" => scalar::Static.route(&path[1..]),
+            "map" => Some(Box::new(MapHandler)),
+            "tuple" => Some(Box::new(TupleHandler)),
+            _ => None,
         }
     }
 }

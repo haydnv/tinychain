@@ -262,6 +262,7 @@ impl Refer for TCRef {
 
         // the Op executor will take care of references that resolve to a reference in general
         // but this is necessary specifically in the case of flow controls like `If` and `After`
+        let mut i = 0;
         let mut state = State::from(self);
         while let State::Scalar(Scalar::Ref(tc_ref)) = state {
             state = match *tc_ref {
@@ -274,6 +275,9 @@ impl Refer for TCRef {
                 Self::While(while_ref) => while_ref.resolve(context, txn).await,
                 Self::With(with) => with.resolve(context, txn).await,
             }?;
+
+            i += 1;
+            debug!("TCRef resolved to {} at recursion depth {}", state, i);
         }
 
         Ok(state)

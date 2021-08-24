@@ -59,8 +59,6 @@ impl Kernel {
                     TCPath::from(path)
                 )))
             }
-        } else if let Some(class) = StateType::from_path(path) {
-            class.try_cast_from_value(key)
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",

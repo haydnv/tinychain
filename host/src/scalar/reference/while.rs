@@ -86,6 +86,7 @@ impl Refer for While {
             if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = still_going {
                 if b.into() {
                     state = closure.clone().call(txn, state).await?;
+                    debug!("While loop state is {}", state);
                 } else {
                     break Ok(state);
                 }

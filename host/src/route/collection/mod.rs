@@ -2,22 +2,19 @@ use safecast::CastInto;
 
 use tc_btree::BTreeInstance;
 use tc_table::TableInstance;
-#[cfg(feature = "tensor")]
-use tcgeneric::{label, Label, PathSegment, Tuple};
+use tc_value::Value;
+use tcgeneric::{PathSegment, Tuple};
 
 use crate::collection::{Collection, CollectionType};
 use crate::route::GetHandler;
 
 use super::{Handler, Route};
-use tc_value::Value;
 
 mod btree;
 mod table;
 
 #[cfg(feature = "tensor")]
 mod tensor;
-
-pub const PREFIX: Label = label("collection");
 
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
