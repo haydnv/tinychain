@@ -41,7 +41,7 @@ Tinychain's all-in-one approach can also reduce operational costs by removing th
 
 ### For end-users
 
-End users won't see Tinychain directly, but it makes the customer experience better by making cloud services faster, more reliable, and cheaper to operate, as well as lowering the risk of a data breach by eliminating the need to make copies of customer data for analysis.
+End users won't see Tinychain directly, but it makes the customer experience better by making cloud services faster, more reliable, and more cost-efficient to operate, as well as lowering the risk of a data breach by eliminating the need to make copies of customer data for analysis.
 
 ## Getting started
 
@@ -68,7 +68,7 @@ Tinychain's tensor feature can be installed using cargo using the command below.
 `cargo install tinychain --features=tensor`
 
 **Note** 
-The tensor feature requires a package-config file for ArrayFire to in your environment's PKG_CONFIG_PATH. If you're not sure what to do about this, copy the file below to your Tinychain install directory and run ```export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:<path to your Tinychain install directory>/arrayfire.pc``` before building or running Tinychain with the --features=tensor flag.
+The tensor feature requires a package-config file for ArrayFire to in your environment's PKG_CONFIG_PATH. If you're not sure what to do about this, copy the file below to your Tinychain install directory and run ```export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:<path to your Tinychain install directory>/arrayfire.pc``` before building or running Tinychain with the `--features=tensor` flag.
 
 ```arrayfire.pc
     prefix=/usr
@@ -198,7 +198,7 @@ The flow of operations within a single transaction is:
 1. For PUT and DELETE operations, the request *T* itself is replicated; for user-defined GET and POST requests, write operations which are part of *T* are replicated to all other hosts in *C*
 1. Each dependent cluster *Cx* receives a request *Tx*, claims leadership of *Tx*, notifies the owner *C* of its participation, and replicates *Tx* to all hosts in *Cx*
 1. If any host responds with error 409: conflict, the transaction is rolled back and error 409 is returned to the end-user
-1. Otherwise, if at least (*N* / 2) + 1 hosts in each participating cluster respond with success, *C* removes the unsuccessful hosts from its replica set, commits the transaction, and responds to the end-user
+1. Otherwise, if at least (*N* / 2) + 1 hosts in each participating cluster respond with success, each cluster *C* removes the unsuccessful hosts from its replica set, commits the transaction, and responds to the end-user
 1. Otherwise, the transaction is rolled back and an error is returned to the end-user
 
 *Important note*: the Tinychain protocol does not support trustless replication. Do not allow untrusted replicas to join your cluster. A single malicious replica can significantly degrade performance, or even halt all updates entirely, by creating extra work to reach consensus; it can also report false information to your clients and the network as a whole.
