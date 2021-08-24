@@ -347,6 +347,19 @@ pub enum Tensor<FD, FS, D, T> {
     Sparse(SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>),
 }
 
+impl<FD, FS, D, T> Tensor<FD, FS, D, T>
+where
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
+    D: Dir,
+    T: Transaction<D>,
+    D::FileClass: From<TensorType>,
+{
+    pub fn schema(&self) -> Schema {
+        Schema { dtype: self.dtype(), shape: self.shape().clone() }
+    }
+}
+
 impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Tensor<FD, FS, D, T> {
     type Class = TensorType;
 
