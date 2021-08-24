@@ -15,7 +15,7 @@ use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
-use crate::route::{GetHandler, PostHandler, PutHandler};
+use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler};
 use crate::scalar::{Bound, Number, NumberClass, Range, Value};
 use crate::state::State;
 use crate::stream::TCStream;
@@ -291,6 +291,44 @@ where
 impl<T> From<T> for ExpandHandler<T> {
     fn from(tensor: T) -> Self {
         Self { tensor }
+    }
+}
+
+struct MaskHandler {
+    tensor: Tensor,
+}
+
+impl<'a> Handler<'a> for MaskHandler {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, other| {
+            Box::pin(async move {
+                let other = other.try_cast_into(|s| {
+                    TCError::bad_request("Tensor::cast requires a Tensor but found", s)
+                })?;
+
+                if key.is_none() {
+                    self.tensor.mask(txn.clone(), other).await
+                } else {
+                    let bounds = cast_bounds(self.tensor.shape(), key.into())?;
+                    let slice = self.tensor.slice(bounds)?;
+                    slice.mask(txn.clone(), other).await
+                }
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for MaskHandler
+where
+    Tensor: From<T>,
+{
+    fn from(tensor: T) -> Self {
+        Self {
+            tensor: tensor.into(),
+        }
     }
 }
 
@@ -623,7 +661,7 @@ where
         + Sync,
     Collection: From<T>,
     Tensor: From<T>,
-    <T as TensorTransform>::Slice: TensorAccess + Send,
+    <T as TensorTransform>::Slice: TensorAccess + Send + 'a,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
@@ -634,7 +672,18 @@ where
         Some(Box::new(TensorHandler::from(tensor.clone())))
     } else if path.len() == 1 {
         match path[0].as_str() {
-            // reduce ops require borrowing
+            // attributes
+            "shape" => {
+                return Some(Box::new(AttributeHandler::from(
+                    tensor
+                        .shape()
+                        .iter()
+                        .map(|dim| Number::from(*dim))
+                        .collect::<Tuple<Value>>(),
+                )))
+            }
+
+            // reduce ops (which require borrowing)
             "product" => {
                 return Some(Box::new(ReduceHandler::new(
                     tensor,
@@ -693,6 +742,9 @@ where
             "cast" => Some(Box::new(CastHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
+
+            // writes
+            "mask" => Some(Box::new(MaskHandler::from(tensor))),
 
             _ => None,
         }

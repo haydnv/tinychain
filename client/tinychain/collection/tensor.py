@@ -1,8 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.decorators import get_op
-from tinychain.state import Map, State, Stream
+from tinychain.state import Map, State, Stream, Tuple
 from tinychain.util import form_of, uri, URI
 from tinychain.value import Bool, F32, Number
 
@@ -147,6 +146,9 @@ class Tensor(Collection):
 
         return self._post("xor", Map(r=other), Tensor)
 
+    def mask(self, other):
+        """Zero out the coordinates in `self` which are also set in `other`.."""
+
     def mul(self, other):
         """Multiply this `Tensor` by another, broadcasting if necessary."""
 
@@ -162,6 +164,10 @@ class Tensor(Collection):
 
         rtype = Number if axis is None else self.__class__
         return self._get("product", axis, rtype)
+
+    def shape(self):
+        """Return the shape of this `Tensor`."""
+        self._get("shape", rtype=Tuple)
 
     def sub(self, other):
         """Subtract another `Tensor` from this one, broadcasting if necessary."""
