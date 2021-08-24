@@ -18,7 +18,7 @@ use crate::scalar::{Number, Scalar, Scope, Value};
 use crate::state::{State, ToState};
 use crate::txn::Txn;
 
-use super::{Refer, TCRef};
+use super::Refer;
 
 /// A while loop.
 #[derive(Clone, Eq, PartialEq)]
@@ -101,11 +101,11 @@ impl Refer for While {
 
 impl TryCastFrom<Scalar> for While {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        scalar.matches::<(TCRef, Scalar, Scalar)>()
+        scalar.matches::<(Scalar, Scalar, Scalar)>()
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        if scalar.matches::<(TCRef, Scalar, Scalar)>() {
+        if scalar.matches::<(Scalar, Scalar, Scalar)>() {
             scalar.opt_cast_into().map(|(cond, closure, state)| Self {
                 cond,
                 closure,

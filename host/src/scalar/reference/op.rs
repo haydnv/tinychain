@@ -271,6 +271,16 @@ impl TryFrom<Subject> for TCPathBuf {
     }
 }
 
+impl fmt::Debug for Subject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Link(link) => fmt::Debug::fmt(link, f),
+            Self::Ref(id_ref, path) if path.is_empty() => fmt::Debug::fmt(id_ref, f),
+            Self::Ref(id_ref, path) => write!(f, "subject: {:?} {:?}", id_ref, path),
+        }
+    }
+}
+
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -516,7 +526,10 @@ impl OpRefVisitor {
                 Ok(OpRef::Put((subject, key, value)))
             }
             other => {
-                debug!("invalid parameters for OpRef: {:?}", other);
+                debug!(
+                    "invalid parameters for method call on {:?}: {:?}",
+                    subject, other
+                );
                 Err(de::Error::invalid_value(other, "OpRef parameters"))
             }
         }
