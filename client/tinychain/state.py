@@ -134,6 +134,9 @@ class Tuple(State):
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("map", {"op": op}, rtype)
 
+    def unpack(self, length):
+        yield from (self[i] for i in range(length))
+
     def zip(self, other):
         return self._get("zip", other, Tuple)
 

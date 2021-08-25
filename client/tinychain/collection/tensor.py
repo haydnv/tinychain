@@ -149,6 +149,8 @@ class Tensor(Collection):
     def mask(self, other):
         """Zero out the coordinates in `self` which are also set in `other`.."""
 
+        return self._put("mask", other)
+
     def mul(self, other):
         """Multiply this `Tensor` by another, broadcasting if necessary."""
 

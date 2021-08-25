@@ -187,8 +187,5 @@ def _maybe_first_arg(op):
                 args.append(cxt)
             else:
                 raise ValueError(f"{param} must be a {Context}, not {param.annotation}")
-        elif len(param_names) > 1:
-            raise ValueError(
-                f"optional first argument of {op.dtype()} must be 'cxt' or 'txn', not {param_names[0]}")
 
     return cxt, args

@@ -52,6 +52,8 @@ class Host(object):
             raise NotFound(response)
         elif status == 405:
             raise MethodNotAllowed(response)
+        elif status == 408:
+            raise Timeout(response)
         elif status == 501:
             raise NotImplemented(response)
         else:

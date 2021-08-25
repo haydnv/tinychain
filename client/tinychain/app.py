@@ -2,13 +2,13 @@ from tinychain.chain import Sync
 from tinychain.cluster import Cluster
 from tinychain.collection.schema import Column, Graph as Schema
 from tinychain.collection.table import Table
-from tinychain.collection.tensor import Sparse
+from tinychain.collection.tensor import einsum, Sparse
 from tinychain.error import BadRequest
-from tinychain.decorators import closure, put_op, delete_op
-from tinychain.ref import After, Get, If
-from tinychain.state import Tuple
+from tinychain.decorators import closure, post_op, put_op, delete_op
+from tinychain.ref import After, Get, If, While
+from tinychain.state import Map, Tuple
 from tinychain.util import uri, URI
-from tinychain.value import String, Bool, I64, U64
+from tinychain.value import Bool, Nil, I64, U64, String
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
@@ -18,8 +18,12 @@ class Graph(Cluster):
     def _configure(self):
         schema = self._schema()
 
+        if schema.tables:
+            assert schema.chain is not None
+            assert schema.edges
+
         for label in schema.edges:
-            setattr(self, f"edge_{label}", schema.chain(Sparse.zeros([I64.max(), I64.max()], Bool)))
+            setattr(self, label, schema.chain(Edge.zeros([I64.max(), I64.max()], Bool)))
 
         for name in schema.tables:
             if hasattr(self, name):
@@ -32,13 +36,30 @@ class Graph(Cluster):
 
     def add_edge(self, label, edge):
         (from_id, to_id) = edge
-        edge = Sparse(Get(uri(self), String("edge_{{label}}").render(label=label)))
+        edge = Sparse(Get(uri(self), label))
         return edge.write([from_id, to_id], True)
 
     def remove_edge(self, label, edge):
         (from_id, to_id) = edge
-        edge = Sparse(Get(uri(self), String("edge_{{label}}").render(label=label)))
+        edge = Sparse(Get(uri(self), label))
         return edge.write([from_id, to_id], False)
+
+
+class Edge(Sparse):
+    def match(self, node_ids, limit):
+        @post_op
+        def cond(i: U64):
+            return i < limit
+
+        @post_op
+        def traverse(i: U64, visited: Sparse, neighbors: Sparse):
+            visited += neighbors
+            neighbors = einsum('ji,j->i', [self, neighbors])
+            return {"i": i + 1, "visited": visited, "neighbors": neighbors}
+
+        visited = Sparse.zeros([I64.max()], Bool)
+        state = Map(While(cond, traverse, {"i": 0, "neighbors": node_ids, "visited": visited}))
+        return state["visited"]
 
 
 def graph_table(graph, schema, table_name):
@@ -85,7 +106,7 @@ def graph_table(graph, schema, table_name):
                 if table_name not in [edge.from_table, edge.to_table]:
                     continue
 
-                adjacent = Sparse(uri(graph).append(f"edge_{label}"))
+                adjacent = Sparse(uri(graph).append(label))
                 deletes.append(delete_row(edge, adjacent, row))
 
             return If(row.is_some(), After(deletes, Table.delete_row(self, key)))
@@ -98,7 +119,7 @@ def graph_table(graph, schema, table_name):
                     continue
 
                 if any(col.name == edge.column for col in table_schema.values):
-                    adjacent = Sparse(uri(graph).append(f"edge_{label}"))
+                    adjacent = Sparse(uri(graph).append(label))
                     old_id = row[edge.column]
                     new_id = values[edge.column]
                     update = maybe_update_row(edge, adjacent, values.contains(edge.column), old_id, new_id)
@@ -116,7 +137,7 @@ def graph_table(graph, schema, table_name):
                 if table_name not in [edge.from_table, edge.to_table]:
                     continue
 
-                adjacent = Sparse(uri(graph).append(f"edge_{label}"))
+                adjacent = Sparse(uri(graph).append(label))
 
                 if any(col.name == edge.column for col in table_schema.values):
                     value_index = [col.name for col in table_schema.values].index(edge.column)

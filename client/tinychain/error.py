@@ -51,6 +51,12 @@ class NotImplemented(TinychainError):
     __uri__ = uri(TinychainError) + "/not_implemented"
 
 
+class Timeout(TinychainError):
+    """Error indicating that the request timed out."""
+
+    __uri__ = uri(TinychainError) + "/timeout"
+
+
 class Unauthorized(TinychainError):
     """Error indicating that the requestor's credentials are missing or invalid."""
 

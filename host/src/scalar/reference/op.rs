@@ -93,13 +93,6 @@ impl Subject {
         }
     }
 
-    fn is_self(&self) -> bool {
-        match self {
-            Self::Ref(id_ref, _) => id_ref.id() == &SELF,
-            _ => false,
-        }
-    }
-
     fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Link(link) if link.path().starts_with(path) => {
@@ -330,19 +323,20 @@ impl Instance for OpRef {
 impl Refer for OpRef {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
-            Self::Get((subject, key)) if subject.is_self() => {
-                Self::Get((subject.dereference_self(path), key))
+            Self::Get((subject, key)) => Self::Get((subject.dereference_self(path), key)),
+            Self::Put((subject, key, value)) => Self::Put((
+                subject.dereference_self(path),
+                key,
+                value.dereference_self(path),
+            )),
+            Self::Post((subject, params)) => {
+                if let Scalar::Map(params) = Scalar::Map(params).dereference_self(path) {
+                    Self::Post((subject.dereference_self(path), params))
+                } else {
+                    panic!("Scalar::Map::dereference_self did not return a Scalar::Map")
+                }
             }
-            Self::Put((subject, key, value)) if subject.is_self() => {
-                Self::Put((subject.dereference_self(path), key, value))
-            }
-            Self::Post((subject, params)) if subject.is_self() => {
-                Self::Post((subject.dereference_self(path), params))
-            }
-            Self::Delete((subject, key)) if subject.is_self() => {
-                Self::Delete((subject.dereference_self(path), key))
-            }
-            op_ref => op_ref,
+            Self::Delete((subject, key)) => Self::Delete((subject.dereference_self(path), key)),
         }
     }
 
@@ -362,19 +356,22 @@ impl Refer for OpRef {
 
     fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
-            Self::Get((subject, key)) if subject.is_self() => {
-                Self::Get((subject.reference_self(path), key))
-            }
-            Self::Put((subject, key, value)) if subject.is_self() => {
-                Self::Put((subject.reference_self(path), key, value))
-            }
-            Self::Post((subject, params)) if subject.is_self() => {
+            Self::Get((subject, key)) => Self::Get((subject.reference_self(path), key)),
+            Self::Put((subject, key, value)) => Self::Put((
+                subject.reference_self(path),
+                key,
+                value.reference_self(path),
+            )),
+            Self::Post((subject, params)) => {
+                let params = if let Scalar::Map(params) = Scalar::Map(params).reference_self(path) {
+                    params
+                } else {
+                    panic!("Scalar::Map::reference_self did not return a Scalar::Map")
+                };
+
                 Self::Post((subject.reference_self(path), params))
             }
-            Self::Delete((subject, key)) if subject.is_self() => {
-                Self::Delete((subject.reference_self(path), key))
-            }
-            op_ref => op_ref,
+            Self::Delete((subject, key)) => Self::Delete((subject.reference_self(path), key)),
         }
     }
 

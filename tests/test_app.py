@@ -26,8 +26,8 @@ class TestApp(tc.Graph):
                   .create_table("products", products)
                   .create_table("orders", orders)
                   .create_edge("friends", tc.schema.Edge("users.user_id", "users.user_id"))
-                  .create_edge("sku", tc.schema.Edge("products.sku", "orders.sku"))
-                  .create_edge("orders", tc.schema.Edge("users.user_id", "orders.user_id")))
+                  .create_edge("order_products", tc.schema.Edge("products.sku", "orders.sku"))
+                  .create_edge("user_orders", tc.schema.Edge("users.user_id", "orders.user_id")))
 
         return schema
 
@@ -48,11 +48,20 @@ class TestApp(tc.Graph):
         order_id = self.orders.max_id() + 1
         return tc.After(self.orders.insert([order_id], [user_id, sku, quantity]), order_id)
 
+    @tc.get_method
+    def recommend(self, txn, user_id: tc.U64):
+        txn.node_id = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
+        txn.node_ids = tc.After(txn.node_id.write([user_id], True), txn.node_id)
+        return tc.If(
+            user_id.is_some(),
+            self.friends.match(txn.node_ids, 1),
+            tc.error.BadRequest(tc.String("invalid user ID: {{user_id}}").render(user_id=user_id)))
+
 
 class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_app", [TestApp], overwrite=True)
+        cls.host = start_host("test_app", [TestApp], overwrite=True, cache_size="1G")
 
     def testGraphTraversal(self):
         user = {"user_id": 12345, "email": "user12345@example.com", "display_name": "user 12345"}
@@ -71,6 +80,8 @@ class AppTests(unittest.TestCase):
 
         order = {"user_id": 12345, "sku": 1, "quantity": 5}
         self.host.post("/test/graph/place_order", order)
+
+        print(self.host.get("/test/graph/recommend", 1))
 
     @classmethod
     def tearDownClass(cls):
