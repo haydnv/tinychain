@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 
 use afarray::{Array, CoordBlocks, CoordMerge, Coords};
 use async_trait::async_trait;
@@ -28,7 +29,7 @@ use super::{SparseRow, SparseStream, SparseTensor};
 /// Access methods for [`SparseTensor`] data
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
-    Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
+    Clone + fmt::Display + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
 {
     /// The type of a slice of this accessor
     type Slice: SparseAccess<FD, FS, D, T>;
@@ -311,6 +312,23 @@ where
     }
 }
 
+impl<FD, FS, D, T> fmt::Display for SparseAccessor<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Broadcast(broadcast) => fmt::Display::fmt(broadcast, f),
+            Self::Cast(cast) => fmt::Display::fmt(cast, f),
+            Self::Combine(combinator) => fmt::Display::fmt(combinator, f),
+            Self::Dense(dense) => fmt::Display::fmt(dense, f),
+            Self::Expand(expand) => fmt::Display::fmt(expand, f),
+            Self::Reduce(reduce) => fmt::Display::fmt(reduce, f),
+            Self::Slice(slice) => fmt::Display::fmt(slice, f),
+            Self::Table(table) => fmt::Display::fmt(table, f),
+            Self::Transpose(transpose) => fmt::Display::fmt(transpose, f),
+            Self::Unary(unary) => fmt::Display::fmt(unary, f),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DenseToSparse<FD, FS, D, T, B> {
     source: B,
@@ -465,6 +483,12 @@ where
     }
 }
 
+impl<FD, FS, D, T, B> fmt::Display for DenseToSparse<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sparse representation of a dense Tensor")
+    }
+}
+
 impl<FD, FS, D, T, B> From<B> for DenseToSparse<FD, FS, D, T, B> {
     fn from(source: B) -> Self {
         Self {
@@ -579,11 +603,18 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        debug!("SparseBroadcast::filled_at {:?}", axes);
+        debug!(
+            "SparseBroadcast::filled_at {:?} (source is {})",
+            axes, self.source
+        );
+
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() || self.is_empty(&txn).await? {
+            debug!("SparseBroadcast::filled_at is empty");
             return Ok(Box::pin(stream::empty()));
+        } else {
+            debug!("SparseBroadcast::filled_at is not empty");
         }
 
         let shape = Shape::from({
@@ -599,7 +630,10 @@ where
         let filled_at = filled_at
             .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
-            .map_ok(move |coord| rebase.map_coord(coord))
+            .map_ok(move |coord| {
+                debug!("broadcast source coord {:?}", coord);
+                rebase.map_coord(coord)
+            })
             // TODO: can this happen in `Coords`? maybe a new stream generator type?
             .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
             .try_flatten();
@@ -663,6 +697,12 @@ where
                 .map_ok(|(_, val)| (coord, val))
                 .await
         })
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseBroadcast<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a broadcasted sparse Tensor")
     }
 }
 
@@ -783,6 +823,12 @@ where
             .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseCast<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a casted sparse Tensor")
     }
 }
 
@@ -1007,6 +1053,12 @@ where
     }
 }
 
+impl<FD, FS, D, T, L, R> fmt::Display for SparseCombinator<FD, FS, D, T, L, R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("the result of combining two sparse Tensors")
+    }
+}
+
 #[derive(Clone)]
 pub struct SparseExpand<FD, FS, D, T, A> {
     source: A,
@@ -1085,6 +1137,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseExpand::filled_at {:?}", axes);
+
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -1101,6 +1155,11 @@ where
                 i += 1;
             }
         };
+
+        debug!(
+            "SparseExpand::filled_at {:?} will expand axis {:?}",
+            axes, expand
+        );
 
         let source_axes = self.rebase.invert_axes(axes);
         let source = self.source.filled_at(txn, source_axes).await?;
@@ -1175,6 +1234,12 @@ where
             .map_ok(|(_, val)| (coord, val));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseExpand<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sparse Tensor expansion")
     }
 }
 
@@ -1338,6 +1403,12 @@ where
     }
 }
 
+impl<FD, FS, D, T> fmt::Display for SparseReduce<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sparse Tensor reduction")
+    }
+}
+
 #[derive(Clone)]
 pub struct SparseTranspose<FD, FS, D, T, A> {
     source: A,
@@ -1428,11 +1499,19 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!(
+            "SparseTranspose::filled_at {:?} (source is {}, shape is {})",
+            axes,
+            self.source,
+            self.shape()
+        );
+
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
 
-        let shape = self.shape().clone();
+        let shape = self.shape();
+        let shape = axes.iter().map(|x| shape[*x]).collect();
         let source_axes = self.rebase.invert_axes(axes);
         let permutation = self.rebase.map_axes(&source_axes);
         let source = self.source.filled_at(txn.clone(), source_axes).await?;
@@ -1490,6 +1569,12 @@ where
             .map_ok(|(_, val)| (coord, val));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseTranspose<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a transposed sparse Tensor")
     }
 }
 
@@ -1611,5 +1696,11 @@ where
             .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T> fmt::Display for SparseUnary<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a unary operation on a sparse Tensor")
     }
 }

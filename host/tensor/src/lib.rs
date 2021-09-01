@@ -356,7 +356,10 @@ where
     D::FileClass: From<TensorType>,
 {
     pub fn schema(&self) -> Schema {
-        Schema { dtype: self.dtype(), shape: self.shape().clone() }
+        Schema {
+            dtype: self.dtype(),
+            shape: self.shape().clone(),
+        }
     }
 }
 

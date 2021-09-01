@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::marker::PhantomData;
 
 use afarray::{Array, CoordBlocks, Coords};
@@ -114,13 +115,15 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseTable::filled_at {:?}", axes);
+
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() || self.is_empty(&txn).await? {
             return Ok(Box::pin(stream::empty()));
         }
 
-        let sort = axes.iter().zip(0..axes.len()).any(|(x, y)| x != &y);
+        let sort = axes.iter().enumerate().any(|(x, y)| &x != y);
 
         let shape = self.shape();
         let shape = axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>();
@@ -129,9 +132,11 @@ where
         let coords = CoordBlocks::new(coords, shape.len(), PER_BLOCK);
 
         if sort {
+            debug!("SparseTable::filled_at shape is {:?}", shape);
             let coords = sorted_coords::<FD, FS, D, T, _>(&txn, shape.into(), coords).await?;
             Ok(Box::pin(coords))
         } else {
+            debug!("SparseTable::filled_at has no need to sort");
             Ok(Box::pin(coords))
         }
     }
@@ -196,6 +201,12 @@ where
     }
 }
 
+impl<FD, FS, D, T> fmt::Display for SparseTable<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sparse Tensor's underlying Table representation")
+    }
+}
+
 #[async_trait]
 impl<FD, FS, D, T> Transact for SparseTable<FD, FS, D, T>
 where
@@ -229,6 +240,8 @@ where
         store: D,
         txn: &T,
     ) -> TCResult<Self> {
+        debug!("SparseTable::copy_from {}", instance.accessor);
+
         let txn_id = *txn.id();
         let shape = instance.shape().clone();
         let dtype = instance.dtype();
@@ -436,6 +449,12 @@ where
             let source_coord = self.rebase.invert_coord(&coord);
             read_value_at(self.table, txn, source_coord, dtype).await
         })
+    }
+}
+
+impl<FD, FS, D, T> fmt::Display for SparseTableSlice<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a slice of a sparse Tensor's underlying Table")
     }
 }
 
