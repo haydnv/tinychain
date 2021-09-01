@@ -340,6 +340,15 @@ impl Refer for OpRef {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        match self {
+            Self::Get((_, key)) => key.is_conditional(),
+            Self::Put((_, key, value)) => key.is_conditional() || value.is_conditional(),
+            Self::Post((_, params)) => params.values().any(|scalar| scalar.is_conditional()),
+            Self::Delete((_, key)) => key.is_conditional(),
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         let subject = match self {
             Self::Put((Subject::Link(link), _, _)) => Some(link),

@@ -37,6 +37,10 @@ impl Refer for With {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        false
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.op.is_inter_service_write(cluster_path)
     }

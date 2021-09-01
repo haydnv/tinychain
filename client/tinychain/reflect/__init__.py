@@ -20,6 +20,16 @@ def _get_rtype(fn, default_rtype):
     return rtype
 
 
+def is_conditional(state):
+    from tinychain.ref import Case, If
+    from tinychain.state import State
+
+    if isinstance(state, State):
+        return is_conditional(form_of(state))
+
+    return isinstance(state, Case) or isinstance(state, If)
+
+
 def is_none(state):
     from tinychain.value import Nil
 

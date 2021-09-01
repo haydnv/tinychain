@@ -1,5 +1,6 @@
 """Reference types."""
 
+from tinychain.reflect import is_conditional
 from tinychain.util import deanonymize, requires, to_json, uri, URI
 
 
@@ -31,6 +32,9 @@ class After(Ref):
         deanonymize(self.when, cxt)
         deanonymize(self.then, cxt)
 
+        if is_conditional(self.when):
+            self.when = reference(cxt, self.when)
+
 
 class Before(Ref):
     """A flow control operator used to delay execution conditionally."""
@@ -53,6 +57,9 @@ class Before(Ref):
     def __ns__(self, cxt):
         deanonymize(self.when, cxt)
         deanonymize(self.then, cxt)
+
+        if is_conditional(self.when):
+            self.when = reference(cxt, self.when)
 
 
 class Case(Ref):
@@ -105,6 +112,9 @@ class If(Ref):
         deanonymize(self.cond, cxt)
         deanonymize(self.then, cxt)
         deanonymize(self.or_else, cxt)
+
+        if is_conditional(self.cond):
+            self.cond = reference(cxt, self.cond)
 
 
 class While(Ref):
@@ -299,3 +309,9 @@ class MethodSubject(object):
     def assign_uri(self, subject_uri):
         assert self.__uri__ is None
         self.__uri__ = subject_uri.append(self.method_name)
+
+
+def reference(cxt, state):
+    name = f"{state.__class__.__name__}_{id(state)}"
+    setattr(cxt, name, state)
+    return URI(name)

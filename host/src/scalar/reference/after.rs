@@ -8,7 +8,7 @@ use destream::{de, en};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_error::TCResult;
+use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
 
 use crate::route::Public;
@@ -34,6 +34,10 @@ impl Refer for After {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        self.then.is_conditional()
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.when.is_inter_service_write(cluster_path)
             || self.then.is_inter_service_write(cluster_path)
@@ -57,8 +61,15 @@ impl Refer for After {
         txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("After::resolve {} from context ()", self);
+        if self.when.is_conditional() {
+            return Err(TCError::bad_request(
+                "After does not allow a conditional clause",
+                self.when,
+            ));
+        }
+
         self.when.resolve(context, txn).await?;
-        Ok(self.then.into())
+        self.then.resolve(context, txn).await
     }
 }
 

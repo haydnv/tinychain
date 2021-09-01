@@ -405,6 +405,15 @@ impl Refer for Scalar {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(|scalar| scalar.is_conditional()),
+            Self::Ref(tc_ref) => tc_ref.is_conditional(),
+            Self::Tuple(tuple) => tuple.iter().any(|scalar| scalar.is_conditional()),
+            _ => false,
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::Map(map) => map

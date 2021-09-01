@@ -122,10 +122,12 @@ class ClientDocTests(unittest.TestCase):
                 [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
             txn.table = tc.Table(schema)
+            txn.insert = txn.table.insert((123,), ("Bob", "bob.roberts@example.com"))
             return tc.After(
-                txn.table.insert((123,), ("Bob", "bob.roberts@example.com")),
+                txn.insert,
                 txn.table.count())
 
+        print(tc.to_json(num_rows))
         actual = self.host.post(ENDPOINT, tc.form_of(num_rows))
         expected = 1
         self.assertEqual(actual, expected)

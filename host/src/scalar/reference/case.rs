@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{Match, TryCastFrom};
 
-use tc_error::TCResult;
+use tc_error::*;
 use tcgeneric::{Id, Instance, Tuple};
 
 use crate::route::Public;
@@ -44,6 +44,10 @@ impl Refer for Case {
                 .map(|scalar| scalar.dereference_self(path))
                 .collect(),
         }
+    }
+
+    fn is_conditional(&self) -> bool {
+        true
     }
 
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
@@ -91,18 +95,33 @@ impl Refer for Case {
     ) -> TCResult<State> {
         assert_eq!(self.switch.len() + 1, self.case.len());
 
+        if self.cond.is_conditional() {
+            return Err(TCError::bad_request(
+                "Case does not allow a nested conditional",
+                self.cond,
+            ));
+        }
+
+        for switch in self.switch.iter() {
+            if switch.is_conditional() {
+                return Err(TCError::bad_request(
+                    "Case does not allow a nested conditional",
+                    switch,
+                ));
+            }
+        }
+
         let cond = self.cond.resolve(context, txn).await?;
         let cond = Value::try_from(cond)?;
         for (i, switch) in self.switch.into_iter().enumerate() {
             let switch = switch.resolve(context, txn).await?;
             let switch = Value::try_from(switch)?;
             if cond == switch {
-                return self.case.remove(i).resolve(context, txn).await;
+                return Ok(self.case.remove(i).into());
             }
         }
 
-        let case = self.case.pop().unwrap();
-        case.resolve(context, txn).await
+        Ok(self.case.pop().unwrap().into())
     }
 }
 

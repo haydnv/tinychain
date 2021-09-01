@@ -38,6 +38,10 @@ impl Refer for While {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        self.closure.is_conditional()
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.cond.is_inter_service_write(cluster_path)
             || self.closure.is_inter_service_write(cluster_path)
@@ -65,6 +69,18 @@ impl Refer for While {
     ) -> TCResult<State> {
         debug!("While::resolve {}", self);
 
+        if self.cond.is_conditional() {
+            return Err(TCError::bad_request(
+                "While does not allow nested conditional",
+                self.cond,
+            ));
+        } else if self.state.is_conditional() {
+            return Err(TCError::bad_request(
+                "While does not allow nested conditional",
+                self.state,
+            ));
+        }
+
         let (cond, closure, mut state) = try_join!(
             self.cond.resolve(context, txn),
             self.closure.resolve(context, txn),
@@ -86,6 +102,14 @@ impl Refer for While {
             if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = still_going {
                 if b.into() {
                     state = closure.clone().call(txn, state).await?;
+
+                    if state.is_conditional() {
+                        return Err(TCError::bad_request(
+                            "conditional State is not allowed in a While loop",
+                            state,
+                        ));
+                    }
+
                     debug!("While loop state is {}", state);
                 } else {
                     break Ok(state);

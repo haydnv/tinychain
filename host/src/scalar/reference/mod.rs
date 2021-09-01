@@ -48,6 +48,9 @@ pub trait Refer {
     /// This is used to control whether or not an OpDef will be replicated.
     fn dereference_self(self, path: &TCPathBuf) -> Self;
 
+    /// Return `true` if this is a conditional reference (e.g. `If` or `Case`).
+    fn is_conditional(&self) -> bool;
+
     /// Return `true` if this references a write operation to a cluster other than the path given.
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool;
 
@@ -196,6 +199,19 @@ impl Refer for TCRef {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        match self {
+            Self::After(after) => after.is_conditional(),
+            Self::Before(before) => before.is_conditional(),
+            Self::Case(case) => case.is_conditional(),
+            Self::Id(id_ref) => id_ref.is_conditional(),
+            Self::If(if_ref) => if_ref.is_conditional(),
+            Self::Op(op_ref) => op_ref.is_conditional(),
+            Self::While(while_ref) => while_ref.is_conditional(),
+            Self::With(with) => with.is_conditional(),
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::After(after) => after.is_inter_service_write(cluster_path),
@@ -260,27 +276,16 @@ impl Refer for TCRef {
     ) -> TCResult<State> {
         debug!("TCRef::resolve {}", self);
 
-        // the Op executor will take care of references that resolve to a reference in general
-        // but this is necessary specifically in the case of flow controls like `If` and `After`
-        let mut i = 0;
-        let mut state = State::from(self);
-        while let State::Scalar(Scalar::Ref(tc_ref)) = state {
-            state = match *tc_ref {
-                Self::After(after) => after.resolve(context, txn).await,
-                Self::Before(before) => before.resolve(context, txn).await,
-                Self::Case(case) => case.resolve(context, txn).await,
-                Self::Id(id_ref) => id_ref.resolve(context, txn).await,
-                Self::If(if_ref) => if_ref.resolve(context, txn).await,
-                Self::Op(op_ref) => op_ref.resolve(context, txn).await,
-                Self::While(while_ref) => while_ref.resolve(context, txn).await,
-                Self::With(with) => with.resolve(context, txn).await,
-            }?;
-
-            i += 1;
-            debug!("TCRef resolved to {} at recursion depth {}", state, i);
+        match self {
+            Self::If(if_ref) => if_ref.resolve(context, txn).await,
+            Self::Case(case) => case.resolve(context, txn).await,
+            Self::After(after) => after.resolve(context, txn).await,
+            Self::Before(before) => before.resolve(context, txn).await,
+            Self::Id(id_ref) => id_ref.resolve(context, txn).await,
+            Self::Op(op_ref) => op_ref.resolve(context, txn).await,
+            Self::While(while_ref) => while_ref.resolve(context, txn).await,
+            Self::With(with) => with.resolve(context, txn).await,
         }
-
-        Ok(state)
     }
 }
 

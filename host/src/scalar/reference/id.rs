@@ -48,6 +48,10 @@ impl Refer for IdRef {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        false
+    }
+
     fn is_inter_service_write(&self, _cluster_path: &[PathSegment]) -> bool {
         false
     }

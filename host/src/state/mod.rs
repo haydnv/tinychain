@@ -307,6 +307,15 @@ impl Refer for State {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(|state| state.is_conditional()),
+            Self::Scalar(scalar) => scalar.is_conditional(),
+            Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
+            _ => false,
+        }
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::Closure(closure) => closure.is_inter_service_write(cluster_path),

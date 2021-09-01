@@ -8,7 +8,7 @@ use destream::{de, en};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_error::TCResult;
+use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
 
 use crate::route::Public;
@@ -34,6 +34,10 @@ impl Refer for Before {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        self.then.is_conditional()
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.when.is_inter_service_write(cluster_path)
             || self.then.is_inter_service_write(cluster_path)
@@ -57,6 +61,13 @@ impl Refer for Before {
         txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("Before::resolve {} from context ()", self);
+        if self.when.is_conditional() {
+            return Err(TCError::bad_request(
+                "Before does not allow a conditional clause",
+                self.when,
+            ));
+        }
+
         let resolved = self.then.resolve(context, txn).await?;
         self.when.resolve(context, txn).await?;
         Ok(resolved)

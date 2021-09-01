@@ -36,6 +36,10 @@ impl Refer for IfRef {
         }
     }
 
+    fn is_conditional(&self) -> bool {
+        true
+    }
+
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.cond.is_inter_service_write(cluster_path)
             || self.then.is_inter_service_write(cluster_path)
@@ -60,6 +64,13 @@ impl Refer for IfRef {
         txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("If::resolve {}", self);
+
+        if self.cond.is_conditional() {
+            return Err(TCError::bad_request(
+                "If does not allow a nested conditional",
+                self.cond,
+            ));
+        }
 
         let cond = self.cond.resolve(context, txn).await?;
         debug!("If condition is {}", cond);
