@@ -8,7 +8,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 use tc_btree::Node;
 use tc_error::*;
 use tc_tensor::*;
-use tc_transact::fs::Dir;
+use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;
 use tc_value::{TCString, ValueType};
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
@@ -74,6 +74,43 @@ impl<'a> Handler<'a> for ConstantHandler {
                     .map_ok(Collection::from)
                     .map_ok(State::from)
                     .await
+            })
+        }))
+    }
+}
+
+struct CopyHandler;
+
+impl<'a> Handler<'a> for CopyHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let source = params.require(&label("tensor").into())?;
+                params.expect_empty()?;
+
+                let copy = match source {
+                    Tensor::Dense(source) => {
+                        let file = txn
+                            .context()
+                            .create_file_tmp(*txn.id(), TensorType::Dense)
+                            .await?;
+
+                        let blocks =
+                            BlockListFile::copy_from(source.into_inner(), file, txn).await?;
+
+                        DenseTensor::from(blocks.accessor()).into()
+                    }
+                    Tensor::Sparse(source) => {
+                        let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                        let table = SparseTable::copy_from(source, dir, txn).await?;
+                        SparseTensor::from(table.accessor()).into()
+                    }
+                };
+
+                Ok(State::Collection(Collection::Tensor(copy)))
             })
         }))
     }
@@ -761,14 +798,12 @@ impl Route for Static {
             return None;
         }
 
-        if path[0].as_str() == "dense" {
-            TensorType::Dense.route(&path[1..])
-        } else if path[0].as_str() == "sparse" {
-            TensorType::Sparse.route(&path[1..])
-        } else if path == &["einsum"] {
-            Some(Box::new(EinsumHandler))
-        } else {
-            None
+        match path[0].as_str() {
+            "dense" => TensorType::Dense.route(&path[1..]),
+            "sparse" => TensorType::Sparse.route(&path[1..]),
+            "copy_from" if path.len() == 1 => Some(Box::new(CopyHandler)),
+            "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
+            _ => None,
         }
     }
 }
