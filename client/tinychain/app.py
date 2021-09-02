@@ -53,9 +53,9 @@ class Edge(Sparse):
 
         @post_op
         def traverse(edge: Sparse, i: U64, neighbors: Sparse, visited: Sparse):
-            visited += neighbors
-            neighbors = (Sparse.sum(edge * neighbors, 1) - visited).copy()
-            return {"edge": edge, "i": i + 1, "neighbors": neighbors, "visited": visited}
+            neighbors = Sparse.sum(edge * neighbors, 1).copy()
+            neighbors = neighbors.logical_and(neighbors.logical_xor(visited))
+            return {"edge": edge, "i": i + 1, "neighbors": neighbors, "visited": (visited + neighbors).copy()}
 
         node_ids = Sparse(node_ids)
         shape = node_ids.shape()
