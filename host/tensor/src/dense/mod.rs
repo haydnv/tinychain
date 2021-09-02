@@ -392,10 +392,6 @@ where
 {
     type Txn = T;
 
-    async fn mask(self, _txn: T, _other: DenseTensor<FD, FS, D, T, O>) -> TCResult<()> {
-        Err(TCError::not_implemented("DenseTensor::mask"))
-    }
-
     async fn write(
         self,
         txn: T,
@@ -418,19 +414,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
-
-    async fn mask(self, txn: T, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
-        let other = if self.shape() == other.shape() {
-            other
-        } else {
-            other.broadcast(self.shape().clone())?
-        };
-
-        match other {
-            Tensor::Dense(dense) => self.mask(txn, dense).await,
-            Tensor::Sparse(sparse) => self.mask(txn, sparse.into_dense()).await,
-        }
-    }
 
     async fn write(self, txn: T, bounds: Bounds, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
         debug!("DenseTensor::write {} to {}", other, bounds);

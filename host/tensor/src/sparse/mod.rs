@@ -381,27 +381,6 @@ where
 {
     type Txn = T;
 
-    async fn mask(self, txn: T, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<()> {
-        if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
-                "cannot use a Tensor with shape {} as a mask for a Tensor with shape {}",
-                other.shape(),
-                self.shape(),
-            )));
-        }
-
-        let zero = self.dtype().zero();
-        let txn_id = *txn.id();
-
-        let filled = other.accessor.filled(txn).await?;
-
-        filled
-            .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
-    }
-
     async fn write(
         self,
         txn: T,
@@ -444,19 +423,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
-
-    async fn mask(self, txn: Self::Txn, other: Tensor<FD, FS, D, T>) -> TCResult<()> {
-        let other = if self.shape() == other.shape() {
-            other
-        } else {
-            other.broadcast(self.shape().clone())?
-        };
-
-        match other {
-            Tensor::Dense(other) => self.mask(txn, other.into_sparse()).await,
-            Tensor::Sparse(other) => self.mask(txn, other).await,
-        }
-    }
 
     async fn write(
         self,

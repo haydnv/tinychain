@@ -205,9 +205,6 @@ pub trait TensorDualIO<D: Dir, O> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
-    /// Zero out the elements of this [`Tensor`] where the corresponding element of `value` is nonzero.
-    async fn mask(self, txn: Self::Txn, value: O) -> TCResult<()>;
-
     /// Overwrite the slice of this [`Tensor`] given by [`Bounds`] with the given `value`.
     async fn write(self, txn: Self::Txn, bounds: Bounds, value: O) -> TCResult<()>;
 }
@@ -575,13 +572,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
-
-    async fn mask(self, txn: T, other: Self) -> TCResult<()> {
-        match self {
-            Self::Dense(this) => this.mask(txn, other).await,
-            Self::Sparse(this) => this.mask(txn, other).await,
-        }
-    }
 
     async fn write(self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
         debug!("Tensor::write {} to {}", value, bounds);

@@ -331,44 +331,6 @@ impl<T> From<T> for ExpandHandler<T> {
     }
 }
 
-struct MaskHandler {
-    tensor: Tensor,
-}
-
-impl<'a> Handler<'a> for MaskHandler {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key, other| {
-            Box::pin(async move {
-                let other = other.try_cast_into(|s| {
-                    TCError::bad_request("Tensor::cast requires a Tensor but found", s)
-                })?;
-
-                if key.is_none() {
-                    self.tensor.mask(txn.clone(), other).await
-                } else {
-                    let bounds = cast_bounds(self.tensor.shape(), key.into())?;
-                    let slice = self.tensor.slice(bounds)?;
-                    slice.mask(txn.clone(), other).await
-                }
-            })
-        }))
-    }
-}
-
-impl<T> From<T> for MaskHandler
-where
-    Tensor: From<T>,
-{
-    fn from(tensor: T) -> Self {
-        Self {
-            tensor: tensor.into(),
-        }
-    }
-}
-
 struct RangeHandler;
 
 impl<'a> Handler<'a> for RangeHandler {
@@ -779,9 +741,6 @@ where
             "cast" => Some(Box::new(CastHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
-
-            // writes
-            "mask" => Some(Box::new(MaskHandler::from(tensor))),
 
             _ => None,
         }
