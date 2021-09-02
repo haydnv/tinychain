@@ -1,6 +1,6 @@
 """Generic error types."""
 
-from tinychain.util import uri, URI
+from tinychain.util import deanonymize, to_json, uri, URI
 
 
 class TinychainError(Exception):
@@ -12,7 +12,10 @@ class TinychainError(Exception):
         self.message = message
 
     def __json__(self):
-        return {str(uri(self)): [str(self.message)]}
+        return {str(uri(self)): [to_json(self.message)]}
+
+    def __ns__(self, cxt):
+        deanonymize(self.message, cxt)
 
 
 class BadRequest(TinychainError):
