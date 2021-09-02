@@ -179,6 +179,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
+    type LeftCombine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
     fn and(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         self.combine(other, Array::and, Number::and, NumberType::Bool)
@@ -203,6 +204,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Tensor<FD, FS, D, T>;
+    type LeftCombine = Tensor<FD, FS, D, T>;
 
     fn and(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
@@ -459,6 +461,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
+    type LeftCombine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
 
     fn add(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn add_array(l: &Array, r: &Array) -> Array {
@@ -517,6 +520,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Tensor<FD, FS, D, T>;
+    type LeftCombine = Tensor<FD, FS, D, T>;
 
     fn add(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {

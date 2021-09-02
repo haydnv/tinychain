@@ -168,7 +168,7 @@ fn outer_product<D, T>(
 where
     D: Dir,
     T: TensorAccess
-        + TensorMath<D, T, Combine = T>
+        + TensorMath<D, T, LeftCombine = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + Clone,
 {
@@ -228,7 +228,7 @@ pub fn einsum<D, T>(format: &str, tensors: Vec<T>) -> TCResult<T>
 where
     D: Dir,
     T: TensorAccess
-        + TensorMath<D, T, Combine = T>
+        + TensorMath<D, T, LeftCombine = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + TensorReduce<D, Reduce = T>
         + Clone,

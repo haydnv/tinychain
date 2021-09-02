@@ -143,8 +143,11 @@ pub trait TensorBoolean<O> {
     /// The result type of a boolean operation.
     type Combine: TensorInstance;
 
+    /// The result type of a boolean operation which may ignore right-hand values.
+    type LeftCombine: TensorInstance;
+
     /// Logical and
-    fn and(self, other: O) -> TCResult<Self::Combine>;
+    fn and(self, other: O) -> TCResult<Self::LeftCombine>;
 
     /// Logical or
     fn or(self, other: O) -> TCResult<Self::Combine>;
@@ -214,14 +217,17 @@ pub trait TensorMath<D: Dir, O> {
     /// The result type of a math operation
     type Combine: TensorInstance;
 
+    /// The result type of a math operation which may ignore right-hand-side values
+    type LeftCombine: TensorInstance;
+
     /// Add two tensors together.
     fn add(self, other: O) -> TCResult<Self::Combine>;
 
     /// Divide `self` by `other`.
-    fn div(self, other: O) -> TCResult<Self::Combine>;
+    fn div(self, other: O) -> TCResult<Self::LeftCombine>;
 
     /// Multiply two tensors together.
-    fn mul(self, other: O) -> TCResult<Self::Combine>;
+    fn mul(self, other: O) -> TCResult<Self::LeftCombine>;
 
     /// Subtract `other` from `self`.
     fn sub(self, other: O) -> TCResult<Self::Combine>;
@@ -446,8 +452,9 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
+    type LeftCombine = Self;
 
-    fn and(self, other: Self) -> TCResult<Self::Combine> {
+    fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(dense) => dense.and(other),
             Self::Sparse(sparse) => sparse.and(other),
@@ -595,6 +602,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
+    type LeftCombine = Self;
 
     fn add(self, other: Self) -> TCResult<Self::Combine> {
         match self {
@@ -603,14 +611,14 @@ where
         }
     }
 
-    fn div(self, other: Self) -> TCResult<Self::Combine> {
+    fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => this.div(other),
             Self::Sparse(this) => this.div(other),
         }
     }
 
-    fn mul(self, other: Self) -> TCResult<Self::Combine> {
+    fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => this.mul(other),
             Self::Sparse(this) => this.mul(other),

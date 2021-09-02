@@ -69,7 +69,6 @@ where
         self,
         other: SparseTensor<FD, FS, D, T, R>,
         combinator: fn(Number, Number) -> Number,
-        dtype: NumberType,
     ) -> TCResult<SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, A, R>>> {
         if self.shape() != other.shape() {
             return Err(TCError::unsupported(format!(
@@ -79,7 +78,7 @@ where
             )));
         }
 
-        let accessor = SparseCombinator::new(self.accessor, other.accessor, combinator, dtype)?;
+        let accessor = SparseCombinator::new(self.accessor, other.accessor, combinator)?;
 
         Ok(SparseTensor {
             accessor,
@@ -103,11 +102,34 @@ where
             )));
         }
 
-        let accessor =
-            SparseCombinator::new(self.accessor, other.accessor, condensor, NumberType::Bool)?;
+        let accessor = SparseCombinator::new(self.accessor, other.accessor, condensor)?;
 
         let dense = BlockListSparse::from(accessor);
         Ok(dense.into())
+    }
+
+    fn left_combine<R>(
+        self,
+        other: SparseTensor<FD, FS, D, T, R>,
+        combinator: fn(Number, Number) -> Number,
+    ) -> TCResult<SparseTensor<FD, FS, D, T, SparseLeftCombinator<FD, FS, D, T, A, R>>>
+    where
+        R: SparseAccess<FD, FS, D, T>,
+    {
+        if self.shape() != other.shape() {
+            return Err(TCError::unsupported(format!(
+                "cannot compare Tensors of different shapes: {}, {}",
+                self.shape(),
+                other.shape()
+            )));
+        }
+
+        let accessor = SparseLeftCombinator::new(self.accessor, other.accessor, combinator)?;
+
+        Ok(SparseTensor {
+            accessor,
+            phantom: self.phantom,
+        })
     }
 }
 
@@ -177,17 +199,18 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     type Combine = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
+    type LeftCombine = SparseTensor<FD, FS, D, T, SparseLeftCombinator<FD, FS, D, T, L, R>>;
 
-    fn and(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        self.combine(other, Number::and, NumberType::Bool)
+    fn and(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        self.left_combine(other, Number::and)
     }
 
     fn or(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        self.combine(other, Number::or, NumberType::Bool)
+        self.combine(other, Number::or)
     }
 
     fn xor(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        self.combine(other, Number::xor, NumberType::Bool)
+        self.combine(other, Number::xor)
     }
 }
 
@@ -202,6 +225,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Tensor<FD, FS, D, T>;
+    type LeftCombine = Tensor<FD, FS, D, T>;
 
     fn and(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
@@ -252,7 +276,7 @@ where
             (l > r).into()
         }
 
-        self.combine(other, gt, NumberType::Bool)
+        self.combine(other, gt)
     }
 
     fn gte(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Dense> {
@@ -268,7 +292,7 @@ where
             (l < r).into()
         }
 
-        self.combine(other, lt, NumberType::Bool)
+        self.combine(other, lt)
     }
 
     fn lte(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Dense> {
@@ -284,7 +308,7 @@ where
             (l != r).into()
         }
 
-        self.combine(other, ne, NumberType::Bool)
+        self.combine(other, ne)
     }
 }
 
@@ -502,27 +526,22 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     type Combine = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
+    type LeftCombine = SparseTensor<FD, FS, D, T, SparseLeftCombinator<FD, FS, D, T, L, R>>;
 
     fn add(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        let dtype = Ord::max(self.dtype(), other.dtype());
-        self.combine(other, Number::add, dtype)
+        self.combine(other, Number::add)
     }
 
-    fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        // TODO: implement left_combine
-        let dtype = Ord::max(self.dtype(), other.dtype());
-        self.combine(other, Number::div, dtype)
+    fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        self.left_combine(other, Number::div)
     }
 
-    fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        // TODO: implement left_combine
-        let dtype = Ord::max(self.dtype(), other.dtype());
-        self.combine(other, Number::mul, dtype)
+    fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        self.left_combine(other, Number::mul)
     }
 
     fn sub(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
-        let dtype = Ord::max(self.dtype(), other.dtype());
-        self.combine(other, Number::sub, dtype)
+        self.combine(other, Number::sub)
     }
 }
 
@@ -536,6 +555,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Tensor<FD, FS, D, T>;
+    type LeftCombine = Tensor<FD, FS, D, T>;
 
     fn add(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {

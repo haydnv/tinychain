@@ -78,6 +78,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     Broadcast(Box<SparseBroadcast<FD, FS, D, T, Self>>),
     Cast(Box<SparseCast<FD, FS, D, T, Self>>),
     Combine(Box<SparseCombinator<FD, FS, D, T, Self, Self>>),
+    CombineLeft(Box<SparseLeftCombinator<FD, FS, D, T, Self, Self>>),
     Dense(Box<DenseToSparse<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
     Slice(SparseTableSlice<FD, FS, D, T>),
@@ -100,6 +101,7 @@ where
             Self::Broadcast(broadcast) => broadcast.dtype(),
             Self::Cast(cast) => cast.dtype(),
             Self::Combine(combine) => combine.dtype(),
+            Self::CombineLeft(combine) => combine.dtype(),
             Self::Dense(dense) => dense.dtype(),
             Self::Expand(expand) => expand.dtype(),
             Self::Slice(slice) => slice.dtype(),
@@ -115,6 +117,7 @@ where
             Self::Broadcast(broadcast) => broadcast.ndim(),
             Self::Cast(cast) => cast.ndim(),
             Self::Combine(combine) => combine.ndim(),
+            Self::CombineLeft(combine) => combine.ndim(),
             Self::Dense(dense) => dense.ndim(),
             Self::Expand(expand) => expand.ndim(),
             Self::Slice(slice) => slice.ndim(),
@@ -130,6 +133,7 @@ where
             Self::Broadcast(broadcast) => broadcast.shape(),
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
+            Self::CombineLeft(combine) => combine.shape(),
             Self::Dense(dense) => dense.shape(),
             Self::Expand(expand) => expand.shape(),
             Self::Reduce(reduce) => reduce.shape(),
@@ -145,6 +149,7 @@ where
             Self::Broadcast(broadcast) => broadcast.size(),
             Self::Cast(cast) => cast.size(),
             Self::Combine(combine) => combine.size(),
+            Self::CombineLeft(combine) => combine.size(),
             Self::Dense(dense) => dense.size(),
             Self::Expand(expand) => expand.size(),
             Self::Slice(slice) => slice.size(),
@@ -177,6 +182,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled(txn).await,
             Self::Cast(cast) => cast.filled(txn).await,
             Self::Combine(combine) => combine.filled(txn).await,
+            Self::CombineLeft(combine) => combine.filled(txn).await,
             Self::Dense(dense) => dense.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
             Self::Reduce(reduce) => reduce.filled(txn).await,
@@ -192,6 +198,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled_at(txn, axes).await,
             Self::Cast(cast) => cast.filled_at(txn, axes).await,
             Self::Combine(combine) => combine.filled_at(txn, axes).await,
+            Self::CombineLeft(combine) => combine.filled_at(txn, axes).await,
             Self::Dense(dense) => dense.filled_at(txn, axes).await,
             Self::Expand(expand) => expand.filled_at(txn, axes).await,
             Self::Reduce(reduce) => reduce.filled_at(txn, axes).await,
@@ -207,6 +214,7 @@ where
             Self::Broadcast(broadcast) => broadcast.filled_count(txn).await,
             Self::Cast(cast) => cast.filled_count(txn).await,
             Self::Combine(combine) => combine.filled_count(txn).await,
+            Self::CombineLeft(combine) => combine.filled_count(txn).await,
             Self::Dense(dense) => dense.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
@@ -222,6 +230,7 @@ where
             Self::Broadcast(broadcast) => broadcast.is_empty(txn).await,
             Self::Cast(cast) => cast.is_empty(txn).await,
             Self::Combine(combine) => combine.is_empty(txn).await,
+            Self::CombineLeft(combine) => combine.is_empty(txn).await,
             Self::Dense(dense) => dense.is_empty(txn).await,
             Self::Expand(expand) => expand.is_empty(txn).await,
             Self::Reduce(reduce) => reduce.is_empty(txn).await,
@@ -237,6 +246,7 @@ where
             Self::Broadcast(broadcast) => broadcast.slice(bounds).map(SparseAccess::accessor),
             Self::Cast(cast) => cast.slice(bounds).map(SparseAccess::accessor),
             Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
+            Self::CombineLeft(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
             Self::Dense(dense) => dense.slice(bounds).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
             Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
@@ -254,6 +264,9 @@ where
             }
             Self::Cast(cast) => cast.transpose(permutation).map(SparseAccess::accessor),
             Self::Combine(combinator) => combinator
+                .transpose(permutation)
+                .map(SparseAccess::accessor),
+            Self::CombineLeft(combinator) => combinator
                 .transpose(permutation)
                 .map(SparseAccess::accessor),
             Self::Dense(dense) => dense.transpose(permutation).map(SparseAccess::accessor),
@@ -301,6 +314,7 @@ where
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::CombineLeft(combine) => combine.read_value_at(txn, coord),
             Self::Dense(dense) => dense.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
@@ -318,6 +332,7 @@ impl<FD, FS, D, T> fmt::Display for SparseAccessor<FD, FS, D, T> {
             Self::Broadcast(broadcast) => fmt::Display::fmt(broadcast, f),
             Self::Cast(cast) => fmt::Display::fmt(cast, f),
             Self::Combine(combinator) => fmt::Display::fmt(combinator, f),
+            Self::CombineLeft(combinator) => fmt::Display::fmt(combinator, f),
             Self::Dense(dense) => fmt::Display::fmt(dense, f),
             Self::Expand(expand) => fmt::Display::fmt(expand, f),
             Self::Reduce(reduce) => fmt::Display::fmt(reduce, f),
@@ -837,7 +852,6 @@ pub struct SparseCombinator<FD, FS, D, T, L, R> {
     left: L,
     right: R,
     combinator: fn(Number, Number) -> Number,
-    dtype: NumberType,
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -850,12 +864,7 @@ where
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
-    pub fn new(
-        left: L,
-        right: R,
-        combinator: fn(Number, Number) -> Number,
-        dtype: NumberType,
-    ) -> TCResult<Self> {
+    pub fn new(left: L, right: R, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
         if left.shape() != right.shape() {
             return Err(TCError::unsupported(
                 "tried to combine SparseTensors with different shapes",
@@ -866,7 +875,6 @@ where
             left,
             right,
             combinator,
-            dtype,
             phantom: Phantom::default(),
         })
     }
@@ -920,7 +928,7 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        self.dtype
+        (self.combinator)(self.left.dtype().zero(), self.right.dtype().zero()).class()
     }
 
     fn ndim(&self) -> usize {
@@ -954,7 +962,6 @@ where
             left: self.left.accessor(),
             right: self.right.accessor(),
             combinator: self.combinator,
-            dtype: self.dtype,
             phantom: Phantom::default(),
         }))
     }
@@ -1011,7 +1018,6 @@ where
             left,
             right,
             combinator: self.combinator,
-            dtype: self.dtype,
             phantom: self.phantom,
         })
     }
@@ -1025,7 +1031,6 @@ where
             left,
             right,
             combinator: self.combinator,
-            dtype: self.dtype,
             phantom: self.phantom,
         })
     }
@@ -1056,6 +1061,230 @@ where
 impl<FD, FS, D, T, L, R> fmt::Display for SparseCombinator<FD, FS, D, T, L, R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("the result of combining two sparse Tensors")
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseLeftCombinator<FD, FS, D, T, L, R> {
+    left: L,
+    right: R,
+    combinator: fn(Number, Number) -> Number,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, L, R> SparseLeftCombinator<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    pub fn new(left: L, right: R, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
+        if left.shape() != right.shape() {
+            return Err(TCError::unsupported(
+                "tried to combine SparseTensors with different shapes",
+            ));
+        }
+
+        Ok(SparseLeftCombinator {
+            left,
+            right,
+            combinator,
+            phantom: Phantom::default(),
+        })
+    }
+
+    pub async fn filled_inner<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        debug!("SparseLeftCombinator::filled_inner ({}, {})", self.left, self.right);
+
+        let left = self.left.filled(txn.clone()).await?;
+
+        let combinator = self.combinator;
+        let right = self.right;
+
+        let filled = left
+            .and_then(move |(coord, left_value)| {
+                right
+                    .clone()
+                    .read_value_at(txn.clone(), coord)
+                    .map_ok(move |(coord, right_value)| {
+                        (coord, left_value, right_value)
+                    })
+            })
+            .map_ok(move |(coord, left, right)| (coord, combinator(left, right)));
+
+        Ok(Box::pin(filled))
+    }
+}
+
+impl<FD, FS, D, T, L, R> TensorAccess for SparseLeftCombinator<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        (self.combinator)(self.left.dtype().zero(), self.right.dtype().zero()).class()
+    }
+
+    fn ndim(&self) -> usize {
+        self.left.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.left.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.left.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, L, R> SparseAccess<FD, FS, D, T> for SparseLeftCombinator<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    type Slice = SparseLeftCombinator<FD, FS, D, T, L::Slice, R::Slice>;
+    type Transpose = SparseLeftCombinator<FD, FS, D, T, L::Transpose, R::Transpose>;
+
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::CombineLeft(Box::new(SparseLeftCombinator {
+            left: self.left.accessor(),
+            right: self.right.accessor(),
+            combinator: self.combinator,
+            phantom: Phantom::default(),
+        }))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let zero = self.dtype().zero();
+        let filled_inner = self.filled_inner(txn).await?;
+        let filled = filled_inner.try_filter(move |(_, value)| future::ready(value != &zero));
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        self.shape().validate_axes(&axes)?;
+
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
+        let ndim = axes.len();
+        let right = self.right;
+        let left = self.left.filled_at(txn.clone(), axes.to_vec()).await?;
+        let filled_at = left
+            .map_ok(|coords| stream::iter(coords.to_vec().into_iter().map(Ok)))
+            .try_flatten()
+            .try_filter_map(move |coord| {
+                let axes = axes.to_vec();
+                let right = right.clone();
+                let txn = txn.clone();
+
+                Box::pin(async move {
+                    let mut bounds = Bounds::all(right.shape());
+                    for (x, i) in axes.iter().zip(coord.iter()) {
+                        bounds[*x] = AxisBounds::At(*i);
+                    }
+
+                    let slice = right.slice(bounds)?;
+                    if slice.is_empty(&txn).await? {
+                        Ok(None)
+                    } else {
+                        Ok(Some(coord))
+                    }
+                })
+            });
+
+        Ok(Box::pin(CoordBlocks::new(filled_at, ndim, PER_BLOCK)))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        let filled = self.filled(txn).await?;
+
+        filled
+            .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+            .await
+    }
+
+    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
+        let mut filled = self.clone().filled(txn.clone()).await?;
+        filled.try_next().map_ok(|v| v.is_some()).await
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseCombinator::slice {}", bounds);
+
+        let left = self.left.slice(bounds.clone())?;
+        let right = self.right.slice(bounds)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseLeftCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            phantom: self.phantom,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let left = self.left.transpose(permutation.clone())?;
+        let right = self.right.transpose(permutation)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseLeftCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            phantom: self.phantom,
+        })
+    }
+}
+
+impl<FD, FS, D, T, L, R> ReadValueAt<D> for SparseLeftCombinator<FD, FS, D, T, L, R>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    L: SparseAccess<FD, FS, D, T>,
+    R: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            let left_zero = self.left.dtype().zero();
+            let zero = self.dtype().zero();
+
+            let (coord, left) = self.left.read_value_at(txn.clone(), coord).await?;
+            let (coord, value) = if left == left_zero {
+                (coord, zero)
+            } else {
+                let (coord, right) = self.right.read_value_at(txn, coord).await?;
+                let value = (self.combinator)(left, right);
+                (coord, value)
+            };
+
+            Ok((coord, value))
+        })
+    }
+}
+
+impl<FD, FS, D, T, L, R> fmt::Display for SparseLeftCombinator<FD, FS, D, T, L, R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("the result of combining two sparse Tensors, ignoring the right Tensor where the left Tensor is zero")
     }
 }
 
