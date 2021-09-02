@@ -50,8 +50,8 @@ class TestApp(tc.Graph):
 
     @tc.get_method
     def recommend(self, txn, user_id: tc.U64):
-        txn.node_id = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
-        txn.node_ids = tc.After(txn.node_id.write([user_id], True), txn.node_id)
+        txn.vector = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
+        txn.node_ids = tc.After(txn.vector.write([user_id], True), txn.vector)
         return tc.If(
             user_id.is_some(),
             self.friends.match(txn.node_ids, 1),
@@ -81,7 +81,7 @@ class AppTests(unittest.TestCase):
         order = {"user_id": 12345, "sku": 1, "quantity": 5}
         self.host.post("/test/graph/place_order", order)
 
-        print(self.host.get("/test/graph/recommend", 1))
+        print(self.host.get("/test/graph/recommend", 12345))
 
     @classmethod
     def tearDownClass(cls):

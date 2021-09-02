@@ -91,6 +91,11 @@ class Tensor(Collection):
 
         return self._get("cast", number_type, self.__class__)
 
+    def copy(self):
+        """Return a copy of this `Tensor`"""
+
+        return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
+
     def div(self, other):
         """Divide this `Tensor` by another, broadcasting if necessary."""
 
@@ -146,11 +151,6 @@ class Tensor(Collection):
 
         return self._post("xor", Map(r=other), Tensor)
 
-    def mask(self, other):
-        """Zero out the coordinates in `self` which are also set in `other`.."""
-
-        return self._put("mask", other)
-
     def mul(self, other):
         """Multiply this `Tensor` by another, broadcasting if necessary."""
 
@@ -169,7 +169,7 @@ class Tensor(Collection):
 
     def shape(self):
         """Return the shape of this `Tensor`."""
-        self._get("shape", rtype=Tuple)
+        return self._get("shape", rtype=Tuple)
 
     def sub(self, other):
         """Subtract another `Tensor` from this one, broadcasting if necessary."""

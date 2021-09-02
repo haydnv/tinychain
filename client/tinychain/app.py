@@ -52,14 +52,20 @@ class Edge(Sparse):
             return i < limit
 
         @post_op
-        def traverse(i: U64, visited: Sparse, neighbors: Sparse):
+        def traverse(edge: Sparse, i: U64, neighbors: Sparse, visited: Sparse):
             visited += neighbors
-            neighbors = einsum('ji,j->i', [self, neighbors])
-            return {"i": i + 1, "visited": visited, "neighbors": neighbors}
+            neighbors = (Sparse.sum(edge * neighbors, 1) - visited).copy()
+            return {"edge": edge, "i": i + 1, "neighbors": neighbors, "visited": visited}
 
-        visited = Sparse.zeros([I64.max()], Bool)
-        state = Map(While(cond, traverse, {"i": 0, "neighbors": node_ids, "visited": visited}))
-        return state["visited"]
+        node_ids = Sparse(node_ids)
+        shape = node_ids.shape()
+        while_state = {"edge": self, "i": 0, "neighbors": node_ids, "visited": Sparse.zeros([I64.max()], Bool)}
+        traversal = If(
+            shape.eq([I64.max()]),
+            While(cond, traverse, while_state),
+            BadRequest(String(f"an edge input vector has shape [{I64.max()}], not {{shape}}").render(shape=shape)))
+
+        return Map(traversal)["neighbors"]
 
 
 def graph_table(graph, schema, table_name):
