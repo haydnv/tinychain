@@ -447,7 +447,8 @@ where
             self.shape().validate_coord(&coord)?;
             let dtype = self.dtype();
             let source_coord = self.rebase.invert_coord(&coord);
-            read_value_at(self.table, txn, source_coord, dtype).await
+            let (_, value) = read_value_at(self.table, txn, source_coord, dtype).await?;
+            Ok((coord, value))
         })
     }
 }

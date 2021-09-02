@@ -1035,8 +1035,9 @@ where
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             self.shape().validate_coord(&coord)?;
-            let coord = self.rebase.invert_coord(&coord);
-            self.source.read_value_at(txn, coord).await
+            let source_coord = self.rebase.invert_coord(&coord);
+            let (_, value) = self.source.read_value_at(txn, source_coord).await?;
+            Ok((coord, value))
         })
     }
 }

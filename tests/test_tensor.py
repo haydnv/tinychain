@@ -318,7 +318,7 @@ class SparseTests(unittest.TestCase):
         small[1] = 3
         expected = small - big
 
-        expected = expect_sparse(tc.I16, shape, expected)
+        expected = expect_sparse(tc.I32, shape, expected)
         self.assertEqual(actual, expected)
 
     def testSum(self):
@@ -357,7 +357,7 @@ class SparseTests(unittest.TestCase):
             [[0, 2, 0, 0], 2.],
             [[1, 0, 0, 0], 3.],
         ]
-        shape = [5, 6, 2, 3, 4, 10]
+        shape = [2, 5, 2, 3, 4, 10]
 
         cxt = tc.Context()
         cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], tc.F32, data)
@@ -372,7 +372,8 @@ class SparseTests(unittest.TestCase):
         expected = expected * np.ones(shape)
         expected = expected[:-1, 1:4, 1]
 
-        self.assertEqual(actual, expect_sparse(tc.F32, expected.shape, expected))
+        expected = expect_sparse(tc.F64, expected.shape, expected)
+        self.assertEqual(actual, expected)
 
     @classmethod
     def tearDownClass(cls):
