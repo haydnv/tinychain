@@ -51,6 +51,102 @@ where
     }
 }
 
+struct EqMapHandler<T> {
+    map: Map<T>,
+}
+
+impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for EqMapHandler<T>
+where
+    State: From<T>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let other: Map<State> = params.require(&label("eq").into())?;
+                params.expect_empty()?;
+
+                if self.map.len() != other.len() {
+                    return Ok(false.into());
+                }
+
+                const ERR: &str = "cannot cast into Value from";
+                let eq = self
+                    .map
+                    .into_iter()
+                    .zip(other)
+                    .map(|((this_id, this), (that_id, that))| {
+                        if this_id != that_id {
+                            return Ok(false);
+                        }
+
+                        let this = State::from(this);
+                        let this = Value::try_cast_from(this, |s| TCError::bad_request(ERR, s))?;
+                        let that = Value::try_cast_from(that, |s| TCError::bad_request(ERR, s))?;
+                        Ok(this == that)
+                    })
+                    .collect::<TCResult<Vec<bool>>>()?;
+
+                Ok(eq.into_iter().all(|eq| eq).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<Map<T>> for EqMapHandler<T> {
+    fn from(map: Map<T>) -> Self {
+        Self { map }
+    }
+}
+
+struct EqTupleHandler<T> {
+    tuple: Tuple<T>,
+}
+
+impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for EqTupleHandler<T>
+where
+    State: From<T>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let other: Tuple<State> = params.require(&label("eq").into())?;
+                params.expect_empty()?;
+
+                if self.tuple.len() != other.len() {
+                    return Ok(false.into());
+                }
+
+                const ERR: &str = "cannot cast into Value from";
+                let eq = self
+                    .tuple
+                    .into_iter()
+                    .zip(other)
+                    .map(|(this, that)| {
+                        let this = State::from(this);
+                        let this = Value::try_cast_from(this, |s| TCError::bad_request(ERR, s))?;
+                        let that = Value::try_cast_from(that, |s| TCError::bad_request(ERR, s))?;
+                        Ok(this == that)
+                    })
+                    .collect::<TCResult<Vec<bool>>>()?;
+
+                Ok(eq.into_iter().all(|eq| eq).into())
+            })
+        }))
+    }
+}
+
+impl<T> From<Tuple<T>> for EqTupleHandler<T> {
+    fn from(tuple: Tuple<T>) -> Self {
+        Self { tuple }
+    }
+}
+
 impl<'a, T: Clone> From<&'a Tuple<T>> for AppendHandler<'a, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
         Self { tuple }
@@ -91,7 +187,7 @@ where
     }
 }
 
-impl<T: Instance + Route + Clone> Route for Map<T>
+impl<T: Instance + Route + Clone + fmt::Display> Route for Map<T>
 where
     State: From<Map<T>>,
     State: From<T>,
@@ -101,6 +197,11 @@ where
             Some(Box::new(MapHandler { map: self }))
         } else if let Some(state) = self.deref().get(&path[0]) {
             state.route(&path[1..])
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "eq" => Some(Box::new(EqMapHandler::from(self.clone()))),
+                _ => None,
+            }
         } else {
             None
         }
@@ -252,6 +353,7 @@ where
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "append" => Some(Box::new(AppendHandler::from(self))),
+                "eq" => Some(Box::new(EqTupleHandler::from(self.clone()))),
                 "map" => Some(Box::new(MapOpHandler::from(self))),
                 "zip" => Some(Box::new(ZipHandler::from(self))),
                 _ => None,

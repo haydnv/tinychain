@@ -106,11 +106,24 @@ class Map(State):
         else:
             State.__init__(self, kwargs)
 
+    def __eq__(self, other):
+        return self.eq(other)
+
     def __getitem__(self, key):
         return self._get("", key)
 
     def __json__(self):
         return to_json(form_of(self))
+
+    def __ne__(self, other):
+        return self.ne(other)
+
+    def eq(self, other):
+        from .value import Bool
+        return self._post("eq", {"eq": other}, Bool)
+
+    def ne(self, other):
+        return self.eq(other).logical_not()
 
 
 class Tuple(State):
@@ -121,11 +134,24 @@ class Tuple(State):
     def __add__(self, other):
         return self.extend(other)
 
+    def __eq__(self, other):
+        return self.eq(other)
+
     def __json__(self):
         return to_json(form_of(self))
 
     def __getitem__(self, key):
         return self._get("", key)
+
+    def __ne__(self, other):
+        return self.ne(other)
+
+    def eq(self, other):
+        from .value import Bool
+        return self._post("eq", {"eq": other}, Bool)
+
+    def ne(self, other):
+        return self.eq(other).logical_not()
 
     def extend(self, other):
         return self._get("extend", other, Tuple)
