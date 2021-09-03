@@ -181,10 +181,10 @@ where
         .into_iter()
         .zip(f_inputs.iter())
         .map(|(tensor, f_input)| normalize(tensor, f_input, &f_output, &dimensions))
-        .collect::<TCResult<Vec<T>>>()?;
+        .collect::<TCResult<VecDeque<T>>>()?;
 
-    let mut op = normalized.pop().unwrap();
-    while let Some(tensor) = normalized.pop() {
+    let mut op = normalized.pop_front().unwrap();
+    while let Some(tensor) = normalized.pop_front() {
         op = op.mul(tensor)?;
     }
 
@@ -234,14 +234,15 @@ where
         + Clone,
 {
     let (f_inputs, f_output) = parse_format(format)?;
+
     debug!(
         "einsum with input labels: {:?}, output label {:?}",
         f_inputs, f_output
     );
 
     let dimensions = validate_args(&f_inputs, &tensors)?;
-
     let op = outer_product(&f_inputs, &dimensions, tensors)?;
+
     debug_assert_eq!(
         op.shape().as_slice(),
         dimensions

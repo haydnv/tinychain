@@ -251,7 +251,16 @@ class Dense(Tensor):
 
 
 class Sparse(Tensor):
-    """An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values."""
+    """
+    An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values.
+
+    **IMPORTANT**: be careful when broadcasting a `Sparse` Tensor--the result may not be so sparse!
+    For example, broadcasting a `Sparse` Tensor with shape [2, 1] with exactly one element into shape [2, 1000]
+    will result in a `Sparse` Tensor with 1000 elements.
+
+    The `and`, `div`, and `mul` methods are optimized to avoid this issue by ignoring right-hand values at coordinates
+    which are not filled in the left-hand `Tensor`.
+    """
 
     __uri__ = uri(Tensor) + "/sparse"
 
@@ -272,8 +281,17 @@ class Sparse(Tensor):
         return self._get("elements", bounds, Stream)
 
 
-def einsum(fmt, tensors):
-    return Tensor(ref.Post(uri(Tensor) + "/einsum", {"format": fmt, "tensors": tensors}))
+def einsum(format, tensors):
+    """
+    Return the Einstein summation of the given `tensors` according the the given `format` string.
+
+    Example: `einsum("ij,kj->ik", [a, b]) # compute the dot product of a and b`
+
+    The tensor product is computed from left to right, so when using any `Sparse` tensors, it's important to put
+    the sparsest first in the list to avoid redundant broadcasting.
+    """
+
+    return Tensor(ref.Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
 
 
 def _handle_bounds(bounds):
