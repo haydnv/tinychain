@@ -1,6 +1,7 @@
 """Generic error types."""
 
 from tinychain.util import deanonymize, to_json, uri, URI
+from tinychain.value import String
 
 
 class TinychainError(Exception):
@@ -8,8 +9,12 @@ class TinychainError(Exception):
 
     __uri__ = URI("/error")
 
-    def __init__(self, message):
-        self.message = message
+    def __init__(self, message, params=None, **kwargs):
+        if kwargs and params is not None:
+            raise ValueError(f"{self.__class__.__name__} takes a Map or kwargs, not both")
+
+        params = kwargs if kwargs else params
+        self.message = String(message).render(params) if params else message
 
     def __json__(self):
         return {str(uri(self)): [to_json(self.message)]}

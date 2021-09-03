@@ -52,10 +52,12 @@ class TestApp(tc.Graph):
     def recommend(self, txn, user_id: tc.U64):
         txn.vector = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
         txn.node_ids = tc.After(txn.vector.write([user_id], True), txn.vector)
-        return tc.If(
+        txn.friend_ids = tc.If(
             user_id.is_some(),
-            self.friends.match(txn.node_ids, 1),
+            self.friends.match(txn.node_ids, 2),
             tc.error.BadRequest(tc.String("invalid user ID: {{user_id}}").render(user_id=user_id)))
+
+        return self.user_orders.forward(txn.friend_ids)
 
 
 class AppTests(unittest.TestCase):
@@ -78,7 +80,7 @@ class AppTests(unittest.TestCase):
         product = {"sku": 2, "name": "widget 2", "price": 499}
         self.host.post("/test/graph/add_product", product)
 
-        order = {"user_id": 12345, "sku": 1, "quantity": 5}
+        order = {"user_id": 23456, "sku": 1, "quantity": 5}
         self.host.post("/test/graph/place_order", order)
 
         print(self.host.get("/test/graph/recommend", 12345))

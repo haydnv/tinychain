@@ -34,8 +34,12 @@ class Post(Op):
 
     __uri__ = uri(Op) + "/post"
 
-    def __call__(self, **params):
-        return ref.Post(self, **params)
+    def __call__(self, params=None, **kwargs):
+        if kwargs and params is not None:
+            raise ValueError("Post takes a Map or kwargs, not both:", params, kwargs)
+
+        params = params if params else kwargs
+        return ref.Post(self, params)
 
 
 class Delete(Op):

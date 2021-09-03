@@ -205,8 +205,7 @@ class Stream(State):
         return self._post("fold", Map(value=initial_value, op=op), type(initial_value))
 
     def map(self, op):
-        rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("map", Map(op=op), rtype)
+        return self._post("map", Map(op=op), Stream)
 
 
 # User-defined object types

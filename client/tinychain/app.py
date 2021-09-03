@@ -4,10 +4,10 @@ from tinychain.collection.schema import Column, Graph as Schema
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import einsum, Sparse
 from tinychain.error import BadRequest
-from tinychain.decorators import closure, post_op, put_op, delete_op
-from tinychain.ref import After, Get, If, While
+from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
+from tinychain.ref import After, Get, If, MethodSubject, While, With
 from tinychain.state import Map, Tuple
-from tinychain.util import uri, URI
+from tinychain.util import uri, Context, URI
 from tinychain.value import Bool, Nil, I64, U64, String
 
 
@@ -22,8 +22,11 @@ class Graph(Cluster):
             assert schema.chain is not None
             assert schema.edges
 
-        for label in schema.edges:
-            setattr(self, label, schema.chain(Edge.zeros([I64.max(), I64.max()], Bool)))
+        for (label, edge) in schema.edges.items():
+            if edge.from_table == edge.to_table:
+                setattr(self, label, schema.chain(Edge.zeros([I64.max(), I64.max()], Bool)))
+            else:
+                setattr(self, label, schema.chain(ForeignKey.zeros([I64.max(), I64.max()], Bool)))
 
         for name in schema.tables:
             if hasattr(self, name):
@@ -46,26 +49,32 @@ class Graph(Cluster):
 
 
 class Edge(Sparse):
-    def match(self, node_ids, limit):
+    def match(self, node_ids, degrees):
         @post_op
         def cond(i: U64):
-            return i < limit
+            return i < degrees
 
         @post_op
-        def traverse(edge: Sparse, i: U64, neighbors: Sparse, visited: Sparse):
-            neighbors = Sparse.sum(edge * neighbors, 1).copy()
-            neighbors = neighbors.logical_and(neighbors.logical_xor(visited))
-            return {"edge": edge, "i": i + 1, "neighbors": neighbors, "visited": (visited + neighbors).copy()}
+        def traverse(edge: Sparse, i: U64, neighbors: Sparse):
+            neighbors += Sparse.sum(edge * neighbors, 1)
+            return {"edge": edge, "i": i + 1, "neighbors": neighbors.copy()}
 
         node_ids = Sparse(node_ids)
         shape = node_ids.shape()
-        while_state = {"edge": self, "i": 0, "neighbors": node_ids, "visited": Sparse.zeros([I64.max()], Bool)}
         traversal = If(
             shape.eq([I64.max()]),
-            While(cond, traverse, while_state),
-            BadRequest(String(f"an edge input vector has shape [{I64.max()}], not {{shape}}").render(shape=shape)))
+            While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
+            BadRequest(f"an edge input vector has shape [{I64.max()}], not {{shape}}", shape=shape))
 
-        return Map(traversal)["neighbors"]
+        return Sparse.sub(Map(traversal)["neighbors"], node_ids)
+
+
+class ForeignKey(Sparse):
+    def backward(self, node_ids):
+        return einsum("ij,j->i", [self, node_ids])
+
+    def forward(self, node_ids):
+        return einsum("ij,i->j", [self, node_ids])
 
 
 def graph_table(graph, schema, table_name):
@@ -89,7 +98,7 @@ def graph_table(graph, schema, table_name):
         else:
             delete_to = If(
                 adjacent[:, row[edge.column]].any(),
-                BadRequest(String(ERR_DELETE).render(column=edge.column, id=row[edge.column])))
+                BadRequest(ERR_DELETE, column=edge.column, id=row[edge.column]))
 
         if edge.from_table == table_name and edge.to_table == table_name:
             return delete_from, delete_to
@@ -100,8 +109,9 @@ def graph_table(graph, schema, table_name):
 
     def maybe_update_row(edge, adjacent, row, cond, new_id):
         to_table = Table(URI(f"$self/{edge.to_table}"))
-        add = put_op(lambda key: adjacent.write([new_id, Tuple(key)[0]], True))  # assumes row[0] is always the key
-        add = to_table.where({edge.column: new_id}).rows().for_each(add)
+        args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
+        add = put_op(lambda new_id, key: adjacent.write([new_id, key], True))  # assumes row[0] is always the key
+        add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
         return After(If(cond, delete_row(edge, adjacent, row)), add)
 
     class GraphTable(Table):
@@ -134,7 +144,7 @@ def graph_table(graph, schema, table_name):
                     # the edge is on the primary key, so it's not being updated
                     pass
 
-            return After(updates, Table.update_row(self, key, values))
+            return After(Table.update_row(self, key, values), updates)
 
         def upsert(self, key, values):
             row = self[key]
@@ -154,7 +164,7 @@ def graph_table(graph, schema, table_name):
                 update = maybe_update_row(edge, adjacent, row, row.is_some(), new_id)
                 updates.append(update)
 
-            return After(updates, Table.upsert(self, key, values))
+            return After(Table.upsert(self, key, values), updates)
 
         def max_id(self):
             row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
