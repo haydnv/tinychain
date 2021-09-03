@@ -146,9 +146,16 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("SparseTable {} slice {}", self.shape(), bounds);
         self.shape().validate_bounds(&bounds)?;
         let table_bounds = table_bounds(self.shape(), &bounds)?;
+
+        debug!(
+            "SparseTable {} slice {}, table bounds are {}",
+            self.shape(),
+            bounds,
+            table_bounds
+        );
+
         if table_bounds.is_empty() {
             Ok(self.accessor())
         } else {
@@ -334,6 +341,12 @@ impl<FD, FS, D, T> SparseTableSlice<FD, FS, D, T> {
         table: Merged<FS, D, T>,
         rebase: transform::Slice,
     ) -> Self {
+        debug!(
+            "SparseTableSlice::new {} from {}",
+            rebase.bounds(),
+            source.shape()
+        );
+
         Self {
             source,
             table,
@@ -377,6 +390,8 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        debug!("SparseTableSlice::filled");
+
         let rebase = self.rebase;
         let rows = self.table.rows(*txn.id()).await?;
         let filled = rows
@@ -388,7 +403,6 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        debug!("SparseTableSlice::filled_at");
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -399,8 +413,8 @@ where
         let shape = axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>();
         let source_axes = (0..self.source.ndim()).collect();
         let rebase = self.rebase;
-        let coords = filled_at::<FD, FS, D, T, _>(&txn, source_axes, self.table).await?;
-        let coords = CoordBlocks::new(coords, self.source.ndim(), PER_BLOCK)
+        let source_coords = filled_at::<FD, FS, D, T, _>(&txn, source_axes, self.table).await?;
+        let coords = CoordBlocks::new(source_coords, self.source.ndim(), PER_BLOCK)
             .map_ok(move |coords| rebase.map_coords(coords))
             .map_ok(move |coords| coords.get(&axes));
 
@@ -413,8 +427,16 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseTableSlice::slice {}", bounds);
         self.shape().validate_bounds(&bounds)?;
         let source_bounds = self.rebase.invert_bounds(bounds);
+
+        debug!(
+            "SparseTableSlice::slice from source {} with bounds {}",
+            self.source.shape(),
+            source_bounds
+        );
+
         self.source.slice(source_bounds)
     }
 

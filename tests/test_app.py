@@ -55,9 +55,10 @@ class TestApp(tc.Graph):
         txn.friend_ids = tc.If(
             user_id.is_some(),
             self.friends.match(txn.node_ids, 2),
-            tc.error.BadRequest(tc.String("invalid user ID: {{user_id}}").render(user_id=user_id)))
+            tc.error.BadRequest("invalid user ID: {{user_id}}", user_id=user_id))
 
-        return self.user_orders.forward(txn.friend_ids)
+        txn.order_ids = self.user_orders.forward(txn.friend_ids)
+        return self.order_products.forward(txn.order_ids)
 
 
 class AppTests(unittest.TestCase):

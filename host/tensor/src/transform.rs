@@ -264,14 +264,12 @@ impl Reduce {
     }
 
     pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
-        let mut reduce_axis = self.axis;
-        for bound in bounds[..self.axis].iter() {
-            if bound.is_index() {
-                reduce_axis -= 1;
-            }
-        }
+        let elided = bounds[..self.axis]
+            .iter()
+            .filter(|bound| bound.is_index())
+            .count();
 
-        reduce_axis
+        self.axis - elided
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {

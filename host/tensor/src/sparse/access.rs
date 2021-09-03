@@ -45,6 +45,9 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
 
     /// Return an ordered stream of unique [`Coord`]s on the given axes with nonzero values.
     ///
+    /// Note: is it *not* safe to assume that all returned coordinates are filled,
+    /// but it *is* safe to assume that all coordinates *not* returned are *not* filled.
+    ///
     /// TODO: add `sort` parameter to make sorting results optional.
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>>;
 
@@ -573,7 +576,10 @@ where
         let coords = filled_at
             .map_ok(move |coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
-            .map_ok(move |coord| rebase.map_coord(coord))
+            .map_ok(move |coord| {
+                debug!("SparseBroadcast::filled at source coord {:?}", coord);
+                rebase.map_coord(coord)
+            })
             .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
             .try_flatten();
 
@@ -635,10 +641,18 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseBroadcast::slice {} from {}", bounds, self.shape());
         self.shape().validate_bounds(&bounds)?;
 
         let shape = bounds.to_shape(self.shape())?;
         let source_bounds = self.rebase.invert_bounds(bounds);
+
+        debug!(
+            "SparseBroadcast::slice source bounds are {} (from {})",
+            source_bounds,
+            self.source.shape()
+        );
+
         let source = self.source.slice(source_bounds)?;
         SparseBroadcast::new(source, shape)
     }
@@ -1125,40 +1139,7 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        self.shape().validate_axes(&axes)?;
-
-        if axes.is_empty() {
-            return Ok(Box::pin(stream::empty()));
-        }
-
-        let ndim = axes.len();
-        let right = self.right;
-        let left = self.left.filled_at(txn.clone(), axes.to_vec()).await?;
-        let filled_at = left
-            .map_ok(|coords| stream::iter(coords.to_vec().into_iter().map(Ok)))
-            .try_flatten()
-            .try_filter_map(move |coord| {
-                let axes = axes.to_vec();
-                let right = right.clone();
-                let txn = txn.clone();
-
-                Box::pin(async move {
-                    let mut bounds = Bounds::all(right.shape());
-                    for (x, i) in axes.iter().zip(coord.iter()) {
-                        bounds[*x] = AxisBounds::At(*i);
-                    }
-
-                    let slice = right.slice(bounds)?;
-                    let mut filled = slice.filled(txn).await?;
-                    if filled.try_next().await?.is_none() {
-                        Ok(None)
-                    } else {
-                        Ok(Some(coord))
-                    }
-                })
-            });
-
-        Ok(Box::pin(CoordBlocks::new(filled_at, ndim, PER_BLOCK)))
+        self.left.filled_at(txn, axes).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1170,10 +1151,15 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("SparseCombinator::slice {}", bounds);
-
+        debug!("SparseLeftCombinator::slice left {} {}", self.left, bounds);
         let left = self.left.slice(bounds.clone())?;
+
+        debug!(
+            "SparseLeftCombinator::slice right {} {}",
+            self.right, bounds
+        );
         let right = self.right.slice(bounds)?;
+
         assert_eq!(left.shape(), right.shape());
 
         Ok(SparseLeftCombinator {
@@ -1287,13 +1273,14 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseExpand<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Array> + TryFrom<D::File, Error = TCError>,
+    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
 {
-    type Slice = A::Slice;
+    type Slice = SparseAccessor<FD, FS, D, T>;
     type Transpose = SparseExpand<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
@@ -1355,16 +1342,45 @@ where
         self.shape().validate_bounds(&bounds)?;
         bounds.normalize(self.shape());
 
-        let source_bounds = self.rebase.invert_bounds(bounds);
+        if bounds == Bounds::all(self.shape()) {
+            return Ok(self.accessor());
+        }
+
+        let source_bounds = self.rebase.invert_bounds(bounds.clone());
+        let source_slice_shape = source_bounds.to_shape(self.source.shape())?;
+
+        let expand_axis = self.rebase.expand_axis();
+        let source_expand_axis = if bounds[expand_axis].is_index() {
+            // in this case the expanded dimension is elided
+            None
+        } else if source_slice_shape.len() == 1 {
+            // in this case only the expanded dimension is present in the slice
+            None
+        } else {
+            let num_elided = bounds[..expand_axis]
+                .iter()
+                .filter(|bound| bound.is_index())
+                .count();
+
+            Some(expand_axis - num_elided)
+        };
 
         debug!(
-            "slice source {} with bounds {} (removed axis {})",
+            "SparseExpand slice source {} with bounds {} (removed axis {}, expanding axis {:?})",
             self.source.shape(),
             source_bounds,
-            self.rebase.expand_axis()
+            expand_axis,
+            source_expand_axis,
         );
 
-        self.source.slice(source_bounds)
+        let slice = self.source.slice(source_bounds)?;
+        debug_assert_eq!(&source_slice_shape, slice.shape());
+
+        if let Some(source_expand_axis) = source_expand_axis {
+            SparseExpand::new(slice, source_expand_axis).map(|expansion| expansion.accessor())
+        } else {
+            Ok(slice.accessor())
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -1487,6 +1503,8 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        debug!("SparseReduce::filled");
+
         let filled_at = self
             .clone()
             .filled_at(txn.clone(), (0..self.ndim()).collect())
@@ -1518,6 +1536,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseReduce::filled_at {:?}", axes);
+
         let source_axes = self.rebase.invert_axes(axes);
         self.source.filled_at(txn, source_axes).await
     }
@@ -1538,9 +1558,20 @@ where
 
         let reduce_axis = self.rebase.reduce_axis(&bounds);
         let source_bounds = self.rebase.invert_bounds(bounds);
-        debug!("source bounds are {}", source_bounds);
+        debug!(
+            "SparseReduce::slice source is {}, bounds are {}, source axis to reduce is {}",
+            self.source, source_bounds, reduce_axis
+        );
+
         let source = self.source.slice(source_bounds)?;
-        SparseReduce::new(source.into(), reduce_axis, self.reductor)
+        let reduced = SparseReduce::new(source.into(), reduce_axis, self.reductor)?;
+        if reduced.ndim() == 0 {
+            Err(TCError::unsupported(
+                "cannot return a zero-dimensional slice from a reduced Tensor",
+            ))
+        } else {
+            Ok(reduced)
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
