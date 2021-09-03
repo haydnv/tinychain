@@ -199,7 +199,7 @@ where
     InstanceExt<T>: ToState,
 {
     debug!(
-        "call method with form {:?}",
+        "call method with form {}",
         form.iter()
             .map(|(id, s)| format!("{}: {}", id, s))
             .collect::<Vec<String>>()

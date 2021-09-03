@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use destream::en;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
+use log::debug;
 use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_btree::BTreeInstance;
@@ -56,10 +57,15 @@ impl TCStream {
     }
 
     pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
+        debug!("Stream::for_each {}", op);
+
         let stream = self.into_stream(txn.clone()).await?;
 
         stream
-            .map_ok(move |args| op.clone().call(&txn, args))
+            .map_ok(move |args| {
+                debug!("Stream::for_each calling op with args {}", args);
+                op.clone().call(&txn, args)
+            })
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |(), _none| future::ready(Ok(())))
             .await

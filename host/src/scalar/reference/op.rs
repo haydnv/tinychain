@@ -415,19 +415,25 @@ impl Refer for OpRef {
     ) -> TCResult<State> {
         debug!("OpRef::resolve {} from context {:?}", self, context);
 
-        let invalid_key = |v: &State| TCError::bad_request("invalid key", v);
+        #[inline]
+        fn invalid_key<'a, T>(subject: &'a T) -> impl FnOnce(&State) -> TCError + 'a
+        where
+            T: fmt::Display + 'a,
+        {
+            move |v| TCError::unsupported(format!("{} is not a valid key for {}", v, subject))
+        }
 
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&link))?;
 
                     txn.get(link, key).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&id_ref))?;
 
                     context.resolve_get(txn, id_ref.id(), &path, key).await
                 }
@@ -435,7 +441,7 @@ impl Refer for OpRef {
             Self::Put((subject, key, value)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&link))?;
 
                     let value = value.resolve(context, txn).await?;
 
@@ -448,7 +454,7 @@ impl Refer for OpRef {
                     let value = value.resolve(context, txn);
                     let (key, value) = try_join!(key, value)?;
 
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&id_ref))?;
 
                     context
                         .resolve_put(txn, id_ref.id(), &path, key, value)
@@ -471,13 +477,13 @@ impl Refer for OpRef {
             Self::Delete((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&link))?;
 
                     txn.delete(link, key).map_ok(|()| State::default()).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;
-                    let key = key.try_cast_into(invalid_key)?;
+                    let key = key.try_cast_into(invalid_key(&id_ref))?;
 
                     context
                         .resolve_delete(txn, id_ref.id(), &path, key)
@@ -625,10 +631,12 @@ impl fmt::Display for OpRef {
         let class = self.class();
 
         match self {
-            OpRef::Get((link, id)) => write!(f, "{} {}?key={}", class, link, id),
-            OpRef::Put((path, id, val)) => write!(f, "{} {}?key={} <- {}", class, path, id, val),
-            OpRef::Post((path, _)) => write!(f, "{} {}", class, path),
-            OpRef::Delete((link, id)) => write!(f, "{} {}?key={}", class, link, id),
+            OpRef::Get((link, key)) => write!(f, "{} {}?key={}", class, link, key),
+            OpRef::Put((path, key, value)) => {
+                write!(f, "{} {}?key={} <- {}", class, path, key, value)
+            }
+            OpRef::Post((path, params)) => write!(f, "{} {}({})", class, path, params),
+            OpRef::Delete((link, key)) => write!(f, "{} {}?key={}", class, link, key),
         }
     }
 }
