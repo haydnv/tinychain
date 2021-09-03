@@ -148,7 +148,7 @@ impl fmt::Display for AxisBounds {
 /// `Tensor` bounds
 #[derive(Clone)]
 pub struct Bounds {
-    pub axes: Vec<AxisBounds>,
+    axes: Vec<AxisBounds>,
 }
 
 impl Bounds {
@@ -264,6 +264,15 @@ impl Bounds {
     }
 }
 
+impl IntoIterator for Bounds {
+    type Item = AxisBounds;
+    type IntoIter = <Vec<AxisBounds> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.axes.into_iter()
+    }
+}
+
 impl Default for Bounds {
     fn default() -> Self {
         Self { axes: vec![] }
@@ -287,6 +296,14 @@ impl DerefMut for Bounds {
 impl PartialEq for Bounds {
     fn eq(&self, other: &Self) -> bool {
         self.axes == other.axes
+    }
+}
+
+impl FromIterator<AxisBounds> for Bounds {
+    fn from_iter<T: IntoIterator<Item = AxisBounds>>(iter: T) -> Self {
+        Self {
+            axes: iter.into_iter().collect(),
+        }
     }
 }
 

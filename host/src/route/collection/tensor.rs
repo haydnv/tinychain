@@ -908,7 +908,7 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
                 axes.push(bound);
             }
 
-            Ok(Bounds { axes })
+            Ok(Bounds::from(axes))
         }
         other => Err(TCError::bad_request("invalid tensor bounds", other)),
     }
