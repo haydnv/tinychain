@@ -51,9 +51,6 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     /// Return the number of nonzero values in this [`SparseTensor`].
     async fn filled_count(self, txn: T) -> TCResult<u64>;
 
-    /// Return `true` if this [`SparseTensor`] contains only zero values.
-    async fn is_empty(&self, txn: &T) -> TCResult<bool>;
-
     /// Return a slice of this accessor with the given [`Bounds`].
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
 
@@ -222,22 +219,6 @@ where
             Self::Table(table) => table.filled_count(txn).await,
             Self::Transpose(transpose) => transpose.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
-        }
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        match self {
-            Self::Broadcast(broadcast) => broadcast.is_empty(txn).await,
-            Self::Cast(cast) => cast.is_empty(txn).await,
-            Self::Combine(combine) => combine.is_empty(txn).await,
-            Self::CombineLeft(combine) => combine.is_empty(txn).await,
-            Self::Dense(dense) => dense.is_empty(txn).await,
-            Self::Expand(expand) => expand.is_empty(txn).await,
-            Self::Reduce(reduce) => reduce.is_empty(txn).await,
-            Self::Slice(slice) => slice.is_empty(txn).await,
-            Self::Table(table) => table.is_empty(txn).await,
-            Self::Transpose(transpose) => transpose.is_empty(txn).await,
-            Self::Unary(unary) => unary.is_empty(txn).await,
         }
     }
 
@@ -463,17 +444,6 @@ where
             .await
     }
 
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        let mut blocks = self.source.clone().block_stream(txn.clone()).await?;
-        while let Some(block) = blocks.try_next().await? {
-            if block.any() {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.source.slice(bounds).map(DenseToSparse::from)
     }
@@ -589,11 +559,6 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         debug!("SparseBroadcast::filled");
 
-        if self.is_empty(&txn).await? {
-            debug!("sparse tensor to broadcast is empty");
-            return Ok(Box::pin(stream::empty()));
-        }
-
         let source_axes: Vec<usize> = (0..self.source.ndim()).collect();
         let ndim = self.ndim();
 
@@ -623,14 +588,11 @@ where
             axes, self.source
         );
 
-        self.shape().validate_axes(&axes)?;
-
-        if axes.is_empty() || self.is_empty(&txn).await? {
-            debug!("SparseBroadcast::filled_at is empty");
+        if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
-        } else {
-            debug!("SparseBroadcast::filled_at is not empty");
         }
+
+        self.shape().validate_axes(&axes)?;
 
         let shape = Shape::from({
             let shape = self.shape();
@@ -670,11 +632,6 @@ where
                 future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
             })
             .await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        debug!("SparseBroadcast::is_empty?");
-        self.source.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -796,10 +753,6 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        self.source.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -969,7 +922,8 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let zero = self.dtype().zero();
         let filled_inner = self.filled_inner(txn).await?;
-        let filled = filled_inner.try_filter(move |(_, value)| future::ready(value != &zero));
+        let filled = filled_inner.try_filter(move |(_, value)| future::ready(*value != zero));
+
         Ok(Box::pin(filled))
     }
 
@@ -1000,11 +954,6 @@ where
         filled
             .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
             .await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        let mut filled = self.clone().filled(txn.clone()).await?;
-        filled.try_next().map_ok(|v| v.is_some()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -1097,7 +1046,10 @@ where
     }
 
     pub async fn filled_inner<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        debug!("SparseLeftCombinator::filled_inner ({}, {})", self.left, self.right);
+        debug!(
+            "SparseLeftCombinator::filled_inner ({}, {})",
+            self.left, self.right
+        );
 
         let left = self.left.filled(txn.clone()).await?;
 
@@ -1109,9 +1061,7 @@ where
                 right
                     .clone()
                     .read_value_at(txn.clone(), coord)
-                    .map_ok(move |(coord, right_value)| {
-                        (coord, left_value, right_value)
-                    })
+                    .map_ok(move |(coord, right_value)| (coord, left_value, right_value))
             })
             .map_ok(move |(coord, left, right)| (coord, combinator(left, right)));
 
@@ -1199,7 +1149,8 @@ where
                     }
 
                     let slice = right.slice(bounds)?;
-                    if slice.is_empty(&txn).await? {
+                    let mut filled = slice.filled(txn).await?;
+                    if filled.try_next().await?.is_none() {
                         Ok(None)
                     } else {
                         Ok(Some(coord))
@@ -1216,11 +1167,6 @@ where
         filled
             .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
             .await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        let mut filled = self.clone().filled(txn.clone()).await?;
-        filled.try_next().map_ok(|v| v.is_some()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -1404,10 +1350,6 @@ where
         self.source.filled_count(txn).await
     }
 
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        self.source.is_empty(txn).await
-    }
-
     fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
         debug!("SparseExpand {} slice {}", self.shape(), bounds);
         self.shape().validate_bounds(&bounds)?;
@@ -1589,11 +1531,6 @@ where
             .await
     }
 
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        let mut filled = self.clone().filled(txn.clone()).await?;
-        filled.try_next().map_ok(|v| v.is_some()).await
-    }
-
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         debug!("SparseReduce::slice {}", bounds);
 
@@ -1710,10 +1647,6 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        if self.is_empty(&txn).await? {
-            return Ok(Box::pin(stream::empty()));
-        }
-
         let rebase = self.rebase.clone();
         let source_axes = self.rebase.invert_axes((0..self.ndim()).collect());
         let filled_at = self
@@ -1751,10 +1684,6 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        self.source.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -1882,10 +1811,6 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.source.filled_count(txn).await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        self.source.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {

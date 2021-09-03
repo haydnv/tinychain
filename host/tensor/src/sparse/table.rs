@@ -119,7 +119,7 @@ where
 
         self.shape().validate_axes(&axes)?;
 
-        if axes.is_empty() || self.is_empty(&txn).await? {
+        if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
 
@@ -143,10 +143,6 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        self.table.is_empty(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -395,7 +391,7 @@ where
         debug!("SparseTableSlice::filled_at");
         self.shape().validate_axes(&axes)?;
 
-        if axes.is_empty() || self.is_empty(&txn).await? {
+        if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
 
@@ -414,11 +410,6 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
-    }
-
-    async fn is_empty(&self, txn: &T) -> TCResult<bool> {
-        let mut rows = self.table.clone().rows(*txn.id()).await?;
-        rows.try_next().map_ok(|v| v.is_none()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {

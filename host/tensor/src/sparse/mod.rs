@@ -495,18 +495,22 @@ where
     type LeftCombine = SparseTensor<FD, FS, D, T, SparseLeftCombinator<FD, FS, D, T, L, R>>;
 
     fn add(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        debug!("SparseTensor::add");
         self.combine(other, Number::add)
     }
 
     fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        debug!("SparseTensor::div");
         self.left_combine(other, Number::div)
     }
 
     fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        debug!("SparseTensor::mul");
         self.left_combine(other, Number::mul)
     }
 
     fn sub(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
+        debug!("SparseTensor::sub");
         self.combine(other, Number::sub)
     }
 }
