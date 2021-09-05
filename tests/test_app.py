@@ -31,13 +31,13 @@ class TestApp(tc.Graph):
 
         return schema
 
-    @tc.post_method
-    def add_product(self, sku: tc.U64, name: tc.String, price: tc.U32):
-        return self.products.insert([sku], [name, price])
+    @tc.put_method
+    def add_product(self, sku: tc.U64, data: tc.Map):
+        return self.products.insert([sku], [data["name"], data["price"]])
 
-    @tc.post_method
-    def create_user(self, user_id: tc.U64, email: tc.String, display_name: tc.String):
-        return self.users.insert([user_id], [email, display_name])
+    @tc.put_method
+    def create_user(self, user_id: tc.U64, data: tc.Map):
+        return self.users.insert([user_id], [data["email"], data["display_name"]])
 
     @tc.put_method
     def add_friend(self, user_id: tc.U64, friend: tc.U64):
@@ -67,22 +67,22 @@ class AppTests(unittest.TestCase):
         cls.host = start_host("test_app", [TestApp], overwrite=True, cache_size="1G")
 
     def testGraphTraversal(self):
-        user = {"user_id": 12345, "email": "user12345@example.com", "display_name": "user 12345"}
-        self.host.post("/test/graph/create_user", user)
+        user1 = {"email": "user12345@example.com", "display_name": "user 12345"}
+        self.host.put("/test/graph/create_user", 12345, user1)
 
-        user = {"user_id": 23456, "email": "user23456@example.com", "display_name": "user 23456"}
-        self.host.post("/test/graph/create_user", user)
+        user2 = {"email": "user23456@example.com", "display_name": "user 23456"}
+        self.host.put("/test/graph/create_user", 23456, user2)
 
         self.host.put("/test/graph/add_friend", 12345, 23456)
 
-        product = {"sku": 1, "name": "widget 1", "price": 399}
-        self.host.post("/test/graph/add_product", product)
+        product1 = {"name": "widget 1", "price": 399}
+        self.host.put("/test/graph/add_product", 1, product1)
 
-        product = {"sku": 2, "name": "widget 2", "price": 499}
-        self.host.post("/test/graph/add_product", product)
+        product2 = {"name": "widget 2", "price": 499}
+        self.host.put("/test/graph/add_product", 2, product2)
 
         order = {"user_id": 23456, "sku": 1, "quantity": 5}
-        self.host.post("/test/graph/place_order", order)
+        _order_id = self.host.post("/test/graph/place_order", order)
 
         print(self.host.get("/test/graph/recommend", 12345))
 

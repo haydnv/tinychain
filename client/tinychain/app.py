@@ -20,7 +20,6 @@ class Graph(Cluster):
 
         if schema.tables:
             assert schema.chain is not None
-            assert schema.edges
 
         for (label, edge) in schema.edges.items():
             if edge.from_table == edge.to_table:
@@ -110,7 +109,7 @@ def graph_table(graph, schema, table_name):
     def maybe_update_row(edge, adjacent, row, cond, new_id):
         to_table = Table(URI(f"$self/{edge.to_table}"))
         args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
-        add = put_op(lambda new_id, key: adjacent.write([new_id, key], True))  # assumes row[0] is always the key
+        add = closure(put_op(lambda new_id, key: adjacent.write([new_id, key], True)))  # assumes row[0] is always the key
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
         return After(If(cond, delete_row(edge, adjacent, row)), add)
 
