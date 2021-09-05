@@ -51,14 +51,15 @@ class TestApp(tc.Graph):
     @tc.get_method
     def recommend(self, txn, user_id: tc.U64):
         txn.vector = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
-        txn.node_ids = tc.After(txn.vector.write([user_id], True), txn.vector)
+        txn.user_ids = tc.After(txn.vector.write([user_id], True), txn.vector)
         txn.friend_ids = tc.If(
             user_id.is_some(),
-            self.friends.match(txn.node_ids, 2),
+            self.friends.match(txn.user_ids, 2),
             tc.error.BadRequest("invalid user ID: {{user_id}}", user_id=user_id))
 
         txn.order_ids = self.user_orders.forward(txn.friend_ids)
-        return self.order_products.forward(txn.order_ids)
+        txn.product_ids = self.order_products.forward(txn.order_ids)
+        return self.products.read_vector(txn.product_ids)
 
 
 class AppTests(unittest.TestCase):
@@ -84,7 +85,8 @@ class AppTests(unittest.TestCase):
         order = {"user_id": 23456, "sku": 1, "quantity": 5}
         _order_id = self.host.post("/test/graph/place_order", order)
 
-        print(self.host.get("/test/graph/recommend", 12345))
+        recommended = self.host.get("/test/graph/recommend", 12345)
+        self.assertEqual(recommended, [[1, "widget 1", 399]])
 
     @classmethod
     def tearDownClass(cls):

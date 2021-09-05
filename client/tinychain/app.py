@@ -126,6 +126,18 @@ def graph_table(graph, schema, table_name):
 
             return If(row.is_some(), After(deletes, Table.delete_row(self, key)))
 
+        def max_id(self):
+            row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
+            return U64(If(row.is_none(), 0, row[0]))
+
+        def read_vector(self, node_ids):
+            @closure
+            @get_op
+            def read_node(row: Tuple):
+                return self[row[0]]
+
+            return Sparse(uri(node_ids)).elements().map(read_node)
+
         def update_row(self, key, values):
             row = self[key]
             updates = []
@@ -164,9 +176,5 @@ def graph_table(graph, schema, table_name):
                 updates.append(update)
 
             return After(Table.upsert(self, key, values), updates)
-
-        def max_id(self):
-            row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
-            return U64(If(row.is_none(), 0, row[0]))
 
     return GraphTable(table_schema)
