@@ -7,6 +7,7 @@ Modules
 .. toctree::
    :maxdepth: 3
 
+   app
    btree
    chain
    cluster

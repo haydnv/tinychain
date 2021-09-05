@@ -60,6 +60,8 @@ class Graph(Cluster):
 
 
 class Edge(Sparse):
+    """A relationship between a primary key and itself."""
+
     def match(self, node_ids, degrees):
         """
         Traverse this `Edge` breadth-first from the given `node_ids` for the given number of `degrees`.
@@ -87,6 +89,8 @@ class Edge(Sparse):
 
 
 class ForeignKey(Sparse):
+    """A relationship between a primary key and a column in another `Table`."""
+
     def backward(self, node_ids):
         """Return a vector of primary node IDs, given a vector of foreign node IDs."""
 

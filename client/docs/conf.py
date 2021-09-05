@@ -18,11 +18,11 @@ sys.path.insert(0, os.path.abspath('..'))
 # -- Project information -----------------------------------------------------
 
 project = 'Tinychain'
-copyright = '2021, Haydn Vestal'
-author = 'Haydn Vestal'
+copyright = '2021'
+author = 'The Tinychain Contributors'
 
 # The full version, including alpha/beta/rc tags
-release = '0.2'
+release = '0.4'
 
 
 # -- General configuration ---------------------------------------------------

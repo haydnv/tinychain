@@ -29,7 +29,15 @@ class Column(object):
 
 
 class Edge(object):
-    """A directed edge between two node columns in a :class:`Graph`."""
+    """
+    A directed edge between two node columns in a :class:`Graph`.
+
+    The format of `from_node` and `to_node` is "<table name>.<column name>", e.g. "users.user_id".
+
+    If the `cascade` attribute is set to `True`, deleting a source row will automatically delete all foreign
+    rows which depend on it. If `cascade` is `False`, deleting a source row when foreign keys are still present
+    will raise a :class:`BadRequest` error.
+    """
 
     def __init__(self, from_node, to_node, cascade=False):
         assert '.' in from_node
@@ -65,11 +73,6 @@ class Graph(object):
         self.chain = chain
         self.tables = {}
         self.edges = {}
-
-    def add_model(self, model):
-        """Configure this `Graph` to store the given data model."""
-
-        raise NotImplementedError
 
     def create_table(self, name, schema):
         """Add a :class:`Table` to this `Graph`."""

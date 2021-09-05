@@ -71,9 +71,13 @@ class Tensor(Collection):
         return self.div(other)
 
     def abs(self):
+        """Return the element-wise absolute value of this `Tensor`."""
+
         return self._get("abs", rtype=self.__class__)
 
     def add(self, other):
+        """Return the element-wise sum of this `Tensor` and another `Tensor` or `Number`."""
+
         return self._post("add", Map(r=other), Tensor)
 
     def all(self):
@@ -97,7 +101,7 @@ class Tensor(Collection):
         return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
 
     def div(self, other):
-        """Divide this `Tensor` by another, broadcasting if necessary."""
+        """Divide this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
         return self._post("div", Map(r=other), Tensor)
 
@@ -152,7 +156,7 @@ class Tensor(Collection):
         return self._post("xor", Map(r=other), Tensor)
 
     def mul(self, other):
-        """Multiply this `Tensor` by another, broadcasting if necessary."""
+        """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
         return self._post("mul", Map(r=other), self.__class__)
 
@@ -172,7 +176,7 @@ class Tensor(Collection):
         return self._get("shape", rtype=Tuple)
 
     def sub(self, other):
-        """Subtract another `Tensor` from this one, broadcasting if necessary."""
+        """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
         return self._post("sub", Map(r=other), Tensor)
 
@@ -254,9 +258,9 @@ class Sparse(Tensor):
     """
     An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values.
 
-    **IMPORTANT**: be careful when broadcasting a `Sparse` Tensor--the result may not be so sparse!
-    For example, broadcasting a `Sparse` Tensor with shape [2, 1] with exactly one element into shape [2, 1000]
-    will result in a `Sparse` Tensor with 1000 elements.
+    **IMPORTANT**: be careful when broadcasting a `Sparse` tensor--the result may not be so sparse!
+    For example, broadcasting a `Sparse` tensor with shape [2, 1] with exactly one element into shape [2, 1000]
+    will result in a `Sparse` tensor with 1000 elements.
 
     The `and`, `div`, and `mul` methods are optimized to avoid this issue by ignoring right-hand values at coordinates
     which are not filled in the left-hand `Tensor`.
