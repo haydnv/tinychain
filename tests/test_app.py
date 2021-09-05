@@ -41,7 +41,7 @@ class TestApp(tc.Graph):
 
     @tc.put_method
     def add_friend(self, user_id: tc.U64, friend: tc.U64):
-        return self.add_edge("friends", (user_id, friend)), self.add_edge("friends", (friend, user_id))
+        return self.add_edge("friends", user_id, friend), self.add_edge("friends", friend, user_id)
 
     @tc.post_method
     def place_order(self, user_id: tc.U64, sku: tc.U64, quantity: tc.U64):

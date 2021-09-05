@@ -15,6 +15,16 @@ ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the 
 
 
 class Graph(Cluster):
+    """
+    A graph database consisting of a set of :class:`Table` s with :class:`U64` primary keys which serve as node IDs.
+
+    Relationships are stored in 2D `Sparse` tensors whose coordinates take the form `[from_id, to_id]`.
+    The two types of relationships are `Edge` and `ForeignKey`. These are distinguished by the graph schema--
+    a table column which has an edge to itself is an `Edge`, otherwise it's a `ForeignKey`. `ForeignKey` relationships
+    are automatically updated when a `Table` is updated, but `Edge` relationships require explicit management
+    with the `add_edge` and `remove_edge` methods.
+    """
+
     def _configure(self):
         schema = self._schema()
 
@@ -36,19 +46,27 @@ class Graph(Cluster):
     def _schema(self):
         return Schema(Sync)
 
-    def add_edge(self, label, edge):
-        (from_id, to_id) = edge
-        edge = Sparse(Get(uri(self), label))
-        return edge.write([from_id, to_id], True)
+    def add_edge(self, label, from_node, to_node):
+        """Mark `from_node` -> `to_node` as `True` in the edge :class:`Tensor` with the given `label`."""
 
-    def remove_edge(self, label, edge):
-        (from_id, to_id) = edge
         edge = Sparse(Get(uri(self), label))
-        return edge.write([from_id, to_id], False)
+        return edge.write([from_node, to_node], True)
+
+    def remove_edge(self, label, from_node, to_node):
+        """Mark `from_node` -> `to_node` as `False` in the edge :class:`Tensor` with the given `label`."""
+
+        edge = Sparse(Get(uri(self), label))
+        return edge.write([from_node, to_node], False)
 
 
 class Edge(Sparse):
     def match(self, node_ids, degrees):
+        """
+        Traverse this `Edge` breadth-first from the given `node_ids` for the given number of `degrees`.
+
+        Returns a new vector filled with the IDs of the matched nodes.
+        """
+
         @post_op
         def cond(i: U64):
             return i < degrees
@@ -70,9 +88,13 @@ class Edge(Sparse):
 
 class ForeignKey(Sparse):
     def backward(self, node_ids):
+        """Return a vector of primary node IDs, given a vector of foreign node IDs."""
+
         return einsum("ij,j->i", [self, node_ids])
 
     def forward(self, node_ids):
+        """Return a vector of foreign node IDs, given a vector of primary node IDs."""
+
         return einsum("ij,i->j", [self, node_ids])
 
 
@@ -108,9 +130,13 @@ def graph_table(graph, schema, table_name):
 
     def maybe_update_row(edge, adjacent, row, cond, new_id):
         to_table = Table(URI(f"$self/{edge.to_table}"))
+
         args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
-        add = closure(put_op(lambda new_id, key: adjacent.write([new_id, key], True)))  # assumes row[0] is always the key
+
+        # assumes row[0] is always the key
+        add = closure(put_op(lambda new_id, key: adjacent.write([new_id, key], True)))
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
+
         return After(If(cond, delete_row(edge, adjacent, row)), add)
 
     class GraphTable(Table):
@@ -127,10 +153,14 @@ def graph_table(graph, schema, table_name):
             return If(row.is_some(), After(deletes, Table.delete_row(self, key)))
 
         def max_id(self):
+            """Return the maximum ID present in this :class:`Table`."""
+
             row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
             return U64(If(row.is_none(), 0, row[0]))
 
         def read_vector(self, node_ids):
+            """Given a vector of `node_ids`, return a :class:`Stream` of :class:`Table` rows matching those IDs."""
+
             @closure
             @get_op
             def read_node(row: Tuple):
