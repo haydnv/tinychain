@@ -1,3 +1,5 @@
+//! An [`OpDef`] which closes over zero or more [`State`]s
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -17,6 +19,7 @@ use crate::scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
+/// An [`OpDef`] which closes over zero or more [`State`]s
 #[derive(Clone)]
 pub struct Closure {
     context: Map<State>,
@@ -24,14 +27,17 @@ pub struct Closure {
 }
 
 impl Closure {
+    /// Construct a new `Closure`.
     pub fn new(context: Map<State>, op: OpDef) -> Self {
         Self { context, op }
     }
 
+    /// Return the context and [`OpDef`] which define this `Closure`.
     pub fn into_inner(self) -> (Map<State>, OpDef) {
         (self.context, self.op)
     }
 
+    /// Replace references to `$self` with the given `path`.
     pub fn dereference_self(self, path: &TCPathBuf) -> Self {
         let mut context = self.context;
         context.remove(&SELF.into());
@@ -41,10 +47,12 @@ impl Closure {
         Self { context, op }
     }
 
+    /// Return `true` if this `Closure` may write to service other than where it's defined
     pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.op.is_inter_service_write(cluster_path)
     }
 
+    /// Replace references to the given `path` with `$self`
     pub fn reference_self(self, path: &TCPathBuf) -> Self {
         let before = self.op.clone();
         let op = self.op.reference_self(path);
@@ -61,6 +69,7 @@ impl Closure {
         Self { context, op }
     }
 
+    /// Execute this `Closure` with the given `args`
     pub async fn call(self, txn: &Txn, args: State) -> TCResult<State> {
         let capture = if let Some(capture) = self.op.last().cloned() {
             capture
@@ -83,6 +92,7 @@ impl Closure {
             OpDef::Put((key_name, value_name, op_def)) => {
                 let (key, value) = args
                     .try_cast_into(|s| TCError::bad_request("invalid arguments for PUT Op", s))?;
+
                 context.insert(key_name, key);
                 context.insert(value_name, value);
 
@@ -93,6 +103,7 @@ impl Closure {
             OpDef::Post(op_def) => {
                 let params: Map<State> = args
                     .try_cast_into(|s| TCError::bad_request("invalid parameters for POST Op", s))?;
+
                 context.extend(params);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)
@@ -110,6 +121,7 @@ impl Closure {
         }
     }
 
+    /// Execute this `Closure` with an owned [`Txn`] and the given `args`.
     pub async fn call_owned(self, txn: Txn, args: State) -> TCResult<State> {
         self.call(&txn, args).await
     }

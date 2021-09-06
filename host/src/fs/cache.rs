@@ -18,9 +18,9 @@ use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::BlockData;
+use tc_value::Value;
 
 use crate::chain::ChainBlock;
-use crate::scalar::Value;
 
 use super::{create_parent, io_err, TMP};
 

@@ -9,10 +9,11 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::IntoView;
+use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs::Dir;
-use crate::scalar::{Scalar, Value};
+use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 

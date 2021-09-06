@@ -17,11 +17,12 @@ use uplock::RwLock;
 use tc_error::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
+use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Executor, Link, OpDef, Scalar, Value};
+use crate::scalar::{Executor, OpDef, Scalar};
 use crate::state::{State, ToState};
 use crate::txn::{Actor, Scope, Txn, TxnId};
 

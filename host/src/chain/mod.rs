@@ -14,6 +14,7 @@ use tc_btree::{BTreeType, Column};
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_value::{Link, Value, ValueType};
 use tcgeneric::*;
 
 use crate::collection::{
@@ -24,7 +25,7 @@ use crate::collection::{
     DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType,
 };
 use crate::fs;
-use crate::scalar::{Link, OpRef, Scalar, TCRef, Value, ValueType};
+use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 

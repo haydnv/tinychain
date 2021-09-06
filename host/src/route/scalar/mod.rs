@@ -1,8 +1,8 @@
 use tc_error::TCError;
-use tc_value::{Bound, Range};
+use tc_value::{Bound, Range, Value};
 use tcgeneric::PathSegment;
 
-use crate::scalar::{Scalar, ScalarType, Value};
+use crate::scalar::{Scalar, ScalarType};
 use crate::state::State;
 
 use super::{EchoHandler, GetHandler, Handler, Route};

@@ -15,7 +15,7 @@ use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_value::TCString;
+use tc_value::{Link, Number, Range, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::closure::Closure;
@@ -25,7 +25,7 @@ use crate::txn::Txn;
 
 pub use op::*;
 pub use reference::*;
-pub use tc_value::*;
+pub use tc_value as value;
 
 pub mod op;
 pub mod reference;
@@ -92,16 +92,6 @@ impl NativeClass for ScalarType {
     }
 }
 
-// impl StateClass for ScalarType {
-//     type Get = Scalar;
-//
-//     fn try_cast_from_value(self, value: Value) -> TCResult<Self::Get> {
-//         Scalar::Value(value)
-//             .into_type(self)
-//             .ok_or_else(|| TCError::bad_request("invalid instance of", self))
-//     }
-// }
-
 impl From<ValueType> for ScalarType {
     fn from(vt: ValueType) -> Self {
         Self::Value(vt)
@@ -122,14 +112,17 @@ impl fmt::Display for ScalarType {
     }
 }
 
+/// A reference to a `Cluster`
 #[derive(Clone, Eq, PartialEq)]
 pub struct ClusterRef(TCPathBuf);
 
 impl ClusterRef {
+    /// Consume this reference and return its `TCPathBuf`
     pub fn into_path(self) -> TCPathBuf {
         self.0
     }
 
+    /// Borrow this reference's `TCPathBuf`
     pub fn path(&self) -> &TCPathBuf {
         &self.0
     }

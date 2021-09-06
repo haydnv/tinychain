@@ -11,11 +11,11 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::{BlockData, Persist, Store};
 use tc_transact::{IntoView, Transact};
+use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;
 
 use crate::fs;
 use crate::route::Public;
-use crate::scalar::{Link, Value};
 use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};

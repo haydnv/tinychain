@@ -18,6 +18,7 @@ use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_value::Value;
 use tcgeneric::{
     label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
 };
@@ -26,7 +27,7 @@ use crate::chain::{ChainType, Subject, CHAIN, NULL_HASH};
 use crate::collection::*;
 use crate::fs;
 use crate::route::Public;
-use crate::scalar::{OpRef, Scalar, TCRef, Value};
+use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 

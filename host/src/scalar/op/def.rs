@@ -96,6 +96,7 @@ pub enum OpDef {
 }
 
 impl OpDef {
+    /// Replace references to `$self` with the given `path`.
     pub fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((key_name, form)) => Self::Get((key_name, dereference_self(form, path))),
@@ -109,6 +110,7 @@ impl OpDef {
         }
     }
 
+    /// Iterate over the internal state assignments of this `OpDef`.
     pub fn form(&self) -> impl Iterator<Item = &(Id, Scalar)> {
         match self {
             Self::Get((_, form)) => form,
@@ -119,6 +121,7 @@ impl OpDef {
         .iter()
     }
 
+    /// Return the last assignment in this `OpDef`.
     pub fn last(&self) -> Option<&Id> {
         match self {
             Self::Get((_, form)) => form.last(),
@@ -129,12 +132,14 @@ impl OpDef {
         .map(|(id, _)| id)
     }
 
+    /// Return `true` if this `OpDef` may execute a write operation to another service.
     pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         self.form()
             .map(|(_, provider)| provider)
             .any(|provider| provider.is_inter_service_write(cluster_path))
     }
 
+    /// Consume this `OpDef` and return its internal state assignments.
     pub fn into_form(self) -> Vec<(Id, Scalar)> {
         match self {
             Self::Get((_, form)) => form,
@@ -144,6 +149,7 @@ impl OpDef {
         }
     }
 
+    /// Return `true` if this is a write operation.
     pub fn is_write(&self) -> bool {
         match self {
             Self::Get(_) => false,
@@ -153,6 +159,7 @@ impl OpDef {
         }
     }
 
+    /// Replace references to the given `path` with `$self`.
     pub fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Get((key_name, form)) => Self::Get((key_name, reference_self(form, path))),
@@ -339,13 +346,13 @@ impl fmt::Display for OpDef {
     }
 }
 
-pub fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
+fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
         .map(|(id, scalar)| (id, scalar.dereference_self(path)))
         .collect()
 }
 
-pub fn reference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
+fn reference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
         .map(|(id, scalar)| (id, scalar.reference_self(path)))
         .collect()

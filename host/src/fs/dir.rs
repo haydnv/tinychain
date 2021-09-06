@@ -20,11 +20,12 @@ use tc_tensor::TensorType;
 use tc_transact::fs::{self, BlockData};
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
+use tc_value::Value;
 use tcgeneric::{Id, PathSegment};
 
 use crate::chain::{self, ChainBlock};
 use crate::collection::CollectionType;
-use crate::scalar::{ScalarType, Value};
+use crate::scalar::ScalarType;
 use crate::state::StateType;
 
 use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};

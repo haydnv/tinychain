@@ -8,12 +8,13 @@ use uplock::RwLock;
 use tc_error::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::Transaction;
+use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
 use crate::chain::{self, Chain, ChainType, Schema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::scalar::{Link, LinkHost, OpRef, Refer, Scalar, Value};
+use crate::scalar::{OpRef, Refer, Scalar};
 use crate::txn::{Actor, Txn, TxnId};
 
 use super::Cluster;

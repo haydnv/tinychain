@@ -15,7 +15,7 @@ use safecast::{CastFrom, CastInto, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::TCString;
+use tc_value::{Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::chain::*;

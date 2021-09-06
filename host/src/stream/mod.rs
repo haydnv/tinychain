@@ -1,3 +1,5 @@
+//! A stream generator such as a `Collection` or a mapping or aggregation of its items
+
 use async_trait::async_trait;
 use destream::en;
 use futures::future::{self, TryFutureExt};
@@ -21,6 +23,7 @@ use crate::value::Value;
 
 mod group;
 
+/// A stream generator such as a `Collection` or a mapping or aggregation of its items
 #[derive(Clone)]
 pub enum TCStream {
     Aggregate(Box<TCStream>),
@@ -29,10 +32,17 @@ pub enum TCStream {
 }
 
 impl TCStream {
+    /// Group equal sequential items in this stream.
+    ///
+    /// For example, aggregating the stream `['b', 'b', 'a', 'a', 'b']`
+    /// will produce `['b', 'a', 'b']`.
     pub fn aggregate(self) -> Self {
         Self::Aggregate(Box::new(self))
     }
 
+    /// Fold this stream with the given initial `Value` and `Closure`.
+    ///
+    /// For example, folding `[1, 2, 3]` with `0` and `Number::add` will produce `6`.
     pub async fn fold(self, txn: Txn, mut value: Value, op: Closure) -> TCResult<Value> {
         let mut source = self.into_stream(txn.clone()).await?;
         loop {
@@ -56,6 +66,7 @@ impl TCStream {
         }
     }
 
+    /// Execute the given [`Closure`] with each item in the stream as its `args`.
     pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
         debug!("Stream::for_each {}", op);
 
@@ -71,10 +82,12 @@ impl TCStream {
             .await
     }
 
+    /// Return a `TCStream` produced by calling the given [`Closure`] on each item in this stream.
     pub fn map(self, op: Closure) -> Self {
         Self::Map(Box::new(self), op)
     }
 
+    /// Return a Rust `Stream` of the items in this `TCStream`.
     pub fn into_stream<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'static, State>> {
         Box::pin(async move {
             match self {

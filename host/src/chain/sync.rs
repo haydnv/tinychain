@@ -9,10 +9,10 @@ use futures::join;
 use tc_error::*;
 use tc_transact::fs::{Persist, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;
 
 use crate::fs;
-use crate::scalar::{Link, Value};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 

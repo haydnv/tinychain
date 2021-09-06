@@ -9,9 +9,9 @@ use uplock::RwLock;
 
 use tc_error::*;
 use tc_transact::Transaction;
+use tc_value::{Link, Value};
 use tcgeneric::Map;
 
-use crate::scalar::{Link, Value};
 use crate::state::State;
 use crate::txn::Txn;
 

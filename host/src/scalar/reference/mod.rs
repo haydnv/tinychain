@@ -332,9 +332,11 @@ impl TryCastFrom<TCRef> for OpRef {
     }
 }
 
+/// A helper struct used to deserialize a [`TCRef`]
 pub struct RefVisitor;
 
 impl RefVisitor {
+    /// Deserialize a map value, assuming it's an instance of the given [`RefType`].
     pub async fn visit_map_value<A: de::MapAccess>(
         class: RefType,
         access: &mut A,
@@ -391,6 +393,7 @@ impl RefVisitor {
         }
     }
 
+    /// Deserialize a [`TCRef`] with the given `subject`.
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<TCRef, E> {
         if params.is_none() {
             match subject {

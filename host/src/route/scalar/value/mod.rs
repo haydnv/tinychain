@@ -3,10 +3,10 @@ use safecast::TryCastFrom;
 use uuid::Uuid;
 
 use tc_error::TCError;
+use tc_value::Value;
 use tcgeneric::{label, Label, PathSegment};
 
 use crate::route::{GetHandler, Handler, Route, SelfHandler};
-use crate::scalar::Value;
 use crate::state::State;
 
 mod number;

@@ -4,6 +4,7 @@ use std::iter::FromIterator;
 use log::debug;
 
 use tc_error::*;
+use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPath, Tuple};
 
 use crate::object::InstanceExt;

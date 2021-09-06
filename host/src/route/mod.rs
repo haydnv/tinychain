@@ -6,10 +6,10 @@ use futures::Future;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_value::TCString;
+use tc_value::{TCString, Value};
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
-use crate::scalar::{OpRefType as ORT, Value};
+use crate::scalar::OpRefType as ORT;
 use crate::state::State;
 use crate::txn::Txn;
 

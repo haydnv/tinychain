@@ -1,4 +1,4 @@
-//! Limits the execution scope of an inline [`Op`].
+//! Limits the execution scope of an inline `Op`.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -21,7 +21,7 @@ use crate::value::Value;
 
 use super::Refer;
 
-/// A conditional reference.
+/// A flow control operator which closes over the context of an [`OpDef`] to produce a [`Closure`].
 #[derive(Clone, Eq, PartialEq)]
 pub struct With {
     capture: Tuple<Id>,

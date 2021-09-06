@@ -11,11 +11,11 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
+use tc_value::{Link, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
 use crate::gateway::Gateway;
-use crate::scalar::{Link, Value};
 use crate::state::State;
 
 pub use request::*;
@@ -97,6 +97,7 @@ impl Txn {
         }
     }
 
+    /// Return a new `Txn` which grants the given [`Scope`]s to the given [`Actor`].
     pub async fn grant(
         &self,
         actor: &Actor,

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use safecast::CastFrom;
 
+use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel, TCPathBuf};
 
 use crate::scalar::*;

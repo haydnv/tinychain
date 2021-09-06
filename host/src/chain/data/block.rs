@@ -10,10 +10,11 @@ use log::debug;
 
 use tc_transact::fs::BlockData;
 use tc_transact::TxnId;
+use tc_value::Value;
 use tcgeneric::{TCPathBuf, Tuple};
 
 use crate::chain::{BLOCK_SIZE, EXT};
-use crate::scalar::{Scalar, Value};
+use crate::scalar::Scalar;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Mutation {

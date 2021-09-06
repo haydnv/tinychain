@@ -19,7 +19,7 @@ use crate::gateway::Gateway;
 use super::request::*;
 use super::{Active, Txn, TxnId};
 
-const GRACE: Duration = Duration::from_secs(2);
+const GRACE: Duration = Duration::from_secs(3);
 const INTERVAL: Duration = Duration::from_secs(1);
 
 /// Server to keep track of the transactions currently active for this host.
@@ -65,6 +65,7 @@ impl TxnServer {
         }
     }
 
+    /// Gracefully shut down this `TxnServer` by allowing all active transactions to drain.
     pub async fn shutdown(self) -> TCResult<()> {
         tokio::spawn(async move {
             let result = loop {

@@ -1,3 +1,5 @@
+//! A Tinychain String
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Deref;
@@ -17,10 +19,21 @@ use tcgeneric::Id;
 
 use super::{Link, Number};
 
+/// A Tinychain String
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct TCString(String);
 
 impl TCString {
+    /// Render this string as a [`Handlebars`] template with the given `data`.
+    ///
+    /// Example:
+    /// ```
+    /// # use std::collections::HashMap;
+    /// let data: HashMap<_, _> = std::iter::once(("name", "world")).collect();
+    /// assert_eq!(TCString::from("Hello, {{name}}").render(data), "Hello, world!");
+    /// ```
+    ///
+    /// See the [`handlebars`] documentation for a complete description of the formatting options.
     pub fn render<T: Serialize>(&self, data: T) -> TCResult<TCString> {
         Handlebars::new()
             .render_template(&self.0, &json!(data))
@@ -134,6 +147,7 @@ impl fmt::Display for TCString {
     }
 }
 
+/// A [`Collator`] for [`TCString`] values.
 #[derive(Clone, Default)]
 pub struct StringCollator {
     collator: Collator<String>,

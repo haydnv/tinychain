@@ -7,11 +7,11 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
+use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Tuple};
 
 use crate::cluster::Cluster;
 use crate::route::*;
-use crate::scalar::{Link, Value};
 use crate::state::State;
 
 struct AuthorizeHandler<'a> {

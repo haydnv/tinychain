@@ -2,11 +2,10 @@ use std::convert::TryInto;
 
 use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
-use tc_value::Number;
+use tc_value::{Link, Number};
 use tcgeneric::{label, Id, Instance, Label, NativeClass, PathSegment, Tuple};
 
 use crate::object::{InstanceClass, Object};
-use crate::scalar::Link;
 use crate::state::{State, StateType};
 
 use super::*;

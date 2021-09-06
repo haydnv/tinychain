@@ -15,11 +15,13 @@ pub mod lock;
 
 pub use id::TxnId;
 
+/// Trait to define a view which can be encoded with [`en::IntoStream`].
 #[async_trait]
 pub trait IntoView<'en, D: fs::Dir> {
     type Txn: Transaction<D>;
     type View: en::IntoStream<'en> + Sized;
 
+    /// Return a `View` which can be encoded with [`en::IntoStream`].
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View>;
 }
 

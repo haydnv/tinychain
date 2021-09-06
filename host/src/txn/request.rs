@@ -8,10 +8,10 @@ use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::TxnId;
+use tc_value::{Link, Value};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
-use crate::scalar::{Link, Value};
 
 pub type Actor = rjwt::Actor<Value>;
 pub type Claims = rjwt::Claims<Link, Value, Vec<Scope>>;
