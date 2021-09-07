@@ -4,7 +4,7 @@ import time
 import tinychain as tc
 
 
-TC_PATH = "host/target/debug/tinychain"
+TC_PATH = "host/target/release/tinychain"
 PORT = 8702
 
 

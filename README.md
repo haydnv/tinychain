@@ -95,14 +95,14 @@ The tensor feature requires a package-config file for ArrayFire to in your envir
 | Database tables | x | | | x | x | | x | x | | x | |
 | Document database | | | | x | | | x | | | | |
 | Distributed applications (dapps) | x | | x | | | | | | | | |
-| Graph database | \*\* | | | | | x | x | | | | |
+| Graph database | x | | | | | x | x | | | | |
 | Hypothetical queries | x | | | | | | | | | | |
 | Large ML library | | | | | | | | | | | x |
 | JSON RPC interface | x | x | x | x | | x | | | x | | |
 | Media (audio, video, image) support | \* | | | | | | | | | | x |
 | Millisecond latency | x | x | | x | x | x | x | x | x | x | x |
 | Object-oriented API | x | x | | x | | | | | x | | x |
-| Object-relational mapping (ORM) | \* | x | | x | | | | | x | | |
+| Object-relational mapping (ORM) | \*\* | x | | x | | | | | x | | |
 | Stateful ML models | \*\* | | | | | | | | | | | 
 | Tensor computation | x | | | | | | | | | | x |
 | Transactional reads & writes | x | | x | x | x | x | x | x | | x | |
@@ -143,7 +143,7 @@ The tensor feature requires a package-config file for ArrayFire to in your envir
     * **BTree**: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
     * **Table**: A database table, which supports one or more **BTree** indices
     * **Tensor**: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
-    * **Graph**\*\*: A graph database which uses a sparse **Tensor** to compute relationships between rows in its **Table**s
+    * **Graph**: A graph database which uses a sparse **Tensor** to compute relationships between rows in its **Table**s
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a transaction
