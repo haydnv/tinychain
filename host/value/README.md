@@ -6,7 +6,7 @@ use safecast::CastFrom;
 use tcgeneric::Tuple;
 
 let row = Value::cast_from(("name", 12345));
-assert_eq!(row, Value::Tuple(Tuple::from(vec![Value::String("name"), Value::Number(12345.into)])));
+assert_eq!(row, Value::Tuple(Tuple::from(vec![Value::String("name"), Value::Number(12345.into())])));
 ```
 
 For more information on Tinychain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

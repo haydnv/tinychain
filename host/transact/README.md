@@ -2,9 +2,9 @@ This crate is used internally by Tinychain. It provides traits and data structur
 
 Example:
 ```rust
-use tc_transact::{Mutable, TxnId, TxnLock};
+use tc_transact::{TxnId, TxnLock};
 
-let version = TxnLock::new("version", Mutable::from(0));
+let version = TxnLock::new("version", 0);
 
 let txn_one = TxnId::new(1);
 let txn_two = TxnId::new(2);
