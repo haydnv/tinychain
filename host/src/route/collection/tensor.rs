@@ -10,13 +10,12 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;
-use tc_value::{TCString, ValueType};
+use tc_value::{Bound, Number, NumberClass, Range, TCString, Value, ValueType};
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler};
-use crate::scalar::{Bound, Number, NumberClass, Range, Value};
 use crate::state::State;
 use crate::stream::TCStream;
 use crate::txn::Txn;
