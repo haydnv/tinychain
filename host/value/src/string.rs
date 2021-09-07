@@ -29,8 +29,11 @@ impl TCString {
     /// Example:
     /// ```
     /// # use std::collections::HashMap;
+    /// # use tc_value::TCString;
     /// let data: HashMap<_, _> = std::iter::once(("name", "world")).collect();
-    /// assert_eq!(TCString::from("Hello, {{name}}").render(data), "Hello, world!");
+    /// assert_eq!(
+    ///     TCString::from("Hello, {{name}}!".to_string()).render(data).unwrap().as_str(),
+    ///     "Hello, world!");
     /// ```
     ///
     /// See the [`handlebars`] documentation for a complete description of the formatting options.
