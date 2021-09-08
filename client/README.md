@@ -3,7 +3,7 @@ Python API documentation: [http://tinychain.readthedocs.io/en/latest/](http://ti
 
 ## Getting started
 
-This guide assumes that you are familiar with the basic concepts of hosting a TinyChain service. If not, please read the Tinychain [project README](http://github.com/haydnv/tinychain) first.
+This guide assumes that you are familiar with the basic concepts of hosting a TinyChain service. If not, please read the TinyChain [project README](http://github.com/haydnv/tinychain) first.
 
 You can install the Python client using Pip:
 

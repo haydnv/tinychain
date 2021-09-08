@@ -1,4 +1,4 @@
-This crate is used internally by TinyChain. It provides a generic Value type which supports (de)serialization with serde and destream as well as equality and collation.
+This crate is used internally by TinyChain. It provides a generic Value type which supports (de)serialization with [serde](https://docs.rs/serde/) and [destream](https://docs.rs/destream/) as well as equality and collation.
 
 Example:
 ```rust
