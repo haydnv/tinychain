@@ -91,7 +91,7 @@ def get_ref(subject, name):
 
 class URI(object):
     """
-    An absolute or relative link to a Tinychain state.
+    An absolute or relative link to a TinyChain state.
     
     Examples:
         .. highlight:: python

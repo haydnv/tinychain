@@ -1,6 +1,6 @@
 //! A generic tuple type
 //!
-//! Note that, from the perspective of a Tinychain user (say, a developer using the HTTP API via
+//! Note that, from the perspective of a TinyChain user (say, a developer using the HTTP API via
 //! the Python client), this really is a tuple, in the sense that it is immutable, with a fixed
 //! length, and not iterable.
 

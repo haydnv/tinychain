@@ -1,4 +1,4 @@
-This crate is used internally by Tinychain. It provides a generic error type `TCError` which can be mapped to common HTTP error codes and supports serialization and deserialization with `destream`.
+This crate is used internally by TinyChain. It provides a generic error type `TCError` which can be mapped to common HTTP error codes and supports serialization and deserialization with `destream`.
 
 Example:
 ```rust
@@ -15,4 +15,4 @@ fn expect_true(value: bool) -> TCResult<()> {
 assert_eq!(expect_true(true), Ok(()));
 ```
 
-For more information on Tinychain, see: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+For more information on TinyChain, see: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

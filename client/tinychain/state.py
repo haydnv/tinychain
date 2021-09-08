@@ -1,4 +1,4 @@
-"""Tinychain `State` s, such as `Map`, `Tuple`, and `Op`."""
+"""TinyChain `State` s, such as `Map`, `Tuple`, and `Op`."""
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -6,7 +6,7 @@ from tinychain.util import *
 
 class State(object):
     """
-    A Tinychain state, such as a `Chain` or `Op` or `Value`.
+    A TinyChain state, such as a `Chain` or `Op` or `Value`.
 
     Do not subclass `State` directly. Use a more specific type instead.
     """
@@ -211,7 +211,7 @@ class Stream(State):
 # User-defined object types
 
 class Class(State):
-    """A user-defined Tinychain class."""
+    """A user-defined TinyChain class."""
 
     __uri__ = uri(State) + "/object/class"
 

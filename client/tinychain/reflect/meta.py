@@ -19,7 +19,7 @@ class Meta(type):
     def __form__(cls):
         mro = cls.mro()
         if len(mro) < 2:
-            raise ValueError("Tinychain class must extend a subclass of State")
+            raise ValueError("TinyChain class must extend a subclass of State")
 
         parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
 
@@ -62,7 +62,7 @@ class Meta(type):
     def __json__(cls):
         mro = cls.mro()
         if len(mro) < 2:
-            raise ValueError("Tinychain class must extend a subclass of State")
+            raise ValueError("TinyChain class must extend a subclass of State")
 
         parent = mro[1]
         return {str(uri(parent)): to_json(form_of(cls))}

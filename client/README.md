@@ -3,7 +3,7 @@ Python API documentation: [http://tinychain.readthedocs.io/en/latest/](http://ti
 
 ## Getting started
 
-This guide assumes that you are familiar with the basic concepts of hosting a Tinychain service. If not, please read the Tinychain [project README](http://github.com/haydnv/tinychain) first.
+This guide assumes that you are familiar with the basic concepts of hosting a TinyChain service. If not, please read the Tinychain [project README](http://github.com/haydnv/tinychain) first.
 
 You can install the Python client using Pip:
 
@@ -11,7 +11,7 @@ You can install the Python client using Pip:
 pip3 install tinychain
 ```
 
-If you don't have a Tinychain host already available for testing, you'll also need to download the [latest release](http://github.com/haydnv/tinychain/releases) from GitHub. Note that binary releases are only available for 64-bit x86 Linux at this time. If you have `cargo` installed, you can compile and install Tinychain for your platform by running `cargo install tinychain`. Using `cargo install` should add the `tinychain` command to your `PATH`, so you can just set `TC_PATH = "tinychain"` in the "Hello, World!" example below.
+If you don't have a TinyChain host already available for testing, you'll also need to download the [latest release](http://github.com/haydnv/tinychain/releases) from GitHub. Note that binary releases are only available for 64-bit x86 Linux at this time. If you have `cargo` installed, you can compile and install TinyChain for your platform by running `cargo install tinychain`. Using `cargo install` should add the `tinychain` command to your `PATH`, so you can just set `TC_PATH = "tinychain"` in the "Hello, World!" example below.
 
 To check that everything is working, try this "Hello, World!" program:
 
@@ -29,9 +29,9 @@ if __name__ == "__main__":
 
 ## Overview
 
-The Tinychain client provides a developer-friendly API to build Tinychain transactions (i.e., distributed compute graphs) using the familiar Python language, but without any of the associated restrictions on performance or locality. A Tinychain transaction can span any number of networked hosts and automatically takes advantage of the hosts' concurrent and parallel computing resources (like multiple cores and GPU acceleration) without any extra application code. A Tinychain service defined using the Python client can be packaged using familiar distribution mechanisms like [Pip](http://pypi.org/project/pip) so that other Tinychain developers can use it just like any other Python developer would use any other Python library. This can save your clients a lot of time and effort when integrating your cloud API into their service.
+The TinyChain client provides a developer-friendly API to build TinyChain transactions (i.e., distributed compute graphs) using the familiar Python language, but without any of the associated restrictions on performance or locality. A TinyChain transaction can span any number of networked hosts and automatically takes advantage of the hosts' concurrent and parallel computing resources (like multiple cores and GPU acceleration) without any extra application code. A TinyChain service defined using the Python client can be packaged using familiar distribution mechanisms like [Pip](http://pypi.org/project/pip) so that other TinyChain developers can use it just like any other Python developer would use any other Python library. This can save your clients a lot of time and effort when integrating your cloud API into their service.
 
-Every value in a Tinychain service is either a `State`, representing a Tinychain state like a `Number` or a `Chain`, or a `Ref`, which tells a Tinychain transaction how to access or calculate a particular `State`. For example:
+Every value in a TinyChain service is either a `State`, representing a TinyChain state like a `Number` or a `Chain`, or a `Ref`, which tells a TinyChain transaction how to access or calculate a particular `State`. For example:
 
 ```python
 @tc.get_op
@@ -46,7 +46,7 @@ Notice the assignments to the transaction context `txn`. This is necessary to as
 
 The constructor of a `State` always takes exactly one argument, which is the form of that `State`. For example, `tc.Number(3)` constructs a new `Number` whose form is `3`; `txn.a * txn.b` above constructs a new `Number` whose form is `OpRef.Get("$a/mul", URI("b"))`. When debugging, it can be helpful to print the form of a `State` using the `form_of` function.
 
-When using Python to develop a Tinychain service, it's important to remember that the output of your code is a Tinychain *compute graph* which will be served by a Tinychain host; your Python code itself won't be running in production. This means that you can't use Python control flow operators like `if` or `while` the way that you're used to. For example:
+When using Python to develop a TinyChain service, it's important to remember that the output of your code is a TinyChain *compute graph* which will be served by a TinyChain host; your Python code itself won't be running in production. This means that you can't use Python control flow operators like `if` or `while` the way that you're used to. For example:
 
 ```python
 @tc.get_op
@@ -58,9 +58,9 @@ def to_feet(txn, meters: tc.Number) -> tc.Number:
         tc.error.BadRequest("negative distance is not supported"))
 ```
 
-For the same reason, it's important to use type annotations in your Tinychain Python code. Otherwise, you and your users (and the Tinychain client itself) won't know the return types of your methods! Without the type annotation in `meters: tc.Number` above, the argument `meters` would just be a `Value` and would not support operators like `*` or `>`.
+For the same reason, it's important to use type annotations in your TinyChain Python code. Otherwise, you and your users (and the TinyChain client itself) won't know the return types of your methods! Without the type annotation in `meters: tc.Number` above, the argument `meters` would just be a `Value` and would not support operators like `*` or `>`.
 
-It's also important to keep in mind that Tinychain by default resolves all dependencies concurrently, and does not resolve unused dependencies. Consider this function:
+It's also important to keep in mind that TinyChain by default resolves all dependencies concurrently, and does not resolve unused dependencies. Consider this function:
 
 ```python
 @tc.post_op
@@ -91,11 +91,11 @@ def num_rows(txn):
         txn.table.count())
 ```
 
-Now, since the program explicitly indicates that `table.count` depends on a side-effect of `table.insert`, Tinychain won't execute `table.count` until after the call to `table.insert` has completed successfully.
+Now, since the program explicitly indicates that `table.count` depends on a side-effect of `table.insert`, TinyChain won't execute `table.count` until after the call to `table.insert` has completed successfully.
 
 ## Object orientation
 
-One of Tinychain's most powerful features is its object-oriented API. You can use this to define your own classes, which must inherit from exactly one class, which ultimately inherits from a native class. For example:
+One of TinyChain's most powerful features is its object-oriented API. You can use this to define your own classes, which must inherit from exactly one class, which ultimately inherits from a native class. For example:
 
 ```python
 from __future__ import annotations # needed until Python 3.10
@@ -138,7 +138,7 @@ class Meters(Distance):
         return self
 ```
 
-Note that Tinychain does not have any concept of member visibility, like a "public" or "private" method. This is because Tinychain objects are meant to be sent over the network and used by client code, making a "private" method meaningless (and deceptive to the developer implementing it). If you want to hide an implementation detail from the public API of your class, use a Python function outside your class definition.
+Note that TinyChain does not have any concept of member visibility, like a "public" or "private" method. This is because TinyChain objects are meant to be sent over the network and used by client code, making a "private" method meaningless (and deceptive to the developer implementing it). If you want to hide an implementation detail from the public API of your class, use a Python function outside your class definition.
 
 ## Chain: persistent mutable state
 
@@ -169,7 +169,7 @@ class Rev(tc.Cluster):
         return self.rev.set(txn.rev + 1)
 ```
 
-When you start a Tinychain host with a cluster definition, it will assume that there is a hosted cluster with the given URI ("http://.../app/test/replication" in the example above) and attempt to join that cluster as a replica. If the cluster URI has no host address, or is the same as the address of the running host, the host will serve a single replica of a new cluster. Watch out for versioning issues! In production, it's best to end your cluster URI with a version number which you can update in order to release a new, non-backwards-compatible version with different data and methods.
+When you start a TinyChain host with a cluster definition, it will assume that there is a hosted cluster with the given URI ("http://.../app/test/replication" in the example above) and attempt to join that cluster as a replica. If the cluster URI has no host address, or is the same as the address of the running host, the host will serve a single replica of a new cluster. Watch out for versioning issues! In production, it's best to end your cluster URI with a version number which you can update in order to release a new, non-backwards-compatible version with different data and methods.
 
 ## Cluster: hosting your service
 
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     # write the definition to disk
     tc.write_cluster(CONFIG_PATH)
 
-    # start a new Tinychain host to serve AreaService
+    # start a new TinyChain host to serve AreaService
     host = tc.host.Local(TC_PATH, WORKSPACE, DATA_DIR, [CONFIG_PATH], force_create=True)
 
     # verify that it works as expected
@@ -216,7 +216,7 @@ You can see more in-depth examples in the [tests](http://github.com/haydnv/tinyc
 
 ## Calling another service from your own
 
-Arguably the most powerful feature of Tinychain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `AreaService`, they can use the exact same Python class that defines the service itself:
+Arguably the most powerful feature of TinyChain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `AreaService`, they can use the exact same Python class that defines the service itself:
 
 ```python
 from area import AreaService

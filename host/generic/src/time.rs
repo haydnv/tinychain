@@ -1,4 +1,4 @@
-//! Time utilities for Tinychain. UNSTABLE.
+//! Time utilities for TinyChain. UNSTABLE.
 
 use std::convert::{TryFrom, TryInto};
 use std::ops;
@@ -12,7 +12,7 @@ pub struct NetworkTime {
     nanos: u64,
 }
 
-/// A Tinychain timestamp, used for absolute ordering of transactions.
+/// A TinyChain timestamp, used for absolute ordering of transactions.
 impl NetworkTime {
     // TODO: replace system time with an explicit network time synchronization system.
     /// The current time.

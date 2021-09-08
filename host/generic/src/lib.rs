@@ -1,6 +1,6 @@
-//! Provides generic data types used across multiple Tinychain sub-crates.
+//! Provides generic data types used across multiple TinyChain sub-crates.
 //!
-//! This library is a part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+//! This library is a part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 use std::fmt;
 use std::pin::Pin;

@@ -1,3 +1,3 @@
-This crate is used internally by Tinychain to provide the Table data structure.
+This crate is used internally by TinyChain to provide the Table data structure.
 
-For more information on Tinychain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+For more information on TinyChain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

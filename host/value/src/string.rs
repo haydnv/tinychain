@@ -1,4 +1,4 @@
-//! A Tinychain String
+//! A TinyChain String
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -19,7 +19,7 @@ use tcgeneric::Id;
 
 use super::{Link, Number};
 
-/// A Tinychain String
+/// A TinyChain String
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct TCString(String);
 

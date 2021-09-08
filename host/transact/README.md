@@ -1,4 +1,4 @@
-This crate is used internally by Tinychain. It provides traits and data structures to support transactional mutations of in-memory and persistent datatypes.
+This crate is used internally by TinyChain. It provides traits and data structures to support transactional mutations of in-memory and persistent datatypes.
 
 Example:
 ```rust
@@ -19,4 +19,4 @@ assert_eq!(version.read(txn_three).await.unwrap(), 2);
 
 ```
 
-For more information on Tinychain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+For more information on TinyChain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

@@ -1,4 +1,4 @@
-"""Utilities for communicating with a Tinychain host."""
+"""Utilities for communicating with a TinyChain host."""
 
 import json
 import logging
@@ -18,7 +18,7 @@ ENCODING = "utf-8"
 
 
 class Host(object):
-    """A Tinychain host."""
+    """A TinyChain host."""
 
     @staticmethod
     def encode_params(params):
@@ -113,7 +113,7 @@ class Host(object):
 
 
 class Local(Host):
-    """A local Tinychain host."""
+    """A local TinyChain host."""
 
     ADDRESS = "127.0.0.1"
     SHUTDOWN_TIME = 0.1
@@ -171,14 +171,14 @@ class Local(Host):
         time.sleep(wait_time)
 
         if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"Tinychain process at {uri(self)} crashed on startup")
+            raise RuntimeError(f"TinyChain process at {uri(self)} crashed on startup")
         else:
             logging.info(f"new instance running at {uri(self)}")
 
     def stop(self, wait_time=SHUTDOWN_TIME):
         """Shut down this host."""
 
-        logging.info(f"Shutting down Tinychain host {uri(self)}")
+        logging.info(f"Shutting down TinyChain host {uri(self)}")
         if self._process:
             self._process.terminate()
             self._process.wait()

@@ -19,7 +19,7 @@ use crate::txn::Txn;
 const IDLE_TIMEOUT: u64 = 30;
 const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
 
-/// A Tinychain HTTP client. Should only be used through a `Gateway`.
+/// A TinyChain HTTP client. Should only be used through a `Gateway`.
 pub struct Client {
     client: hyper::Client<HttpConnector, Body>,
 }

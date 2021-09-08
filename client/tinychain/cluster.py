@@ -12,7 +12,7 @@ from tinychain.util import form_of, uri, URI, to_json
 
 
 class Cluster(object, metaclass=Meta):
-    """A hosted Tinychain service."""
+    """A hosted TinyChain service."""
 
     @classmethod
     def __use__(cls):

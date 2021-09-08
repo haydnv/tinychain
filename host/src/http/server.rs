@@ -23,7 +23,7 @@ use super::{Accept, Encoding};
 
 type GetParams = HashMap<String, String>;
 
-/// Tinychain's HTTP server. Should only be used through a [`Gateway`].
+/// TinyChain's HTTP server. Should only be used through a [`Gateway`].
 pub struct HTTPServer {
     gateway: Arc<Gateway>,
 }

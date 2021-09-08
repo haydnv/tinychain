@@ -1,4 +1,4 @@
-This crate is used internally by Tinychain. It provides generic Id, Map, and Tuple types.
+This crate is used internally by TinyChain. It provides generic Id, Map, and Tuple types.
 
 Example:
 ```rust
@@ -9,4 +9,4 @@ let tuple = Tuple::<(Id, String)>::from_iter(vec![]);
 assert_eq!(Map::opt_cast_from(tuple).unwrap(), Map::default());
 ```
 
-For more information on Tinychain, see: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+For more information on TinyChain, see: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

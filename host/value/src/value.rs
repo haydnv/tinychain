@@ -26,7 +26,7 @@ use super::{Link, TCString};
 pub use number_general::*;
 
 const EMPTY_SEQ: [u8; 0] = [];
-const EXPECTING: &'static str = "a Tinychain value, e.g. 1 or \"two\" or [3]";
+const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
 /// The class of a [`Value`].

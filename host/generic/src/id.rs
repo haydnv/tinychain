@@ -67,7 +67,7 @@ impl From<uuid::Uuid> for Id {
 
 /// A generic `Id`
 ///
-/// `Id` is widely used within the Tinychain host software to identify individual variables
+/// `Id` is widely used within the TinyChain host software to identify individual variables
 /// within a transaction context as well as files and directories.
 ///
 /// An `Id` must be valid UTF8 and must not contain whitespace or any control character sequence
@@ -142,7 +142,7 @@ impl de::Visitor for IdVisitor {
     type Value = Id;
 
     fn expecting() -> &'static str {
-        "a Tinychain Id like {\"foo\": []}"
+        "a TinyChain Id like {\"foo\": []}"
     }
 
     fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
@@ -290,7 +290,7 @@ impl From<PathLabel> for TCPathBuf {
     }
 }
 
-/// A Tinychain path.
+/// A TinyChain path.
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct TCPathBuf {
     segments: Vec<PathSegment>,
@@ -483,7 +483,7 @@ impl fmt::Display for TCPathBuf {
     }
 }
 
-/// A borrowed Tinychain path which implements [`fmt::Display`].
+/// A borrowed TinyChain path which implements [`fmt::Display`].
 pub struct TCPath<'a> {
     inner: &'a [PathSegment],
 }
