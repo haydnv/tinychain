@@ -1,7 +1,7 @@
 //! A [`TxnLock`] featuring transaction-specific versioning
 
 use std::cell::UnsafeCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -25,7 +25,11 @@ pub struct TxnLockReadGuard<T> {
 impl<T> TxnLockReadGuard<T> {
     /// Upgrade this read lock to a write lock.
     pub fn upgrade(self) -> TxnLockWriteFuture<T> {
+        let mut state = self.lock.inner.state.lock().expect("TxnLockReadGuard::upgrade");
+        let id = state.consume_id();
+
         TxnLockWriteFuture {
+            id,
             txn_id: self.txn_id,
             lock: self.lock.clone(),
         }
@@ -59,9 +63,7 @@ impl<T> Drop for TxnLockReadGuard<T> {
             Some(count) if *count == 1 => {
                 *count = 0;
 
-                while let Some(waker) = state.wakers.pop_front() {
-                    waker.wake()
-                }
+                state.wake();
             }
             _ => panic!("TxnLockReadGuard count updated incorrectly!"),
         }
@@ -131,10 +133,7 @@ impl<T> Drop for TxnLockWriteGuard<T> {
             .expect("TxnLockWriteGuard drop");
 
         state.reserved = None;
-
-        while let Some(waker) = state.wakers.pop_front() {
-            waker.wake()
-        }
+        state.wake();
     }
 }
 
@@ -142,10 +141,32 @@ struct LockState<T> {
     last_commit: Option<TxnId>,
     readers: BTreeMap<TxnId, usize>,
     reserved: Option<TxnId>,
-    wakers: VecDeque<Waker>,
+
+    wakers: HashMap<usize, Waker>,
+    next_id: usize,
 
     canon: UnsafeCell<T>,
     at: BTreeMap<TxnId, UnsafeCell<T>>,
+}
+
+impl<T> LockState<T> {
+    fn consume_id(&mut self) -> usize {
+        let id = self.next_id;
+
+        self.next_id = if let Some(next) = self.next_id.checked_add(1) {
+            next
+        } else {
+            0
+        };
+
+        id
+    }
+
+    fn wake(&mut self) {
+        for (_, waker) in self.wakers.drain() {
+            waker.wake();
+        }
+    }
 }
 
 struct Inner<T> {
@@ -173,7 +194,9 @@ impl<T: Clone> TxnLock<T> {
             last_commit: None,
             readers: BTreeMap::new(),
             reserved: None,
-            wakers: VecDeque::new(),
+
+            next_id: 0,
+            wakers: HashMap::new(),
 
             canon: UnsafeCell::new(value),
             at: BTreeMap::new(),
@@ -235,10 +258,9 @@ impl<T: Clone> TxnLock<T> {
 
     /// Lock this state for reading at the given [`TxnId`].
     pub fn read<'a>(&self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
-        TxnLockReadFuture {
-            txn_id,
-            lock: self.clone(),
-        }
+        let mut state = self.inner.state.lock().expect("TxnLock::read");
+        let id = state.consume_id();
+        TxnLockReadFuture::new(id, txn_id, self.clone())
     }
 
     /// Try to acquire a write lock, synchronously.
@@ -302,10 +324,9 @@ impl<T: Clone> TxnLock<T> {
 
     /// Lock this state for writing at the given [`TxnId`].
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        TxnLockWriteFuture {
-            txn_id,
-            lock: self.clone(),
-        }
+        let mut state = self.inner.state.lock().expect("TxnLock::write");
+        let id = state.consume_id();
+        TxnLockWriteFuture::new(id, txn_id, self.clone())
     }
 }
 
@@ -328,9 +349,7 @@ impl<T: Clone + Send> Transact for TxnLock<T> {
             *value = pending.clone();
         }
 
-        while let Some(waker) = state.wakers.pop_front() {
-            waker.wake()
-        }
+        state.wake();
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -350,8 +369,15 @@ impl<T: Clone + Send> Transact for TxnLock<T> {
 
 /// A read lock future.
 pub struct TxnLockReadFuture<'a, T> {
+    id: usize,
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
+}
+
+impl<'a, T> TxnLockReadFuture<'a, T> {
+    fn new(id: usize, txn_id: &'a TxnId, lock: TxnLock<T>) -> Self {
+        Self { id, txn_id, lock }
+    }
 }
 
 impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
@@ -362,13 +388,13 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                self.lock
+                let mut state = self.lock
                     .inner
                     .state
                     .lock()
-                    .expect("TxnLockReadFuture state")
-                    .wakers
-                    .push_back(context.waker().clone());
+                    .expect("TxnLockReadFuture state");
+
+                state.wakers.insert(self.id, context.waker().clone());
 
                 Poll::Pending
             }
@@ -378,8 +404,15 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
 
 /// A write lock future.
 pub struct TxnLockWriteFuture<T> {
+    id: usize,
     txn_id: TxnId,
     lock: TxnLock<T>,
+}
+
+impl<T> TxnLockWriteFuture<T> {
+    fn new(id: usize, txn_id: TxnId, lock: TxnLock<T>) -> Self {
+        Self { id, txn_id, lock }
+    }
 }
 
 impl<T: Clone> Future for TxnLockWriteFuture<T> {
@@ -390,13 +423,13 @@ impl<T: Clone> Future for TxnLockWriteFuture<T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                self.lock
+                let mut state = self.lock
                     .inner
                     .state
                     .lock()
-                    .expect("TxnLockWriteFuture state")
-                    .wakers
-                    .push_back(context.waker().clone());
+                    .expect("TxnLockWriteFuture state");
+
+                state.wakers.insert(self.id, context.waker().clone());
 
                 Poll::Pending
             }

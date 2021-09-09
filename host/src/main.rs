@@ -126,6 +126,7 @@ async fn main() -> Result<(), TokioError> {
 
     #[cfg(feature = "tensor")]
     afarray::print_af_info();
+    println!();
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
