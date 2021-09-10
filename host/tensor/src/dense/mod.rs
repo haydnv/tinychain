@@ -882,14 +882,16 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        debug!("deserialize DenseTensor");
+
         let schema = seq.next_element(()).await?;
         let schema = schema.ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
+        debug!("DenseTensor schema is {}", schema);
 
         let cxt = (self.txn_id, self.file, schema);
-        let blocks = seq
-            .next_element::<BlockListFile<FD, FS, D, T>>(cxt)
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(1, "dense tensor data"))?;
+        let blocks = seq.next_element::<BlockListFile<FD, FS, D, T>>(cxt).await?;
+
+        let blocks = blocks.ok_or_else(|| de::Error::invalid_length(1, "dense tensor data"))?;
 
         Ok(DenseTensor::from(blocks))
     }

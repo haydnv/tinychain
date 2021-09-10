@@ -732,6 +732,11 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
     where
         Array: From<ArrayExt<T>>,
     {
+        debug!(
+            "BlockListVisitor decoding array of type {}",
+            std::any::type_name::<T>()
+        );
+
         let mut buf = vec![T::default(); BUF_SIZE];
         let mut size = 0u64;
         let mut block_id = 0u64;

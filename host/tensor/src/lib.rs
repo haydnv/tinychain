@@ -86,6 +86,7 @@ impl de::FromStream for Schema {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        debug!("deserialize Tensor schema");
         let schema = Value::from_stream(cxt, decoder).await?;
         Self::try_cast_from(schema, |v| de::Error::invalid_value(v, "a Tensor schema"))
     }
