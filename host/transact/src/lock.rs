@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use futures::future::Future;
@@ -25,7 +25,7 @@ pub struct TxnLockReadGuard<T> {
 impl<T> TxnLockReadGuard<T> {
     /// Upgrade this read lock to a write lock.
     pub fn upgrade(self) -> TxnLockWriteFuture<T> {
-        let mut state = self.lock.inner.state.lock().expect("TxnLockReadGuard::upgrade");
+        let mut state = self.lock.lock_inner("TxnLockReadGuard::upgrade");
         let id = state.consume_id();
 
         TxnLockWriteFuture {
@@ -150,6 +150,7 @@ struct LockState<T> {
 }
 
 impl<T> LockState<T> {
+    #[inline]
     fn consume_id(&mut self) -> usize {
         let id = self.next_id;
 
@@ -187,7 +188,7 @@ impl<T> Clone for TxnLock<T> {
     }
 }
 
-impl<T: Clone> TxnLock<T> {
+impl<T> TxnLock<T> {
     /// Create a new lock.
     pub fn new<I: fmt::Display>(name: I, value: T) -> TxnLock<T> {
         let state = LockState {
@@ -212,6 +213,13 @@ impl<T: Clone> TxnLock<T> {
         }
     }
 
+    #[inline]
+    fn lock_inner(&self, expect: &'static str) -> MutexGuard<LockState<T>> {
+        self.inner.state.lock().expect(expect)
+    }
+}
+
+impl<T: Clone> TxnLock<T> {
     /// Try to acquire a read lock synchronously.
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
         let mut state = if let Ok(state) = self.inner.state.try_lock() {
@@ -258,7 +266,7 @@ impl<T: Clone> TxnLock<T> {
 
     /// Lock this state for reading at the given [`TxnId`].
     pub fn read<'a>(&self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
-        let mut state = self.inner.state.lock().expect("TxnLock::read");
+        let mut state = self.lock_inner("TxnLock::read");
         let id = state.consume_id();
         TxnLockReadFuture::new(id, txn_id, self.clone())
     }
@@ -324,7 +332,7 @@ impl<T: Clone> TxnLock<T> {
 
     /// Lock this state for writing at the given [`TxnId`].
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        let mut state = self.inner.state.lock().expect("TxnLock::write");
+        let mut state = self.lock_inner("TxnLock::write");
         let id = state.consume_id();
         TxnLockWriteFuture::new(id, txn_id, self.clone())
     }
@@ -335,7 +343,7 @@ impl<T: Clone + Send> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 
-        let mut state = self.inner.state.lock().expect("TxnLock commit state");
+        let mut state = self.lock_inner("TxnLock::commit");
         assert!(state.reserved.is_none());
         if let Some(ref last_commit) = state.last_commit {
             assert!(last_commit < &txn_id);
@@ -355,7 +363,7 @@ impl<T: Clone + Send> Transact for TxnLock<T> {
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("TxnLock {} finalize {}", &self.inner.name, txn_id);
 
-        let mut state = self.inner.state.lock().expect("TxnLock finalize state");
+        let mut state = self.lock_inner("TxnLock::finalize");
 
         if let Some(readers) = state.readers.remove(txn_id) {
             if readers > 0 {
@@ -388,17 +396,18 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                let mut state = self.lock
-                    .inner
-                    .state
-                    .lock()
-                    .expect("TxnLockReadFuture state");
-
+                let mut state = self.lock.lock_inner("TxnLockReadFuture::poll");
                 state.wakers.insert(self.id, context.waker().clone());
-
                 Poll::Pending
             }
         }
+    }
+}
+
+impl<'a, T> Drop for TxnLockReadFuture<'a, T> {
+    fn drop(&mut self) {
+        let mut state = self.lock.lock_inner("TxnLockWriteFuture::drop");
+        state.wakers.remove(&self.id);
     }
 }
 
@@ -423,16 +432,17 @@ impl<T: Clone> Future for TxnLockWriteFuture<T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                let mut state = self.lock
-                    .inner
-                    .state
-                    .lock()
-                    .expect("TxnLockWriteFuture state");
-
+                let mut state = self.lock.lock_inner("TxnLockWriteFuture::poll");
                 state.wakers.insert(self.id, context.waker().clone());
-
                 Poll::Pending
             }
         }
+    }
+}
+
+impl<T> Drop for TxnLockWriteFuture<T> {
+    fn drop(&mut self) {
+        let mut state = self.lock.lock_inner("TxnLockWriteFuture::drop");
+        state.wakers.remove(&self.id);
     }
 }

@@ -32,5 +32,5 @@ tc-error = "~0.2.5"
 tc-value = "~0.2.1"
 tokio = { version = "1.11", features = ["io-util"] }
 tokio-util = { version = "0.6", features = ["io"] }
-uplock = "~0.1.4"
+uplock = "~0.1.5"
 uuid = { version = "0.8", features = ["v4"] }
