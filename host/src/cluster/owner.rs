@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::sync::Arc;
 
 use futures::future::{try_join_all, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, warn};
-
-use uplock::RwLock;
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -17,13 +17,13 @@ use crate::txn::Txn;
 
 #[derive(Clone)]
 pub struct Owner {
-    mutated: RwLock<HashSet<Link>>,
+    mutated: Arc<RwLock<HashSet<Link>>>,
 }
 
 impl Owner {
     pub fn new() -> Self {
         Self {
-            mutated: RwLock::new(HashSet::new()),
+            mutated: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 

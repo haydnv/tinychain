@@ -258,21 +258,21 @@ impl Dir {
         })
     }
 
-    pub async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
+    pub async fn entry_ids(&self, txn_id: TxnId) -> TCResult<HashSet<PathSegment>> {
         let contents = self.contents.read(txn_id).await?;
         Ok(contents.keys().cloned().collect())
     }
 
     pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        if let Some(dir) = fs::Dir::get_dir(self, &txn_id, &name).await? {
+        if let Some(dir) = fs::Dir::get_dir(self, txn_id, &name).await? {
             Ok(dir)
         } else {
             fs::Dir::create_dir(self, txn_id, name).await
         }
     }
 
-    pub async fn unique_id(&self, txn_id: &TxnId) -> TCResult<PathSegment> {
-        let existing_ids = self.entry_ids(&txn_id).await?;
+    pub async fn unique_id(&self, txn_id: TxnId) -> TCResult<PathSegment> {
+        let existing_ids = self.entry_ids(txn_id).await?;
         loop {
             let id: PathSegment = Uuid::new_v4().into();
             if !existing_ids.contains(&id) {
@@ -284,7 +284,7 @@ impl Dir {
 
 #[async_trait]
 impl fs::Store for Dir {
-    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.is_empty())
@@ -297,7 +297,7 @@ impl fs::Dir for Dir {
     type File = FileEntry;
     type FileClass = StateType;
 
-    async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool> {
+    async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool> {
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.contains_key(name))
@@ -327,7 +327,7 @@ impl fs::Dir for Dir {
     }
 
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Dir> {
-        self.unique_id(&txn_id)
+        self.unique_id(txn_id)
             .and_then(|id| self.create_dir(txn_id, id))
             .await
     }
@@ -363,12 +363,12 @@ impl fs::Dir for Dir {
     where
         StateType: From<C>,
     {
-        self.unique_id(&txn_id)
+        self.unique_id(txn_id)
             .and_then(|id| self.create_file(txn_id, id, class))
             .await
     }
 
-    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
+    async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
         let contents = self.contents.read(txn_id).await?;
         match contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
@@ -379,7 +379,7 @@ impl fs::Dir for Dir {
 
     async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         name: &Id,
     ) -> TCResult<Option<F>> {
         let contents = self.contents.read(txn_id).await?;
@@ -411,7 +411,7 @@ impl Transact for Dir {
         }
 
         {
-            let contents = self.contents.read(&txn_id).await.unwrap();
+            let contents = self.contents.read(*txn_id).await.unwrap();
 
             join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
@@ -431,8 +431,10 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("finalize dir {:?} at {}", &self.path, txn_id);
+
         {
-            let contents = self.contents.read(&txn_id).await.unwrap();
+            let contents = self.contents.read(*txn_id).await.unwrap();
             join_all(contents.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {

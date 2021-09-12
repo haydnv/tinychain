@@ -14,7 +14,7 @@ ENDPOINT = "/transact/hypothetical"
 class Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_einsum")
+        cls.host = start_host("test_einsum", cache_size="10G")
 
     def testExpandDims(self):
         cxt = tc.Context()

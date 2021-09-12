@@ -12,7 +12,7 @@ use futures::future::{join_all, try_join_all, Future, FutureExt};
 use futures::{join, StreamExt};
 use log::{debug, info, warn};
 use safecast::TryCastFrom;
-use uplock::RwLock;
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::lock::TxnLock;
@@ -92,7 +92,7 @@ impl Cluster {
     }
 
     /// Iterate over a list of replicas of this cluster.
-    pub async fn replicas(&self, txn_id: &TxnId) -> TCResult<HashSet<Link>> {
+    pub async fn replicas(&self, txn_id: TxnId) -> TCResult<HashSet<Link>> {
         let replicas = self.replicas.read(txn_id).await?;
         Ok(replicas.deref().clone())
     }
@@ -119,7 +119,7 @@ impl Cluster {
     pub async fn authorize(&self, txn: &Txn, scope: &Scope) -> TCResult<()> {
         debug!("authorize scope {}...", scope);
 
-        let installed = self.installed.read(txn.id()).await?;
+        let installed = self.installed.read(*txn.id()).await?;
         debug!("{} authorized callers installed", installed.len());
 
         for (host, actor_id, scopes) in txn.request().scopes().iter() {
@@ -302,7 +302,7 @@ impl Cluster {
         txn: Txn,
         write: W,
     ) -> TCResult<()> {
-        let mut replicas = self.replicas(txn.id()).await?;
+        let mut replicas = self.replicas(*txn.id()).await?;
         replicas.remove(&txn.link(self.link().path().clone()));
         debug!("replicating write to {} replicas", replicas.len());
 
@@ -376,7 +376,7 @@ impl Cluster {
     }
 
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
-        let replicas = self.replicas.read(txn.id()).await?;
+        let replicas = self.replicas.read(*txn.id()).await?;
 
         if let Some(owner) = self.owned.read().await.get(txn.id()) {
             owner.commit(txn).await?;
@@ -408,7 +408,7 @@ impl Cluster {
     }
 
     pub async fn distribute_rollback(&self, txn: &Txn) {
-        let replicas = self.replicas.read(txn.id()).await;
+        let replicas = self.replicas.read(*txn.id()).await;
 
         if let Some(owner) = self.owned.read().await.get(txn.id()) {
             owner.rollback(txn).await;
@@ -462,7 +462,7 @@ impl Transact for Cluster {
         {
             debug!(
                 "replicas at commit: {}",
-                Value::from_iter(self.replicas.read(txn_id).await.unwrap().iter().cloned())
+                Value::from_iter(self.replicas.read(*txn_id).await.unwrap().iter().cloned())
             );
         }
 
@@ -472,7 +472,7 @@ impl Transact for Cluster {
         {
             debug!(
                 "replicas after commit: {}",
-                Value::from_iter(self.replicas.read(txn_id).await.unwrap().iter().cloned())
+                Value::from_iter(self.replicas.read(*txn_id).await.unwrap().iter().cloned())
             );
         }
 

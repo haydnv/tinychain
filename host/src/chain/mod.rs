@@ -233,14 +233,14 @@ impl Subject {
     async fn load(txn: &Txn, schema: Schema, dir: &fs::Dir) -> TCResult<Self> {
         match schema {
             Schema::BTree(schema) => {
-                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
+                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
                     BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                 } else {
                     Self::create(Schema::BTree(schema), dir, *txn.id()).await
                 }
             }
             Schema::Table(schema) => {
-                if dir.is_empty(txn.id()).await? {
+                if dir.is_empty(*txn.id()).await? {
                     Self::create(Schema::Table(schema), dir, *txn.id()).await
                 } else {
                     TableIndex::load(txn, schema, dir.clone())
@@ -250,7 +250,7 @@ impl Subject {
             }
             #[cfg(feature = "tensor")]
             Schema::Dense(schema) => {
-                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
+                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
                     DenseTensor::load(txn, schema, file)
                         .map_ok(Self::Dense)
                         .await
@@ -260,7 +260,7 @@ impl Subject {
             }
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => {
-                if let Some(dir) = dir.get_dir(txn.id(), &SUBJECT.into()).await? {
+                if let Some(dir) = dir.get_dir(*txn.id(), &SUBJECT.into()).await? {
                     SparseTensor::load(txn, schema, dir)
                         .map_ok(Self::Sparse)
                         .await
@@ -269,7 +269,7 @@ impl Subject {
                 }
             }
             Schema::Value(value) => {
-                if let Some(file) = dir.get_file(txn.id(), &SUBJECT.into()).await? {
+                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
                     Ok(Self::Value(file))
                 } else {
                     Self::create(Schema::Value(value), dir, *txn.id()).await

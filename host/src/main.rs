@@ -128,7 +128,7 @@ async fn main() -> Result<(), TokioError> {
     afarray::print_af_info();
     println!();
 
-    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
+    let txn_server = tinychain::txn::TxnServer::new(workspace.clone()).await;
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {

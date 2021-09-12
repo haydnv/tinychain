@@ -61,7 +61,7 @@ where
     pub async fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
         debug!("BlockListFile::constant {} {}", shape, value);
 
-        if !file.is_empty(&txn_id).await? {
+        if !file.is_empty(txn_id).await? {
             return Err(TCError::unsupported(
                 "cannot create new tensor: file is not empty",
             ));

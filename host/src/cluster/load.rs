@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use log::debug;
-use uplock::RwLock;
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::lock::TxnLock;

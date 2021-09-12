@@ -18,7 +18,7 @@ use tokio_util::io::StreamReader;
 
 use tc_error::*;
 use tc_value::Value;
-use tcgeneric::{Id, PathSegment, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Id, PathSegment, TCBoxTryStream};
 
 use super::{Transaction, TxnId};
 
@@ -131,23 +131,11 @@ impl BlockData for Array {
     }
 }
 
-pub trait BlockRead<B: BlockData, F: File<B>>: Deref<Target = B> + Send {
-    fn upgrade(self, file: &F)
-        -> TCBoxTryFuture<<<F as File<B>>::Block as Block<B, F>>::WriteLock>;
-}
-
-pub trait BlockWrite<B: BlockData, F: File<B>>: DerefMut<Target = B> + Send + Sync {
-    fn downgrade(
-        self,
-        file: &F,
-    ) -> TCBoxTryFuture<<<F as File<B>>::Block as Block<B, F>>::ReadLock>;
-}
-
 /// A transactional filesystem block.
 #[async_trait]
 pub trait Block<B: BlockData, F: File<B>>: Send + Sync {
-    type ReadLock: BlockRead<B, F>;
-    type WriteLock: BlockWrite<B, F>;
+    type ReadLock: Deref<Target = B> + Send;
+    type WriteLock: DerefMut<Target = B> + Send + Sync;
 
     /// Get a read lock on this block.
     async fn read(self) -> Self::ReadLock;
@@ -160,7 +148,7 @@ pub trait Block<B: BlockData, F: File<B>>: Send + Sync {
 #[async_trait]
 pub trait Store: Clone + Send + Sync {
     /// Return `true` if this store contains no data as of the given [`TxnId`].
-    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool>;
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 }
 
 /// A transactional file.
@@ -170,13 +158,13 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
     type Block: Block<B, Self>;
 
     /// Return the IDs of all this `File``'s blocks.
-    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>>;
+    async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>>;
 
     /// Return a new [`BlockId`] which is not used within this `File`.
-    async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId>;
+    async fn unique_id(&self, txn_id: TxnId) -> TCResult<BlockId>;
 
     /// Return true if this `File` contains the given [`BlockId`] as of the given [`TxnId`].
-    async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
+    async fn contains_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<bool>;
 
     /// Copy all blocks from the source `File` into this `File`.
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
@@ -230,7 +218,7 @@ pub trait Dir: Store + Send + Sized + 'static {
     type FileClass: Send;
 
     /// Return `true` if this directory has an entry at the given [`PathSegment`].
-    async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool>;
+    async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool>;
 
     /// Create a new `Dir`.
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
@@ -258,12 +246,12 @@ pub trait Dir: Store + Send + Sized + 'static {
         Self::FileClass: From<C>;
 
     /// Look up a subdirectory of this `Dir`.
-    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
+    async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
     /// Get a [`Self::File`] in this `Dir`.
     async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         name: &Id,
     ) -> TCResult<Option<F>>;
 }

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use futures::TryFutureExt;
 use log::debug;
-use uplock::RwLock;
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
@@ -25,14 +25,14 @@ const INTERVAL: Duration = Duration::from_secs(1);
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
-    active: RwLock<HashMap<TxnId, Arc<Active>>>,
+    active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
     workspace: fs::Dir,
 }
 
 impl TxnServer {
     /// Construct a new `TxnServer`.
     pub async fn new(workspace: fs::Dir) -> Self {
-        let active = RwLock::new(HashMap::new());
+        let active = Arc::new(RwLock::new(HashMap::new()));
 
         spawn_cleanup_thread(workspace.clone(), active.clone());
 
@@ -46,6 +46,8 @@ impl TxnServer {
         txn_id: TxnId,
         token: (String, Claims),
     ) -> TCResult<Txn> {
+        debug!("TxnServer::new_txn");
+
         let expires = token.1.expires().try_into()?;
         let dir = self.txn_dir(txn_id).await?;
         let request = Request::new(txn_id, token.0, token.1);
@@ -67,11 +69,14 @@ impl TxnServer {
 
     /// Gracefully shut down this `TxnServer` by allowing all active transactions to drain.
     pub async fn shutdown(self) -> TCResult<()> {
+        debug!("TxnServer::shutdown");
+
         tokio::spawn(async move {
             let result = loop {
                 if self.active.read().await.is_empty() {
                     break TCResult::Ok(());
                 } else {
+                    debug!("TxnServer::shutdown pending active transactions");
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
             };
@@ -87,7 +92,7 @@ impl TxnServer {
     }
 }
 
-fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Arc<Active>>>) {
+fn spawn_cleanup_thread(workspace: fs::Dir, active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(INTERVAL.as_secs()));
 
     tokio::spawn(async move {
@@ -99,6 +104,8 @@ fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Arc<Ac
 }
 
 async fn cleanup(workspace: &fs::Dir, txn_pool: &RwLock<HashMap<TxnId, Arc<Active>>>) {
+    debug!("TxnServer::cleanup");
+
     let expired = {
         let now = Gateway::time();
         let mut txn_pool = txn_pool.write().await;

@@ -9,6 +9,7 @@ use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
 use safecast::*;
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
@@ -102,7 +103,7 @@ impl History {
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
-                    if self.dir.contains(&txn_id, &hash).await? {
+                    if self.dir.contains(txn_id, &hash).await? {
                         debug!("BTree with hash {} is already saved", hash);
                     } else {
                         let file = self
@@ -125,7 +126,7 @@ impl History {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
-                    if self.dir.contains(&txn_id, &hash).await? {
+                    if self.dir.contains(txn_id, &hash).await? {
                         debug!("Table with hash {} is already saved", hash);
                     } else {
                         let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
@@ -151,7 +152,7 @@ impl History {
                         Tensor::Dense(dense) => {
                             let hash = dense.hash_hex(&txn).await?.parse()?;
 
-                            if self.dir.contains(&txn_id, &hash).await? {
+                            if self.dir.contains(txn_id, &hash).await? {
                                 debug!("Tensor with hash {} is already saved", hash);
                             } else {
                                 let file = self
@@ -168,7 +169,7 @@ impl History {
                         Tensor::Sparse(sparse) => {
                             let hash = sparse.hash_hex(&txn).await?.parse()?;
 
-                            if self.dir.contains(&txn_id, &hash).await? {
+                            if self.dir.contains(txn_id, &hash).await? {
                                 debug!("Tensor with hash {} is already saved", hash);
                             } else {
                                 let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
@@ -198,11 +199,11 @@ impl History {
         Ok(block.mutations().keys().next().cloned())
     }
 
-    pub async fn latest_block_id(&self, txn_id: &TxnId) -> TCResult<u64> {
+    pub async fn latest_block_id(&self, txn_id: TxnId) -> TCResult<u64> {
         self.latest.read(txn_id).map_ok(|id| *id).await
     }
 
-    pub async fn contains_block(&self, txn_id: &TxnId, block_id: u64) -> TCResult<bool> {
+    pub async fn contains_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<bool> {
         self.file.contains_block(txn_id, &block_id.into()).await
     }
 
@@ -224,7 +225,7 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<fs::BlockRead<ChainBlock>> {
+    ) -> TCResult<OwnedRwLockReadGuard<ChainBlock>> {
         self.file.read_block(txn_id, block_id.into()).await
     }
 
@@ -232,22 +233,22 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<fs::BlockWrite<ChainBlock>> {
+    ) -> TCResult<OwnedRwLockWriteGuard<ChainBlock>> {
         self.file.write_block(txn_id, block_id.into()).await
     }
 
-    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<fs::BlockRead<ChainBlock>> {
-        let latest = self.latest.read(&txn_id).await?;
+    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<OwnedRwLockReadGuard<ChainBlock>> {
+        let latest = self.latest.read(txn_id).await?;
         self.read_block(txn_id, (*latest).into()).await
     }
 
-    pub async fn write_latest(&self, txn_id: TxnId) -> TCResult<fs::BlockWrite<ChainBlock>> {
-        let latest = self.latest.read(&txn_id).await?;
+    pub async fn write_latest(&self, txn_id: TxnId) -> TCResult<OwnedRwLockWriteGuard<ChainBlock>> {
+        let latest = self.latest.read(txn_id).await?;
         self.write_block(txn_id, (*latest).into()).await
     }
 
     pub async fn apply_last(&self, txn: &Txn, subject: &Subject) -> TCResult<()> {
-        let latest = *self.latest.read(txn.id()).await?;
+        let latest = *self.latest.read(*txn.id()).await?;
         let block = self.read_block(*txn.id(), latest.into()).await?;
         let last_block = if latest > 0 && block.mutations().is_empty() {
             self.read_block(*txn.id(), (latest - 1).into()).await?
@@ -290,7 +291,7 @@ impl History {
         let txn_id = *txn.id();
 
         let (latest, other_latest) =
-            try_join!(self.latest.read(&txn_id), other.latest.read(&txn_id))?;
+            try_join!(self.latest.read(txn_id), other.latest.read(txn_id))?;
 
         if (*latest) > (*other_latest) {
             return Err(TCError::bad_request(
@@ -362,7 +363,7 @@ impl History {
 
             i += 1;
 
-            if other.contains_block(txn.id(), i).await? {
+            if other.contains_block(*txn.id(), i).await? {
                 self.create_next_block(*txn.id()).await?;
             } else {
                 break;
@@ -420,7 +421,7 @@ impl History {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let file = self.dir.get_file(txn.id(), &hash).await?.ok_or_else(|| {
+                let file = self.dir.get_file(*txn.id(), &hash).await?.ok_or_else(|| {
                     TCError::internal(format!("Chain is missing historical state {}", hash))
                 })?;
 
@@ -438,7 +439,7 @@ impl History {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let dir = self.dir.get_dir(txn.id(), &hash).await?;
+                let dir = self.dir.get_dir(*txn.id(), &hash).await?;
                 let dir = dir.ok_or_else(|| {
                     TCError::internal(format!("missing historical Chain state {}", hash))
                 })?;
@@ -458,7 +459,7 @@ impl History {
 
                 match tt {
                     TensorType::Dense => {
-                        let file = self.dir.get_file(txn.id(), &hash).await?;
+                        let file = self.dir.get_file(*txn.id(), &hash).await?;
                         let file = file.ok_or_else(|| {
                             TCError::internal(format!("missing historical Chain state {}", hash))
                         })?;
@@ -467,7 +468,7 @@ impl History {
                         Ok(Collection::Tensor(tensor.into()))
                     }
                     TensorType::Sparse => {
-                        let dir = self.dir.get_dir(txn.id(), &hash).await?;
+                        let dir = self.dir.get_dir(*txn.id(), &hash).await?;
                         let dir = dir.ok_or_else(|| {
                             TCError::internal(format!("missing historical Chain state {}", hash))
                         })?;
@@ -497,12 +498,12 @@ impl Persist<fs::Dir> for History {
         let txn_id = txn.id();
 
         let file: fs::File<ChainBlock> = dir
-            .get_file(txn_id, &CHAIN.into())
+            .get_file(*txn_id, &CHAIN.into())
             .await?
             .ok_or_else(|| TCError::internal("Chain has no history file"))?;
 
         let dir = dir
-            .get_dir(txn_id, &DATA.into())
+            .get_dir(*txn_id, &DATA.into())
             .await?
             .ok_or_else(|| TCError::internal("Chain has no data directory"))?;
 
@@ -520,7 +521,7 @@ impl Persist<fs::Dir> for History {
                 )));
             }
 
-            if file.contains_block(txn_id, &(latest + 1).into()).await? {
+            if file.contains_block(*txn_id, &(latest + 1).into()).await? {
                 latest += 1;
             } else {
                 break;
@@ -696,7 +697,7 @@ impl<'en> IntoView<'en, fs::Dir> for History {
         debug!("History::into_view");
 
         let txn_id = *txn.id();
-        let latest = self.latest.read(&txn_id).await?;
+        let latest = self.latest.read(txn_id).await?;
 
         let file = self.file.clone();
         let read_block = move |block_id| Box::pin(file.clone().read_block_owned(txn_id, block_id));

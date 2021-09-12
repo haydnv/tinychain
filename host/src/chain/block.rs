@@ -112,7 +112,7 @@ impl Persist<fs::Dir> for BlockChain {
     }
 
     async fn load(txn: &Txn, schema: Schema, dir: fs::Dir) -> TCResult<Self> {
-        let is_new = dir.is_empty(txn.id()).await?;
+        let is_new = dir.is_empty(*txn.id()).await?;
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
         let history = if is_new {
@@ -196,7 +196,7 @@ async fn validate(txn: Txn, schema: Schema, history: History) -> TCResult<BlockC
     let subject = Subject::create(schema.clone(), txn.context(), *txn.id()).await?;
 
     let mut i = 0u64;
-    while history.contains_block(&txn_id, i).await? {
+    while history.contains_block(*txn_id, i).await? {
         let block = history.read_block(*txn_id, i.into()).await?;
 
         for (_, ops) in block.mutations() {

@@ -872,7 +872,7 @@ where
 
     async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let file = store
-            .get_file(txn.id(), &PRIMARY_INDEX.into())
+            .get_file(*txn.id(), &PRIMARY_INDEX.into())
             .await?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
@@ -880,7 +880,7 @@ where
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
-            let file = store.get_file(txn.id(), name).await?.ok_or_else(|| {
+            let file = store.get_file(*txn.id(), name).await?.ok_or_else(|| {
                 TCError::internal(format!("cannot load Table: missing index {}", name))
             })?;
 

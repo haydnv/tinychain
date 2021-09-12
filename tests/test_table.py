@@ -14,7 +14,7 @@ SCHEMA = (
 class TableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_table")
+        cls.host = start_host("test_table", cache_size="1G")
 
     def testAggregate(self):
         count = 10

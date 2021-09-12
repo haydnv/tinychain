@@ -86,7 +86,7 @@ impl Persist<fs::Dir> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let is_new = dir.is_empty(txn.id()).await?;
+        let is_new = dir.is_empty(*txn.id()).await?;
 
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
@@ -96,7 +96,7 @@ impl Persist<fs::Dir> for SyncChain {
             History::load(txn, (), dir).await?
         };
 
-        let latest = history.latest_block_id(txn.id()).await?;
+        let latest = history.latest_block_id(*txn.id()).await?;
         if latest > 0 {
             return Err(TCError::internal(format!(
                 "a SyncChain can only have one block, found {}",

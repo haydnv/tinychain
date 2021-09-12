@@ -12,7 +12,7 @@ ENDPOINT = "/transact/hypothetical"
 class DenseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_dense_tensor")
+        cls.host = start_host("test_dense_tensor", cache_size="10G")
 
     def testConstant(self):
         c = 1.414
@@ -207,7 +207,7 @@ class DenseTests(unittest.TestCase):
 class SparseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_sparse_tensor")
+        cls.host = start_host("test_sparse_tensor", cache_size="1G")
 
     def testCreate(self):
         shape = [2, 5]

@@ -220,7 +220,7 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
             Box::pin(async move {
                 key.expect_none()?;
 
-                let replicas = self.cluster.replicas(txn.id()).await?;
+                let replicas = self.cluster.replicas(*txn.id()).await?;
                 assert!(replicas.contains(&txn.link(self.cluster.link().path().clone())));
                 Ok(Value::from_iter(replicas).into())
             })

@@ -6,8 +6,9 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::{de, en};
@@ -15,14 +16,13 @@ use futures::future::{try_join_all, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::{try_join, TryStreamExt};
 use log::debug;
-use uplock::*;
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{self, BlockData, BlockId, Store};
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
-use tcgeneric::TCBoxTryFuture;
 
 use super::cache::*;
 use super::{file_name, fs_path, DirContents, TMP};
@@ -40,79 +40,15 @@ where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    type ReadLock = BlockRead<B>;
-    type WriteLock = BlockWrite<B>;
+    type ReadLock = OwnedRwLockReadGuard<B>;
+    type WriteLock = OwnedRwLockWriteGuard<B>;
 
     async fn read(self) -> Self::ReadLock {
-        let lock = self.lock.read().await;
-        BlockRead {
-            name: self.name,
-            txn_id: self.txn_id,
-            lock,
-        }
+        self.lock.read().await
     }
 
     async fn write(self) -> Self::WriteLock {
-        let lock = self.lock.write().await;
-        BlockWrite {
-            name: self.name,
-            txn_id: self.txn_id,
-            lock,
-        }
-    }
-}
-
-pub struct BlockRead<B> {
-    name: BlockId,
-    txn_id: TxnId,
-    lock: RwLockReadGuard<B>,
-}
-
-impl<B> Deref for BlockRead<B> {
-    type Target = B;
-
-    fn deref(&self) -> &B {
-        self.lock.deref()
-    }
-}
-
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockRead<B, File<B>> for BlockRead<B>
-where
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-{
-    fn upgrade(self, file: &File<B>) -> TCBoxTryFuture<BlockWrite<B>> {
-        Box::pin(fs::File::write_block(file, self.txn_id, self.name))
-    }
-}
-
-pub struct BlockWrite<B> {
-    name: BlockId,
-    txn_id: TxnId,
-    lock: RwLockWriteGuard<B>,
-}
-
-impl<B> Deref for BlockWrite<B> {
-    type Target = B;
-
-    fn deref(&self) -> &B {
-        self.lock.deref()
-    }
-}
-
-impl<B> DerefMut for BlockWrite<B> {
-    fn deref_mut(&mut self) -> &mut B {
-        self.lock.deref_mut()
-    }
-}
-
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::BlockWrite<B, File<B>> for BlockWrite<B>
-where
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-{
-    fn downgrade(self, file: &File<B>) -> TCBoxTryFuture<BlockRead<B>> {
-        Box::pin(fs::File::read_block(file, self.txn_id, self.name))
+        self.lock.write().await
     }
 }
 
@@ -122,19 +58,19 @@ pub struct File<B> {
     path: PathBuf,
     cache: Cache,
     contents: TxnLock<HashSet<BlockId>>,
-    mutated: RwLock<HashMap<TxnId, HashSet<BlockId>>>,
+    mutated: Arc<RwLock<HashMap<TxnId, HashSet<BlockId>>>>,
     phantom: PhantomData<B>,
 }
 
 impl<B: BlockData> File<B> {
     fn _new(cache: Cache, path: PathBuf, block_ids: HashSet<BlockId>) -> Self {
-        let lock_name = format!("file contents at {:?}", &path);
+        let txn_lock_name = format!("file contents at {:?}", &path);
 
         File {
             path,
             cache,
-            contents: TxnLock::new(lock_name, block_ids),
-            mutated: RwLock::new(HashMap::new()),
+            contents: TxnLock::new(txn_lock_name, block_ids),
+            mutated: Arc::new(RwLock::new(HashMap::new())),
             phantom: PhantomData,
         }
     }
@@ -171,7 +107,11 @@ impl<B: BlockData> File<B> {
         }
     }
 
-    pub async fn sync_block<'en>(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>>
+    pub async fn sync_block<'en>(
+        &self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<OwnedRwLockWriteGuard<B>>
     where
         B: en::IntoStream<'en> + 'en,
         CacheBlock: From<CacheLock<B>>,
@@ -188,7 +128,7 @@ impl<B: BlockData> File<B> {
 
 #[async_trait]
 impl<B: BlockData> Store for File<B> {
-    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.is_empty())
@@ -204,12 +144,12 @@ where
 {
     type Block = Block<B>;
 
-    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
+    async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>> {
         let contents = self.contents.read(txn_id).await?;
         Ok((*contents).clone())
     }
 
-    async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId> {
+    async fn unique_id(&self, txn_id: TxnId) -> TCResult<BlockId> {
         let contents = self.contents.read(txn_id).await?;
         let id = loop {
             let id: BlockId = Uuid::new_v4().into();
@@ -221,7 +161,7 @@ where
         Ok(id)
     }
 
-    async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool> {
+    async fn contains_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<bool> {
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.contains(name))
@@ -230,7 +170,7 @@ where
 
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()> {
         let (new_block_ids, mut contents) =
-            try_join!(other.contents.read(&txn_id), self.contents.write(txn_id))?;
+            try_join!(other.contents.read(txn_id), self.contents.write(txn_id))?;
 
         let mut copied_block_ids = HashSet::with_capacity(new_block_ids.len());
 
@@ -300,7 +240,7 @@ where
         debug!("File::get_block {}", name);
 
         {
-            let contents = self.contents.read(&txn_id).await?;
+            let contents = self.contents.read(txn_id).await?;
             if !contents.contains(&name) {
                 return Err(TCError::not_found(format!("block named {}", name)));
             }
@@ -322,21 +262,29 @@ where
         }
     }
 
-    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<OwnedRwLockReadGuard<B>> {
         debug!("File::read_block {}", name);
 
         let block = self.get_block(txn_id, name).await?;
         Ok(fs::Block::read(block).await)
     }
 
-    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockRead<B>> {
+    async fn read_block_owned(
+        self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<OwnedRwLockReadGuard<B>> {
         debug!("File::read_block_owned {}", name);
 
         let block = self.get_block(txn_id, name).await?;
         Ok(fs::Block::read(block).await)
     }
 
-    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<BlockWrite<B>> {
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<OwnedRwLockWriteGuard<B>> {
         debug!("File::write_block");
         let block = self.get_block(txn_id, name.clone()).await?;
         self.mutate(txn_id, name).await;
@@ -370,14 +318,14 @@ where
         let file_path = &self.path;
         let cache = &self.cache;
         {
-            let contents = self.contents.read(txn_id).await.expect("file block list");
+            let contents = self.contents.read(*txn_id).await.expect("file block list");
             let mutated = self.mutated.read().await;
-            if let Some(blocks) = mutated.get(txn_id) {
+            if let Some(blocks) = mutated.get(&txn_id) {
                 let commits = blocks
                     .iter()
                     .filter(|block_id| contents.contains(block_id))
                     .map(|block_id| {
-                        let version_path = block_version(file_path, txn_id, block_id);
+                        let version_path = block_version(file_path, &txn_id, block_id);
                         let block_path = fs_path(file_path, block_id);
                         cache.sync_and_copy(version_path, block_path)
                     });
@@ -388,7 +336,7 @@ where
             }
         }
 
-        self.contents.commit(txn_id).await;
+        self.contents.commit(&txn_id).await;
         debug!("committed {:?} at {}", &self.path, txn_id);
     }
 
@@ -398,7 +346,7 @@ where
         let file_path = &self.path;
         let cache = &self.cache;
         {
-            let contents = self.contents.read(txn_id).await.expect("file block list");
+            let contents = self.contents.read(*txn_id).await.expect("file block list");
             let mut mutated = self.mutated.write().await;
             if let Some(blocks) = mutated.remove(txn_id) {
                 let deletes = blocks

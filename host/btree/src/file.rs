@@ -246,7 +246,7 @@ where
 
     /// Create a new `BTreeFile`.
     pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
-        if !file.is_empty(&txn_id).await? {
+        if !file.is_empty(txn_id).await? {
             return Err(TCError::internal(
                 "Tried to create a new BTree without a new File",
             ));
@@ -318,7 +318,7 @@ where
     fn _insert(
         &self,
         txn_id: TxnId,
-        node: <F::Block as Block<Node, F>>::ReadLock,
+        mut node: <F::Block as Block<Node, F>>::WriteLock,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
@@ -333,12 +333,14 @@ where
 
             if node.leaf {
                 let key = NodeKey::new(key);
-                let mut node = node.upgrade(file).await?;
 
                 if i == node.keys.len() {
                     node.keys.insert(i, key);
                     return Ok(());
                 }
+
+                #[cfg(debug_assertions)]
+                debug!("insert key {} into {} at {}", key, *node, i);
 
                 match collator.compare_slice(&key, &node.keys[i]) {
                     Ordering::Less => node.keys.insert(i, key),
@@ -353,22 +355,16 @@ where
                 Ok(())
             } else {
                 let child_id = node.children[i].clone();
-                let child = file.read_block(txn_id, child_id).await?;
+                let child = file.write_block(txn_id, child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
-                    // split_child will need a write lock on child, so drop the read lock
-                    std::mem::drop(child);
-
                     let child_id = node.children[i].clone();
-                    let node = self
-                        .split_child(txn_id, child_id, node.upgrade(file).await?, i)
-                        .await?;
+                    let mut node = self.split_child(txn_id, node, child_id, child, i).await?;
 
                     match collator.compare_slice(&key, &node.keys[i]) {
                         Ordering::Less => self._insert(txn_id, node, key).await,
                         Ordering::Equal => {
                             if node.keys[i].deleted {
-                                let mut node = node.upgrade(file).await?;
                                 node.keys[i].deleted = false;
                             }
 
@@ -376,11 +372,17 @@ where
                         }
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
-                            let child = file.read_block(txn_id, child_id).await?;
+
+                            // don't need this write lock anymore
+                            std::mem::drop(node);
+
+                            let child = file.write_block(txn_id, child_id).await?;
                             self._insert(txn_id, child, key).await
                         }
                     }
                 } else {
+                    // don't need this write lock any more
+                    std::mem::drop(node);
                     self._insert(txn_id, child, key).await
                 }
             }
@@ -514,7 +516,7 @@ where
     where
         Self: 'a,
     {
-        let root_id = self.inner.root.read(&txn_id).await?;
+        let root_id = self.inner.root.read(txn_id).await?;
 
         let root = self
             .inner
@@ -532,17 +534,17 @@ where
     async fn split_child(
         &self,
         txn_id: TxnId,
-        node_id: NodeId,
         mut node: <F::Block as Block<Node, F>>::WriteLock,
+        node_id: NodeId,
+        mut child: <F::Block as Block<Node, F>>::WriteLock,
         i: usize,
-    ) -> TCResult<<F::Block as Block<Node, F>>::ReadLock> {
+    ) -> TCResult<<F::Block as Block<Node, F>>::WriteLock> {
         debug!("btree::split_child");
 
         let file = &self.inner.file;
         let order = self.inner.order;
 
-        let child_id = node.children[i].clone(); // needed due to mutable borrow below
-        let mut child = file.write_block(txn_id, child_id.clone()).await?;
+        assert_eq!(node_id, node.children[i].clone());
 
         debug!(
             "child to split has {} keys and {} children",
@@ -550,7 +552,7 @@ where
             child.children.len()
         );
 
-        let new_node_id = file.unique_id(&txn_id).await?;
+        let new_node_id = file.unique_id(txn_id).await?;
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(order - 1));
@@ -566,7 +568,7 @@ where
 
         file.create_block(txn_id, new_node_id, new_node).await?;
 
-        node.downgrade(file).await
+        Ok(node)
     }
 }
 
@@ -602,7 +604,7 @@ where
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        let root_id = self.inner.root.read(&txn_id).await?;
+        let root_id = self.inner.root.read(txn_id).await?;
         let root = self
             .inner
             .file
@@ -643,7 +645,7 @@ where
 
             self.inner.file.truncate(txn_id).await?;
 
-            *root = self.inner.file.unique_id(&txn_id).await?;
+            *root = self.inner.file.unique_id(txn_id).await?;
 
             self.inner
                 .file
@@ -653,7 +655,7 @@ where
             return Ok(());
         }
 
-        let root_id = self.inner.root.read(&txn_id).await?;
+        let root_id = self.inner.root.read(txn_id).await?;
         self._delete_range(txn_id, (*root_id).clone(), &range).await
     }
 
@@ -668,7 +670,7 @@ where
         let mut root_id = self.inner.root.write(txn_id).await?;
         debug!("insert into BTree with root node ID {}", *root_id);
 
-        let root = file.read_block(txn_id, (*root_id).clone()).await?;
+        let root = file.write_block(txn_id, (*root_id).clone()).await?;
 
         #[cfg(debug_assertions)]
         debug!(
@@ -686,14 +688,11 @@ where
         assert_eq!(root.children.is_empty(), root.leaf);
 
         if root.keys.len() == (2 * order) - 1 {
-            // split_child will need a write lock on root, so release the read lock
-            std::mem::drop(root);
-
             debug!("split root node");
 
             let old_root_id = (*root_id).clone();
 
-            (*root_id) = file.unique_id(&txn_id).await?;
+            (*root_id) = file.unique_id(txn_id).await?;
 
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
@@ -703,7 +702,7 @@ where
                 .await?;
 
             let new_root = new_root.write().await;
-            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+            let new_root = self.split_child(txn_id,  new_root, old_root_id, root, 0).await?;
             self._insert(txn_id, new_root, key).await
         } else {
             // no need to keep this write lock since we're not splitting the root node
@@ -745,7 +744,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
 
         let txn_id = *txn.id();
         let mut root = None;
-        for block_id in file.block_ids(&txn_id).await? {
+        for block_id in file.block_ids(txn_id).await? {
             let block = file.read_block(txn_id, block_id.clone()).await?;
             if block.parent.is_none() {
                 root = Some(block_id);
@@ -770,7 +769,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T>
 
         let mut root_id = self.inner.root.write(txn_id).await?;
         self.inner.file.truncate(txn_id).await?;
-        *root_id = backup.inner.root.read(&txn_id).await?.clone();
+        *root_id = backup.inner.root.read(txn_id).await?.clone();
         self.inner.file.copy_from(&backup.inner.file, txn_id).await
     }
 }

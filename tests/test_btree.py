@@ -147,7 +147,8 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         for i in range(n):
             hosts[0].put("/test/btree/tree", None, (i, num2words(i)))
 
-        self.assertEqual(hosts[1].get("/test/btree/tree/count"), n)
+        for host in hosts:
+            self.assertEqual(host.get("/test/btree/tree/count"), n)
 
 
 def expected(rows):
