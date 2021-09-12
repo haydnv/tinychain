@@ -29,6 +29,12 @@ class BadRequest(TinyChainError):
     __uri__ = uri(TinyChainError) + "/bad_request"
 
 
+class Conflict(TinyChainError):
+    """Error indicating that the requested resource is unavailable due to a lock in a different transaction."""
+
+    __uri__ = uri(TinyChainError) + "/conflict"
+
+
 class Forbidden(TinyChainError):
     """Error indicating that the requestor is not authorized to access a requested resource."""
 
