@@ -1,7 +1,7 @@
 """Reference types."""
 
 from tinychain.reflect import is_conditional
-from tinychain.util import deanonymize, requires, to_json, uri, URI
+from tinychain.util import deanonymize, get_ref, requires, to_json, uri, URI
 
 
 class Ref(object):
@@ -170,6 +170,9 @@ class With(Ref):
     def __ns__(self, cxt):
         deanonymize(self.capture, cxt)
         deanonymize(self.op, cxt)
+
+    def __ref__(self, name):
+        return get_ref(self.op, name)
 
 
 class Op(Ref):

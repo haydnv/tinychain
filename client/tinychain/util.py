@@ -1,6 +1,7 @@
 """Utility data structures and functions."""
 
 import inspect
+import logging
 
 from collections import OrderedDict
 
@@ -49,6 +50,7 @@ class Context(object):
             elif hasattr(value, "__ref__"):
                 return get_ref(value, name)
             else:
+                logging.info(f"context attribute {value} has no __ref__ method")
                 return URI(name)
         else:
             raise ValueError(f"Context has no such value: {name}")
@@ -249,6 +251,9 @@ class URI(object):
 
 def requires(subject):
     """Return a set of the IDs of the dependencies required to resolve the given state."""
+
+    if inspect.isclass(subject):
+        return set()
 
     if hasattr(subject, "__deps__"):
         return subject.__deps__()
