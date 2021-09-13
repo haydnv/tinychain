@@ -15,6 +15,9 @@ class Op(object):
     __uri__ = uri(op.Op)
 
     def __init__(self, form):
+        if not inspect.isfunction(form):
+            raise ValueError(f"reflection requires a Python callable, not {form}")
+
         self.form = form
 
     def __deps__(self):
@@ -24,6 +27,9 @@ class Op(object):
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
+
+    def __ref__(self):
+        raise RuntimeError("cannot reference a reflected Op; use Get, Put, Post, or Delete instead")
 
     def dtype(self):
         return self.__class__.__name__

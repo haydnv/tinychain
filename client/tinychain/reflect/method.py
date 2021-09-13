@@ -15,6 +15,9 @@ class Method(object):
     __uri__ = uri(op.Op)
 
     def __init__(self, header, form, name):
+        if not inspect.ismethod(form):
+            raise ValueError(f"reflection requires a Python method, not {form}")
+
         self.header = header
         self.form = form
         self.name = name

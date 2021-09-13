@@ -36,7 +36,11 @@ class Host(object):
     def _handle(self, req):
         response = req()
         status = response.status_code
-        response = json.loads(response.text)
+
+        try:
+            response = json.loads(response.text)
+        except json.decoder.JSONDecodeError as cause:
+            raise ValueError(f"invalid JSON response: {response.text} ({cause}")
 
         if status == 200:
             return response

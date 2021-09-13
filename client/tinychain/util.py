@@ -44,7 +44,7 @@ class Context(object):
     def __getattr__(self, name):
         if name in self.form:
             value = self.form[name]
-            if isinstance(value, type):
+            if inspect.isclass(value):
                 from .state import Class
                 return Class(URI(name))
             elif hasattr(value, "__ref__"):

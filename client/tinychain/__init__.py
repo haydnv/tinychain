@@ -12,7 +12,7 @@ from tinychain.cluster import Cluster, write_cluster
 from tinychain.collection.btree import BTree
 from tinychain.collection.schema import Column
 from tinychain.collection.table import Table
-from tinychain.decorators import *
+from tinychain.decorators import delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
 from tinychain.ref import After, If, Case
 from tinychain.reflect.meta import Meta
 from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple

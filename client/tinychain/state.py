@@ -16,7 +16,9 @@ class State(object):
     def __init__(self, form):
         self.__form__ = form
 
-        if isinstance(form, URI):
+        if hasattr(form, "__form__"):
+            self.__uri__ = uri(form_of(form))
+        elif isinstance(form, URI):
             self.__uri__ = form
 
         reflect.meta.gen_headers(self)
@@ -35,7 +37,10 @@ class State(object):
         deanonymize(form_of(self), cxt)
 
     def __ref__(self, name):
-        return self.__class__(URI(name))
+        if hasattr(form_of(self), "__ref__"):
+            return self.__class__(get_ref(form_of(self), name))
+        else:
+            return self.__class__(URI(name))
 
     def __repr__(self):
         return f"{self.__class__.__name__}({form_of(self)})"
@@ -156,6 +161,9 @@ class Tuple(State):
     def extend(self, other):
         return self._get("extend", other, Tuple)
 
+    def fold(self, initial_state, op):
+        return self._post("fold", {"value": initial_state, "op": op}, type(initial_state))
+
     def map(self, op):
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("map", {"op": op}, rtype)
@@ -201,8 +209,8 @@ class Stream(State):
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("for_each", Map(op=op), rtype)
 
-    def fold(self, initial_value, op):
-        return self._post("fold", Map(value=initial_value, op=op), type(initial_value))
+    def fold(self, initial_state, op):
+        return self._post("fold", Map(value=initial_state, op=op), type(initial_state))
 
     def map(self, op):
         return self._post("map", Map(op=op), Stream)
