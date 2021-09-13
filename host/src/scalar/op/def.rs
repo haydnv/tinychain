@@ -206,21 +206,87 @@ impl<'a> Handler<'a> for OpDef {
     where
         'b: 'a,
     {
-        None
+        if let OpDef::Put((key_name, value_name, op_def)) = *self {
+            Some(Box::new(|txn, key, value| {
+                Box::pin(async move {
+                    let capture = if let Some((capture, _)) = op_def.last() {
+                        capture.clone()
+                    } else {
+                        return Ok(());
+                    };
+
+                    let key = State::from(key);
+                    let args = std::array::IntoIter::new([(key_name, key), (value_name, value)]);
+                    let op_def = op_def
+                        .into_iter()
+                        .map(|(id, provider)| (id, State::Scalar(provider)));
+
+                    let data = args.chain(op_def);
+                    let executor: Executor<State> = Executor::new(txn, None, data);
+                    executor.capture(capture).await?;
+                    Ok(())
+                })
+            }))
+        } else {
+            None
+        }
     }
 
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        None
+        if let OpDef::Post(op_def) = *self {
+            Some(Box::new(|txn, params| {
+                Box::pin(async move {
+                    let capture = if let Some((capture, _)) = op_def.last() {
+                        capture.clone()
+                    } else {
+                        return Ok(State::default());
+                    };
+
+                    let op_def = op_def
+                        .into_iter()
+                        .map(|(id, provider)| (id, State::Scalar(provider)));
+
+                    let data = params.into_iter().chain(op_def);
+                    let executor: Executor<State> = Executor::new(txn, None, data);
+                    executor.capture(capture).await
+                })
+            }))
+        } else {
+            None
+        }
     }
 
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        None
+        if let OpDef::Get((key_name, op_def)) = *self {
+            Some(Box::new(|txn, key| {
+                Box::pin(async move {
+                    let capture = if let Some((capture, _)) = op_def.last() {
+                        capture.clone()
+                    } else {
+                        return Ok(());
+                    };
+
+                    let key = State::from(key);
+                    let data = iter::once((key_name, key)).chain(
+                        op_def
+                            .into_iter()
+                            .map(|(id, provider)| (id, State::Scalar(provider))),
+                    );
+
+                    let executor: Executor<State> = Executor::new(txn, None, data);
+                    executor.capture(capture).await?;
+                    Ok(())
+                })
+            }))
+        } else {
+            None
+        }
     }
 }
 
