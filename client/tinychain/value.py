@@ -1,6 +1,6 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from tinychain.ref import Ref
+from tinychain.ref import If, Ref
 from tinychain.state import Scalar
 from tinychain.util import form_of, to_json, uri, URI
 
@@ -87,6 +87,14 @@ class Number(Value):
 
     __uri__ = uri(Value) + "/number"
 
+    @classmethod
+    def max(cls, l, r):
+        return cls(If(l >= r, l, r))
+
+    @classmethod
+    def min(cls, l, r):
+        return cls(If(l <= r, l, r))
+
     def __abs__(self):
         return self.abs()
 
@@ -119,6 +127,15 @@ class Number(Value):
 
     def __rmul__(self, other):
         return self.mul(other)
+
+    def __rdiv__(self, other):
+        return self.__class__(other).div(self)
+
+    def __rpow__(self, other):
+        return self.__class__(other)**self
+
+    def __rtruediv__(self, other):
+        return self.__class__(other).div(self)
 
     def __ne__(self, other):
         return self.ne(other)
