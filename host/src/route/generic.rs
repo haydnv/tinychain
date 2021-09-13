@@ -1,3 +1,4 @@
+use std::array::IntoIter;
 use std::fmt;
 use std::iter::Cloned;
 use std::ops::Deref;
@@ -8,7 +9,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, Value};
-use tcgeneric::{label, Id, Instance, Map, PathSegment, Tuple};
+use tcgeneric::{label, Id, Instance, Label, Map, PathSegment, Tuple};
 
 use crate::closure::Closure;
 use crate::scalar::Scalar;
@@ -208,6 +209,43 @@ where
     }
 }
 
+struct TupleFoldHandler<'a, T> {
+    tuple: &'a Tuple<T>,
+}
+
+impl<'a, T> Handler<'a> for TupleFoldHandler<'a, T>
+where
+    T: Clone + Send + Sync + 'a,
+    State: From<T>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let mut state: State = params.require(&label("value").into())?;
+                let op: Closure = params.require(&label("op").into())?;
+
+                const ITEM: Label = label("item");
+                const STATE: Label = label("state");
+                for item in self.tuple.iter().cloned() {
+                    let args = IntoIter::new([(ITEM.into(), item.into()), (STATE.into(), state)]);
+                    state = op.clone().call(txn, State::Map(args.collect())).await?;
+                }
+
+                Ok(state)
+            })
+        }))
+    }
+}
+
+impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for TupleFoldHandler<'a, T> {
+    fn from(tuple: &'a Tuple<T>) -> Self {
+        Self { tuple }
+    }
+}
+
 struct MapOpHandler<I> {
     len: usize,
     items: I,
@@ -353,6 +391,7 @@ where
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "append" => Some(Box::new(AppendHandler::from(self))),
+                "fold" => Some(Box::new(TupleFoldHandler::from(self))),
                 "eq" => Some(Box::new(EqTupleHandler::from(self.clone()))),
                 "map" => Some(Box::new(MapOpHandler::from(self))),
                 "zip" => Some(Box::new(ZipHandler::from(self))),
