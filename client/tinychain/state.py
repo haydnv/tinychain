@@ -16,9 +16,7 @@ class State(object):
     def __init__(self, form):
         self.__form__ = form
 
-        if hasattr(form, "__form__"):
-            self.__uri__ = uri(form_of(form))
-        elif isinstance(form, URI):
+        if isinstance(form, URI):
             self.__uri__ = form
 
         reflect.meta.gen_headers(self)
@@ -28,13 +26,17 @@ class State(object):
 
     def __json__(self):
         form = form_of(self)
-        if isinstance(form, URI) or isinstance(form, ref.Op):
+
+        if reflect.is_ref(form):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}
 
     def __ns__(self, cxt):
         deanonymize(form_of(self), cxt)
+
+        if isinstance(self.__form__, URI):
+            self.__uri__ = self.__form__
 
     def __ref__(self, name):
         if hasattr(form_of(self), "__ref__"):

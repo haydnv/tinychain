@@ -53,7 +53,7 @@ class Context(object):
                 logging.info(f"context attribute {value} has no __ref__ method")
                 return URI(name)
         else:
-            raise ValueError(f"Context has no such value: {name}")
+            raise AttributeError(f"Context has no such value: {name}")
 
     def __json__(self):
         return to_json(list(self.form.items()))

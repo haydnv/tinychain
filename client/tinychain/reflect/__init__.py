@@ -46,7 +46,12 @@ def is_op(fn):
 def is_ref(state):
     from tinychain.ref import Ref
 
-    return isinstance(state, Ref) or isinstance(state, URI)
+    if isinstance(state, Ref) or isinstance(state, URI):
+        return True
+    elif hasattr(state, "__form__"):
+        return is_ref(form_of(state))
+    else:
+        return False
 
 
 def resolve_class(subject, annotation, default):

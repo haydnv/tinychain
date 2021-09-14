@@ -1,7 +1,7 @@
 """Reference types."""
 
 from tinychain.reflect import is_conditional
-from tinychain.util import deanonymize, get_ref, requires, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, get_ref, requires, to_json, uri, URI
 
 
 class Ref(object):
@@ -191,12 +191,12 @@ class Op(Ref):
         return deps
 
     def __json__(self):
-        if isinstance(self.subject, Ref):
-            subject = self.subject
+        if hasattr(self.subject, "__form__"):
+            subject = form_of(self.subject)
         else:
-            subject = uri(self.subject)
+            subject = self.subject
 
-        return {str(subject): to_json(self.args)}
+        return {str(uri(subject)): to_json(self.args)}
 
     def __ns__(self, cxt):
         deanonymize(self.subject, cxt)
