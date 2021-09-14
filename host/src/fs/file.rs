@@ -374,6 +374,14 @@ where
     }
 }
 
+impl<B> Eq for File<B> {}
+
+impl<B> PartialEq for File<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
 impl<B> fmt::Display for File<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "file at {:?}", &self.path)

@@ -32,7 +32,7 @@ use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File
 
 const VALUE_EXT: &'static str = "value";
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum FileEntry {
     BTree(File<Node>),
     Chain(File<ChainBlock>),
@@ -185,7 +185,7 @@ impl fmt::Display for FileEntry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 enum DirEntry {
     Dir(Dir),
     File(FileEntry),
@@ -279,6 +279,14 @@ impl Dir {
                 break Ok(id);
             }
         }
+    }
+}
+
+impl Eq for Dir {}
+
+impl PartialEq for Dir {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
     }
 }
 
