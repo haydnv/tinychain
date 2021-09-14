@@ -64,10 +64,8 @@ class NeuralNetTests(unittest.TestCase):
             0, 0, 1, 1
         ])
         cxt.nn = NeuralNet([nn_layer(8, 8, cxt.relu), nn_layer(8, 4, cxt.sigmoid)])
-        # cxt.inputs = tc.tensor.Dense.load([1, 1], tc.U8, [0])
-        # cxt.nn = NeuralNet([nn_layer(1, 1, cxt.relu)])
         cxt.result = cxt.nn.eval(cxt.inputs)
-        print(tc.to_json(cxt))
+
         print(self.host.post(ENDPOINT, cxt))
 
     @classmethod
