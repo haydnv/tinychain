@@ -97,6 +97,7 @@ class ClientDocTests(unittest.TestCase):
 
     def testHello(self):
         hello = "Hello, World!"
+        self.assertEqual(self.host.get(tc.uri(tc.String), hello), hello)
         self.assertEqual(self.host.post(ENDPOINT, tc.String(hello)), hello)
 
     def testExampleOp(self):

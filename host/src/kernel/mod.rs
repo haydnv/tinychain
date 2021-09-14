@@ -60,6 +60,12 @@ impl Kernel {
                     TCPath::from(path)
                 )))
             }
+        } else if let Some(class) = ScalarType::from_path(path) {
+            let err = format!("cannot cast into an instance of {} from {}", class, key);
+            Scalar::from(key)
+                .into_type(class)
+                .map(State::Scalar)
+                .ok_or_else(|| TCError::unsupported(err))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
