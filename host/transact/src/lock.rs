@@ -1,7 +1,7 @@
 //! A [`TxnLock`] featuring transaction-specific versioning
 
 use std::cell::UnsafeCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -77,8 +77,9 @@ impl<T: Clone> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
+        let state = self.lock.lock_inner("TxnLockWriteGuard::deref");
+
         unsafe {
-            let state = self.lock.lock_inner("TxnLockWriteGuard::deref");
             &*state
                 .versions
                 .get(&self.txn_id)
@@ -90,8 +91,10 @@ impl<T: Clone> Deref for TxnLockWriteGuard<T> {
 
 impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
+        let mut state = self.lock.lock_inner("TxnLockWriteGuard::deref");
+        state.pending_writes.insert(self.txn_id);
+
         unsafe {
-            let state = self.lock.lock_inner("TxnLockWriteGuard::deref");
             &mut *state
                 .versions
                 .get(&self.txn_id)
@@ -117,7 +120,7 @@ struct LockState<T> {
     last_commit: TxnId,
     readers: BTreeMap<TxnId, usize>,
     writer: Option<TxnId>,
-    pending_commit: Option<TxnId>,
+    pending_writes: HashSet<TxnId>,
     wakers: VecDeque<Weak<Mutex<Option<Waker>>>>,
 }
 
@@ -160,7 +163,7 @@ impl<T> TxnLock<T> {
             last_commit: super::id::MIN_ID,
             readers: BTreeMap::new(),
             writer: None,
-            pending_commit: None,
+            pending_writes: HashSet::new(),
             wakers: VecDeque::new(),
         };
 
@@ -243,23 +246,55 @@ impl<T: Clone + Send> TxnLock<T> {
 
         if state.last_commit >= txn_id {
             // can't write-lock a committed version
+            debug!(
+                "TxnLock {} has a commit at {}",
+                self.inner.name, state.last_commit
+            );
             return Err(TCError::conflict());
         }
 
-        if let Some(writer) = state.writer {
-            // if there's an active write lock, wait it out
-            debug!("TxnLock has an active write lock at {}", writer);
-            return Ok(None);
-        } else if let Some(readers) = state.readers.get(&txn_id) {
-            // if there's an active read lock for this txn_id, wait it out
-            if readers > &0 {
-                debug!("TxnLock has {} active readers at {}", readers, txn_id);
-                return Ok(None);
+        if let Some(pending) = state.pending_writes.iter().max() {
+            if pending > &txn_id {
+                // there's already a write in the future
+                debug!("TxnLock {} has a write at {}", self.inner.name, pending);
+                return Err(TCError::conflict());
             }
-        } else if let Some(reader) = state.readers.keys().max() {
+        }
+
+        if let Some(reader) = state.readers.keys().max() {
             if reader > &txn_id {
                 // can't write-lock the past
+                debug!("TxnLock {} has a reader at {}", self.inner.name, txn_id);
                 return Err(TCError::conflict());
+            }
+        }
+
+        if let Some(readers) = state.readers.get(&txn_id) {
+            // if there's an active read lock for this txn_id, wait it out
+            if readers > &0 {
+                debug!(
+                    "TxnLock {} has {} active readers at {}",
+                    self.inner.name, readers, txn_id
+                );
+
+                return Ok(None);
+            }
+        }
+
+        if let Some(writer) = &state.writer {
+            // if there's an active write lock, wait it out
+            debug!(
+                "TxnLock {} has an active write lock at {}",
+                self.inner.name, writer
+            );
+
+            return Ok(None);
+        }
+
+        if let Some(pending) = state.pending_writes.iter().min() {
+            if pending > &state.last_commit && pending < &txn_id {
+                // if there's a past write that might still be committed, wait it out
+                // return Ok(None);
             }
         }
 
@@ -269,43 +304,76 @@ impl<T: Clone + Send> TxnLock<T> {
         }
 
         state.writer = Some(txn_id);
-        state.pending_commit = Some(txn_id);
         Ok(Some(TxnLockWriteGuard::new(self.clone(), txn_id)))
     }
 }
 
 #[async_trait]
-impl<T: Clone + Send> Transact for TxnLock<T> {
+impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 
         let mut state = self.lock_inner("TxnLock::commit");
-        assert!(&state.last_commit < txn_id);
 
-        state.last_commit = *txn_id;
-
-        if let Some(pending) = &state.pending_commit {
-            assert_eq!(pending, txn_id);
-        }
-
-        let value = unsafe { &mut *state.canon.get() };
-        if let Some(version) = state.versions.get(txn_id) {
+        let canon = unsafe { &mut *state.canon.get() };
+        let updated = if let Some(version) = state.versions.get(txn_id) {
             let version = unsafe { &*version.get() };
-            *value = version.clone();
+
+            if state.pending_writes.contains(txn_id) {
+                version != canon
+            } else {
+                assert!(version == canon);
+                false
+            }
         } else {
             // it's valid to request a read lock for the first time between commit & finalize
             // so make sure to keep this txn's version around
-            state.versions.insert(*txn_id, UnsafeCell::new(value.clone()));
+            state
+                .versions
+                .insert(*txn_id, UnsafeCell::new(canon.clone()));
+
+            false
+        };
+
+        for pending in &state.pending_writes {
+            if pending < txn_id {
+                // there's a write pending in the past
+                // if committing it would change the locked value, then it will crash on commit
+                // (this is handled by the code below)
+            } else if pending > txn_id {
+                // there's a write pending in the future
+                // so make sure no changes were made in this version
+                if updated {
+                    panic!(
+                        "attempted to commit an out-of-order write to {} at {}",
+                        self.inner.name, txn_id
+                    );
+                }
+            }
         }
 
-        state.pending_commit = None;
+        if updated {
+            assert!(txn_id > &state.last_commit);
+        }
+
+        if txn_id > &state.last_commit {
+            state.last_commit = *txn_id;
+        }
+
+        if updated {
+            let version = state.versions.get(txn_id).expect("txn commit version");
+            let version = unsafe { &*version.get() }.clone();
+            *canon = version;
+        }
+
+        state.pending_writes.remove(txn_id);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("TxnLock {} finalize {}", &self.inner.name, txn_id);
         let mut state = self.lock_inner("TxnLock::finalize");
         state.versions.remove(txn_id);
-        state.pending_commit = None;
+        state.pending_writes.remove(txn_id);
     }
 }
 
