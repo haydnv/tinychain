@@ -47,19 +47,9 @@ End users won't see TinyChain directly, but it makes the customer experience bet
 
 The easiest way to get started is to download the latest release from GitHub here: [github.com/haydnv/tinychain/releases](https://github.com/haydnv/tinychain/releases). Binary releases are currently only available for 64-bit x86 Linux (you should be able to build from source on other architectures, but this has not been tested).
 
-If you use the Rust programming language, you can install TinyChain on any platform by running `cargo install tinychain`.
+If you use the Rust programming language, you can install TinyChain on any platform by running `cargo install tinychain`. There are instructions for setting up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
 
-Try this "Hello, World!" program:
-
-```bash
-$ ./tinychain &
-# ...
-$ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'key="Hello, world!"'
-```
-
-There are instructions for setting up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
-
-You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
+You can find in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
 
 To use TinyChain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm). Then, follow the instructions for the [ArrayFire Rust wrapper](https://github.com/arrayfire/arrayfire-rust#use-from-cratesio--) to set the `LD_LIBRARY_PATH` and `AF_PATH` environment variables.
 
