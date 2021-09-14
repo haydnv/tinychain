@@ -125,6 +125,9 @@ class Number(Value):
     def __mul__(self, other):
         return self.mul(other)
 
+    def __neg__(self):
+        return self * self.__class__(-1)
+
     def __rmul__(self, other):
         return self.mul(other)
 
