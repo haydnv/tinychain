@@ -3,7 +3,7 @@
 from tinychain import ref
 from tinychain.state import Map, State, Stream, Tuple
 from tinychain.util import form_of, uri, URI
-from tinychain.value import Bool, F32, Number
+from tinychain.value import Bool, I16, F32, Number
 
 from . import schema
 from .bound import Range
@@ -63,6 +63,9 @@ class Tensor(Collection):
 
     def __ne__(self, other):
         return self.ne(other)
+
+    def __pow__(self, other):
+        return self.pow(other)
 
     def __sub__(self, other):
         return self.sub(other)
@@ -164,6 +167,11 @@ class Tensor(Collection):
         """Return a boolean `Tensor` with element-wise not-equal values."""
 
         return self._post("ne", Map(r=other), self.__class__)
+
+    def pow(self, other):
+        """Raise this `Tensor` to the given power."""
+
+        return self._post("pow", Map(r=other), self.__class__)
 
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""

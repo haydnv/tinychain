@@ -270,7 +270,9 @@ impl Cache {
             info!("cache miss: {:?}", path);
         }
 
-        Self::_read_and_insert(cache, path.clone()).map_ok(|block| Some(block)).await
+        Self::_read_and_insert(cache, path.clone())
+            .map_ok(|block| Some(block))
+            .await
     }
 
     /// Delete a block from the cache.

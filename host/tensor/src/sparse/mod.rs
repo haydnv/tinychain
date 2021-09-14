@@ -509,6 +509,11 @@ where
         self.left_combine(other, Number::mul)
     }
 
+    fn pow(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        debug!("SparseTensor::pow");
+        self.left_combine(other, Number::pow)
+    }
+
     fn sub(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::Combine> {
         debug!("SparseTensor::sub");
         self.combine(other, Number::sub)
@@ -542,6 +547,13 @@ where
     }
 
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Sparse(sparse) => self.mul(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.mul(dense.into_sparse()).map(Tensor::from),
+        }
+    }
+
+    fn pow(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Sparse(sparse) => self.mul(sparse).map(Tensor::from),
             Tensor::Dense(dense) => self.mul(dense.into_sparse()).map(Tensor::from),

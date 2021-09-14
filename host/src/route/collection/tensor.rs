@@ -734,6 +734,7 @@ where
             "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),
             "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
             "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
+            "pow" => Some(Box::new(DualHandler::new(tensor, TensorMath::pow))),
             "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
 
             // transforms

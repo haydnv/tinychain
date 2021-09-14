@@ -480,9 +480,17 @@ where
         self.combine(other, mul_array, Mul::mul, dtype)
     }
 
-    fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
-        debug!("subtract {} from {}", other, self);
+    fn pow(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        fn pow_array(l: &Array, r: &Array) -> Array {
+            debug_assert_eq!(l.len(), r.len());
+            l.pow(r)
+        }
 
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, pow_array, Number::pow, dtype)
+    }
+
+    fn sub(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn sub_array(l: &Array, r: &Array) -> Array {
             debug_assert_eq!(l.len(), r.len());
             l - r
@@ -523,6 +531,13 @@ where
         match other {
             Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
             Tensor::Sparse(sparse) => sparse.mul(self.into_sparse()).map(Tensor::from),
+        }
+    }
+
+    fn pow(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
+        match other {
+            Tensor::Dense(dense) => self.pow(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => sparse.pow(self.into_sparse()).map(Tensor::from),
         }
     }
 

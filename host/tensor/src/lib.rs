@@ -227,6 +227,9 @@ pub trait TensorMath<D: Dir, O> {
     /// Multiply two tensors together.
     fn mul(self, other: O) -> TCResult<Self::LeftCombine>;
 
+    /// Raise `self` to the power `other`.
+    fn pow(self, other: O) -> TCResult<Self::LeftCombine>;
+
     /// Subtract `other` from `self`.
     fn sub(self, other: O) -> TCResult<Self::Combine>;
 }
@@ -613,6 +616,13 @@ where
         match self {
             Self::Dense(this) => this.mul(other),
             Self::Sparse(this) => this.mul(other),
+        }
+    }
+
+    fn pow(self, other: Self) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this.pow(other),
+            Self::Sparse(this) => this.pow(other),
         }
     }
 
