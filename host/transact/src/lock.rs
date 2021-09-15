@@ -200,10 +200,10 @@ impl<T: Clone + Send> TxnLock<T> {
         debug!("TxnLock::try_read {} at {}", self.inner.name, txn_id);
 
         let mut state = self.lock_inner("TxnLock::try_read");
-        if let Some(reserved) = &state.writer {
-            if reserved <= &txn_id {
-                // if there's an active writer that can change the value at this txn_id, wait it out
-                debug!("TxnLock waiting on an active writer at {}", reserved);
+        for reserved in state.pending_writes.iter().rev() {
+            if reserved > &state.last_commit && reserved < &txn_id {
+                // if there's a pending write that can change the value at this txn_id, wait it out
+                debug!("TxnLock waiting on a pending write at {}", reserved);
                 return Ok(None);
             }
         }
