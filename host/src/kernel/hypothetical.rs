@@ -2,11 +2,13 @@ use std::collections::HashSet;
 use std::fmt;
 
 use bytes::Bytes;
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::error;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::lock::TxnLock;
-use tc_transact::Transaction;
+use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel};
 
@@ -37,7 +39,7 @@ impl Hypothetical {
         let txn = txn.clone().claim(&self.actor, PATH.into()).await?;
         let context = Map::<State>::default();
 
-        if Vec::<(Id, State)>::can_cast_from(&data) {
+        let result = if Vec::<(Id, State)>::can_cast_from(&data) {
             let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
             let capture = if let Some((capture, _)) = op_def.last() {
                 capture.clone()
@@ -50,7 +52,25 @@ impl Hypothetical {
         } else {
             data.resolve(&Scope::<State>::new(None, context), &txn)
                 .await
+        };
+
+        {
+            let mut participants = self.participants.write(*txn.id()).await?;
+            let mut rollbacks: FuturesUnordered<_> = participants
+                .drain()
+                .map(|link| txn.delete(link, Value::None))
+                .collect();
+
+            while let Some(result) = rollbacks.next().await {
+                if let Err(cause) = result {
+                    error!("error finalizing hypothetical transaction: {}", cause);
+                }
+            }
         }
+
+        // always bump the last commit ID in order to provide correct conflict error behavior
+        self.participants.commit(txn.id()).await;
+        result
     }
 }
 
@@ -98,10 +118,10 @@ impl<'a> Handler<'a> for &'a Hypothetical {
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key| {
+        Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_none() {
-                    Ok(())
+                    Ok(self.participants.finalize(txn.id()))
                 } else {
                     Err(TCError::not_found(key))
                 }

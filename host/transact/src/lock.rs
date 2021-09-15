@@ -294,7 +294,7 @@ impl<T: Clone + Send> TxnLock<T> {
         if let Some(pending) = state.pending_writes.iter().min() {
             if pending > &state.last_commit && pending < &txn_id {
                 // if there's a past write that might still be committed, wait it out
-                // return Ok(None);
+                return Ok(None);
             }
         }
 
@@ -316,23 +316,22 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
         let mut state = self.lock_inner("TxnLock::commit");
 
         let canon = unsafe { &mut *state.canon.get() };
-        let updated = if let Some(version) = state.versions.get(txn_id) {
-            let version = unsafe { &*version.get() };
+        let (updated, version) = if let Some(cell) = state.versions.get(txn_id) {
+            let version = unsafe { &*cell.get() };
 
             if state.pending_writes.contains(txn_id) {
-                version != canon
+                (version != canon, version)
             } else {
                 assert!(version == canon);
-                false
+                (false, version)
             }
         } else {
             // it's valid to request a read lock for the first time between commit & finalize
             // so make sure to keep this txn's version around
-            state
-                .versions
-                .insert(*txn_id, UnsafeCell::new(canon.clone()));
-
-            false
+            let cell = UnsafeCell::new(canon.clone());
+            let version = unsafe { &*cell.get() };
+            state.versions.insert(*txn_id, cell);
+            (false, version)
         };
 
         for pending in &state.pending_writes {
@@ -354,16 +353,10 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
 
         if updated {
             assert!(txn_id > &state.last_commit);
-        }
-
-        if txn_id > &state.last_commit {
             state.last_commit = *txn_id;
-        }
-
-        if updated {
-            let version = state.versions.get(txn_id).expect("txn commit version");
-            let version = unsafe { &*version.get() }.clone();
-            *canon = version;
+            *canon = version.clone();
+        } else if &state.last_commit > txn_id {
+            state.last_commit = *txn_id;
         }
 
         state.pending_writes.remove(txn_id);
