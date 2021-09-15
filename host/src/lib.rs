@@ -11,6 +11,8 @@
 
 use std::path::PathBuf;
 
+use futures::TryFutureExt;
+
 pub use kernel::*;
 pub use tc_btree as btree;
 pub use tc_error as error;
@@ -41,10 +43,9 @@ const MIN_CACHE_SIZE: u64 = 5000;
 
 /// Initialize the transactional filesystem layer.
 pub async fn mount(
-    workspace: PathBuf,
-    data_dir: Option<PathBuf>,
     cache_size: u64,
-) -> tc_error::TCResult<(fs::Dir, Option<fs::Dir>)> {
+    data_dir: Option<PathBuf>,
+) -> tc_error::TCResult<(fs::Cache, Option<fs::Dir>)> {
     if cache_size < MIN_CACHE_SIZE {
         return Err(error::TCError::unsupported(format!(
             "the minimum cache size is {} bytes",
@@ -53,13 +54,11 @@ pub async fn mount(
     }
 
     let cache = fs::Cache::new(cache_size);
-
-    let workspace = fs::load(cache.clone(), workspace).await?;
     let data_dir = if let Some(data_dir) = data_dir {
-        Some(fs::load(cache, data_dir).await?)
+        fs::load(cache.clone(), data_dir).map_ok(Some).await?
     } else {
         None
     };
 
-    Ok((workspace, data_dir))
+    Ok((cache, data_dir))
 }

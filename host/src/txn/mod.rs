@@ -26,14 +26,19 @@ mod request;
 mod server;
 
 struct Active {
+    workspace: fs::Dir,
     expires: NetworkTime,
     scope: Scope,
 }
 
 impl Active {
-    fn new(txn_id: &TxnId, expires: NetworkTime) -> Self {
+    fn new(txn_id: &TxnId, workspace: fs::Dir, expires: NetworkTime) -> Self {
         let scope = TCPathBuf::from(txn_id.to_id());
-        Self { expires, scope }
+        Self {
+            workspace,
+            expires,
+            scope,
+        }
     }
 
     fn expires(&self) -> &NetworkTime {

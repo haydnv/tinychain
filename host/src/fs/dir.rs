@@ -258,6 +258,16 @@ impl Dir {
         })
     }
 
+    pub fn new(path: PathBuf, cache: Cache) -> Self {
+        assert!(!path.exists());
+        let lock_name = format!("contents of {:?}", path);
+        Self {
+            path,
+            cache,
+            contents: TxnLock::new(lock_name, HashMap::new()),
+        }
+    }
+
     pub async fn entry_ids(&self, txn_id: TxnId) -> TCResult<HashSet<PathSegment>> {
         let contents = self.contents.read(txn_id).await?;
         Ok(contents.keys().cloned().collect())

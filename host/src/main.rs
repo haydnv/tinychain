@@ -119,16 +119,15 @@ async fn main() -> Result<(), TokioError> {
         if !data_dir.exists() {
             panic!("{:?} does not exist--create it or provide a different path for the --data_dir flag", data_dir);
         }
-    }
+    };
 
-    let (workspace, data_dir) =
-        mount(config.workspace.clone(), config.data_dir, config.cache_size).await?;
+    let (cache, data_dir) = mount(config.cache_size, config.data_dir).await?;
 
     #[cfg(feature = "tensor")]
     afarray::print_af_info();
     println!();
 
-    let txn_server = tinychain::txn::TxnServer::new(workspace.clone()).await;
+    let txn_server = tinychain::txn::TxnServer::new(config.workspace.clone(), cache).await;
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
@@ -175,33 +174,5 @@ async fn main() -> Result<(), TokioError> {
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!("starting server, cache size is {}", config.cache_size);
-    if let Err(cause) = gateway.listen().await {
-        log::error!("server error: {}", cause);
-    }
-
-    empty_dir(config.workspace)
-}
-
-fn empty_dir(workspace: PathBuf) -> Result<(), TokioError> {
-    let contents = std::fs::read_dir(workspace)?;
-    for entry in contents {
-        let result = match entry {
-            Ok(entry) => rm_entry(entry),
-            Err(cause) => Err(cause),
-        };
-
-        if let Err(cause) = result {
-            log::error!("unable to clean up workspace: {}", cause);
-        }
-    }
-
-    Ok(())
-}
-
-fn rm_entry(entry: std::fs::DirEntry) -> Result<(), std::io::Error> {
-    if entry.metadata()?.is_dir() {
-        std::fs::remove_dir_all(entry.path())
-    } else {
-        std::fs::remove_file(entry.path())
-    }
+    gateway.listen().await
 }

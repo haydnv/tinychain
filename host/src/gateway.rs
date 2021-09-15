@@ -20,6 +20,8 @@ use crate::kernel::Kernel;
 use crate::state::State;
 use crate::txn::*;
 
+type Error = Box<dyn std::error::Error + Send + Sync>;
+
 /// Configuration for [`Gateway`].
 #[derive(Clone)]
 pub struct Config {
@@ -211,9 +213,7 @@ impl Gateway {
     }
 
     /// Start this `Gateway`'s server
-    pub fn listen(
-        self: Arc<Self>,
-    ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>> + 'static>> {
+    pub fn listen(self: Arc<Self>) -> Pin<Box<impl Future<Output = Result<(), Error>> + 'static>> {
         Box::pin(async move {
             match try_join!(self.clone().http_listen(), self.clone().replicate()) {
                 Ok(_) => Ok(()),
@@ -222,7 +222,7 @@ impl Gateway {
         })
     }
 
-    async fn replicate(self: Arc<Self>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn replicate(self: Arc<Self>) -> Result<(), Error> {
         let result = async move {
             for cluster in self.kernel.hosted() {
                 let gateway = self.clone();
@@ -249,9 +249,9 @@ impl Gateway {
         };
 
         match result.await {
-            Ok(()) => Result::<(), Box<dyn std::error::Error>>::Ok(()),
+            Ok(()) => Result::<(), Error>::Ok(()),
             Err(cause) => {
-                let e: Box<dyn std::error::Error> = Box::new(cause);
+                let e: Error = Box::new(cause);
                 Err(e)
             }
         }
@@ -259,12 +259,11 @@ impl Gateway {
 
     fn http_listen(
         self: Arc<Self>,
-    ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Box<dyn std::error::Error>>>>>
-    {
+    ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Error>>>> {
         let http_addr = (self.config.addr, self.config.http_port).into();
         let server = crate::http::HTTPServer::new(self);
         let listener = server.listen(http_addr).map_err(|e| {
-            let e: Box<dyn std::error::Error> = Box::new(e);
+            let e: Error = Box::new(e);
             e
         });
 
