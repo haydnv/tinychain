@@ -1,7 +1,7 @@
-//! A [`TxnLock`] featuring transaction-specific versioning
+//! A [`TxnLock`] to support transaction-specific versioning
 
 use std::cell::UnsafeCell;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -120,7 +120,7 @@ struct LockState<T> {
     last_commit: TxnId,
     readers: BTreeMap<TxnId, usize>,
     writer: Option<TxnId>,
-    pending_writes: HashSet<TxnId>,
+    pending_writes: BTreeSet<TxnId>,
     wakers: VecDeque<Weak<Mutex<Option<Waker>>>>,
 }
 
@@ -163,7 +163,7 @@ impl<T> TxnLock<T> {
             last_commit: super::id::MIN_ID,
             readers: BTreeMap::new(),
             writer: None,
-            pending_writes: HashSet::new(),
+            pending_writes: BTreeSet::new(),
             wakers: VecDeque::new(),
         };
 
@@ -253,18 +253,30 @@ impl<T: Clone + Send> TxnLock<T> {
             return Err(TCError::conflict());
         }
 
-        if let Some(pending) = state.pending_writes.iter().max() {
+        for pending in state.pending_writes.iter().rev() {
             if pending > &txn_id {
-                // there's already a write in the future
-                debug!("TxnLock {} has a write at {}", self.inner.name, pending);
+                // can't write-lock the past
+                debug!(
+                    "TxnLock {} has pending write in the future",
+                    self.inner.name
+                );
+
                 return Err(TCError::conflict());
+            } else if pending > &state.last_commit && pending < &txn_id {
+                // if there's a past write that might still be committed, wait it out
+                debug!(
+                    "TxnLock {} has a pending write at {}",
+                    self.inner.name, pending
+                );
+
+                return Ok(None);
             }
         }
 
         if let Some(reader) = state.readers.keys().max() {
             if reader > &txn_id {
                 // can't write-lock the past
-                debug!("TxnLock {} has a reader at {}", self.inner.name, txn_id);
+                debug!("TxnLock {} has a read lock in the future", self.inner.name);
                 return Err(TCError::conflict());
             }
         }
@@ -289,13 +301,6 @@ impl<T: Clone + Send> TxnLock<T> {
             );
 
             return Ok(None);
-        }
-
-        if let Some(pending) = state.pending_writes.iter().min() {
-            if pending > &state.last_commit && pending < &txn_id {
-                // if there's a past write that might still be committed, wait it out
-                return Ok(None);
-            }
         }
 
         if !state.versions.contains_key(&txn_id) {
