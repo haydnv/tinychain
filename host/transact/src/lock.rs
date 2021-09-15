@@ -357,14 +357,25 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
         }
 
         if updated {
-            assert!(txn_id > &state.last_commit);
-            state.last_commit = *txn_id;
+            let has_been_read = if let Some(reserved) = state.readers.keys().last() {
+                reserved > txn_id
+            } else {
+                false
+            };
+
+            if has_been_read {
+                assert!(txn_id > &state.last_commit);
+            }
+
             *canon = version.clone();
-        } else if &state.last_commit > txn_id {
-            state.last_commit = *txn_id;
         }
 
         state.pending_writes.remove(txn_id);
+
+        if txn_id > &state.last_commit {
+            state.last_commit = *txn_id;
+            state.wake()
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
