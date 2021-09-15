@@ -121,7 +121,7 @@ impl<'a> Handler<'a> for &'a Hypothetical {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_none() {
-                    Ok(self.participants.finalize(txn.id()))
+                    Ok(self.participants.finalize(txn.id()).await)
                 } else {
                     Err(TCError::not_found(key))
                 }
