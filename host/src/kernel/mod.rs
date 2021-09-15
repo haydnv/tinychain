@@ -4,11 +4,9 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
 
-use bytes::Bytes;
 use futures::future::Future;
 use log::debug;
 use safecast::*;
-
 use tc_error::*;
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -16,30 +14,28 @@ use tcgeneric::*;
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;
 use crate::route::{Public, Static};
-use crate::scalar::*;
-use crate::state::*;
-use crate::txn::*;
+use crate::scalar::{OpRefType, Scalar, ScalarType};
+use crate::state::{State, StateType};
+use crate::txn::Txn;
 
 use hosted::Hosted;
+use hypothetical::Hypothetical;
 
 mod hosted;
-
-const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
-
-type ExeScope<'a> = crate::scalar::Scope<'a, State>;
+mod hypothetical;
 
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
-    actor: Actor,
     hosted: Hosted,
+    hypothetical: Hypothetical,
 }
 
 impl Kernel {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
     pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
         Self {
-            actor: Actor::new(Link::default().into()),
             hosted: clusters.into_iter().collect(),
+            hypothetical: Hypothetical::new(),
         }
     }
 
@@ -51,21 +47,19 @@ impl Kernel {
     /// Route a GET request.
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path.is_empty() {
-            if key.is_none() {
-                Ok(Value::from(Bytes::copy_from_slice(self.actor.public_key().as_bytes())).into())
-            } else {
-                Err(TCError::not_found(format!(
-                    "{} at {}",
-                    key,
-                    TCPath::from(path)
-                )))
-            }
+            Err(TCError::not_found(format!(
+                "{} at {}",
+                key,
+                TCPath::from(path)
+            )))
         } else if let Some(class) = ScalarType::from_path(path) {
             let err = format!("cannot cast into an instance of {} from {}", class, key);
             Scalar::from(key)
                 .into_type(class)
                 .map(State::Scalar)
                 .ok_or_else(|| TCError::unsupported(err))
+        } else if path == &hypothetical::PATH[..] {
+            self.hypothetical.get(txn, &path[..], key).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
                 "GET {}: {} from cluster {}",
@@ -101,6 +95,8 @@ impl Kernel {
                 self,
                 TCPath::from(path),
             ))
+        } else if path == &hypothetical::PATH[..] {
+            self.hypothetical.put(txn, &path[..], key, value).await
         } else if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(
                 OpRefType::Put,
@@ -171,23 +167,8 @@ impl Kernel {
                     TCPath::from(path),
                 ))
             }
-        } else if path == &HYPOTHETICAL[..] {
-            let txn = txn.clone().claim(&self.actor, TCPathBuf::default()).await?;
-            let context = Map::<State>::default();
-
-            if Vec::<(Id, State)>::can_cast_from(&data) {
-                let op_def: Vec<(Id, State)> = data.opt_cast_into().unwrap();
-                let capture = if let Some((capture, _)) = op_def.last() {
-                    capture.clone()
-                } else {
-                    return Ok(State::default());
-                };
-
-                let executor: Executor<State> = Executor::new(&txn, None, op_def);
-                executor.capture(capture).await
-            } else {
-                data.resolve(&ExeScope::new(None, context), &txn).await
-            }
+        } else if path == &hypothetical::PATH[..] {
+            self.hypothetical.execute(txn, data).await
         } else if let Some(class) = StateType::from_path(path) {
             let params = data.try_into()?;
             class.post(txn, path, params).await
@@ -219,17 +200,14 @@ impl Kernel {
 
     /// Route a DELETE request.
     pub async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
-        if path.is_empty() || StateType::from_path(path).is_some() {
-            if key.is_none() {
-                // it's a rollback message for a hypothetical transaction
-                Ok(())
-            } else {
-                Err(TCError::method_not_allowed(
-                    OpRefType::Delete,
-                    self,
-                    TCPath::from(path),
-                ))
-            }
+        if path.is_empty() {
+            Err(TCError::method_not_allowed(
+                OpRefType::Delete,
+                self,
+                TCPath::from(path),
+            ))
+        } else if path == &hypothetical::PATH[..] {
+            self.hypothetical.delete(txn, &path[2..], key).await
         } else if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(
                 OpRefType::Post,
