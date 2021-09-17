@@ -24,6 +24,7 @@ use tcgeneric::TCBoxTryFuture;
 use crate::chain::ChainBlock;
 
 use super::{create_parent, io_err, TMP};
+use std::ops::{Deref, DerefMut};
 
 struct Policy;
 
@@ -367,14 +368,54 @@ impl<B: BlockData> CacheLock<B> {
         state.downgrade()
     }
 
-    pub async fn read(&self) -> OwnedRwLockReadGuard<B> {
+    pub async fn read(&self) -> CacheLockReadGuard<B> {
         let state = self.get_lock().await;
-        state.active_lock().clone().read_owned().await
+        let value = state.active_lock().clone().read_owned().await;
+        CacheLockReadGuard {
+            block: self.clone(),
+            value,
+        }
     }
 
-    pub async fn write(&self) -> OwnedRwLockWriteGuard<B> {
+    pub async fn write(&self) -> CacheLockWriteGuard<B> {
         let state = self.get_lock().await;
-        state.active_lock().clone().write_owned().await
+        let value = state.active_lock().clone().write_owned().await;
+        CacheLockWriteGuard {
+            block: self.clone(),
+            value,
+        }
+    }
+}
+
+pub struct CacheLockReadGuard<B> {
+    block: CacheLock<B>,
+    value: OwnedRwLockReadGuard<B>,
+}
+
+impl<B> Deref for CacheLockReadGuard<B> {
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+        self.value.deref()
+    }
+}
+
+pub struct CacheLockWriteGuard<B> {
+    block: CacheLock<B>,
+    value: OwnedRwLockWriteGuard<B>,
+}
+
+impl<B> Deref for CacheLockWriteGuard<B> {
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+        self.value.deref()
+    }
+}
+
+impl<B> DerefMut for CacheLockWriteGuard<B> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.value.deref_mut()
     }
 }
 

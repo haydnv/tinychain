@@ -9,7 +9,6 @@ use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
 use safecast::*;
-use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
@@ -225,7 +224,7 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<OwnedRwLockReadGuard<ChainBlock>> {
+    ) -> TCResult<fs::CacheLockReadGuard<ChainBlock>> {
         self.file.read_block(txn_id, block_id.into()).await
     }
 
@@ -233,16 +232,19 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<OwnedRwLockWriteGuard<ChainBlock>> {
+    ) -> TCResult<fs::CacheLockWriteGuard<ChainBlock>> {
         self.file.write_block(txn_id, block_id.into()).await
     }
 
-    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<OwnedRwLockReadGuard<ChainBlock>> {
+    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<fs::CacheLockReadGuard<ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.read_block(txn_id, (*latest).into()).await
     }
 
-    pub async fn write_latest(&self, txn_id: TxnId) -> TCResult<OwnedRwLockWriteGuard<ChainBlock>> {
+    pub async fn write_latest(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<fs::CacheLockWriteGuard<ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(txn_id, (*latest).into()).await
     }

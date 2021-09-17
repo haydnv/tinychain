@@ -16,7 +16,7 @@ use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::{try_join, TryStreamExt};
 use log::debug;
-use tokio::sync::{RwLock, OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use tc_error::*;
@@ -40,8 +40,8 @@ where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    type ReadLock = OwnedRwLockReadGuard<B>;
-    type WriteLock = OwnedRwLockWriteGuard<B>;
+    type ReadLock = CacheLockReadGuard<B>;
+    type WriteLock = CacheLockWriteGuard<B>;
 
     async fn read(self) -> Self::ReadLock {
         self.lock.read().await
@@ -111,7 +111,7 @@ impl<B: BlockData> File<B> {
         &self,
         txn_id: TxnId,
         name: BlockId,
-    ) -> TCResult<OwnedRwLockWriteGuard<B>>
+    ) -> TCResult<CacheLockWriteGuard<B>>
     where
         B: en::IntoStream<'en> + 'en,
         CacheBlock: From<CacheLock<B>>,
@@ -257,7 +257,8 @@ where
             let data = block.read().await;
 
             debug!("File::get_block {} caching new version", name);
-            let block = self.cache
+            let block = self
+                .cache
                 .write(version, data.deref().clone())
                 .map_ok(|lock| Block { name, txn_id, lock })
                 .await;
@@ -266,7 +267,7 @@ where
         }
     }
 
-    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<OwnedRwLockReadGuard<B>> {
+    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<CacheLockReadGuard<B>> {
         debug!("File::read_block {}", name);
 
         let block = self.get_block(txn_id, name).await?;
@@ -277,14 +278,14 @@ where
         self,
         txn_id: TxnId,
         name: BlockId,
-    ) -> TCResult<OwnedRwLockReadGuard<B>> {
+    ) -> TCResult<CacheLockReadGuard<B>> {
         debug!("File::read_block_owned {}", name);
 
         let block = self.get_block(txn_id, name).await?;
         Ok(fs::Block::read(block).await)
     }
 
-    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<OwnedRwLockWriteGuard<B>> {
+    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<CacheLockWriteGuard<B>> {
         debug!("File::write_block");
         let block = self.get_block(txn_id, name.clone()).await?;
         self.mutate(txn_id, name).await;
@@ -334,7 +335,10 @@ where
                             cache.write(block_path.clone(), (&*source).clone()).await?;
                             cache.sync(&block_path).map_ok(|_| ()).await
                         } else {
-                            Err(TCError::internal(format!("missing transaction version of block {}", block_id)))
+                            Err(TCError::internal(format!(
+                                "missing transaction version of block {}",
+                                block_id
+                            )))
                         }
                     });
 
