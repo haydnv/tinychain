@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::future::{try_join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::{try_join, TryStreamExt};
 use log::debug;
-use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use tokio::sync::{RwLock, OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -232,7 +232,7 @@ where
 
         let version = block_version(&self.path, &txn_id, &name);
         self.mutate(txn_id, name).await;
-        self.cache.delete(&version).await;
+        self.cache.delete(version).await;
         Ok(())
     }
 
@@ -248,6 +248,7 @@ where
 
         let version = block_version(&self.path, &txn_id, &name);
         if let Some(lock) = self.cache.read(&version).await? {
+            debug!("File::get_block {} from cache", name);
             Ok(Block { name, txn_id, lock })
         } else {
             let canon = fs_path(&self.path, &name);
@@ -255,10 +256,13 @@ where
             let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
             let data = block.read().await;
 
-            self.cache
+            debug!("File::get_block {} caching new version", name);
+            let block = self.cache
                 .write(version, data.deref().clone())
                 .map_ok(|lock| Block { name, txn_id, lock })
-                .await
+                .await;
+
+            block
         }
     }
 
@@ -280,11 +284,7 @@ where
         Ok(fs::Block::read(block).await)
     }
 
-    async fn write_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<OwnedRwLockWriteGuard<B>> {
+    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<OwnedRwLockWriteGuard<B>> {
         debug!("File::write_block");
         let block = self.get_block(txn_id, name.clone()).await?;
         self.mutate(txn_id, name).await;
@@ -295,7 +295,7 @@ where
         let mut contents = self.contents.write(txn_id).await?;
         let deletes = FuturesUnordered::from_iter(contents.drain().map(|block_id| async move {
             let path = block_version(&self.path, &txn_id, &block_id);
-            self.cache.delete(&path).await;
+            self.cache.delete(path).await;
             block_id
         }));
 
@@ -324,10 +324,18 @@ where
                 let commits = blocks
                     .iter()
                     .filter(|block_id| contents.contains(block_id))
-                    .map(|block_id| {
+                    .map(|block_id| async move {
                         let version_path = block_version(file_path, &txn_id, block_id);
                         let block_path = fs_path(file_path, block_id);
-                        cache.sync_and_copy(version_path, block_path)
+
+                        cache.sync(&version_path).await?;
+                        if let Some(source) = cache.read(&version_path).await? {
+                            let source = source.write().await;
+                            cache.write(block_path.clone(), (&*source).clone()).await?;
+                            cache.sync(&block_path).map_ok(|_| ()).await
+                        } else {
+                            Err(TCError::internal(format!("missing transaction version of block {}", block_id)))
+                        }
                     });
 
                 try_join_all(commits).await.expect("commit file blocks");
@@ -354,19 +362,19 @@ where
                     .filter(|block_id| !contents.contains(block_id))
                     .map(|block_id| {
                         let block_path = fs_path(file_path, block_id);
-                        cache.delete_and_sync(block_path)
+                        cache.delete(block_path.clone())
                     });
 
-                try_join_all(deletes).await.expect("delete file blocks");
+                join_all(deletes).await;
             }
         }
 
         let version = file_version(&self.path, txn_id);
         if version.exists() {
-            cache
-                .delete_dir(version)
+            tokio::fs::remove_dir_all(&version)
+                .map_err(|e| panic!("file I/O error: {}", e))
                 .await
-                .expect("delete file version");
+                .expect("delete file version")
         }
 
         self.contents.finalize(txn_id).await;

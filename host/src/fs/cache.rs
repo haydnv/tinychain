@@ -1,5 +1,6 @@
-//! The filesystem cache, with LFU eviction
+//! The filesystem [`Cache`], with LFU eviction
 
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,18 +8,18 @@ use std::sync::Arc;
 #[cfg(feature = "tensor")]
 use afarray::Array;
 use async_trait::async_trait;
-use destream::IntoStream;
-use freqache::Entry;
-use futures::{Future, TryFutureExt};
-use log::{debug, error, info, warn};
+use freqache::LFUCache;
+use futures::future::{Future, TryFutureExt};
+use log::{debug, info};
 use tokio::fs;
 use tokio::io::AsyncWrite;
-use tokio::sync::{mpsc, Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::BlockData;
 use tc_value::Value;
+use tcgeneric::TCBoxTryFuture;
 
 use crate::chain::ChainBlock;
 
@@ -28,35 +29,163 @@ struct Policy;
 
 #[async_trait]
 impl freqache::Policy<PathBuf, CacheBlock> for Policy {
-    fn can_evict(&self, block: &CacheBlock) -> bool {
-        block.ref_count() <= 1
+    fn can_evict(&self, _block: &CacheBlock) -> bool {
+        unimplemented!()
     }
 
-    async fn evict(&self, path: PathBuf, block: &CacheBlock) {
-        debug!("evict block at {:?} from cache", path);
-
-        let size = persist(&path, block)
-            .await
-            .expect("persist cache block to disk");
-
-        debug!("block at {:?} evicted, wrote {} bytes to disk", path, size);
+    async fn evict(&self, _path: PathBuf, _block: &CacheBlock) {
+        unimplemented!()
     }
 }
 
-type LFU = freqache::LFUCache<PathBuf, CacheBlock, Policy>;
+struct CacheState {
+    lfu: LFUCache<PathBuf, CacheBlock, Policy>,
+    deleted: HashSet<PathBuf>,
+}
+
+/// The filesystem block cache.
+///
+/// **IMPORTANT**: for performance reasons, the cache listing is not locked during file I/O.
+/// This means that it's up to the developer to explicitly call `sync` between inserts and deletes
+/// of the same block path.
+#[derive(Clone)]
+pub struct Cache {
+    state: Arc<Mutex<CacheState>>,
+}
+
+impl Cache {
+    /// Construct a new cache with the given size.
+    pub fn new(max_size: u64) -> Self {
+        let state = CacheState {
+            lfu: LFUCache::new(max_size, Policy),
+            deleted: HashSet::new(),
+        };
+
+        Self {
+            state: Arc::new(Mutex::new(state)),
+        }
+    }
+
+    /// Delete a block from the cache.
+    pub async fn delete(&self, path: PathBuf) {
+        debug!("Cache::delete {:?}", path);
+
+        let mut state = self.state.lock().await;
+        if let Some(block) = state.lfu.remove(&path) {
+            block.delete().await;
+            state.deleted.insert(path.clone());
+        } else if path.exists() {
+            state.deleted.insert(path.clone());
+        }
+    }
+
+    /// Read a block from the cache if possible, otherwise from the filesystem.
+    pub async fn read<B>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
+    where
+        B: BlockData,
+        CacheBlock: From<CacheLock<B>>,
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    {
+        debug!("Cache::read {:?}", path);
+
+        let mut state = self.state.lock().await;
+
+        if state.deleted.contains(path) {
+            Ok(None)
+        } else if let Some(block) = state.lfu.get(path).cloned() {
+            block.try_into().map(Some)
+        } else if path.exists() {
+            info!("cache miss: {:?}", path);
+            let lock = CacheLock::<B>::pending(path.clone());
+            let block = CacheBlock::from(lock.clone());
+            state.lfu.insert(path.clone(), block);
+            Ok(Some(lock))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Synchronize a cached block with the filesystem.
+    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
+        debug!("Cache::sync {:?}", path);
+
+        let mut state = self.state.lock().await;
+        if state.deleted.contains(path) {
+            assert!(!state.lfu.contains_key(path));
+            std::mem::drop(state);
+
+            let cache = self.clone();
+            delete_block_at(path)
+                .and_then(|()| async move {
+                    let mut state = cache.state.lock().await;
+                    state.deleted.remove(path);
+                    Ok(false)
+                })
+                .await
+        } else if let Some(block) = state.lfu.get(path).cloned() {
+            std::mem::drop(state);
+            persist(block).map_ok(|_num_bytes| true).await
+        } else {
+            Ok(path.exists())
+        }
+    }
+
+    /// Update a block in the cache.
+    pub async fn write<B: BlockData>(&self, path: PathBuf, value: B) -> TCResult<CacheLock<B>>
+    where
+        CacheBlock: From<CacheLock<B>>,
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    {
+        debug!("Cache::write {:?}", path);
+
+        let mut state = self.state.lock().await;
+        state.deleted.remove(&path);
+
+        if let Some(block) = state.lfu.get(&path).cloned() {
+            std::mem::drop(state);
+
+            let block = CacheLock::<B>::try_from(block)?;
+            *block.write().await = value;
+            Ok(block)
+        } else {
+            let block = CacheLock::new(path.clone(), value);
+            state.lfu.insert(path, block.clone().into());
+            Ok(block)
+        }
+    }
+}
 
 /// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
 pub enum CacheBlock {
     BTree(CacheLock<Node>),
     Chain(CacheLock<ChainBlock>),
-    Value(CacheLock<Value>),
-
     #[cfg(feature = "tensor")]
     Tensor(CacheLock<Array>),
+    Value(CacheLock<Value>),
 }
 
 impl CacheBlock {
+    async fn delete(self) {
+        match self {
+            Self::BTree(lock) => lock.delete().await,
+            Self::Chain(lock) => lock.delete().await,
+            #[cfg(feature = "tensor")]
+            Self::Tensor(lock) => lock.delete().await,
+            Self::Value(lock) => lock.delete().await,
+        }
+    }
+
+    fn path(&self) -> &PathBuf {
+        match self {
+            Self::BTree(lock) => lock.path(),
+            Self::Chain(lock) => lock.path(),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(lock) => lock.path(),
+            Self::Value(lock) => lock.path(),
+        }
+    }
+
     async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
         match self {
             Self::BTree(block) => {
@@ -78,26 +207,16 @@ impl CacheBlock {
             }
         }
     }
-
-    fn ref_count(&self) -> usize {
-        match self {
-            Self::BTree(block) => block.ref_count(),
-            Self::Chain(block) => block.ref_count(),
-            Self::Value(block) => block.ref_count(),
-            #[cfg(feature = "tensor")]
-            Self::Tensor(block) => block.ref_count(),
-        }
-    }
 }
 
-impl Entry for CacheBlock {
+impl freqache::Entry for CacheBlock {
     fn weight(&self) -> u64 {
         match self {
             Self::BTree(_) => Node::max_size(),
             Self::Chain(_) => ChainBlock::max_size(),
-            Self::Value(_) => Value::max_size(),
             #[cfg(feature = "tensor")]
             Self::Tensor(_) => Array::max_size(),
+            Self::Value(_) => Value::max_size(),
         }
     }
 }
@@ -172,124 +291,95 @@ impl TryFrom<CacheBlock> for CacheLock<Value> {
     }
 }
 
-/// A filesystem cache lock.
-pub struct CacheLock<T> {
-    lock: Arc<RwLock<T>>,
+enum CacheLockState<B> {
+    Pending,
+    Active(Arc<RwLock<B>>),
+    Deleted,
 }
 
-impl<T> CacheLock<T> {
-    fn new(value: T) -> Self {
-        Self {
-            lock: Arc::new(RwLock::new(value)),
+impl<B> CacheLockState<B> {
+    fn is_deleted(&self) -> bool {
+        match self {
+            Self::Deleted => true,
+            _ => false,
         }
     }
 
-    pub async fn read(&self) -> OwnedRwLockReadGuard<T> {
-        self.lock.clone().read_owned().await
-    }
-
-    pub async fn write(&self) -> OwnedRwLockWriteGuard<T> {
-        self.lock.clone().write_owned().await
-    }
-
-    pub fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.lock)
-    }
-}
-
-impl<T> Clone for CacheLock<T> {
-    fn clone(&self) -> Self {
-        Self {
-            lock: self.lock.clone(),
+    fn is_pending(&self) -> bool {
+        match self {
+            Self::Pending => true,
+            _ => false,
         }
     }
-}
 
-struct Evict;
-
-/// The filesystem cache.
-#[derive(Clone)]
-pub struct Cache {
-    tx: mpsc::Sender<Evict>,
-    lfu: Arc<Mutex<LFU>>, // TODO: implement a custom Future for reading a block from the cache
-}
-
-impl Cache {
-    /// Construct a new cache with the given size.
-    pub fn new(max_size: u64) -> Self {
-        assert!(max_size > 0);
-
-        let (tx, rx) = mpsc::channel(1024);
-        let cache = Self {
-            tx,
-            lfu: Arc::new(Mutex::new(LFU::new(max_size, Policy))),
-        };
-
-        spawn_cleanup_thread(cache.lfu.clone(), rx);
-        cache
-    }
-
-    async fn _read_and_insert<B: BlockData>(
-        mut cache: tokio::sync::MutexGuard<'_, LFU>,
-        path: PathBuf,
-    ) -> TCResult<CacheLock<B>>
-    where
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-        CacheBlock: From<CacheLock<B>>,
-    {
-        debug!("Cache::_read_and_insert: {:?}", path);
-
-        let block_file = read_file(&path).await?;
-        let block = B::load(block_file).await?;
-
-        debug!("creating new CacheLock for {:?}", path);
-        let block = CacheLock::new(block);
-        cache.insert(path, block.clone().into()).await;
-
-        Ok(block)
-    }
-
-    /// Read a block from the cache if possible, or else fetch it from the filesystem.
-    pub async fn read<B: BlockData>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
-    where
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-        CacheBlock: From<CacheLock<B>>,
-    {
-        debug!("Cache::read {:?}", path);
-
-        let mut cache = self.lfu.lock().await;
-
-        if let Some(block) = cache.get(path).await {
-            debug!("cache hit: {:?}", path);
-            let block = block.clone().try_into()?;
-            return Ok(Some(block));
-        } else if !path.exists() {
-            debug!("block {:?} does not exist", path);
-            return Ok(None);
+    fn active_lock(&self) -> &Arc<RwLock<B>> {
+        if let Self::Active(lock) = self {
+            lock
         } else {
-            info!("cache miss: {:?}", path);
+            unreachable!("lock inactive cache block")
+        }
+    }
+}
+
+/// A type-specific lock on a block in the [`Cache`].
+#[derive(Clone)]
+pub struct CacheLock<B> {
+    path: Arc<PathBuf>,
+    state: Arc<RwLock<CacheLockState<B>>>,
+}
+
+impl<B: BlockData> CacheLock<B> {
+    fn new(path: PathBuf, value: B) -> Self {
+        let state = CacheLockState::Active(Arc::new(RwLock::new(value)));
+        Self {
+            path: Arc::new(path),
+            state: Arc::new(RwLock::new(state)),
+        }
+    }
+
+    fn pending(path: PathBuf) -> Self {
+        Self {
+            path: Arc::new(path),
+            state: Arc::new(RwLock::new(CacheLockState::Pending)),
+        }
+    }
+
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
+    async fn delete(self) {
+        let mut state = self.state.write().await;
+        *state = CacheLockState::Deleted;
+    }
+
+    async fn get_lock(&self) -> OwnedRwLockReadGuard<CacheLockState<B>> {
+        let mut state = self.state.clone().write_owned().await;
+        assert!(!state.is_deleted());
+
+        if state.is_pending() {
+            let block_file = read_file(&self.path).await.expect("a block file");
+            let block = B::load(block_file).await.expect("a decoded block");
+            let lock = Arc::new(RwLock::new(block));
+            *state = CacheLockState::Active(lock.clone());
         }
 
-        Self::_read_and_insert(cache, path.clone())
-            .map_ok(|block| Some(block))
-            .await
+        state.downgrade()
     }
 
-    /// Delete a block from the cache.
-    pub async fn delete(&self, path: &PathBuf) -> Option<CacheBlock> {
-        debug!("Cache::delete {:?}", path);
-
-        let mut cache = self.lfu.lock().await;
-        cache.remove(path).await
+    pub async fn read(&self) -> OwnedRwLockReadGuard<B> {
+        let state = self.get_lock().await;
+        state.active_lock().clone().read_owned().await
     }
 
-    /// Remove a block from the cache and delete it from the filesystem.
-    pub async fn delete_and_sync(&self, path: PathBuf) -> TCResult<()> {
-        debug!("Cache::delete_and_sync {:?}", path);
+    pub async fn write(&self) -> OwnedRwLockWriteGuard<B> {
+        let state = self.get_lock().await;
+        state.active_lock().clone().write_owned().await
+    }
+}
 
-        let mut cache = self.lfu.lock().await;
-        cache.remove(&path).await;
-
+fn delete_block_at(path: &PathBuf) -> TCBoxTryFuture<()> {
+    Box::pin(async move {
         let tmp = path.with_extension(TMP);
         if tmp.exists() {
             tokio::fs::remove_file(&tmp)
@@ -304,124 +394,11 @@ impl Cache {
         }
 
         Ok(())
-    }
-
-    /// Lock the cache for writing before deleting the given filesystem directory.
-    pub async fn delete_dir(&self, path: PathBuf) -> TCResult<()> {
-        debug!("Cache::delete_dir");
-
-        let _lock = self.lfu.lock().await;
-        tokio::fs::remove_dir_all(&path)
-            .map_err(|e| io_err(e, &path))
-            .await
-    }
-
-    async fn _sync(cache: &mut LFU, path: &PathBuf) -> TCResult<bool> {
-        debug!("sync block at {:?} with filesystem", &path);
-
-        if let Some(block) = cache.get(path).await {
-            let size = persist(path, &block).await?;
-            debug!("sync'd block at {:?}, wrote {} bytes", path, size);
-            Ok(true)
-        } else {
-            info!("cache sync miss: {:?}", path);
-            Ok(path.exists())
-        }
-    }
-
-    /// Synchronize a cached block with the filesystem.
-    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
-        debug!("sync block at {:?} with filesystem", &path);
-
-        let mut cache = self.lfu.lock().await;
-        Self::_sync(&mut cache, path).await
-    }
-
-    /// Sync the source block with the filesystem and then copy it to the destination.
-    pub async fn sync_and_copy<'en, B: BlockData + IntoStream<'en> + 'en>(
-        &self,
-        source: PathBuf,
-        dest: PathBuf,
-    ) -> TCResult<CacheLock<B>>
-    where
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-        CacheBlock: From<CacheLock<B>>,
-    {
-        debug!("cache sync + copy from {:?} to {:?}", source, dest);
-        let mut cache = self.lfu.lock().await;
-        Self::_sync(&mut cache, &source).await?;
-
-        tokio::fs::copy(&source, &dest)
-            .map_err(|e| io_err(e, format!("copy from {:?} to {:?}", source, dest)))
-            .await?;
-
-        Self::_read_and_insert(cache, dest).await
-    }
-
-    async fn _write<'en, B: BlockData + IntoStream<'en> + 'en>(
-        cache: &mut LFU,
-        tx: &mpsc::Sender<Evict>,
-        path: PathBuf,
-        block: CacheLock<B>,
-    ) where
-        CacheBlock: From<CacheLock<B>>,
-    {
-        cache.insert(path, block.into()).await;
-
-        if cache.is_full() {
-            info!("the block cache is full ({} occupied out of {} capacity), triggering garbage collection...", cache.occupied(), cache.capacity());
-            if let Err(err) = tx.send(Evict).await {
-                error!("the cache cleanup thread is dead! {}", err);
-            }
-        }
-    }
-
-    /// Update a block in the cache.
-    pub async fn write<'en, B: BlockData + IntoStream<'en> + 'en>(
-        &self,
-        path: PathBuf,
-        block: B,
-    ) -> TCResult<CacheLock<B>>
-    where
-        CacheBlock: From<CacheLock<B>>,
-    {
-        debug!("Cache::write {:?}", &path);
-        let block = CacheLock::new(block);
-        let mut cache = self.lfu.lock().await;
-        Self::_write(&mut cache, &self.tx, path, block.clone()).await;
-        Ok(block)
-    }
+    })
 }
 
-fn spawn_cleanup_thread(cache: Arc<Mutex<LFU>>, mut rx: mpsc::Receiver<Evict>) {
-    tokio::spawn(async move {
-        info!("cache cleanup thread is running...");
-
-        while rx.recv().await.is_some() {
-            debug!("got Evict message, locking LFU cache for cleanup...");
-
-            let mut lfu = cache.lock().await;
-
-            debug!(
-                "cache has {} entries (capacity {} bytes)",
-                lfu.len(),
-                lfu.capacity()
-            );
-
-            if lfu.is_full() {
-                debug!("running cache eviction with {} entries...", lfu.len());
-                lfu.evict().await;
-                debug!("cache eviction complete, {} entries remain", lfu.len());
-            } else {
-                debug!("cache eviction already ran, ignoring redundant Evict message");
-            }
-        }
-
-        warn!("cache cleanup thread shutting down");
-    });
-}
-
-async fn persist(path: &PathBuf, block: &CacheBlock) -> TCResult<u64> {
+async fn persist(block: CacheBlock) -> TCResult<u64> {
+    let path = block.path();
     let tmp = path.with_extension(TMP);
 
     let size = {
