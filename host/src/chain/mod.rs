@@ -38,7 +38,7 @@ mod data;
 
 mod sync;
 
-const BLOCK_SIZE: u64 = 1_000_000;
+const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);

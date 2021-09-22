@@ -40,25 +40,3 @@ pub mod stream;
 pub mod txn;
 
 const MIN_CACHE_SIZE: u64 = 5000;
-
-/// Initialize the transactional filesystem layer.
-pub async fn mount(
-    cache_size: u64,
-    data_dir: Option<PathBuf>,
-) -> tc_error::TCResult<(fs::Cache, Option<fs::Dir>)> {
-    if cache_size < MIN_CACHE_SIZE {
-        return Err(error::TCError::unsupported(format!(
-            "the minimum cache size is {} bytes",
-            MIN_CACHE_SIZE
-        )));
-    }
-
-    let cache = fs::Cache::new(cache_size);
-    let data_dir = if let Some(data_dir) = data_dir {
-        fs::load(cache.clone(), data_dir).map_ok(Some).await?
-    } else {
-        None
-    };
-
-    Ok((cache, data_dir))
-}

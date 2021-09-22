@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
@@ -10,6 +9,7 @@ use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, try_join, TryFutureExt};
 use log::debug;
+use safecast::AsType;
 use strided::Stride;
 
 use tc_btree::Node;
@@ -302,10 +302,11 @@ impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
@@ -377,10 +378,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     async fn write<B: DenseAccess<FD, FS, D, T>>(
@@ -506,10 +508,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -960,10 +963,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
@@ -1029,10 +1033,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;

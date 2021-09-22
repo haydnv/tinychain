@@ -224,7 +224,8 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<fs::CacheLockReadGuard<ChainBlock>> {
+    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::ReadLock>
+    {
         self.file.read_block(txn_id, block_id.into()).await
     }
 
@@ -232,11 +233,16 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<fs::CacheLockWriteGuard<ChainBlock>> {
+    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::WriteLock>
+    {
         self.file.write_block(txn_id, block_id.into()).await
     }
 
-    pub async fn read_latest(&self, txn_id: TxnId) -> TCResult<fs::CacheLockReadGuard<ChainBlock>> {
+    pub async fn read_latest(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::ReadLock>
+    {
         let latest = self.latest.read(txn_id).await?;
         self.read_block(txn_id, (*latest).into()).await
     }
@@ -244,7 +250,8 @@ impl History {
     pub async fn write_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<fs::CacheLockWriteGuard<ChainBlock>> {
+    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::WriteLock>
+    {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(txn_id, (*latest).into()).await
     }
@@ -354,9 +361,6 @@ impl History {
 
             let (source_hash, dest_hash) = try_join!(source.hash(), dest.hash())?;
             if source_hash != dest_hash {
-                debug!("source {:?}", &*source);
-                debug!("dest {:?}", &*dest);
-
                 return Err(TCError::bad_request(
                     "error replicating chain",
                     format!("hashes diverge at block {}", i),
@@ -629,7 +633,8 @@ impl de::Visitor for HistoryVisitor {
                 .map_err(de::Error::custom)
                 .await?
                 .write()
-                .await;
+                .map_err(de::Error::custom)
+                .await?;
 
             if block.last_hash() != &hash {
                 let hash = hex::encode(hash);

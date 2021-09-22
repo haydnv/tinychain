@@ -126,16 +126,6 @@ impl Node {
     }
 }
 
-impl BlockData for Node {
-    fn ext() -> &'static str {
-        super::EXT
-    }
-
-    fn max_size() -> u64 {
-        4096
-    }
-}
-
 #[async_trait]
 impl de::FromStream for Node {
     type Context = ();
@@ -318,7 +308,7 @@ where
     fn _insert(
         &self,
         txn_id: TxnId,
-        mut node: <F::Block as Block<Node, F>>::WriteLock,
+        mut node: <F::Block as Block<Node>>::WriteLock,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
@@ -534,11 +524,11 @@ where
     async fn split_child(
         &self,
         txn_id: TxnId,
-        mut node: <F::Block as Block<Node, F>>::WriteLock,
+        mut node: <F::Block as Block<Node>>::WriteLock,
         node_id: NodeId,
-        mut child: <F::Block as Block<Node, F>>::WriteLock,
+        mut child: <F::Block as Block<Node>>::WriteLock,
         i: usize,
-    ) -> TCResult<<F::Block as Block<Node, F>>::WriteLock> {
+    ) -> TCResult<<F::Block as Block<Node>>::WriteLock> {
         debug!("btree::split_child");
 
         let file = &self.inner.file;
@@ -552,12 +542,13 @@ where
             child.children.len()
         );
 
-        let new_node_id = file.unique_id(txn_id).await?;
+        let new_node = Node::new(child.leaf, Some(node_id));
+        let (new_node_id, new_node) = file.create_block_tmp(txn_id, new_node).await?;
+        let mut new_node = new_node.write().await?;
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(order - 1));
 
-        let mut new_node = Node::new(child.leaf, Some(node_id));
         new_node.keys = child.keys.drain((order - 1)..).collect();
 
         if child.leaf {
@@ -565,8 +556,6 @@ where
         } else {
             new_node.children = child.children.drain(order..).collect();
         }
-
-        file.create_block(txn_id, new_node_id, new_node).await?;
 
         Ok(node)
     }
@@ -645,7 +634,7 @@ where
 
             self.inner.file.truncate(txn_id).await?;
 
-            *root = self.inner.file.unique_id(txn_id).await?;
+            *root = Uuid::new_v4().into();
 
             self.inner
                 .file
@@ -692,17 +681,18 @@ where
 
             let old_root_id = (*root_id).clone();
 
-            (*root_id) = file.unique_id(txn_id).await?;
-
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
 
-            let new_root = file
-                .create_block(txn_id, (*root_id).clone(), new_root)
+            let (new_root_id, new_root) = file.create_block_tmp(txn_id, new_root).await?;
+
+            (*root_id) = new_root_id;
+
+            let new_root = new_root.write().await?;
+            let new_root = self
+                .split_child(txn_id, new_root, old_root_id, root, 0)
                 .await?;
 
-            let new_root = new_root.write().await;
-            let new_root = self.split_child(txn_id,  new_root, old_root_id, root, 0).await?;
             self._insert(txn_id, new_root, key).await
         } else {
             // no need to keep this write lock since we're not splitting the root node

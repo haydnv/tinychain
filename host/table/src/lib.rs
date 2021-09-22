@@ -1,6 +1,5 @@
 //! A [`Table`], an ordered collection of [`Row`]s which supports `BTree`-based indexing
 
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -8,6 +7,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::TryStreamExt;
+use safecast::AsType;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -455,7 +455,7 @@ impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en, D> for Table<F, 
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
 where
-    F: TryFrom<D::File, Error = TCError>,
+    D::File: AsType<F>,
     D::FileClass: From<BTreeType>,
 {
     type Context = Txn;
@@ -510,7 +510,7 @@ struct TableVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
 where
-    F: TryFrom<D::File, Error = TCError>,
+    D::File: AsType<F>,
     D::FileClass: From<BTreeType>,
 {
     type Value = Table<F, D, Txn>;

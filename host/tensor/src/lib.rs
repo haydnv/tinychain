@@ -1,5 +1,4 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -356,10 +355,11 @@ pub enum Tensor<FD, FS, D, T> {
 
 impl<FD, FS, D, T> Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     pub fn schema(&self) -> Schema {
@@ -383,10 +383,11 @@ impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Te
 
 impl<FD, FS, D, T> TensorAccess for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
@@ -420,10 +421,11 @@ where
 
 impl<FD, FS, D, T> TensorInstance for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Dense = Self;
@@ -446,10 +448,11 @@ where
 
 impl<FD, FS, D, T> TensorBoolean<Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
@@ -479,10 +482,11 @@ where
 
 impl<FD, FS, D, T> TensorCompare<Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Compare = Self;
@@ -534,10 +538,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -569,10 +574,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDualIO<D, Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -589,10 +595,11 @@ where
 
 impl<FD, FS, D, T> TensorMath<D, Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
@@ -636,10 +643,11 @@ where
 
 impl<FD, FS, D, T> TensorReduce<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -676,10 +684,11 @@ where
 
 impl<FD, FS, D, T> TensorTransform for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Broadcast = Self;
@@ -743,10 +752,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorUnary<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -783,10 +793,11 @@ where
 
 impl<FD, FS, D, T, B> From<DenseTensor<FD, FS, D, T, B>> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
@@ -797,10 +808,11 @@ where
 
 impl<FD, FS, D, T, A> From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     A: SparseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
@@ -812,9 +824,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -846,9 +860,11 @@ impl<FD, FS, D, T> TensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for TensorVisitor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -885,10 +901,11 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;

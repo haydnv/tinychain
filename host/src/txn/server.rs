@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::TryFutureExt;
+use freqfs::DirLock;
+use futures::future::{FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, error};
 use tokio::sync::RwLock;
@@ -22,28 +23,21 @@ use super::request::*;
 use super::{Active, Txn, TxnId};
 
 const GRACE: Duration = Duration::from_secs(3);
-const INTERVAL: Duration = Duration::from_secs(1);
+const INTERVAL: Duration = Duration::from_millis(100);
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
     active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
-    workspace: std::path::PathBuf,
-    cache: fs::Cache,
+    workspace: DirLock<fs::CacheBlock>,
 }
 
 impl TxnServer {
     /// Construct a new `TxnServer`.
-    pub async fn new(workspace: std::path::PathBuf, cache: fs::Cache) -> Self {
+    pub async fn new(workspace: DirLock<fs::CacheBlock>) -> Self {
         let active = Arc::new(RwLock::new(HashMap::new()));
-
         spawn_cleanup_thread(workspace.clone(), active.clone());
-
-        Self {
-            active,
-            workspace,
-            cache,
-        }
+        Self { active, workspace }
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
@@ -66,7 +60,7 @@ impl TxnServer {
                 Ok(Txn::new(active.clone(), gateway, dir, request))
             }
             Entry::Vacant(entry) => {
-                let workspace = self.txn_dir(txn_id);
+                let workspace = self.txn_dir(txn_id).await?;
                 let dir = workspace.create_dir_tmp(txn_id).await?;
                 let active = Arc::new(Active::new(&txn_id, workspace, expires));
                 let txn = Txn::new(active.clone(), gateway, dir, request);
@@ -96,15 +90,22 @@ impl TxnServer {
         .await?
     }
 
-    fn txn_dir(&self, txn_id: TxnId) -> fs::Dir {
-        let mut path = self.workspace.clone();
-        path.push(txn_id.to_string());
-        fs::Dir::new(path, self.cache.clone())
+    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<fs::Dir> {
+        let mut workspace = self.workspace.write().await;
+        let cache = workspace
+            .create_dir(txn_id.to_string())
+            .map_err(fs::io_err)?;
+        fs::Dir::new(cache).map(Ok).await
     }
 }
 
-fn spawn_cleanup_thread(workspace: PathBuf, active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>) {
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(INTERVAL.as_secs()));
+fn spawn_cleanup_thread(
+    workspace: DirLock<fs::CacheBlock>,
+    active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
+) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(
+        INTERVAL.as_millis() as u64,
+    ));
 
     tokio::spawn(async move {
         loop {
@@ -114,7 +115,10 @@ fn spawn_cleanup_thread(workspace: PathBuf, active: Arc<RwLock<HashMap<TxnId, Ar
     });
 }
 
-async fn cleanup(workspace: &PathBuf, txn_pool: &RwLock<HashMap<TxnId, Arc<Active>>>) {
+async fn cleanup(
+    workspace: &DirLock<fs::CacheBlock>,
+    txn_pool: &RwLock<HashMap<TxnId, Arc<Active>>>,
+) {
     let now = Gateway::time();
     let mut txn_pool = txn_pool.write().await;
     let expired: Vec<TxnId> = txn_pool
@@ -129,29 +133,11 @@ async fn cleanup(workspace: &PathBuf, txn_pool: &RwLock<HashMap<TxnId, Arc<Activ
         .cloned()
         .collect();
 
-    let mut cleanup: FuturesUnordered<_> = expired
-        .into_iter()
-        .filter_map(|txn_id| txn_pool.remove(&txn_id).map(|active| (txn_id, active)))
-        .map(|(txn_id, active)| async move {
+    let mut workspace = workspace.write().await;
+    for txn_id in expired.into_iter() {
+        if let Some(active) = txn_pool.remove(&txn_id) {
             debug!("clean up txn {}", txn_id);
-
-            // call finalize to clean up the cache
-            active.workspace.finalize(&txn_id).await;
-
-            let mut path = workspace.clone();
-            path.push(txn_id.to_string());
-
-            if path.exists() {
-                tokio::fs::remove_dir_all(path).await
-            } else {
-                Ok(())
-            }
-        })
-        .collect();
-
-    while let Some(result) = cleanup.next().await {
-        if let Err(cause) = result {
-            error!("error finalizing transaction: {}", cause);
+            workspace.delete(txn_id.to_string());
         }
     }
 }

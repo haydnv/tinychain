@@ -1,8 +1,7 @@
-use std::convert::TryFrom;
-
 use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
+use safecast::AsType;
 
 use tc_btree::Node;
 use tc_error::*;
@@ -21,12 +20,13 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    C: Stream<Item = TCResult<Coords>> + Unpin + Send,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
     let file: FD = txn
@@ -52,13 +52,14 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<(Coord, Number)>>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
-    A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + 'a,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + 'a,
+    C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {
     debug!(
         "sort values by coordinate for Tensor with shape {}",

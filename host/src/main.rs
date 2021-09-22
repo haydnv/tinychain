@@ -115,13 +115,21 @@ async fn main() -> Result<(), TokioError> {
         std::fs::create_dir_all(&config.workspace)?;
     }
 
-    if let Some(data_dir) = &config.data_dir {
+    let data_dir = if let Some(data_dir) = &config.data_dir {
         if !data_dir.exists() {
             panic!("{:?} does not exist--create it or provide a different path for the --data_dir flag", data_dir);
         }
-    };
 
-    let (cache, data_dir) = mount(config.cache_size, config.data_dir).await?;
+        let data_dir = freqfs::load(
+            config.data_dir,
+            config.cache_size,
+            Duration::from_millis(50),
+        )
+        .await?;
+        Some(data_dir)
+    } else {
+        None
+    };
 
     #[cfg(feature = "tensor")]
     afarray::print_af_info();

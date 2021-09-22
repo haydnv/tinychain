@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
@@ -10,6 +9,7 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
+use safecast::AsType;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
@@ -135,10 +135,11 @@ where
 
 impl<FD, FS, D, T> SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType>,
 {
     /// Create a new `SparseTensor` with the given schema
@@ -217,12 +218,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorBoolean<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
     type LeftCombine = Tensor<FD, FS, D, T>;
@@ -252,13 +254,14 @@ where
 impl<FD, FS, D, T, L, R> TensorCompare<SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
 {
     type Compare = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
     type Dense = Condensed<FD, FS, D, T, L, R>;
@@ -314,12 +317,13 @@ where
 
 impl<FD, FS, D, T, A> TensorCompare<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Compare = Tensor<FD, FS, D, T>;
     type Dense = Tensor<FD, FS, D, T>;
@@ -371,13 +375,14 @@ where
 impl<FD, FS, D, T, L, R> TensorDualIO<D, SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: SparseWrite<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -415,12 +420,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorDualIO<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseWrite<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseWrite<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -522,12 +528,13 @@ where
 
 impl<FD, FS, D, T, A> TensorMath<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
     type LeftCombine = Tensor<FD, FS, D, T>;
@@ -570,12 +577,13 @@ where
 
 impl<FD, FS, D, T, A> TensorReduce<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
     Self: TensorInstance,
     <Self as TensorInstance>::Dense: TensorReduce<D, Txn = T> + Send + Sync,
 {
@@ -631,12 +639,13 @@ where
 
 impl<FD, FS, D, T, A> TensorTransform for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Broadcast = SparseTensor<FD, FS, D, T, SparseBroadcast<FD, FS, D, T, A>>;
     type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
@@ -722,12 +731,13 @@ where
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>>
     for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType> + From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
@@ -760,10 +770,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Schema = Schema;
@@ -784,10 +795,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Restore<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
@@ -828,12 +840,13 @@ impl<FD, FS, D, T, A> fmt::Display for SparseTensor<FD, FS, D, T, A> {
 #[async_trait]
 impl<'en, FD, FS, D, T, A> IntoView<'en, D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
     type View = SparseTensorView<'en>;
@@ -852,10 +865,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = T;
@@ -886,10 +900,11 @@ impl<FD, FS, D, T> SparseTensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for SparseTensorVisitor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;

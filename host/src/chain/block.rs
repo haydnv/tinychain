@@ -9,7 +9,7 @@ use futures::join;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Persist, Store};
+use tc_transact::fs::{Persist, Store};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;

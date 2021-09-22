@@ -1,192 +1,37 @@
 //! A transactional filesystem directory.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 
-#[cfg(feature = "tensor")]
-use afarray::Array;
 use async_trait::async_trait;
-use futures::future::{join_all, Future, TryFutureExt};
+use freqfs::{DirLock, DirWriteGuard};
+use futures::future::{join_all, Future, FutureExt, TryFutureExt};
 use log::debug;
+use safecast::AsType;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use tc_btree::Node;
 use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorType;
-use tc_transact::fs::{self, BlockData};
-use tc_transact::lock::TxnLock;
+use tc_transact::fs;
+use tc_transact::lock::{TxnLock, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, PathSegment};
 
-use crate::chain::{self, ChainBlock};
+use crate::chain::ChainBlock;
 use crate::collection::CollectionType;
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 
-use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
+use super::{file_ext, file_name, io_err, CacheBlock, File};
 
-const VALUE_EXT: &'static str = "value";
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum FileEntry {
-    BTree(File<Node>),
-    Chain(File<ChainBlock>),
-    Value(File<Value>),
-
-    #[cfg(feature = "tensor")]
-    Tensor(File<Array>),
-}
-
-impl FileEntry {
-    fn new<C>(cache: Cache, path: PathBuf, class: C) -> TCResult<Self>
-    where
-        StateType: From<C>,
-    {
-        fn err<T: fmt::Display>(class: T) -> TCError {
-            TCError::bad_request("cannot create file for", class)
-        }
-
-        match StateType::from(class) {
-            StateType::Collection(ct) => match ct {
-                CollectionType::BTree(_) => Ok(Self::BTree(File::new(cache, path, Node::ext()))),
-                CollectionType::Table(tt) => Err(err(tt)),
-
-                #[cfg(feature = "tensor")]
-                CollectionType::Tensor(tt) => match tt {
-                    TensorType::Dense => Ok(Self::Tensor(File::new(cache, path, Array::ext()))),
-                    TensorType::Sparse => {
-                        Err(TCError::unsupported("cannot create File for SparseTensor"))
-                    }
-                },
-            },
-            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, ChainBlock::ext()))),
-            StateType::Scalar(st) => match st {
-                ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, Value::ext()))),
-                other => Err(err(other)),
-            },
-            other => Err(err(other)),
-        }
-    }
-
-    async fn load(cache: Cache, path: PathBuf, contents: DirContents) -> TCResult<Self> {
-        let ext = file_ext(&path)
-            .ok_or_else(|| TCError::unsupported(format!("file at {:?} has no extension", &path)))?;
-
-        match ext {
-            tc_btree::EXT => {
-                let file = File::load(cache.clone(), path, contents)?;
-                Ok(FileEntry::BTree(file))
-            }
-            chain::EXT => {
-                let file = File::load(cache.clone(), path, contents)?;
-                Ok(FileEntry::Chain(file))
-            }
-            #[cfg(feature = "tensor")]
-            tc_tensor::EXT => {
-                let file = File::load(cache.clone(), path, contents)?;
-                Ok(FileEntry::Tensor(file))
-            }
-            VALUE_EXT => {
-                let file = File::load(cache.clone(), path, contents)?;
-                Ok(FileEntry::Value(file))
-            }
-            other => Err(TCError::internal(format!(
-                "file at {:?} has invalid extension {}",
-                &path, other
-            ))),
-        }
-    }
-}
-
-impl From<File<ChainBlock>> for FileEntry {
-    fn from(file: File<ChainBlock>) -> Self {
-        Self::Chain(file)
-    }
-}
-
-#[cfg(feature = "tensor")]
-impl TryFrom<FileEntry> for File<Array> {
-    type Error = TCError;
-
-    fn try_from(entry: FileEntry) -> TCResult<Self> {
-        match entry {
-            FileEntry::Tensor(file) => Ok(file),
-            other => Err(TCError::bad_request(
-                "expected a Tensor file but found",
-                other,
-            )),
-        }
-    }
-}
-
-impl TryFrom<FileEntry> for File<ChainBlock> {
-    type Error = TCError;
-
-    fn try_from(entry: FileEntry) -> TCResult<Self> {
-        match entry {
-            FileEntry::Chain(file) => Ok(file),
-            other => Err(TCError::bad_request(
-                "expected a Chain file but found",
-                other,
-            )),
-        }
-    }
-}
-
-impl TryFrom<FileEntry> for File<Node> {
-    type Error = TCError;
-
-    fn try_from(entry: FileEntry) -> TCResult<Self> {
-        match entry {
-            FileEntry::BTree(file) => Ok(file),
-            other => Err(TCError::bad_request(
-                "expected a Chain file but found",
-                other,
-            )),
-        }
-    }
-}
-
-impl From<File<Value>> for FileEntry {
-    fn from(file: File<Value>) -> Self {
-        Self::Value(file)
-    }
-}
-
-impl TryFrom<FileEntry> for File<Value> {
-    type Error = TCError;
-
-    fn try_from(entry: FileEntry) -> TCResult<Self> {
-        match entry {
-            FileEntry::Value(file) => Ok(file),
-            other => Err(TCError::bad_request(
-                "expected a Chain file but found",
-                other,
-            )),
-        }
-    }
-}
-
-impl fmt::Display for FileEntry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::BTree(btree) => fmt::Display::fmt(btree, f),
-            Self::Chain(chain) => fmt::Display::fmt(chain, f),
-            Self::Value(value) => fmt::Display::fmt(value, f),
-
-            #[cfg(feature = "tensor")]
-            Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
-        }
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-enum DirEntry {
+#[derive(Clone)]
+pub enum DirEntry {
     Dir(Dir),
     File(FileEntry),
 }
@@ -201,102 +46,195 @@ impl fmt::Display for DirEntry {
 }
 
 #[derive(Clone)]
+pub enum FileEntry {
+    BTree(File<tc_btree::Node>),
+    Chain(File<crate::chain::ChainBlock>),
+    #[cfg(feature = "tensor")]
+    Tensor(File<afarray::Array>),
+    Value(File<tc_value::Value>),
+}
+
+impl FileEntry {
+    fn new<C>(cache: DirLock<CacheBlock>, class: C) -> TCResult<Self>
+    where
+        StateType: From<C>,
+    {
+        match class.into() {
+            StateType::Collection(ct) => match ct {
+                CollectionType::BTree(_) | CollectionType::Table(_) => todo!(),
+
+                #[cfg(feature = "tensor")]
+                CollectionType::Tensor(_) => todo!(),
+            },
+            StateType::Chain(_) => todo!(),
+            other => Err(TCError::bad_request("invalid file class", other)),
+        }
+    }
+}
+
+impl AsType<File<tc_btree::Node>> for FileEntry {
+    fn as_type(&self) -> Option<&File<tc_btree::Node>> {
+        if let Self::BTree(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn as_type_mut(&mut self) -> Option<&mut File<tc_btree::Node>> {
+        if let Self::BTree(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn into_type(self) -> Option<File<tc_btree::Node>> {
+        if let Self::BTree(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+}
+
+impl AsType<File<ChainBlock>> for FileEntry {
+    fn as_type(&self) -> Option<&File<ChainBlock>> {
+        if let Self::Chain(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn as_type_mut(&mut self) -> Option<&mut File<ChainBlock>> {
+        if let Self::Chain(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn into_type(self) -> Option<File<ChainBlock>> {
+        if let Self::Chain(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl AsType<File<afarray::Array>> for FileEntry {
+    fn as_type(&self) -> Option<&File<afarray::Array>> {
+        if let Self::Tensor(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn as_type_mut(&mut self) -> Option<&mut File<afarray::Array>> {
+        if let Self::Tensor(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn into_type(self) -> Option<File<afarray::Array>> {
+        if let Self::Tensor(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+}
+
+impl AsType<File<Value>> for FileEntry {
+    fn as_type(&self) -> Option<&File<Value>> {
+        if let Self::Value(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn as_type_mut(&mut self) -> Option<&mut File<Value>> {
+        if let Self::Value(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+
+    fn into_type(self) -> Option<File<Value>> {
+        if let Self::Value(file) = self {
+            Some(file)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<File<tc_btree::Node>> for FileEntry {
+    fn from(file: File<tc_btree::Node>) -> Self {
+        Self::BTree(file)
+    }
+}
+
+impl From<File<ChainBlock>> for FileEntry {
+    fn from(file: File<ChainBlock>) -> Self {
+        Self::Chain(file)
+    }
+}
+
+#[cfg(feature = "tensor")]
+impl From<File<afarray::Array>> for FileEntry {
+    fn from(file: File<afarray::Array>) -> Self {
+        Self::Tensor(file)
+    }
+}
+
+impl From<File<Value>> for FileEntry {
+    fn from(file: File<Value>) -> Self {
+        Self::Value(file)
+    }
+}
+
+impl fmt::Display for FileEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(_) => f.write_str("a BTree file"),
+            Self::Chain(_) => f.write_str("a Chain file"),
+            #[cfg(feature = "tensor")]
+            Self::Tensor(_) => f.write_str("a Tensor file"),
+            Self::Value(_) => f.write_str("a Value file"),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Dir {
-    path: PathBuf,
-    cache: Cache,
+    cache: DirLock<CacheBlock>,
     contents: TxnLock<HashMap<PathSegment, DirEntry>>,
 }
 
 impl Dir {
-    pub fn load(
-        cache: Cache,
-        path: PathBuf,
-        entries: DirContents,
-    ) -> Pin<Box<dyn Future<Output = TCResult<Self>>>> {
-        Box::pin(async move {
-            if entries.iter().all(|(_, meta)| meta.is_dir()) {
-                let mut contents = HashMap::new();
+    pub async fn new(cache: DirLock<CacheBlock>) -> Self {
+        let lock_name = cache
+            .read()
+            .map(|dir| format!("contents of {:?}", &*dir))
+            .await;
 
-                for (handle, _) in entries.into_iter() {
-                    let name = file_name(&handle)?;
-                    let path = handle.path();
-                    let entries = dir_contents(&path).await?;
-                    if is_empty(&entries) {
-                        if file_ext(&path).is_some() {
-                            let file = FileEntry::load(cache.clone(), path, entries).await?;
-                            contents.insert(name, DirEntry::File(file));
-                        } else {
-                            let dir = Dir::load(cache.clone(), path, entries).await?;
-                            contents.insert(name, DirEntry::Dir(dir));
-                        }
-                    } else if entries.iter().all(|(_, meta)| meta.is_file()) {
-                        let file = FileEntry::load(cache.clone(), path, entries).await?;
-                        contents.insert(name, DirEntry::File(file));
-                    } else if entries.iter().all(|(_, meta)| meta.is_dir()) {
-                        let dir = Dir::load(cache.clone(), path, entries).await?;
-                        contents.insert(name, DirEntry::Dir(dir));
-                    } else {
-                        return Err(TCError::internal(format!(
-                            "directory at {:?} contains both blocks and subdirectories",
-                            path
-                        )));
-                    }
-                }
-
-                let lock_name = format!("contents of {:?}", path);
-                Ok(Dir {
-                    path,
-                    cache,
-                    contents: TxnLock::new(lock_name, contents),
-                })
-            } else {
-                Err(TCError::internal(format!(
-                    "directory at {:?} contains both blocks and subdirectories",
-                    path
-                )))
-            }
-        })
-    }
-
-    pub fn new(path: PathBuf, cache: Cache) -> Self {
-        assert!(!path.exists());
-        let lock_name = format!("contents of {:?}", path);
         Self {
-            path,
             cache,
             contents: TxnLock::new(lock_name, HashMap::new()),
         }
     }
 
-    pub async fn entry_ids(&self, txn_id: TxnId) -> TCResult<HashSet<PathSegment>> {
-        let contents = self.contents.read(txn_id).await?;
-        Ok(contents.keys().cloned().collect())
-    }
-
-    pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        if let Some(dir) = fs::Dir::get_dir(self, txn_id, &name).await? {
-            Ok(dir)
-        } else {
-            fs::Dir::create_dir(self, txn_id, name).await
-        }
-    }
-
-    pub async fn unique_id(&self, txn_id: TxnId) -> TCResult<PathSegment> {
-        let existing_ids = self.entry_ids(txn_id).await?;
-        loop {
-            let id: PathSegment = Uuid::new_v4().into();
-            if !existing_ids.contains(&id) {
-                break Ok(id);
-            }
-        }
-    }
-}
-
-impl Eq for Dir {}
-
-impl PartialEq for Dir {
-    fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
+    pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Dir> {
+        unimplemented!()
     }
 }
 
@@ -310,6 +248,7 @@ impl fs::Store for Dir {
     }
 }
 
+// TODO: transactional versioning on the filesystem itself
 #[async_trait]
 impl fs::Dir for Dir {
     type File = FileEntry;
@@ -325,65 +264,59 @@ impl fs::Dir for Dir {
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "filesystem entry already exists",
-                name,
-            ));
+            return Err(TCError::bad_request("directory already exists", name));
         }
 
-        let subdir = Dir {
-            path: fs_path(&self.path, &name),
-            cache: self.cache.clone(),
-            contents: TxnLock::new(
-                format!("transactional subdirectory at {}", name),
-                HashMap::new(),
-            ),
-        };
-
-        contents.insert(name, DirEntry::Dir(subdir.clone()));
-        Ok(subdir)
+        let cache = self.cache.write().await;
+        create_dir_inner(contents, cache, name).await
     }
 
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Dir> {
-        self.unique_id(txn_id)
-            .and_then(|id| self.create_dir(txn_id, id))
-            .await
+        let mut contents = self.contents.write(txn_id).await?;
+        let name = loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !contents.contains_key(&id) {
+                break id;
+            }
+        };
+
+        let cache = self.cache.write().await;
+        create_dir_inner(contents, cache, name).await
     }
 
-    async fn create_file<F: TryFrom<FileEntry, Error = TCError>, C: Send>(
-        &self,
-        txn_id: TxnId,
-        name: Id,
-        class: C,
-    ) -> TCResult<F>
+    async fn create_file<C, F>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
     where
+        C: Send,
+        F: Clone,
         StateType: From<C>,
+        FileEntry: AsType<F>,
     {
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "filesystem entry already exists",
-                name,
-            ));
+            return Err(TCError::bad_request("file already exists", name));
         }
 
-        let path = fs_path(&self.path, &name);
-        let file = FileEntry::new(self.cache.clone(), path, class)?;
-        contents.insert(name, DirEntry::File(file.clone()));
-        file.try_into()
+        let mut cache = self.cache.write().await;
+        create_file_inner(contents, cache, name, class).await
     }
 
-    async fn create_file_tmp<F: TryFrom<FileEntry, Error = TCError>, C: Send>(
-        &self,
-        txn_id: TxnId,
-        class: C,
-    ) -> TCResult<F>
+    async fn create_file_tmp<C, F>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
+        C: Send,
+        F: Clone,
         StateType: From<C>,
+        FileEntry: AsType<F>,
     {
-        self.unique_id(txn_id)
-            .and_then(|id| self.create_file(txn_id, id, class))
-            .await
+        let mut contents = self.contents.write(txn_id).await?;
+        let name = loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !contents.contains_key(&id) {
+                break id;
+            }
+        };
+
+        let cache = self.cache.write().await;
+        create_file_inner(contents, cache, name, class).await
     }
 
     async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
@@ -395,14 +328,17 @@ impl fs::Dir for Dir {
         }
     }
 
-    async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
-        &self,
-        txn_id: TxnId,
-        name: &Id,
-    ) -> TCResult<Option<F>> {
+    async fn get_file<F: Clone>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
+    where
+        FileEntry: AsType<F>,
+    {
         let contents = self.contents.read(txn_id).await?;
         match contents.get(name) {
-            Some(DirEntry::File(file)) => Ok(Some(file.clone().try_into()?)),
+            Some(DirEntry::File(file)) => file
+                .as_type()
+                .cloned()
+                .ok_or_else(|| TCError::bad_request("unexpected file type", file))
+                .map(Some),
             Some(other) => Err(TCError::bad_request("expected a file, not", other)),
             None => Ok(None),
         }
@@ -412,45 +348,26 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("commit dir {:?} at {}", &self.path, txn_id);
+        // let the TxnLock panic first, if a panic is going to happen, so we don't overwrite files
+        self.contents.commit(txn_id).await;
 
-        if !self.path.exists() {
-            let dir_create = tokio::fs::create_dir(&self.path).await;
+        let contents = self.contents.read(*txn_id).await.unwrap();
 
-            match dir_create {
-                Ok(_) => {
-                    debug!("created filesystem dir {:?}", &self.path);
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    debug!("another thread created filesystem dir {:?}", &self.path);
-                }
-                Err(err) => panic!("error creating dir {:?}: {}", &self.path, err),
-            }
-        }
+        join_all(contents.values().map(|entry| match entry {
+            DirEntry::Dir(dir) => dir.commit(txn_id),
+            DirEntry::File(file) => match file {
+                FileEntry::BTree(file) => file.commit(txn_id),
+                FileEntry::Chain(file) => file.commit(txn_id),
+                FileEntry::Value(file) => file.commit(txn_id),
 
-        {
-            let contents = self.contents.read(*txn_id).await.unwrap();
-
-            join_all(contents.values().map(|entry| match entry {
-                DirEntry::Dir(dir) => dir.commit(txn_id),
-                DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.commit(txn_id),
-                    FileEntry::Chain(file) => file.commit(txn_id),
-                    FileEntry::Value(file) => file.commit(txn_id),
-
-                    #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.commit(txn_id),
-                },
-            }))
-            .await;
-        }
-
-        self.contents.commit(txn_id).await
+                #[cfg(feature = "tensor")]
+                FileEntry::Tensor(file) => file.commit(txn_id),
+            },
+        }))
+        .await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("finalize dir {:?} at {}", &self.path, txn_id);
-
         {
             let contents = self.contents.read(*txn_id).await.unwrap();
             join_all(contents.values().map(|entry| match entry {
@@ -473,16 +390,42 @@ impl Transact for Dir {
 
 impl fmt::Display for Dir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "directory at {:?}", self.path)
+        f.write_str("a directory")
     }
 }
 
-fn is_empty(contents: &DirContents) -> bool {
-    for (handle, _) in contents {
-        if !handle.file_name().to_str().unwrap().starts_with('.') {
-            return false;
-        }
-    }
+async fn create_dir_inner(
+    mut contents: TxnLockWriteGuard<HashMap<PathSegment, DirEntry>>,
+    mut cache: DirWriteGuard<CacheBlock>,
+    name: PathSegment,
+) -> TCResult<Dir> {
+    let cache = cache.create_dir(name.to_string()).map_err(io_err)?;
 
-    true
+    let subdir = Dir {
+        cache,
+        contents: TxnLock::new(
+            format!("transactional subdirectory at {}", name),
+            HashMap::new(),
+        ),
+    };
+
+    contents.insert(name, DirEntry::Dir(subdir.clone()));
+    Ok(subdir)
+}
+
+async fn create_file_inner<C, F>(
+    mut contents: TxnLockWriteGuard<HashMap<PathSegment, DirEntry>>,
+    mut cache: DirWriteGuard<CacheBlock>,
+    name: PathSegment,
+    class: C,
+) -> TCResult<F>
+where
+    StateType: From<C>,
+    FileEntry: AsType<F>,
+{
+    let cache = cache.create_dir(name.to_string()).map_err(io_err)?;
+    let file = FileEntry::new(cache, class)?;
+    contents.insert(name, DirEntry::File(file.clone()));
+    file.into_type()
+        .ok_or_else(|| TCError::internal("wrong file class"))
 }
