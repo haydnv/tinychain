@@ -314,31 +314,29 @@ impl Dir {
             debug!("Dir::load {:?}", &*fs_dir);
 
             let mut inner = HashMap::new();
-            for (file_name, fs_cache) in fs_dir.iter() {
-                if file_name.starts_with('.') {
-                    debug!("Dir::load skipping hidden filesystem entry {}", file_name);
+            for (name, fs_cache) in fs_dir.iter() {
+                if name.starts_with('.') {
+                    debug!("Dir::load skipping hidden filesystem entry {}", name);
                     continue;
                 }
 
                 let fs_cache = match fs_cache {
                     freqfs::DirEntry::Dir(dir_lock) => dir_lock.clone(),
-                    _ => {
-                        return Err(TCError::internal(format!(
-                            "{} is not a directory",
-                            file_name
-                        )))
-                    }
+                    _ => return Err(TCError::internal(format!("{} is not a directory", name))),
                 };
 
-                let (name, entry) = if is_file(file_name, &fs_cache).await {
-                    let (name, class) = file_class(file_name)?;
+                let (name, entry) = if is_file(name, &fs_cache).await {
+                    let (name, class) = file_class(name)?;
                     let entry = FileEntry::load(fs_cache, class, txn_id).await?;
                     (name, DirEntry::File(entry))
-                } else if is_dir(file_name, &fs_cache) {
+                } else if is_dir(&fs_cache).await {
                     let subdir = Dir::load(fs_cache, txn_id).await?;
-                    (file_name.parse()?, DirEntry::Dir(subdir))
+                    (name.parse()?, DirEntry::Dir(subdir))
                 } else {
-                    return Err(TCError::internal(format!("directory at {:?} contains both blocks and subdirectories", &*fs_cache)))
+                    return Err(TCError::internal(format!(
+                        "directory {} contains both blocks and subdirectories",
+                        name
+                    )));
                 };
 
                 inner.insert(name, entry);
@@ -544,7 +542,7 @@ impl fmt::Display for Dir {
     }
 }
 
-async fn is_dir(name: &str, fs_cache: &DirLock<CacheBlock>) -> bool {
+async fn is_dir(fs_cache: &DirLock<CacheBlock>) -> bool {
     for (name, entry) in fs_cache.read().await.iter() {
         if name.starts_with('.') {
             continue;
