@@ -212,6 +212,8 @@ where
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<Self::Block> {
+        debug!("File::create_block {}", block_id);
+
         let present = self.present.write(txn_id).await?;
         if present.contains(&block_id) {
             return Err(TCError::bad_request("block already exists", block_id));
@@ -238,6 +240,8 @@ where
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<(fs::BlockId, Self::Block)> {
+        debug!("File::create_block_tmp");
+
         let present = self.present.write(txn_id).await?;
         let name = loop {
             let name = Uuid::new_v4().into();
@@ -263,6 +267,8 @@ where
     }
 
     async fn delete_block(&self, txn_id: TxnId, block_id: fs::BlockId) -> TCResult<()> {
+        debug!("File::delete_block {}", block_id);
+
         let mut present = self.present.write(txn_id).await?;
         let mut blocks = self.blocks.write().await;
         if let Some(block) = blocks.get_mut(&block_id) {
@@ -281,32 +287,44 @@ where
     async fn read_block(
         &self,
         txn_id: TxnId,
-        name: fs::BlockId,
+        block_id: fs::BlockId,
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
-        let block = self.get_block(txn_id, name, false).await?;
+        debug!("File::read_block {}", block_id);
+
+        let block = self.get_block(txn_id, block_id, false).await?;
         fs::Block::read(block).await
     }
 
     async fn read_block_owned(
         self,
         txn_id: TxnId,
-        name: fs::BlockId,
+        block_id: fs::BlockId,
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
-        let block = self.get_block(txn_id, name, false).await?;
+        debug!("File::read_block_owned {}", block_id);
+
+        let block = self.get_block(txn_id, block_id, false).await?;
         fs::Block::read(block).await
     }
 
     async fn write_block(
         &self,
         txn_id: TxnId,
-        name: fs::BlockId,
+        block_id: fs::BlockId,
     ) -> TCResult<FileWriteGuard<CacheBlock, B>> {
-        let block = self.get_block(txn_id, name, true).await?;
+        debug!("File::write_block {}", block_id);
+
+        let block = self.get_block(txn_id, block_id, true).await?;
         fs::Block::write(block).await
     }
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
-        unimplemented!()
+        let mut contents = self.present.write(txn_id).await?;
+        let mut version = self.version(&txn_id).await?;
+        for block_id in contents.drain() {
+            version.delete(Self::file_name(&block_id));
+        }
+
+        Ok(())
     }
 }
 
@@ -317,9 +335,13 @@ where
     CacheBlock: AsType<B>,
 {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!("File::commit");
+
         let mut blocks = self.blocks.write().await;
 
         self.present.commit(txn_id).await;
+        debug!("File::commit committed block listing");
+
         join_all(
             blocks
                 .values()
@@ -391,7 +413,7 @@ async fn create_block_inner<'a, B: fs::BlockData + 'a>(
 where
     CacheBlock: AsType<B>,
 {
-    debug_assert!(blocks.contains_key(&block_id));
+    debug_assert!(!blocks.contains_key(&block_id));
 
     blocks.insert(
         block_id.clone(),
