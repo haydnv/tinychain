@@ -1,10 +1,8 @@
 //! Transactional filesystem traits and data structures. Unstable.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
-
-#[cfg(feature = "tensor")]
-use afarray::Array;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -20,6 +18,23 @@ use super::{Transaction, TxnId};
 
 /// An alias for [`Id`] used for code clarity.
 pub type BlockId = PathSegment;
+
+pub trait BlockData: Clone + Send + Sync + 'static {
+    fn ext() -> &'static str;
+}
+
+#[cfg(feature = "tensor")]
+impl BlockData for afarray::Array {
+    fn ext() -> &'static str {
+        "array"
+    }
+}
+
+impl BlockData for tc_value::Value {
+    fn ext() -> &'static str {
+        "value"
+    }
+}
 
 /// A transactional filesystem block.
 #[async_trait]
@@ -43,7 +58,7 @@ pub trait Store: Clone + Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File<B>: Store + Sized + 'static {
+pub trait File<B: Clone>: Store + Sized + 'static {
     /// The type of block which this file is divided into.
     type Block: Block<B>;
 
@@ -57,26 +72,29 @@ pub trait File<B>: Store + Sized + 'static {
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
 
     /// Create a new [`Self::Block`].
+    ///
+    /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block(
         &self,
         txn_id: TxnId,
         name: BlockId,
         initial_value: B,
+        size_hint: usize,
     ) -> TCResult<Self::Block>;
 
     // TODO: rename to create_block_unique
     /// Create a new [`Self::Block`].
+    ///
+    /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block_tmp(
         &self,
         txn_id: TxnId,
         initial_value: B,
+        size_hint: usize,
     ) -> TCResult<(BlockId, Self::Block)>;
 
     /// Delete the block with the given ID.
     async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()>;
-
-    /// Return a lockable owned reference to the block at `name`.
-    async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Block>;
 
     /// Get a read lock on the block at `name`.
     async fn read_block(
@@ -125,7 +143,7 @@ pub trait Dir: Store + Send + Sized + 'static {
     /// Create a new [`Self::File`].
     async fn create_file<C, F>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
     where
-        C: Send,
+        C: Copy + Send + fmt::Display,
         F: Clone,
         Self::FileClass: From<C>,
         Self::File: AsType<F>;
@@ -134,7 +152,7 @@ pub trait Dir: Store + Send + Sized + 'static {
     /// Create a new [`Self::File`] with a new unique ID.
     async fn create_file_tmp<C, F>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
-        C: Send,
+        C: Copy + Send + fmt::Display,
         F: Clone,
         Self::FileClass: From<C>,
         Self::File: AsType<F>;

@@ -5,11 +5,12 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{future, TryFutureExt, TryStreamExt};
 use log::debug;
 use sha2::{Digest, Sha256};
 
 use tc_error::*;
+use tc_transact::fs::BlockData;
 use tc_transact::TxnId;
 use tc_value::Value;
 use tcgeneric::{TCPathBuf, Tuple};
@@ -194,6 +195,12 @@ impl ChainBlock {
             .map_err(TCError::internal)
             .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
             .await
+    }
+}
+
+impl BlockData for ChainBlock {
+    fn ext() -> &'static str {
+        "chain_block"
     }
 }
 

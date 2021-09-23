@@ -35,6 +35,9 @@ mod access;
 mod file;
 mod stream;
 
+/// The number of bytes in one mebibyte.s
+const MEBIBYTE: usize = 1_048_576;
+
 /// The number of elements per dense tensor block, equal to (1 mebibyte / 64 bits).
 pub const PER_BLOCK: usize = 131_072;
 

@@ -222,7 +222,7 @@ impl Subject {
                     .create_file(txn_id, SUBJECT.into(), value.class())
                     .await?;
 
-                file.create_block(txn_id, SUBJECT.into(), value.clone())
+                file.create_block(txn_id, SUBJECT.into(), value.clone(), BLOCK_SIZE)
                     .await?;
 
                 Ok(Self::Value(file))
@@ -376,7 +376,7 @@ impl de::FromStream for Subject {
             .map_err(de::Error::custom)
             .await?;
 
-        file.create_block(*txn.id(), SUBJECT.into(), value)
+        file.create_block(*txn.id(), SUBJECT.into(), value, BLOCK_SIZE)
             .map_err(de::Error::custom)
             .await?;
 

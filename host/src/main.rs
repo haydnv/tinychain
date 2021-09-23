@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use destream::de::FromStream;
-use futures::{future, stream};
+use futures::{future, stream, TryFutureExt};
 use structopt::StructOpt;
 use tokio::time::Duration;
 
@@ -17,6 +17,8 @@ use tinychain::object::InstanceClass;
 use tinychain::*;
 
 type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+const MIN_CACHE_SIZE: usize = 5000;
 
 fn data_size(flag: &str) -> TCResult<u64> {
     const ERR: &str = "unable to parse data size";
@@ -115,18 +117,21 @@ async fn main() -> Result<(), TokioError> {
         std::fs::create_dir_all(&config.workspace)?;
     }
 
-    let data_dir = if let Some(data_dir) = &config.data_dir {
+    let cache_size = config.cache_size as usize;
+    if cache_size < MIN_CACHE_SIZE {
+        return Err(TCError::bad_request("the minimum cache size is", MIN_CACHE_SIZE).into());
+    }
+
+    let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_millis(50));
+    let workspace = cache.clone().load(config.workspace).await?;
+
+    let data_dir = if let Some(data_dir) = config.data_dir {
         if !data_dir.exists() {
             panic!("{:?} does not exist--create it or provide a different path for the --data_dir flag", data_dir);
         }
 
-        let data_dir = freqfs::load(
-            config.data_dir,
-            config.cache_size,
-            Duration::from_millis(50),
-        )
-        .await?;
-        Some(data_dir)
+        let data_dir = cache.load(data_dir).await?;
+        tinychain::fs::Dir::new(data_dir).map_ok(Some).await?
     } else {
         None
     };
@@ -135,7 +140,7 @@ async fn main() -> Result<(), TokioError> {
     afarray::print_af_info();
     println!();
 
-    let txn_server = tinychain::txn::TxnServer::new(config.workspace.clone(), cache).await;
+    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {

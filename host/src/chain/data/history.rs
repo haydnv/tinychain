@@ -23,7 +23,7 @@ use tcgeneric::{
     label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
 };
 
-use crate::chain::{ChainType, Subject, CHAIN, NULL_HASH};
+use crate::chain::{ChainType, Subject, BLOCK_SIZE, CHAIN, NULL_HASH};
 use crate::collection::*;
 use crate::fs;
 use crate::route::Public;
@@ -49,8 +49,9 @@ impl History {
     }
 
     pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
+        let block = ChainBlock::new(NULL_HASH);
         let file: fs::File<ChainBlock> = dir.create_file(txn_id, CHAIN.into(), class).await?;
-        file.create_block(txn_id, 0u64.into(), ChainBlock::new(NULL_HASH))
+        file.create_block(txn_id, 0u64.into(), block, BLOCK_SIZE)
             .await?;
 
         let dir = dir.create_dir(txn_id, DATA.into()).await?;
@@ -216,7 +217,7 @@ impl History {
         debug!("creating next chain block {}", *latest);
 
         self.file
-            .create_block(txn_id, (*latest).into(), block)
+            .create_block(txn_id, (*latest).into(), block, BLOCK_SIZE)
             .await
     }
 
@@ -585,7 +586,7 @@ impl de::Visitor for HistoryVisitor {
             .await?;
 
         let first_block = ChainBlock::new(NULL_HASH);
-        file.create_block(txn_id, 0u64.into(), first_block)
+        file.create_block(txn_id, 0u64.into(), first_block, BLOCK_SIZE)
             .map_err(de::Error::custom)
             .await?;
 

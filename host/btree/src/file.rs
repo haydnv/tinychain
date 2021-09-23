@@ -126,6 +126,12 @@ impl Node {
     }
 }
 
+impl BlockData for Node {
+    fn ext() -> &'static str {
+        "node"
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Node {
     type Context = ();
@@ -245,8 +251,9 @@ where
         let order = validate_schema(&schema)?;
 
         let root: BlockId = Uuid::new_v4().into();
+        let node = Node::new(true, None);
         file.clone()
-            .create_block(txn_id, root.clone(), Node::new(true, None))
+            .create_block(txn_id, root.clone(), node, DEFAULT_BLOCK_SIZE)
             .await?;
 
         Ok(BTreeFile::new(file, schema, order, root))
@@ -543,7 +550,9 @@ where
         );
 
         let new_node = Node::new(child.leaf, Some(node_id));
-        let (new_node_id, new_node) = file.create_block_tmp(txn_id, new_node).await?;
+        let (new_node_id, new_node) = file
+            .create_block_tmp(txn_id, new_node, DEFAULT_BLOCK_SIZE)
+            .await?;
         let mut new_node = new_node.write().await?;
 
         node.children.insert(i + 1, new_node_id.clone());
@@ -635,10 +644,10 @@ where
             self.inner.file.truncate(txn_id).await?;
 
             *root = Uuid::new_v4().into();
-
+            let node = Node::new(true, None);
             self.inner
                 .file
-                .create_block(txn_id, (*root).clone(), Node::new(true, None))
+                .create_block(txn_id, (*root).clone(), node, DEFAULT_BLOCK_SIZE)
                 .await?;
 
             return Ok(());
@@ -684,7 +693,9 @@ where
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
 
-            let (new_root_id, new_root) = file.create_block_tmp(txn_id, new_root).await?;
+            let (new_root_id, new_root) = file
+                .create_block_tmp(txn_id, new_root, DEFAULT_BLOCK_SIZE)
+                .await?;
 
             (*root_id) = new_root_id;
 

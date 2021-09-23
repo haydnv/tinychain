@@ -2,19 +2,16 @@
 
 use std::collections::hash_map::{Entry, HashMap};
 use std::convert::TryInto;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use freqfs::DirLock;
-use futures::future::{FutureExt, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error};
+use futures::future::TryFutureExt;
+use log::debug;
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
-use tc_transact::Transact;
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -95,7 +92,8 @@ impl TxnServer {
         let cache = workspace
             .create_dir(txn_id.to_string())
             .map_err(fs::io_err)?;
-        fs::Dir::new(cache).map(Ok).await
+
+        fs::Dir::new(cache).await
     }
 }
 
@@ -135,7 +133,7 @@ async fn cleanup(
 
     let mut workspace = workspace.write().await;
     for txn_id in expired.into_iter() {
-        if let Some(active) = txn_pool.remove(&txn_id) {
+        if let Some(_active) = txn_pool.remove(&txn_id) {
             debug!("clean up txn {}", txn_id);
             workspace.delete(txn_id.to_string());
         }
