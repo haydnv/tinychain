@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
@@ -48,6 +48,10 @@ impl<T> Drop for TxnLockReadGuard<T> {
         debug!("TxnLockReadGuard::drop {}", self.lock.inner.name);
 
         let mut state = self.lock.lock_inner("TxnLockReadGuard::drop");
+        debug!("TxnLockReadGuard::drop {} locked state", self.lock.inner.name);
+
+        assert_ne!(state.writer, Some(self.txn_id));
+
         let num_readers = state
             .readers
             .get_mut(&self.txn_id)
@@ -55,6 +59,7 @@ impl<T> Drop for TxnLockReadGuard<T> {
 
         *num_readers -= 1;
 
+        debug!("TxnLock has {} waiting readers", num_readers);
         if num_readers == &0 {
             state.wake();
         }
@@ -109,6 +114,10 @@ impl<T> Drop for TxnLockWriteGuard<T> {
         debug!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
 
         let mut state = self.lock.lock_inner("TxnLockWriteGuard::drop");
+        if let Some(readers) = state.readers.get(&self.txn_id) {
+            assert_eq!(readers, &0);
+        }
+
         state.writer = None;
         state.wake();
     }
@@ -121,17 +130,15 @@ struct LockState<T> {
     readers: BTreeMap<TxnId, usize>,
     writer: Option<TxnId>,
     pending_writes: BTreeSet<TxnId>,
-    wakers: VecDeque<Weak<Mutex<Option<Waker>>>>,
+    wakers: VecDeque<Waker>,
 }
 
 impl<T> LockState<T> {
     fn wake(&mut self) {
-        for i in 0..self.wakers.len() {
-            if let Some(waker) = self.wakers[i].upgrade() {
-                if let Some(waker) = &*waker.lock().expect("TxnLock Future wake lock") {
-                    waker.wake_by_ref();
-                }
-            }
+        debug!("TxnLock waking {} waiting futures", self.wakers.len());
+
+        while let Some(waker) = self.wakers.pop_front() {
+            waker.wake();
         }
     }
 }
@@ -179,6 +186,8 @@ impl<T> TxnLock<T> {
 
     #[inline]
     fn lock_inner(&self, expect: &'static str) -> MutexGuard<LockState<T>> {
+        debug!("TxnLock::lock_inner {}", expect);
+
         self.inner.state.lock().expect(expect)
     }
 }
@@ -186,13 +195,11 @@ impl<T> TxnLock<T> {
 impl<T: Clone + Send> TxnLock<T> {
     /// Try to acquire a read lock.
     pub fn read(&self, txn_id: TxnId) -> TxnLockReadFuture<T> {
-        let waker = Arc::new(Mutex::new(None));
-        let mut state = self.lock_inner("TxnLock::read");
-        state.wakers.push_back(Arc::downgrade(&waker));
+        debug!("TxnLock::read");
+
         TxnLockReadFuture {
             lock: self.clone(),
             txn_id,
-            shared: SharedState { waker },
         }
     }
 
@@ -206,6 +213,12 @@ impl<T: Clone + Send> TxnLock<T> {
                 debug!("TxnLock waiting on a pending write at {}", reserved);
                 return Ok(None);
             }
+        }
+
+        if state.writer == Some(txn_id) {
+            // if there's an active writer for this txn_id, wait it out
+            debug!("TxnLock waiting on a write lock at {}", txn_id);
+            return Ok(None);
         }
 
         if !state.versions.contains_key(&txn_id) {
@@ -223,19 +236,19 @@ impl<T: Clone + Send> TxnLock<T> {
             state.versions.insert(txn_id, version);
         }
 
+        debug!("TxnLock locking {} for read at {}", self.inner.name, txn_id);
+
         *state.readers.entry(txn_id).or_insert(0) += 1;
         Ok(Some(TxnLockReadGuard::new(self.clone(), txn_id)))
     }
 
     /// Try to acquire a write lock.
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        let waker = Arc::new(Mutex::new(None));
-        let mut state = self.lock_inner("TxnLock::read");
-        state.wakers.push_back(Arc::downgrade(&waker));
+        debug!("TxnLock::write");
+
         TxnLockWriteFuture {
             lock: self.clone(),
             txn_id,
-            shared: SharedState { waker },
         }
     }
 
@@ -250,6 +263,7 @@ impl<T: Clone + Send> TxnLock<T> {
                 "TxnLock {} has a commit at {}",
                 self.inner.name, state.last_commit
             );
+
             return Err(TCError::conflict());
         }
 
@@ -302,6 +316,8 @@ impl<T: Clone + Send> TxnLock<T> {
 
             return Ok(None);
         }
+
+        debug!("TxnLock locking {} for write at {}", self.inner.name, txn_id);
 
         if !state.versions.contains_key(&txn_id) {
             let version = UnsafeCell::new(unsafe { (&*state.canon.get()).clone() });
@@ -380,25 +396,15 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
 
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("TxnLock {} finalize {}", &self.inner.name, txn_id);
+
         let mut state = self.lock_inner("TxnLock::finalize");
         state.versions.remove(txn_id);
         state.pending_writes.remove(txn_id);
     }
 }
 
-struct SharedState {
-    waker: Arc<Mutex<Option<Waker>>>,
-}
-
-impl SharedState {
-    fn update(&self, waker: Waker) {
-        *self.waker.lock().expect("SharedState::update") = Some(waker);
-    }
-}
-
 pub struct TxnLockReadFuture<T> {
     lock: TxnLock<T>,
-    shared: SharedState,
     txn_id: TxnId,
 }
 
@@ -410,7 +416,8 @@ impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                self.shared.update(cx.waker().clone());
+                let mut state = self.lock.lock_inner("TxnLockWriteFuture::poll");
+                state.wakers.push_back(cx.waker().clone());
                 Poll::Pending
             }
         }
@@ -419,7 +426,6 @@ impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
 
 pub struct TxnLockWriteFuture<T> {
     lock: TxnLock<T>,
-    shared: SharedState,
     txn_id: TxnId,
 }
 
@@ -431,7 +437,8 @@ impl<T: Clone + Send> Future for TxnLockWriteFuture<T> {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                self.shared.update(cx.waker().clone());
+                let mut state = self.lock.lock_inner("TxnLockWriteFuture::poll");
+                state.wakers.push_back(cx.waker().clone());
                 Poll::Pending
             }
         }
