@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::*;
-use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::try_join;
 use log::debug;
 use safecast::AsType;
@@ -137,6 +137,8 @@ where
         let name = Self::file_name(&block_id);
 
         let block = if let Some(block) = version.get_file(&name) {
+            debug!("read existing version of block {} at {}", block_id, txn_id);
+
             block
         } else {
             let canon = self.canon.read().await;
@@ -146,6 +148,8 @@ where
             let block_version = version
                 .create_file(name, B::clone(&*value), size_hint)
                 .map_err(io_err)?;
+
+            debug!("created new version of block {} at {}", block_id, txn_id);
 
             block_version
         };
@@ -202,7 +206,40 @@ where
     }
 
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()> {
-        unimplemented!()
+        let (mut this_present, that_present) =
+            try_join!(self.present.write(txn_id), other.present.read(txn_id))?;
+
+        let (mut this_version, mut that_version) =
+            try_join!(self.version(&txn_id), other.version(&txn_id))?;
+
+        let mut blocks = self.blocks.write().await;
+        let canon = other.canon.read().await;
+
+        for block_id in that_present.iter() {
+            let file_name = Self::file_name(block_id);
+            let source = if let Some(version) = that_version.get_file(&file_name) {
+                version
+            } else {
+                canon.get_file(&file_name).expect("block version")
+            };
+
+            this_present.insert(block_id.clone());
+
+            if let Some(last_mutation) = blocks.get_mut(block_id) {
+                *last_mutation.write(txn_id).await? = txn_id;
+            } else {
+                let lock_name = format!("block {}", block_id);
+                blocks.insert(block_id.clone(), TxnLock::new(lock_name, txn_id));
+            }
+
+            // can't run these copies in parallel since this_version is borrowed mutably
+            this_version
+                .copy_from(file_name, source)
+                .map_err(io_err)
+                .await?;
+        }
+
+        Ok(())
     }
 
     async fn create_block(
@@ -354,15 +391,25 @@ where
             let version = self.version(txn_id).await.expect("file block versions");
             let mut canon = self.canon.write().await;
             let mut deleted = Vec::with_capacity(blocks.len());
+            let mut synchronize = Vec::with_capacity(present.len());
             for block_id in blocks.keys() {
                 let name = Self::file_name(block_id);
                 if present.contains(block_id) {
                     if let Some(version) = version.get_file(&name) {
-                        // these copies can't be run concurrently since `canon` is borrowed mutably
-                        canon
-                            .copy_from(name, version)
-                            .await
-                            .expect("copy block version");
+                        let block = version.read().await.expect("block version");
+                        let canon = if let Some(canon) = canon.get_file(&name) {
+                            *canon.write().await.expect("canonical block") = block.clone();
+                            canon
+                        } else {
+                            let size_hint = version.size_hint().await;
+                            canon
+                                .create_file(name, block.clone(), size_hint)
+                                .expect("new canonical block")
+                        };
+
+                        synchronize.push(async move { canon.sync(true).await });
+                    } else {
+                        debug!("block {} has no version to commit at {}", block_id, txn_id);
                     }
                 } else {
                     canon.delete(name);
@@ -373,6 +420,10 @@ where
             for block_id in deleted.into_iter() {
                 assert!(blocks.remove(&block_id).is_some());
             }
+
+            try_join_all(synchronize)
+                .await
+                .expect("sync block contents to disk");
         }
 
         try_join!(self.canon.sync(false), self.versions.sync(false))
