@@ -141,30 +141,36 @@ pub trait Dir: Store + Send + Sized + 'static {
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<C, F>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
+    async fn create_file<C, F, B>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         F: Clone,
+        B: BlockData,
         Self::FileClass: From<C>,
-        Self::File: AsType<F>;
+        Self::File: AsType<F>,
+        F: File<B>;
 
     // TODO: rename to create_file_unique
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp<C, F>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_tmp<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         F: Clone,
+        B: BlockData,
         Self::FileClass: From<C>,
-        Self::File: AsType<F>;
+        Self::File: AsType<F>,
+        F: File<B>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
     /// Get a [`Self::File`] in this `Dir`.
-    async fn get_file<F>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
+    async fn get_file<F, B>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
     where
         F: Clone,
-        Self::File: AsType<F>;
+        B: BlockData,
+        Self::File: AsType<F>,
+        F: File<B>;
 }
 
 /// Defines how to load a persistent data structure from the filesystem.

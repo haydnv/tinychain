@@ -9,20 +9,21 @@ use afarray::Array;
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::future::{join_all, TryFutureExt};
+use log::debug;
 use safecast::AsType;
 use uuid::Uuid;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorType;
 use tc_transact::fs;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
-use tc_value::Value;
-use tcgeneric::{Id, PathSegment};
+use tc_value::{Value, ValueType};
+use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
-use crate::chain::ChainBlock;
+use crate::chain::{ChainBlock, ChainType};
 use crate::collection::CollectionType;
 use crate::scalar::ScalarType;
 use crate::state::StateType;
@@ -62,6 +63,34 @@ impl FileEntry {
             StateType::Chain(_) => File::new(cache).map_ok(Self::Chain).await,
             StateType::Scalar(st) => match st {
                 ScalarType::Value(_) => File::new(cache).map_ok(Self::Value).await,
+                other => Err(err(other)),
+            },
+            other => Err(err(other)),
+        }
+    }
+
+    async fn load<C>(cache: DirLock<CacheBlock>, class: C, txn_id: TxnId) -> TCResult<Self>
+    where
+        StateType: From<C>,
+    {
+        fn err<T: fmt::Display>(class: T) -> TCError {
+            TCError::bad_request("cannot load file for", class)
+        }
+
+        match StateType::from(class) {
+            StateType::Collection(ct) => match ct {
+                CollectionType::BTree(_) => File::load(cache, txn_id).map_ok(Self::BTree).await,
+                CollectionType::Table(tt) => Err(err(tt)),
+
+                #[cfg(feature = "tensor")]
+                CollectionType::Tensor(tt) => match tt {
+                    TensorType::Dense => File::load(cache, txn_id).map_ok(Self::Tensor).await,
+                    TensorType::Sparse => Err(err(TensorType::Sparse)),
+                },
+            },
+            StateType::Chain(_) => File::load(cache, txn_id).map_ok(Self::Chain).await,
+            StateType::Scalar(st) => match st {
+                ScalarType::Value(_) => File::load(cache, txn_id).map_ok(Self::Value).await,
                 other => Err(err(other)),
             },
             other => Err(err(other)),
@@ -232,14 +261,6 @@ struct Contents {
     inner: HashMap<PathSegment, DirEntry>,
 }
 
-impl Contents {
-    fn new() -> Self {
-        Self {
-            inner: HashMap::new(),
-        }
-    }
-}
-
 impl Deref for Contents {
     type Target = HashMap<PathSegment, DirEntry>;
 
@@ -273,15 +294,59 @@ pub struct Dir {
 impl Dir {
     pub async fn new(cache: DirLock<CacheBlock>) -> TCResult<Self> {
         let fs_dir = cache.read().await;
-        let lock_name = format!("contents of {:?}", &*fs_dir);
-
         if fs_dir.len() > 0 {
-            return Err(TCError::unsupported("cannot re-create existing directory"));
+            return Err(TCError::internal(format!(
+                "new directory is not empty! {:?}",
+                &*fs_dir
+            )));
         }
 
-        Ok(Self {
-            cache,
-            contents: TxnLock::new(lock_name, Contents::new()),
+        let inner = HashMap::new();
+        let lock_name = format!("contents of {:?}", &*fs_dir);
+        let contents = TxnLock::new(lock_name, Contents { inner });
+        Ok(Self { cache, contents })
+    }
+
+    pub fn load<'a>(cache: DirLock<CacheBlock>, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
+        Box::pin(async move {
+            let fs_dir = cache.read().await;
+
+            debug!("Dir::load {:?}", &*fs_dir);
+
+            let mut inner = HashMap::new();
+            for (file_name, fs_cache) in fs_dir.iter() {
+                if file_name.starts_with('.') {
+                    debug!("Dir::load skipping hidden filesystem entry {}", file_name);
+                    continue;
+                }
+
+                let fs_cache = match fs_cache {
+                    freqfs::DirEntry::Dir(dir_lock) => dir_lock.clone(),
+                    _ => {
+                        return Err(TCError::internal(format!(
+                            "{} is not a directory",
+                            file_name
+                        )))
+                    }
+                };
+
+                let (name, entry) = if is_file(file_name, &fs_cache).await {
+                    let (name, class) = file_class(file_name)?;
+                    let entry = FileEntry::load(fs_cache, class, txn_id).await?;
+                    (name, DirEntry::File(entry))
+                } else if is_dir(file_name, &fs_cache) {
+                    let subdir = Dir::load(fs_cache, txn_id).await?;
+                    (file_name.parse()?, DirEntry::Dir(subdir))
+                } else {
+                    return Err(TCError::internal(format!("directory at {:?} contains both blocks and subdirectories", &*fs_cache)))
+                };
+
+                inner.insert(name, entry);
+            }
+
+            let lock_name = format!("contents of {:?}", &*fs_dir);
+            let contents = TxnLock::new(lock_name, Contents { inner });
+            Ok(Self { cache, contents })
         })
     }
 
@@ -348,36 +413,43 @@ impl fs::Dir for Dir {
         Ok(subdir)
     }
 
-    async fn create_file<C, F>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
+    async fn create_file<C, F, B>(&self, txn_id: TxnId, file_id: Id, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         StateType: From<C>,
         FileEntry: AsType<F>,
+        F: fs::File<B>,
+        B: fs::BlockData,
     {
         let mut contents = self.contents.write(txn_id).await?;
-        if contents.contains_key(&name) {
+        if contents.contains_key(&file_id) {
             return Err(TCError::bad_request(
                 "filesystem entry already exists",
-                name,
+                file_id,
             ));
         }
 
         let mut cache = self.cache.write().await;
-        let file_cache = cache.create_dir(name.to_string()).map_err(io_err)?;
+        let name = format!("{}.{}", file_id, B::ext());
+        debug!("create file at {}", name);
+
+        let file_cache = cache.create_dir(name).map_err(io_err)?;
         let file = FileEntry::new(file_cache, class).await?;
-        contents.insert(name, DirEntry::File(file.clone()));
+        contents.insert(file_id, DirEntry::File(file.clone()));
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
 
-    async fn create_file_tmp<C, F>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_tmp<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         StateType: From<C>,
         FileEntry: AsType<F>,
+        F: fs::File<B>,
+        B: fs::BlockData,
     {
         let mut contents = self.contents.write(txn_id).await?;
-        let name = loop {
+        let file_id = loop {
             let name = Uuid::new_v4().into();
             if !contents.contains_key(&name) {
                 break name;
@@ -385,9 +457,12 @@ impl fs::Dir for Dir {
         };
 
         let mut cache = self.cache.write().await;
-        let file_cache = cache.create_dir(name.to_string()).map_err(io_err)?;
+        let name = format!("{}.{}", file_id, B::ext());
+        debug!("create file at {}", name);
+
+        let file_cache = cache.create_dir(name).map_err(io_err)?;
         let file = FileEntry::new(file_cache, class).await?;
-        contents.insert(name, DirEntry::File(file.clone()));
+        contents.insert(file_id, DirEntry::File(file.clone()));
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
@@ -401,12 +476,14 @@ impl fs::Dir for Dir {
         }
     }
 
-    async fn get_file<F>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
+    async fn get_file<F, B>(&self, txn_id: TxnId, file_id: &Id) -> TCResult<Option<F>>
     where
         FileEntry: AsType<F>,
+        F: fs::File<B>,
+        B: fs::BlockData,
     {
         let contents = self.contents.read(txn_id).await?;
-        match contents.get(name) {
+        match contents.get(file_id) {
             Some(DirEntry::File(file)) => file
                 .clone()
                 .into_type()
@@ -464,5 +541,65 @@ impl Transact for Dir {
 impl fmt::Display for Dir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a transactional directory")
+    }
+}
+
+async fn is_dir(name: &str, fs_cache: &DirLock<CacheBlock>) -> bool {
+    for (name, entry) in fs_cache.read().await.iter() {
+        if name.starts_with('.') {
+            continue;
+        }
+
+        if let freqfs::DirEntry::File(_) = entry {
+            return false;
+        }
+    }
+
+    true
+}
+
+async fn is_file(name: &str, fs_cache: &DirLock<CacheBlock>) -> bool {
+    if ext_class(name).is_none() {
+        return false;
+    }
+
+    for (name, entry) in fs_cache.read().await.iter() {
+        if name.starts_with('.') {
+            continue;
+        }
+
+        if let freqfs::DirEntry::Dir(_) = entry {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
+    let i = name
+        .rfind('.')
+        .ok_or_else(|| TCError::internal(format!("invalid file name {}", name)))?;
+
+    let stem = name[..i].parse()?;
+    let class = ext_class(&name[i..])
+        .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
+    Ok((stem, class))
+}
+
+fn ext_class(name: &str) -> Option<StateType> {
+    if name.ends_with('.') {
+        return None;
+    }
+
+    let i = name.rfind('.').map(|i| i + 1).unwrap_or(0);
+
+    match &name[i..] {
+        "node" => Some(BTreeType::default().into()),
+        "chain_block" => Some(ChainType::default().into()),
+        #[cfg(feature = "tensor")]
+        "array" => Some(TensorType::Dense.into()),
+        "value" => Some(ValueType::default().into()),
+        _ => None,
     }
 }

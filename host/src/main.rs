@@ -124,6 +124,7 @@ async fn main() -> Result<(), TokioError> {
 
     let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_millis(50));
     let workspace = cache.clone().load(config.workspace).await?;
+    let txn_id = TxnId::new(Gateway::time());
 
     let data_dir = if let Some(data_dir) = config.data_dir {
         if !data_dir.exists() {
@@ -131,7 +132,9 @@ async fn main() -> Result<(), TokioError> {
         }
 
         let data_dir = cache.load(data_dir).await?;
-        tinychain::fs::Dir::new(data_dir).map_ok(Some).await?
+        tinychain::fs::Dir::load(data_dir, txn_id)
+            .map_ok(Some)
+            .await?
     } else {
         None
     };
@@ -141,13 +144,11 @@ async fn main() -> Result<(), TokioError> {
     println!();
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
-
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let txn_server = txn_server.clone();
         let kernel = tinychain::Kernel::new(std::iter::empty());
         let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
-        let txn_id = TxnId::new(Gateway::time());
         let token = gateway.new_token(&txn_id)?;
         let txn = txn_server.new_txn(gateway, txn_id, token).await?;
 

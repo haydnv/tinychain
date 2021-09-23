@@ -509,10 +509,9 @@ impl Persist<fs::Dir> for History {
             .await?
             .ok_or_else(|| TCError::internal("Chain has no history file"))?;
 
-        let dir = dir
-            .get_dir(*txn_id, &DATA.into())
-            .await?
-            .ok_or_else(|| TCError::internal("Chain has no data directory"))?;
+        // if there's no data in the data dir, it may not have been sync'd to the filesystem
+        // so just create a new one in memory
+        let dir = dir.get_or_create_dir(*txn_id, DATA.into()).await?;
 
         let mut last_hash = Bytes::from(NULL_HASH);
         let mut latest = 0;

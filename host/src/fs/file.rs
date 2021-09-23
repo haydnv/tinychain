@@ -102,6 +102,43 @@ where
         })
     }
 
+    pub(super) async fn load(canon: DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
+        let mut fs_dir = canon.write().await;
+
+        let mut blocks = HashMap::new();
+        let mut present = HashSet::new();
+        for (name, _) in fs_dir.iter() {
+            if name.starts_with('.') {
+                debug!("File::load skipping hidden filesystem entry");
+                continue;
+            }
+
+            if name.len() < B::ext().len() + 1 || !name.ends_with(B::ext()) {
+                return Err(TCError::internal(format!(
+                    "block has invalid extension: {}",
+                    name
+                )));
+            }
+
+            let block_id: fs::BlockId = name[..(name.len() - B::ext().len() - 1)].parse()?;
+
+            present.insert(block_id.clone());
+
+            let lock_name = format!("block {}", block_id);
+            blocks.insert(block_id, TxnLock::new(lock_name, txn_id));
+        }
+
+        Ok(Self {
+            canon,
+            blocks: Arc::new(RwLock::new(blocks)),
+            present: TxnLock::new(format!("block listing for {:?}", &*fs_dir), present),
+            versions: fs_dir
+                .get_or_create_dir(VERSION.to_string())
+                .map_err(io_err)?,
+            phantom: PhantomData,
+        })
+    }
+
     async fn get_block(
         &self,
         txn_id: TxnId,

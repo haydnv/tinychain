@@ -45,10 +45,7 @@ impl<T> Deref for TxnLockReadGuard<T> {
 
 impl<T> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
-        debug!("TxnLockReadGuard::drop {}", self.lock.inner.name);
-
         let mut state = self.lock.lock_inner("TxnLockReadGuard::drop");
-        debug!("TxnLockReadGuard::drop {} locked state", self.lock.inner.name);
 
         assert_ne!(state.writer, Some(self.txn_id));
 
@@ -59,7 +56,6 @@ impl<T> Drop for TxnLockReadGuard<T> {
 
         *num_readers -= 1;
 
-        debug!("TxnLock has {} waiting readers", num_readers);
         if num_readers == &0 {
             state.wake();
         }
@@ -111,8 +107,6 @@ impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
 
 impl<T> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
-        debug!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
-
         let mut state = self.lock.lock_inner("TxnLockWriteGuard::drop");
         if let Some(readers) = state.readers.get(&self.txn_id) {
             assert_eq!(readers, &0);
@@ -135,8 +129,6 @@ struct LockState<T> {
 
 impl<T> LockState<T> {
     fn wake(&mut self) {
-        debug!("TxnLock waking {} waiting futures", self.wakers.len());
-
         while let Some(waker) = self.wakers.pop_front() {
             waker.wake();
         }
@@ -186,8 +178,6 @@ impl<T> TxnLock<T> {
 
     #[inline]
     fn lock_inner(&self, expect: &'static str) -> MutexGuard<LockState<T>> {
-        debug!("TxnLock::lock_inner {}", expect);
-
         self.inner.state.lock().expect(expect)
     }
 }
@@ -316,8 +306,6 @@ impl<T: Clone + Send> TxnLock<T> {
 
             return Ok(None);
         }
-
-        debug!("TxnLock locking {} for write at {}", self.inner.name, txn_id);
 
         if !state.versions.contains_key(&txn_id) {
             let version = UnsafeCell::new(unsafe { (&*state.canon.get()).clone() });
