@@ -27,5 +27,5 @@ tc-btree = { path = "../btree" }
 tc-error = { version = "~0.2.5", features = ["tensor"] }
 tc-value = "~0.2.1"
 tc-table = { path = "../table" }
-tc-transact = { path = "../transact" }
+tc-transact = { path = "../transact", features = ["tensor"] }
 tcgeneric = "~0.2.2"
