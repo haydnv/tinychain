@@ -22,8 +22,8 @@ use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::transform;
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
-    TensorUnary,
+    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce,
+    TensorTransform, TensorType, TensorUnary,
 };
 
 use access::*;
@@ -369,6 +369,58 @@ where
             Tensor::Dense(other) => self.ne(other.into_sparse()).map(Tensor::from),
             Tensor::Sparse(other) => self.ne(other).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> TensorCompareConst for SparseTensor<FD, FS, D, T, A> {
+    type Compare = SparseTensor<FD, FS, D, T, SparseConstCombinator<FD, FS, D, T, A>>;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn eq(l: Number, r: Number) -> Number {
+            (l == r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, eq).into())
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn gt(l: Number, r: Number) -> Number {
+            (l > r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, gt).into())
+    }
+
+    fn gte_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn gte(l: Number, r: Number) -> Number {
+            (l >= r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, gte).into())
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn lt(l: Number, r: Number) -> Number {
+            (l < r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, lt).into())
+    }
+
+    fn lte_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn lte(l: Number, r: Number) -> Number {
+            (l <= r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, lte).into())
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn ne(l: Number, r: Number) -> Number {
+            (l != r).into()
+        }
+
+        Ok(SparseConstCombinator::new(self.accessor, other, ne).into())
     }
 }
 

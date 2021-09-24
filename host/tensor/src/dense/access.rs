@@ -626,7 +626,6 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D: Dir,
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
@@ -649,12 +648,10 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListConst<FD, FS, D, T, B>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    D: Dir,
+    T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListConst<FD, FS, D, T, B::Slice>;
@@ -691,8 +688,6 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;

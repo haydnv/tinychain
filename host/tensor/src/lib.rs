@@ -184,27 +184,27 @@ pub trait TensorCompare<O> {
 }
 
 /// Tensor-constant comparison operations
-pub trait TensorCompareConst<O> {
+pub trait TensorCompareConst {
     /// The result of a comparison operation
     type Compare: TensorInstance;
 
     /// Element-wise equality
-    fn eq(self, other: Number) -> TCResult<Self::Compare>;
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-than
-    fn gt(self, other: Number) -> TCResult<Self::Compare>;
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-or-equal
-    fn gte(self, other: Number) -> TCResult<Self::Compare>;
+    fn gte_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise less-than
-    fn lt(self, other: Number) -> TCResult<Self::Compare>;
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise less-or-equal
-    fn lte(self, other: Number) -> TCResult<Self::Compare>;
+    fn lte_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise not-equal
-    fn ne(self, other: Number) -> TCResult<Self::Compare>;
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
 }
 
 /// [`Tensor`] I/O operations
@@ -579,6 +579,60 @@ where
         match self {
             Self::Dense(dense) => dense.ne(other),
             Self::Sparse(sparse) => sparse.ne(other),
+        }
+    }
+}
+
+impl<FD, FS, D, T> TensorCompareConst for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+{
+    type Compare = Self;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.eq_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.eq_const(other).map(Self::from),
+        }
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.gt_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.gt_const(other).map(Self::from),
+        }
+    }
+
+    fn gte_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.gte_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.gte_const(other).map(Self::from),
+        }
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.lt_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.lt_const(other).map(Self::from),
+        }
+    }
+
+    fn lte_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.lte_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.lte_const(other).map(Self::from),
+        }
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(dense) => dense.ne_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.ne_const(other).map(Self::from),
         }
     }
 }

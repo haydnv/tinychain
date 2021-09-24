@@ -7,7 +7,7 @@ use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
-use futures::stream::{Stream, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::{debug, warn};
 use safecast::AsType;
 
@@ -22,14 +22,13 @@ use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce, TensorTransform, TensorType,
-    TensorUnary,
+    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce,
+    TensorTransform, TensorType, TensorUnary,
 };
 
 use access::*;
 pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
-use futures::StreamExt;
 
 #[allow(unused)]
 mod access;
@@ -353,6 +352,89 @@ where
             Tensor::Dense(dense) => self.ne(dense).map(Tensor::from),
             Tensor::Sparse(sparse) => self.ne(sparse.into_dense()).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, B> TensorCompareConst for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Compare = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn eq_array(l: Array, r: Number) -> Array {
+            l.eq_const(r)
+        }
+
+        fn eq_number(l: Number, r: Number) -> Number {
+            (l == r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, eq_array, eq_number).into())
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn gt_array(l: Array, r: Number) -> Array {
+            l.gt_const(r)
+        }
+
+        fn gt_number(l: Number, r: Number) -> Number {
+            (l > r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, gt_array, gt_number).into())
+    }
+
+    fn gte_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn gte_array(l: Array, r: Number) -> Array {
+            l.gte_const(r)
+        }
+
+        fn gte_number(l: Number, r: Number) -> Number {
+            (l >= r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, gte_array, gte_number).into())
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn lt_array(l: Array, r: Number) -> Array {
+            l.lt_const(r)
+        }
+
+        fn lt_number(l: Number, r: Number) -> Number {
+            (l < r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, lt_array, lt_number).into())
+    }
+
+    fn lte_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn lte_array(l: Array, r: Number) -> Array {
+            l.lte_const(r)
+        }
+
+        fn lte_number(l: Number, r: Number) -> Number {
+            (l <= r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, lte_array, lte_number).into())
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        fn ne_array(l: Array, r: Number) -> Array {
+            l.ne_const(r)
+        }
+
+        fn ne_number(l: Number, r: Number) -> Number {
+            (l != r).into()
+        }
+
+        Ok(BlockListConst::new(self.blocks, other, ne_array, ne_number).into())
     }
 }
 
