@@ -98,6 +98,7 @@ pub enum DenseAccessor<FD, FS, D, T> {
     Broadcast(Box<BlockListBroadcast<FD, FS, D, T, Self>>),
     Cast(Box<BlockListCast<FD, FS, D, T, Self>>),
     Combine(Box<BlockListCombine<FD, FS, D, T, Self, Self>>),
+    Const(Box<BlockListConst<FD, FS, D, T, Self>>),
     Expand(Box<BlockListExpand<FD, FS, D, T, Self>>),
     File(BlockListFile<FD, FS, D, T>),
     Reduce(Box<BlockListReduce<FD, FS, D, T, Self>>),
@@ -121,6 +122,7 @@ where
             Self::Broadcast(broadcast) => broadcast.dtype(),
             Self::Cast(cast) => cast.dtype(),
             Self::Combine(combine) => combine.dtype(),
+            Self::Const(combine) => combine.dtype(),
             Self::Expand(expansion) => expansion.dtype(),
             Self::File(file) => file.dtype(),
             Self::Reduce(reduced) => reduced.dtype(),
@@ -136,6 +138,7 @@ where
             Self::Broadcast(broadcast) => broadcast.ndim(),
             Self::Cast(cast) => cast.ndim(),
             Self::Combine(combine) => combine.ndim(),
+            Self::Const(combine) => combine.ndim(),
             Self::Expand(expansion) => expansion.ndim(),
             Self::File(file) => file.ndim(),
             Self::Reduce(reduced) => reduced.ndim(),
@@ -151,6 +154,7 @@ where
             Self::Broadcast(broadcast) => broadcast.shape(),
             Self::Cast(cast) => cast.shape(),
             Self::Combine(combine) => combine.shape(),
+            Self::Const(combine) => combine.shape(),
             Self::Expand(expansion) => expansion.shape(),
             Self::File(file) => file.shape(),
             Self::Reduce(reduced) => reduced.shape(),
@@ -166,6 +170,7 @@ where
             Self::Broadcast(broadcast) => broadcast.size(),
             Self::Cast(cast) => cast.size(),
             Self::Combine(combine) => combine.size(),
+            Self::Const(combine) => combine.size(),
             Self::Expand(expansion) => expansion.size(),
             Self::File(file) => file.size(),
             Self::Reduce(reduced) => reduced.size(),
@@ -200,6 +205,7 @@ where
             Self::Slice(slice) => slice.block_stream(txn),
             Self::Broadcast(broadcast) => broadcast.block_stream(txn),
             Self::Cast(cast) => cast.block_stream(txn),
+            Self::Const(combine) => combine.block_stream(txn),
             Self::Combine(combine) => combine.block_stream(txn),
             Self::Expand(expansion) => expansion.block_stream(txn),
             Self::Reduce(reduced) => reduced.block_stream(txn),
@@ -216,6 +222,7 @@ where
             Self::Broadcast(broadcast) => broadcast.value_stream(txn),
             Self::Cast(cast) => cast.value_stream(txn),
             Self::Combine(combine) => combine.value_stream(txn),
+            Self::Const(combine) => combine.value_stream(txn),
             Self::Expand(expansion) => expansion.value_stream(txn),
             Self::Reduce(reduced) => reduced.value_stream(txn),
             Self::Sparse(sparse) => sparse.value_stream(txn),
@@ -231,6 +238,7 @@ where
             Self::Broadcast(broadcast) => broadcast.slice(bounds).map(|slice| slice.accessor()),
             Self::Cast(cast) => cast.slice(bounds).map(|slice| slice.accessor()),
             Self::Combine(combine) => combine.slice(bounds).map(|slice| slice.accessor()),
+            Self::Const(combine) => combine.slice(bounds).map(|slice| slice.accessor()),
             Self::Expand(expansion) => expansion.slice(bounds).map(|slice| slice.accessor()),
             Self::Reduce(reduced) => reduced.slice(bounds).map(|slice| slice.accessor()),
             Self::Sparse(sparse) => sparse.slice(bounds).map(|slice| slice.accessor()),
@@ -244,30 +252,42 @@ where
             Self::File(file) => file
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Slice(slice) => slice
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Broadcast(broadcast) => broadcast
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Cast(cast) => cast
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Combine(combine) => combine
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
+            Self::Const(combine) => combine
+                .transpose(permutation)
+                .map(|transpose| transpose.accessor()),
+
             Self::Expand(expansion) => expansion
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Reduce(reduced) => reduced
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Sparse(sparse) => sparse
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
             Self::Transpose(transpose) => transpose
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
+
             Self::Unary(unary) => unary
                 .transpose(permutation)
                 .map(|transpose| transpose.accessor()),
@@ -281,6 +301,7 @@ where
             Self::Broadcast(broadcast) => broadcast.read_values(txn, coords).await,
             Self::Cast(cast) => cast.read_values(txn, coords).await,
             Self::Combine(combine) => combine.read_values(txn, coords).await,
+            Self::Const(combine) => combine.read_values(txn, coords).await,
             Self::Expand(expansion) => expansion.read_values(txn, coords).await,
             Self::Reduce(reduced) => reduced.read_values(txn, coords).await,
             Self::Sparse(sparse) => sparse.read_values(txn, coords).await,
@@ -338,6 +359,7 @@ where
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Cast(cast) => cast.read_value_at(txn, coord),
             Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::Const(combine) => combine.read_value_at(txn, coord),
             Self::Expand(expansion) => expansion.read_value_at(txn, coord),
             Self::Reduce(reduced) => reduced.read_value_at(txn, coord),
             Self::Sparse(sparse) => sparse.read_value_at(txn, coord),
@@ -573,6 +595,121 @@ where
 }
 
 #[derive(Clone)]
+pub struct BlockListConst<FD, FS, D, T, B> {
+    source: B,
+    other: Number,
+    combinator: fn(Array, Number) -> Array,
+    value_combinator: fn(Number, Number) -> Number,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, B> BlockListConst<FD, FS, D, T, B> {
+    pub fn new(
+        source: B,
+        other: Number,
+        combinator: fn(Array, Number) -> Array,
+        value_combinator: fn(Number, Number) -> Number,
+    ) -> Self {
+        Self {
+            source,
+            other,
+            combinator,
+            value_combinator,
+            phantom: Phantom::default(),
+        }
+    }
+}
+
+impl<FD, FS, D, T, B> TensorAccess for BlockListConst<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        Ord::max(self.source.dtype(), self.other.class())
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListConst<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Slice = BlockListConst<FD, FS, D, T, B::Slice>;
+    type Transpose = BlockListConst<FD, FS, D, T, B::Transpose>;
+
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
+        let this = BlockListConst {
+            source: self.source.accessor(),
+            other: self.other,
+            combinator: self.combinator,
+            value_combinator: self.value_combinator,
+            phantom: self.phantom,
+        };
+
+        DenseAccessor::Const(Box::new(this))
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        todo!()
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        todo!()
+    }
+
+    async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
+        todo!()
+    }
+}
+
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListConst<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
+        let combinator = self.value_combinator;
+        let other = self.other;
+        let read = self
+            .source
+            .read_value_at(txn, coord)
+            .map_ok(move |(coord, val)| (coord, combinator(val, other)));
+
+        Box::pin(read)
+    }
+}
+
+#[derive(Clone)]
 pub struct BlockListBroadcast<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Broadcast,
@@ -589,6 +726,7 @@ where
 {
     pub fn new(source: B, shape: Shape) -> TCResult<Self> {
         let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
+
         Ok(Self {
             source,
             rebase,

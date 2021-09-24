@@ -30,6 +30,7 @@ use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
 
+#[allow(unused)]
 mod access;
 mod combine;
 mod table;
@@ -697,6 +698,10 @@ where
 
         let accessor = SparseUnary::new(source, transform, self.dtype());
         Ok(SparseTensor::from(accessor))
+    }
+
+    fn exp(&self) -> TCResult<Self::Unary> {
+        todo!()
     }
 
     async fn all(self, txn: Self::Txn) -> TCResult<bool> {

@@ -183,6 +183,30 @@ pub trait TensorCompare<O> {
     fn ne(self, other: O) -> TCResult<Self::Compare>;
 }
 
+/// Tensor-constant comparison operations
+pub trait TensorCompareConst<O> {
+    /// The result of a comparison operation
+    type Compare: TensorInstance;
+
+    /// Element-wise equality
+    fn eq(self, other: Number) -> TCResult<Self::Compare>;
+
+    /// Element-wise greater-than
+    fn gt(self, other: Number) -> TCResult<Self::Compare>;
+
+    /// Element-wise greater-or-equal
+    fn gte(self, other: Number) -> TCResult<Self::Compare>;
+
+    /// Element-wise less-than
+    fn lt(self, other: Number) -> TCResult<Self::Compare>;
+
+    /// Element-wise less-or-equal
+    fn lte(self, other: Number) -> TCResult<Self::Compare>;
+
+    /// Element-wise not-equal
+    fn ne(self, other: Number) -> TCResult<Self::Compare>;
+}
+
 /// [`Tensor`] I/O operations
 #[async_trait]
 pub trait TensorIO<D: Dir> {
@@ -231,6 +255,27 @@ pub trait TensorMath<D: Dir, O> {
 
     /// Subtract `other` from `self`.
     fn sub(self, other: O) -> TCResult<Self::Combine>;
+}
+
+/// [`Tensor`] constant math operations
+pub trait TensorMathConst<D: Dir, O> {
+    /// The result type of a math operation
+    type Combine: TensorInstance;
+
+    /// Add a constant to this tensor
+    fn add(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Divide `self` by `other`.
+    fn div(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Multiply `self` by `other`.
+    fn mul(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Raise `self` to the power `other`.
+    fn pow(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Subtract `other` from `self`.
+    fn sub(self, other: Number) -> TCResult<Self::Combine>;
 }
 
 /// [`Tensor`] reduction operations
@@ -299,6 +344,9 @@ pub trait TensorUnary<D: Dir> {
 
     /// Element-wise absolute value
     fn abs(&self) -> TCResult<Self::Unary>;
+
+    /// Raise `e` to the power of `self`
+    fn exp(&self) -> TCResult<Self::Unary>;
 
     /// Return `true` if all elements in this [`Tensor`] are nonzero.
     async fn all(self, txn: Self::Txn) -> TCResult<bool>;
@@ -766,6 +814,13 @@ where
         match self {
             Self::Dense(dense) => dense.abs().map(Self::from),
             Self::Sparse(sparse) => sparse.abs().map(Self::from),
+        }
+    }
+
+    fn exp(&self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.exp().map(Self::from),
+            Self::Sparse(sparse) => sparse.exp().map(Self::from),
         }
     }
 

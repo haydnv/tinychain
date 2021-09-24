@@ -31,6 +31,7 @@ pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
 use futures::StreamExt;
 
+#[allow(unused)]
 mod access;
 mod file;
 mod stream;
@@ -699,6 +700,10 @@ where
         );
 
         Ok(DenseTensor::from(blocks))
+    }
+
+    fn exp(&self) -> TCResult<Self::Unary> {
+        todo!()
     }
 
     async fn all(self, txn: T) -> TCResult<bool> {
