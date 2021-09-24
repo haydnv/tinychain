@@ -928,7 +928,7 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        Ord::max(self.left.dtype(), self.right.dtype())
+        (self.combinator)(self.left.dtype().zero(), self.right.dtype().zero()).class()
     }
 
     fn ndim(&self) -> usize {

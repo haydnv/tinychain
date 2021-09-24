@@ -1,6 +1,7 @@
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 use afarray::{Array, ArrayExt, ArrayInstance, CoordBlocks, Coords, Offsets};
 use arrayfire as af;
@@ -230,7 +231,7 @@ where
 
             let (mut left, mut right) = try_join!(left, right)?;
 
-            let mut block = Array::concatenate(&left, &right)?;
+            let mut block = Array::concatenate(&left, &right);
             block.sort(true)?;
 
             let (left_sorted, right_sorted) = block.split(PER_BLOCK)?;
@@ -366,8 +367,8 @@ where
         stream::iter(block_ids)
             .map(|block_id| {
                 let af_block_id = af::Array::new(&[block_id], af::Dim4::new(&[1, 1, 1, 1]));
-                let mask = ArrayExt::from(af::eq(block_offsets.af(), &af_block_id, true));
-                let indices = (&offsets % &per_block).af() * mask.af();
+                let mask = ArrayExt::from(af::eq(block_offsets.deref(), &af_block_id, true));
+                let indices = (&offsets % &per_block).deref() * mask.deref();
                 (block_id, mask.into(), indices.into())
             })
             .map(|(block_id, mask, indices)| {
@@ -441,15 +442,16 @@ where
 
                 async move {
                     let indices: ArrayExt<u64> =
-                        af::modulo(offsets.af(), &af_per_block, true).into();
+                        af::modulo(offsets.deref(), &af_per_block, true).into();
 
-                    let block_offsets = af::div(offsets.af(), &af_per_block, true);
+                    let block_offsets = af::div(offsets.deref(), &af_per_block, true);
                     let block_ids = ArrayExt::from(af::set_unique(&block_offsets, true)).to_vec();
 
                     let mut start = 0;
                     for block_id in block_ids.into_iter() {
                         let af_block_id = ArrayExt::from(&[block_id][..]);
-                        let (len, _) = af::sum_all(&af::eq(&block_offsets, af_block_id.af(), true));
+                        let (len, _) =
+                            af::sum_all(&af::eq(&block_offsets, af_block_id.deref(), true));
                         let end = start + len as usize;
                         let indices = indices.slice(start, end);
                         let array = array.slice(start, end).map_err(TCError::from)?;
@@ -1081,7 +1083,7 @@ fn block_offsets(
     assert_eq!(indices.len(), offsets.len());
 
     let num_to_update = af::sum_all(&af::eq(
-        indices.af(),
+        indices.deref(),
         &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
         true,
     ))
@@ -1101,7 +1103,7 @@ fn coord_block(coords: Coords, shape: &[u64]) -> (Vec<u64>, ArrayExt<u64>, Offse
     let af_per_block = af::constant(PER_BLOCK as u64, af::Dim4::new(&[1, 1, 1, 1]));
 
     let offsets = coords.to_offsets(shape);
-    let block_offsets = ArrayExt::from(af::div(offsets.af(), &af_per_block, true));
+    let block_offsets = ArrayExt::from(af::div(offsets.deref(), &af_per_block, true));
     let block_ids = block_offsets.unique(true);
     (block_ids.to_vec(), block_offsets, offsets)
 }

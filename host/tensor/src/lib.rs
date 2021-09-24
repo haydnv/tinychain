@@ -2,7 +2,6 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use afarray::Array;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
@@ -19,6 +18,7 @@ use tcgeneric::{
     TCPathBuf, Tuple,
 };
 
+pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
 pub use einsum::einsum;

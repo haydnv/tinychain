@@ -20,7 +20,7 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
 tc-btree = { path = "../btree" }
-tc-error = "~0.2.5"
+tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
-tc-value = "~0.2.1"
-tcgeneric = "~0.2.2"
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

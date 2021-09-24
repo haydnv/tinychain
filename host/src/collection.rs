@@ -12,7 +12,7 @@ use tc_btree::BTreeView;
 use tc_error::*;
 use tc_table::TableView;
 #[cfg(feature = "tensor")]
-use tc_tensor::TensorView;
+use tc_tensor::{Array, TensorView};
 use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -35,20 +35,15 @@ pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
-pub type Tensor =
-    tc_tensor::Tensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type Tensor = tc_tensor::Tensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
-pub type DenseTensor<B> =
-    tc_tensor::DenseTensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
+pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
-pub type DenseTensorFile =
-    tc_tensor::BlockListFile<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
-pub type SparseTensor<A> =
-    tc_tensor::SparseTensor<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
+pub type SparseTensor<A> = tc_tensor::SparseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
-pub type SparseTable =
-    tc_tensor::SparseTable<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type SparseTable = tc_tensor::SparseTable<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -174,7 +169,7 @@ impl From<Tensor> for Collection {
 }
 
 #[cfg(feature = "tensor")]
-impl<B: DenseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
+impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
     From<DenseTensor<B>> for Collection
 {
     fn from(tensor: DenseTensor<B>) -> Self {
@@ -183,7 +178,7 @@ impl<B: DenseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir,
 }
 
 #[cfg(feature = "tensor")]
-impl<A: SparseAccess<fs::File<afarray::Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
+impl<A: SparseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
     From<SparseTensor<A>> for Collection
 {
     fn from(tensor: SparseTensor<A>) -> Self {

@@ -4,8 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
-#[cfg(feature = "tensor")]
-use afarray::Array;
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::future::{join_all, TryFutureExt};
@@ -16,7 +14,7 @@ use uuid::Uuid;
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 #[cfg(feature = "tensor")]
-use tc_tensor::TensorType;
+use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};

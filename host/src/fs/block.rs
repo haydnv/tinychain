@@ -2,8 +2,6 @@ use std::fs::Metadata;
 use std::io;
 use std::path::Path;
 
-#[cfg(feature = "tensor")]
-use afarray::Array;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
@@ -13,6 +11,8 @@ use tokio::fs;
 use tokio_util::io::StreamReader;
 
 use tc_btree::Node;
+#[cfg(feature = "tensor")]
+use tc_tensor::Array;
 use tc_value::Value;
 
 use crate::chain::ChainBlock;

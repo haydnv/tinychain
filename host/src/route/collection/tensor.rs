@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 
-use afarray::Array;
 use futures::{future, Future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
@@ -805,7 +804,7 @@ where
     }
 }
 
-async fn create_file(txn: &Txn) -> TCResult<fs::File<afarray::Array>> {
+async fn create_file(txn: &Txn) -> TCResult<fs::File<Array>> {
     txn.context()
         .create_file_tmp(*txn.id(), TensorType::Dense)
         .await
