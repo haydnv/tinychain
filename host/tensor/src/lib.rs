@@ -258,24 +258,24 @@ pub trait TensorMath<D: Dir, O> {
 }
 
 /// [`Tensor`] constant math operations
-pub trait TensorMathConst<D: Dir, O> {
+pub trait TensorMathConst {
     /// The result type of a math operation
     type Combine: TensorInstance;
 
     /// Add a constant to this tensor
-    fn add(self, other: Number) -> TCResult<Self::Combine>;
+    fn add_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Divide `self` by `other`.
-    fn div(self, other: Number) -> TCResult<Self::Combine>;
+    fn div_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Multiply `self` by `other`.
-    fn mul(self, other: Number) -> TCResult<Self::Combine>;
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Raise `self` to the power `other`.
-    fn pow(self, other: Number) -> TCResult<Self::Combine>;
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Subtract `other` from `self`.
-    fn sub(self, other: Number) -> TCResult<Self::Combine>;
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
 /// [`Tensor`] reduction operations
@@ -739,6 +739,53 @@ where
         match self {
             Self::Dense(this) => this.sub(other),
             Self::Sparse(this) => this.sub(other),
+        }
+    }
+}
+
+impl<FD, FS, D, T> TensorMathConst for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>
+{
+    type Combine = Self;
+
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.add_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.add_const(other).map(Self::from),
+        }
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.div_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.div_const(other).map(Self::from),
+        }
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.mul_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.mul_const(other).map(Self::from),
+        }
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.pow_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.pow_const(other).map(Self::from),
+        }
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.sub_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.sub_const(other).map(Self::from),
         }
     }
 }

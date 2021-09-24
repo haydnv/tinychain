@@ -22,8 +22,8 @@ use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::transform;
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorReduce,
-    TensorTransform, TensorType, TensorUnary,
+    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorMathConst,
+    TensorReduce, TensorTransform, TensorType, TensorUnary,
 };
 
 use access::*;
@@ -625,6 +625,30 @@ where
             Tensor::Sparse(sparse) => self.sub(sparse).map(Tensor::from),
             Tensor::Dense(dense) => self.into_dense().sub(dense).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A> {
+    type Combine = SparseTensor<FD, FS, D, T, SparseConstCombinator<FD, FS, D, T, A>>;
+
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
+        Ok(SparseConstCombinator::new(self.accessor, other, Number::add).into())
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        Ok(SparseConstCombinator::new(self.accessor, other, Number::div).into())
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        Ok(SparseConstCombinator::new(self.accessor, other, Number::mul).into())
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        Ok(SparseConstCombinator::new(self.accessor, other, Number::pow).into())
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
+        Ok(SparseConstCombinator::new(self.accessor, other, Number::sub).into())
     }
 }
 
