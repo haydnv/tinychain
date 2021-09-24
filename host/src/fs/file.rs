@@ -21,39 +21,6 @@ use tc_transact::{Transact, TxnId};
 
 use super::{io_err, CacheBlock, VERSION};
 
-#[derive(Clone)]
-pub struct Block<B> {
-    lock: FileLock<CacheBlock>,
-    phantom: PhantomData<B>,
-}
-
-impl<B> From<FileLock<CacheBlock>> for Block<B> {
-    fn from(lock: FileLock<CacheBlock>) -> Self {
-        Self {
-            lock,
-            phantom: PhantomData,
-        }
-    }
-}
-
-#[async_trait]
-impl<B> fs::Block<B> for Block<B>
-where
-    B: Send + Sync + 'static,
-    CacheBlock: AsType<B>,
-{
-    type ReadLock = FileReadGuard<CacheBlock, B>;
-    type WriteLock = FileWriteGuard<CacheBlock, B>;
-
-    async fn read(self) -> TCResult<Self::ReadLock> {
-        self.lock.read().map_err(io_err).await
-    }
-
-    async fn write(self) -> TCResult<Self::WriteLock> {
-        self.lock.write().map_err(io_err).await
-    }
-}
-
 type Blocks = HashMap<fs::BlockId, TxnLock<TxnId>>;
 
 /// A transactional file
@@ -144,7 +111,7 @@ where
         txn_id: TxnId,
         block_id: fs::BlockId,
         mutate: bool,
-    ) -> TCResult<Block<B>> {
+    ) -> TCResult<FileLock<CacheBlock>> {
         let present = self.present.read(txn_id).await?;
         let blocks = self.blocks.read().await;
         if !present.contains(&block_id) {
@@ -191,7 +158,7 @@ where
             block_version
         };
 
-        Ok(block.into())
+        Ok(block)
     }
 
     async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
@@ -226,7 +193,8 @@ where
     B: fs::BlockData,
     CacheBlock: AsType<B>,
 {
-    type Block = Block<B>;
+    type Read = FileReadGuard<CacheBlock, B>;
+    type Write = FileWriteGuard<CacheBlock, B>;
 
     async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<fs::BlockId>> {
         self.present
@@ -269,11 +237,12 @@ where
                 blocks.insert(block_id.clone(), TxnLock::new(lock_name, txn_id));
             }
 
-            // can't run these copies in parallel since this_version is borrowed mutably
+            let block = source.read().map_err(io_err).await?;
+            let size_hint = source.size_hint().await;
+            this_version.delete(file_name.clone());
             this_version
-                .copy_from(file_name, source)
-                .map_err(io_err)
-                .await?;
+                .create_file(file_name, block.clone(), size_hint)
+                .map_err(io_err)?;
         }
 
         Ok(())
@@ -285,7 +254,7 @@ where
         block_id: fs::BlockId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<Self::Block> {
+    ) -> TCResult<Self::Write> {
         debug!("File::create_block {}", block_id);
 
         let present = self.present.write(txn_id).await?;
@@ -296,7 +265,7 @@ where
         let blocks = self.blocks.write().await;
         let version = self.version(&txn_id).await?;
 
-        create_block_inner(
+        let block = create_block_inner(
             present,
             blocks,
             version,
@@ -305,7 +274,9 @@ where
             initial_value,
             size_hint,
         )
-        .await
+        .await?;
+
+        block.write().map_err(io_err).await
     }
 
     async fn create_block_tmp(
@@ -313,11 +284,11 @@ where
         txn_id: TxnId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(fs::BlockId, Self::Block)> {
+    ) -> TCResult<(fs::BlockId, Self::Write)> {
         debug!("File::create_block_tmp");
 
         let present = self.present.write(txn_id).await?;
-        let name = loop {
+        let block_id = loop {
             let name = Uuid::new_v4().into();
             if !present.contains(&name) {
                 break name;
@@ -327,17 +298,19 @@ where
         let blocks = self.blocks.write().await;
         let version = self.version(&txn_id).await?;
 
-        create_block_inner(
+        let block = create_block_inner(
             present,
             blocks,
             version,
             txn_id,
-            name.clone(),
+            block_id.clone(),
             initial_value,
             size_hint,
         )
-        .map_ok(|block| (name, block))
-        .await
+        .await?;
+
+        let lock = block.write().map_err(io_err).await?;
+        Ok((block_id, lock))
     }
 
     async fn delete_block(&self, txn_id: TxnId, block_id: fs::BlockId) -> TCResult<()> {
@@ -366,7 +339,7 @@ where
         debug!("File::read_block {}", block_id);
 
         let block = self.get_block(txn_id, block_id, false).await?;
-        fs::Block::read(block).await
+        block.read().map_err(io_err).await
     }
 
     async fn read_block_owned(
@@ -377,7 +350,7 @@ where
         debug!("File::read_block_owned {}", block_id);
 
         let block = self.get_block(txn_id, block_id, false).await?;
-        fs::Block::read(block).await
+        block.read().map_err(io_err).await
     }
 
     async fn write_block(
@@ -388,7 +361,7 @@ where
         debug!("File::write_block {}", block_id);
 
         let block = self.get_block(txn_id, block_id, true).await?;
-        fs::Block::write(block).await
+        block.write().map_err(io_err).await
     }
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
@@ -497,7 +470,7 @@ async fn create_block_inner<'a, B: fs::BlockData + 'a>(
     block_id: fs::BlockId,
     value: B,
     size: usize,
-) -> TCResult<Block<B>>
+) -> TCResult<FileLock<CacheBlock>>
 where
     CacheBlock: AsType<B>,
 {

@@ -36,19 +36,6 @@ impl BlockData for tc_value::Value {
     }
 }
 
-/// A transactional filesystem block.
-#[async_trait]
-pub trait Block<B>: Send + Sync {
-    type ReadLock: Deref<Target = B> + Send;
-    type WriteLock: DerefMut<Target = B> + Send + Sync;
-
-    /// Get a read lock on this block.
-    async fn read(self) -> TCResult<Self::ReadLock>;
-
-    /// Get a write lock on this block.
-    async fn write(self) -> TCResult<Self::WriteLock>;
-}
-
 /// A transactional persistent data store.
 #[async_trait]
 pub trait Store: Clone + Send + Sync {
@@ -59,8 +46,11 @@ pub trait Store: Clone + Send + Sync {
 /// A transactional file.
 #[async_trait]
 pub trait File<B: Clone>: Store + Sized + 'static {
-    /// The type of block which this file is divided into.
-    type Block: Block<B>;
+    /// A read Lock on a block in this file.
+    type Read: Deref<Target = B> + Send;
+
+    /// A read Lock on a block in this file.
+    type Write: DerefMut<Target = B> + Send;
 
     /// Return the IDs of all this `File`'s blocks.
     async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>>;
@@ -71,7 +61,7 @@ pub trait File<B: Clone>: Store + Sized + 'static {
     /// Copy all blocks from the source `File` into this `File`.
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
 
-    /// Create a new [`Self::Block`].
+    /// Create a new block.
     ///
     /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block(
@@ -80,7 +70,7 @@ pub trait File<B: Clone>: Store + Sized + 'static {
         name: BlockId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<Self::Block>;
+    ) -> TCResult<Self::Write>;
 
     // TODO: rename to create_block_unique
     /// Create a new [`Self::Block`].
@@ -91,31 +81,19 @@ pub trait File<B: Clone>: Store + Sized + 'static {
         txn_id: TxnId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(BlockId, Self::Block)>;
+    ) -> TCResult<(BlockId, Self::Write)>;
 
     /// Delete the block with the given ID.
     async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()>;
 
     /// Get a read lock on the block at `name`.
-    async fn read_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
 
     /// Get a read lock on the block at `name`, without borrowing.
-    async fn read_block_owned(
-        self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`].
-    async fn write_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
+    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Write>;
 
     /// Delete all of this `File`'s blocks.
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()>;

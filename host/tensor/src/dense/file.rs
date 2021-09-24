@@ -155,6 +155,7 @@ where
             let block = Array::from(chunk).cast_into(dtype);
             file.create_block(txn_id, block_id, block, BLOCK_SIZE)
                 .await?;
+
             i += 1;
         }
 
@@ -214,6 +215,7 @@ where
         } else if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
+
             block.sort(true)?;
             return Ok(());
         }
@@ -223,7 +225,9 @@ where
             let block_id = BlockId::from(block_id);
 
             let left = self.file.write_block(txn_id, block_id);
+
             let right = self.file.write_block(txn_id, next_block_id);
+
             let (mut left, mut right) = try_join!(left, right)?;
 
             let mut block = Array::concatenate(&left, &right)?;
@@ -275,6 +279,7 @@ where
             .map(|(block_id, r)| r.map(|array| (block_id, array)))
             .map_ok(|(block_id, array)| async {
                 let mut block = self.file.write_block(txn_id, block_id).await?;
+
                 *block = array;
                 Ok(())
             })
@@ -532,6 +537,7 @@ where
 
             let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let block = self.file.read_block(*txn.id(), block_id).await?;
+
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
             Ok((coord, value))
@@ -713,7 +719,7 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
         &self,
         block_id: u64,
         block: ArrayExt<T>,
-    ) -> Result<<F as File<Array>>::Block, E>
+    ) -> Result<F::Write, E>
     where
         Array: From<ArrayExt<T>>,
     {
@@ -884,6 +890,7 @@ impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
                 let im = ArrayExt::<T>::from_iter(im.iter().cloned());
                 let block = ArrayExt::from((re, im));
                 self.visitor.create_block(block_id, block).await?;
+
                 size += block_size as u64;
                 block_id += 1;
             }
@@ -1006,6 +1013,7 @@ where
                         block_offsets(&af_indices, &af_offsets, start, block_id);
 
                     let block = file_clone.read_block(txn_id, block_id.into()).await?;
+
                     values.extend(block.get(&block_offsets.into()).to_vec());
                     start = new_start;
                 }

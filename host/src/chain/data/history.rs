@@ -207,9 +207,13 @@ impl History {
         self.file.contains_block(txn_id, &block_id.into()).await
     }
 
-    pub async fn create_next_block(&self, txn_id: TxnId) -> TCResult<fs::Block<ChainBlock>> {
+    pub async fn create_next_block(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
         let mut latest = self.latest.write(txn_id).await?;
         let last_block = self.read_block(txn_id, (*latest).into()).await?;
+
         let hash = last_block.hash().await?;
         let block = ChainBlock::new(hash);
 
@@ -225,8 +229,7 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::ReadLock>
-    {
+    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
         self.file.read_block(txn_id, block_id.into()).await
     }
 
@@ -234,16 +237,14 @@ impl History {
         &self,
         txn_id: TxnId,
         block_id: u64,
-    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::WriteLock>
-    {
+    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
         self.file.write_block(txn_id, block_id.into()).await
     }
 
     pub async fn read_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::ReadLock>
-    {
+    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
         let latest = self.latest.read(txn_id).await?;
         self.read_block(txn_id, (*latest).into()).await
     }
@@ -251,8 +252,7 @@ impl History {
     pub async fn write_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<<fs::File<ChainBlock> as File<ChainBlock>>::Block as Block<ChainBlock>>::WriteLock>
-    {
+    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(txn_id, (*latest).into()).await
     }
@@ -260,6 +260,7 @@ impl History {
     pub async fn apply_last(&self, txn: &Txn, subject: &Subject) -> TCResult<()> {
         let latest = *self.latest.read(*txn.id()).await?;
         let block = self.read_block(*txn.id(), latest.into()).await?;
+
         let last_block = if latest > 0 && block.mutations().is_empty() {
             self.read_block(*txn.id(), (latest - 1).into()).await?
         } else {
@@ -313,7 +314,9 @@ impl History {
         const ERR_DIVERGENT: &str = "chain to replicate diverges at block";
         for i in 0u64..*latest {
             let block = self.read_block(txn_id, i.into()).await?;
+
             let other = other.read_block(txn_id, i.into()).await?;
+
             if &*block != &*other {
                 return Err(TCError::bad_request(ERR_DIVERGENT, i));
             }
@@ -322,6 +325,7 @@ impl History {
         let mut i = *latest;
         loop {
             debug!("copy history from block {}", i);
+
             let source = other.read_block(txn_id, i).await?;
             let mut dest = self.write_block(txn_id, i).await?;
 
@@ -518,6 +522,7 @@ impl Persist<fs::Dir> for History {
 
         loop {
             let block = file.read_block(*txn_id, latest.into()).await?;
+
             if block.last_hash() == &last_hash {
                 last_hash = block.last_hash().clone();
             } else {
@@ -630,9 +635,6 @@ impl de::Visitor for HistoryVisitor {
 
             let mut block = history
                 .create_next_block(txn_id)
-                .map_err(de::Error::custom)
-                .await?
-                .write()
                 .map_err(de::Error::custom)
                 .await?;
 

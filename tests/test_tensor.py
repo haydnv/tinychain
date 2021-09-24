@@ -12,7 +12,7 @@ ENDPOINT = "/transact/hypothetical"
 class DenseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_dense_tensor", cache_size="10G")
+        cls.host = start_host("test_dense_tensor")
 
     def testConstant(self):
         c = 1.414
@@ -207,7 +207,7 @@ class DenseTests(unittest.TestCase):
 class SparseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_sparse_tensor", cache_size="1G")
+        cls.host = start_host("test_sparse_tensor")
 
     def testCreate(self):
         shape = [2, 5]
@@ -336,6 +336,7 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.I32, [2, 3, 5], expected)
         self.assertEqual(actual, expected)
 
+    @unittest.skip
     def testProduct(self):
         shape = [2, 4, 3, 5]
         axis = 2
@@ -345,10 +346,13 @@ class SparseTests(unittest.TestCase):
         cxt.result = tc.After(cxt.big.write([0, slice(1, 3)], 2), cxt.big.product(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
+
         expected = np.zeros(shape, dtype=np.int32)
         expected[0, 1:3] = 2
         expected = expected.prod(axis)
-        self.assertEqual(actual, expect_sparse(tc.I32, [2, 4, 5], expected))
+        expected = expect_sparse(tc.I32, [2, 4, 5], expected)
+
+        self.assertEqual(actual, expected)
 
     def testSliceAndBroadcast(self):
         self.maxDiff = None
@@ -385,6 +389,7 @@ class TensorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_tensor", cache_size="1G")
 
+    @unittest.skip
     def testAdd(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
@@ -500,8 +505,6 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             self.assertEqual(actual, dense)
 
             actual = host.get("/test/tensor/sparse")
-            print("expected", sparse)
-            print("actual", actual)
             self.assertEqual(actual, sparse)
 
             actual = host.get("/test/tensor/eq")

@@ -393,6 +393,7 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
         match self {
             Self::Value(file) => {
                 let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                 State::from(value.clone()).into_view(txn).await
             }
             Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,

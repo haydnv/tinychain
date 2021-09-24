@@ -312,12 +312,7 @@ where
         })
     }
 
-    fn _insert(
-        &self,
-        txn_id: TxnId,
-        mut node: <F::Block as Block<Node>>::WriteLock,
-        key: Key,
-    ) -> TCBoxTryFuture<()> {
+    fn _insert(&self, txn_id: TxnId, mut node: F::Write, key: Key) -> TCBoxTryFuture<()> {
         Box::pin(async move {
             let collator = &self.inner.collator;
             let file = &self.inner.file;
@@ -531,11 +526,11 @@ where
     async fn split_child(
         &self,
         txn_id: TxnId,
-        mut node: <F::Block as Block<Node>>::WriteLock,
+        mut node: F::Write,
         node_id: NodeId,
-        mut child: <F::Block as Block<Node>>::WriteLock,
+        mut child: F::Write,
         i: usize,
-    ) -> TCResult<<F::Block as Block<Node>>::WriteLock> {
+    ) -> TCResult<F::Write> {
         debug!("btree::split_child");
 
         let file = &self.inner.file;
@@ -550,10 +545,9 @@ where
         );
 
         let new_node = Node::new(child.leaf, Some(node_id));
-        let (new_node_id, new_node) = file
+        let (new_node_id, mut new_node) = file
             .create_block_tmp(txn_id, new_node, DEFAULT_BLOCK_SIZE)
             .await?;
-        let mut new_node = new_node.write().await?;
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(order - 1));
@@ -699,7 +693,6 @@ where
 
             (*root_id) = new_root_id;
 
-            let new_root = new_root.write().await?;
             let new_root = self
                 .split_child(txn_id, new_root, old_root_id, root, 0)
                 .await?;
@@ -747,6 +740,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
         let mut root = None;
         for block_id in file.block_ids(txn_id).await? {
             let block = file.read_block(txn_id, block_id.clone()).await?;
+
             if block.parent.is_none() {
                 root = Some(block_id);
                 break;
