@@ -14,7 +14,7 @@ SCHEMA = (
 class TableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_table", cache_size="1G")
+        cls.host = start_host("test_table")
 
     def testAggregate(self):
         count = 10
@@ -233,7 +233,6 @@ class SparseTests(unittest.TestCase):
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
-    CACHE_SIZE = "1G"
     NAME = "table"
     NUM_HOSTS = 4
 

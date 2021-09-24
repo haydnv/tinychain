@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 
 use afarray::{Array, CoordBlocks, CoordMerge, Coords};
@@ -7,6 +6,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
+use safecast::AsType;
 
 use tc_btree::Node;
 use tc_error::*;
@@ -90,10 +90,11 @@ pub enum SparseAccessor<FD, FS, D, T> {
 
 impl<FD, FS, D, T> TensorAccess for SparseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
@@ -164,10 +165,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
@@ -269,10 +271,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -285,10 +288,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -362,10 +366,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> SparseAccess<FD, FS, D, T> for DenseToSparse<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
@@ -495,12 +500,13 @@ pub struct SparseBroadcast<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseBroadcast<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     pub fn new(source: A, shape: Shape) -> TCResult<Self> {
         debug!("SparseBroadcast::new {} into {}", source.shape(), shape);
@@ -541,12 +547,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseBroadcast<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
     type Transpose = SparseTranspose<FD, FS, D, T, Self>;
@@ -664,12 +671,13 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseBroadcast<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -1273,12 +1281,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseExpand<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
     type Transpose = SparseExpand<FD, FS, D, T, A::Transpose>;
@@ -1442,10 +1451,11 @@ pub struct SparseReduce<FD, FS, D, T> {
 
 impl<FD, FS, D, T> SparseReduce<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     pub fn new(
@@ -1463,10 +1473,11 @@ where
 
 impl<FD, FS, D, T> TensorAccess for SparseReduce<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
@@ -1489,10 +1500,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseReduce<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseReduce<FD, FS, D, T>;
@@ -1581,10 +1593,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseReduce<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -1658,13 +1671,14 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseTranspose<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
     A::Slice: SparseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
 {
     type Slice = <A::Slice as SparseAccess<FD, FS, D, T>>::Transpose;
     type Transpose = A::Transpose;
@@ -1790,10 +1804,11 @@ impl<FD, FS, D, T> SparseUnary<FD, FS, D, T> {
 
 impl<FD, FS, D, T> TensorAccess for SparseUnary<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
@@ -1816,10 +1831,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseUnary<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
@@ -1865,10 +1881,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseUnary<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;

@@ -38,7 +38,7 @@ mod data;
 
 mod sync;
 
-const BLOCK_SIZE: u64 = 1_000_000;
+const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
@@ -222,7 +222,7 @@ impl Subject {
                     .create_file(txn_id, SUBJECT.into(), value.class())
                     .await?;
 
-                file.create_block(txn_id, SUBJECT.into(), value.clone())
+                file.create_block(txn_id, SUBJECT.into(), value.clone(), BLOCK_SIZE)
                     .await?;
 
                 Ok(Self::Value(file))
@@ -376,7 +376,7 @@ impl de::FromStream for Subject {
             .map_err(de::Error::custom)
             .await?;
 
-        file.create_block(*txn.id(), SUBJECT.into(), value)
+        file.create_block(*txn.id(), SUBJECT.into(), value, BLOCK_SIZE)
             .map_err(de::Error::custom)
             .await?;
 
@@ -393,6 +393,7 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
         match self {
             Self::Value(file) => {
                 let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                 State::from(value.clone()).into_view(txn).await
             }
             Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,

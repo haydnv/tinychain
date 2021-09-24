@@ -34,6 +34,7 @@ struct Active {
 impl Active {
     fn new(txn_id: &TxnId, workspace: fs::Dir, expires: NetworkTime) -> Self {
         let scope = TCPathBuf::from(txn_id.to_id());
+
         Self {
             workspace,
             expires,
@@ -281,9 +282,17 @@ impl Transaction<fs::Dir> for Txn {
         })
     }
 
+    // TODO: rename to subcontext_unique
     async fn subcontext_tmp(&self) -> TCResult<Self> {
-        let id = self.dir.unique_id(*self.id()).await?;
-        self.subcontext(id).await
+        self.dir
+            .create_dir_tmp(*self.id())
+            .map_ok(|dir| Self {
+                active: self.active.clone(),
+                gateway: self.gateway.clone(),
+                request: self.request.clone(),
+                dir,
+            })
+            .await
     }
 }
 

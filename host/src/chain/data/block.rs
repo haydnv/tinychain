@@ -5,15 +5,16 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::{future, TryFutureExt, TryStreamExt};
 use log::debug;
+use sha2::{Digest, Sha256};
 
+use tc_error::*;
 use tc_transact::fs::BlockData;
 use tc_transact::TxnId;
 use tc_value::Value;
 use tcgeneric::{TCPathBuf, Tuple};
 
-use crate::chain::{BLOCK_SIZE, EXT};
 use crate::scalar::Scalar;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -101,7 +102,7 @@ impl de::Visitor for MutationVisitor {
 /// A single filesystem block belonging to a `Chain`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
-    hash: Bytes,
+    last_hash: Bytes,
     contents: BTreeMap<TxnId, Vec<Mutation>>,
 }
 
@@ -109,7 +110,7 @@ impl ChainBlock {
     /// Return a new, empty block.
     pub fn new<H: Into<Bytes>>(hash: H) -> Self {
         Self {
-            hash: hash.into(),
+            last_hash: hash.into(),
             contents: BTreeMap::new(),
         }
     }
@@ -120,14 +121,17 @@ impl ChainBlock {
         contents.insert(txn_id, Vec::new());
 
         Self {
-            hash: hash.into(),
+            last_hash: hash.into(),
             contents,
         }
     }
 
     /// Return a new, empty block with an empty mutation list for the given `TxnId`.
     pub fn with_mutations(hash: Bytes, contents: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
-        Self { hash, contents }
+        Self {
+            last_hash: hash,
+            contents,
+        }
     }
 
     pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
@@ -173,18 +177,30 @@ impl ChainBlock {
 
     /// The hash of the previous block in the chain.
     pub fn last_hash(&self) -> &Bytes {
-        &self.hash
+        &self.last_hash
+    }
+
+    /// The current hash of this block.
+    pub async fn hash(&self) -> TCResult<Bytes> {
+        let mut hasher = Sha256::default();
+        hash_chunks(&mut hasher, self).await?;
+        let digest = hasher.finalize();
+        Ok(Bytes::from(digest.to_vec()))
+    }
+
+    /// The current size of this block.
+    pub async fn size(&self) -> TCResult<usize> {
+        let encoded = tbon::en::encode(self).map_err(TCError::internal)?;
+        encoded
+            .map_err(TCError::internal)
+            .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
+            .await
     }
 }
 
-#[async_trait]
 impl BlockData for ChainBlock {
     fn ext() -> &'static str {
-        EXT
-    }
-
-    fn max_size() -> u64 {
-        BLOCK_SIZE
+        "chain_block"
     }
 }
 
@@ -194,7 +210,10 @@ impl de::FromStream for ChainBlock {
 
     async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(context, decoder)
-            .map_ok(|(hash, contents)| Self { hash, contents })
+            .map_ok(|(hash, contents)| Self {
+                last_hash: hash,
+                contents,
+            })
             .map_err(|e| de::Error::custom(format!("failed to decode ChainBlock: {}", e)))
             .await
     }
@@ -202,20 +221,20 @@ impl de::FromStream for ChainBlock {
 
 impl<'en> en::IntoStream<'en> for ChainBlock {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((self.hash, self.contents), encoder)
+        en::IntoStream::into_stream((self.last_hash, self.contents), encoder)
     }
 }
 
 impl<'en> en::ToStream<'en> for ChainBlock {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((&self.hash, &self.contents), encoder)
+        en::IntoStream::into_stream((&self.last_hash, &self.contents), encoder)
     }
 }
 
 impl fmt::Debug for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "chain block:")?;
-        writeln!(f, "\thash: {}", hex::encode(&self.hash))?;
+        writeln!(f, "\thash: {}", hex::encode(&self.last_hash))?;
         writeln!(f, "\tentries: {}", self.contents.len())?;
         for (txn_id, mutations) in &self.contents {
             writeln!(
@@ -235,8 +254,20 @@ impl fmt::Display for ChainBlock {
         write!(
             f,
             "(a Chain block starting at hash {} with {} entries)",
-            hex::encode(&self.hash),
+            hex::encode(&self.last_hash),
             self.contents.len()
         )
     }
+}
+
+async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
+    hasher: &mut Sha256,
+    data: T,
+) -> TCResult<()> {
+    let mut data = tbon::en::encode(data).map_err(TCError::internal)?;
+    while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
+        hasher.update(&chunk);
+    }
+
+    Ok(())
 }

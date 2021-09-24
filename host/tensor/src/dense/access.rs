@@ -1,11 +1,10 @@
-use std::convert::TryFrom;
-
 use afarray::{Array, ArrayExt, Coords, Offsets};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
+use safecast::AsType;
 
 use tc_btree::*;
 use tc_error::*;
@@ -110,10 +109,11 @@ pub enum DenseAccessor<FD, FS, D, T> {
 
 impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
@@ -180,10 +180,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
@@ -292,10 +293,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     async fn write<V: DenseAccess<FD, FS, D, T>>(
@@ -320,10 +322,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -368,10 +371,11 @@ pub struct BlockListCombine<FD, FS, D, T, L, R> {
 
 impl<FD, FS, D, T, L, R> BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Array>,
-    FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -429,13 +433,14 @@ where
 #[async_trait]
 impl<FD, FS, D, T, L, R> DenseAccess<FD, FS, D, T> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
 {
     type Slice = BlockListCombine<FD, FS, D, T, L::Slice, R::Slice>;
     type Transpose = BlockListCombine<FD, FS, D, T, L::Transpose, R::Transpose>;
@@ -539,13 +544,14 @@ where
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -619,12 +625,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListBroadcast<FD, FS, D, T, B::Slice>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -691,12 +698,13 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -763,12 +771,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListCast<FD, FS, D, T, B::Slice>;
     type Transpose = BlockListCast<FD, FS, D, T, B::Transpose>;
@@ -810,12 +819,13 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -883,12 +893,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = B::Slice;
     type Transpose = B::Transpose;
@@ -931,12 +942,13 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -1009,12 +1021,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1082,12 +1095,13 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -1157,12 +1171,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = <<B as DenseAccess<FD, FS, D, T>>::Slice as DenseAccess<FD, FS, D, T>>::Transpose;
     type Transpose = B::Transpose;
@@ -1230,12 +1245,13 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -1285,12 +1301,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> DenseAccess<FD, FS, D, T> for BlockListSparse<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListSparse<FD, FS, D, T, A::Slice>;
     type Transpose = BlockListSparse<FD, FS, D, T, A::Transpose>;
@@ -1343,12 +1360,13 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for BlockListSparse<FD, FS, D, T, A>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -1427,12 +1445,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListUnary<FD, FS, D, T, B::Slice>;
     type Transpose = BlockListUnary<FD, FS, D, T, B::Transpose>;

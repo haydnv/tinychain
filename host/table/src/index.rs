@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -8,6 +7,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::TryStreamExt;
 use log::debug;
+use safecast::AsType;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Node};
 use tc_error::*;
@@ -275,7 +275,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn>
 where
-    F: TryFrom<D::File>,
+    D::File: AsType<F>,
 {
     type Schema = IndexSchema;
     type Store = F;
@@ -295,7 +295,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn>
 where
-    F: TryFrom<D::File>,
+    D::File: AsType<F>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.btree.restore(&backup.btree, txn_id).await
@@ -328,7 +328,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn> {
         txn_id: TxnId,
     ) -> TCResult<TableIndex<F, D, Txn>>
     where
-        F: TryFrom<D::File, Error = TCError>,
+        D::File: AsType<F>,
         D::FileClass: From<BTreeType>,
     {
         let primary_file = context
@@ -859,7 +859,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
 where
-    F: TryFrom<D::File, Error = TCError>,
+    D::File: AsType<F>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
     type Schema = TableSchema;
@@ -903,7 +903,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
 where
-    F: TryFrom<D::File, Error = TCError>,
+    D::File: AsType<F>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
@@ -938,7 +938,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>, I: TableStream + 'static> CopyFrom<D, I>
     for TableIndex<F, D, Txn>
 where
-    F: TryFrom<D::File, Error = TCError>,
+    D::File: AsType<F>,
     <D as Dir>::FileClass: From<BTreeType> + Send,
 {
     async fn copy_from(source: I, dir: D, txn: &Txn) -> TCResult<Self> {

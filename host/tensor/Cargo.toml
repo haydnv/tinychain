@@ -21,7 +21,7 @@ itertools  = "0.10"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 pin-project = "1.0"
-safecast = "0.1"
+safecast = "~0.1.2"
 strided = "~0.2.9"
 tc-btree = { path = "../btree" }
 tc-error = { version = "~0.2.5", features = ["tensor"] }

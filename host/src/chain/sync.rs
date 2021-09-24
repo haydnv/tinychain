@@ -32,8 +32,10 @@ pub struct SyncChain {
 impl ChainInstance for SyncChain {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
         let mut block = self.history.write_latest(txn_id).await?;
+
         block.clear_until(&txn_id);
         block.append_delete(txn_id, path, key);
+
         Ok(())
     }
 
@@ -46,6 +48,7 @@ impl ChainInstance for SyncChain {
     ) -> TCResult<()> {
         {
             let mut block = self.history.write_latest(*txn.id()).await?;
+
             block.clear_until(txn.id());
         }
 
@@ -65,6 +68,7 @@ impl ChainInstance for SyncChain {
         self.subject.restore(txn, subject).await?;
 
         let mut block = self.history.write_latest(*txn.id()).await?;
+
         *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
 
         Ok(())

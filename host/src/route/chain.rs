@@ -53,6 +53,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
                     Subject::Value(file) => {
                         let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                         if self.path.is_empty() {
                             Ok(value.clone().into())
                         } else {
@@ -93,6 +94,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     }
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                         subject.put(&txn, self.path, key, value).await
                     }
                 }
@@ -116,6 +118,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                         subject.post(&txn, self.path, params).await
                     }
                 }
@@ -138,11 +141,13 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
                     Subject::Value(file) if self.path.is_empty() => {
                         let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
+
                         *subject = Value::None;
                         Ok(())
                     }
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
+
                         subject.delete(&txn, self.path, key).await
                     }
                 }

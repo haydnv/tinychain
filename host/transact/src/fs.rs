@@ -1,23 +1,17 @@
 //! Transactional filesystem traits and data structures. Unstable.
 
 use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::io;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
-
-#[cfg(feature = "tensor")]
-use afarray::Array;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
+use destream::en;
+use futures::{TryFutureExt, TryStreamExt};
+use safecast::AsType;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWrite};
-use tokio_util::io::StreamReader;
 
 use tc_error::*;
-use tc_value::Value;
 use tcgeneric::{Id, PathSegment, TCBoxTryStream};
 
 use super::{Transaction, TxnId};
@@ -25,123 +19,21 @@ use super::{Transaction, TxnId};
 /// An alias for [`Id`] used for code clarity.
 pub type BlockId = PathSegment;
 
-/// The contents of a [`Block`].
-#[async_trait]
-pub trait BlockData: de::FromStream<Context = ()> + Clone + Send + Sync + 'static {
+pub trait BlockData: Clone + Send + Sync + 'static {
     fn ext() -> &'static str;
-
-    fn max_size() -> u64;
-
-    async fn hash<'en>(&'en self) -> TCResult<Bytes>
-    where
-        Self: en::ToStream<'en>,
-    {
-        let mut hasher = Sha256::default();
-        hash_chunks(&mut hasher, self).await?;
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
-    }
-
-    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
-        tbon::de::read_from((), source)
-            .map_err(|e| TCError::internal(format!("unable to parse saved block: {}", e)))
-            .await
-    }
-
-    async fn persist<'en, W: AsyncWrite + Send + Unpin>(&'en self, sink: &mut W) -> TCResult<u64>
-    where
-        Self: en::ToStream<'en>,
-    {
-        let encoded = tbon::en::encode(self)
-            .map_err(|e| TCError::internal(format!("unable to serialize block: {}", e)))?;
-
-        let mut reader = StreamReader::new(
-            encoded
-                .map_ok(Bytes::from)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
-        );
-
-        let size = tokio::io::copy(&mut reader, sink)
-            .map_err(|e| TCError::bad_gateway(e))
-            .await?;
-
-        if size > Self::max_size() {
-            log::warn!(
-                "{} block exceeds maximum size of {}",
-                Self::ext(),
-                Self::max_size()
-            )
-        }
-
-        Ok(size)
-    }
-
-    async fn into_size<'en>(self) -> TCResult<u64>
-    where
-        Self: Clone + en::IntoStream<'en> + 'en,
-    {
-        let encoded =
-            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
-
-        encoded
-            .map_err(|e| TCError::bad_request("serialization error", e))
-            .try_fold(0, |size, chunk| {
-                future::ready(Ok(size + chunk.len() as u64))
-            })
-            .await
-    }
-
-    async fn size<'en>(&'en self) -> TCResult<u64>
-    where
-        Self: en::ToStream<'en>,
-    {
-        let encoded =
-            tbon::en::encode(self).map_err(|e| TCError::bad_request("serialization error", e))?;
-
-        encoded
-            .map_err(|e| TCError::bad_request("serialization error", e))
-            .try_fold(0, |size, chunk| {
-                future::ready(Ok(size + chunk.len() as u64))
-            })
-            .await
-    }
-}
-
-#[async_trait]
-impl BlockData for Value {
-    fn ext() -> &'static str {
-        "value"
-    }
-
-    fn max_size() -> u64 {
-        4096
-    }
 }
 
 #[cfg(feature = "tensor")]
-#[async_trait]
-impl BlockData for Array {
+impl BlockData for afarray::Array {
     fn ext() -> &'static str {
         "array"
     }
-
-    #[inline]
-    fn max_size() -> u64 {
-        1_048_581 // 1 mebibyte + 5 bytes overhead
-    }
 }
 
-/// A transactional filesystem block.
-#[async_trait]
-pub trait Block<B: BlockData, F: File<B>>: Send + Sync {
-    type ReadLock: Deref<Target = B> + Send;
-    type WriteLock: DerefMut<Target = B> + Send + Sync;
-
-    /// Get a read lock on this block.
-    async fn read(self) -> Self::ReadLock;
-
-    /// Get a write lock on this block.
-    async fn write(self) -> Self::WriteLock;
+impl BlockData for tc_value::Value {
+    fn ext() -> &'static str {
+        "value"
+    }
 }
 
 /// A transactional persistent data store.
@@ -153,15 +45,15 @@ pub trait Store: Clone + Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File<B: BlockData>: Store + Sized + 'static {
-    /// The type of block which this file is divided into.
-    type Block: Block<B, Self>;
+pub trait File<B: Clone>: Store + Sized + 'static {
+    /// A read Lock on a block in this file.
+    type Read: Deref<Target = B> + Send;
 
-    /// Return the IDs of all this `File``'s blocks.
+    /// A read Lock on a block in this file.
+    type Write: DerefMut<Target = B> + Send;
+
+    /// Return the IDs of all this `File`'s blocks.
     async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>>;
-
-    /// Return a new [`BlockId`] which is not used within this `File`.
-    async fn unique_id(&self, txn_id: TxnId) -> TCResult<BlockId>;
 
     /// Return true if this `File` contains the given [`BlockId`] as of the given [`TxnId`].
     async fn contains_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<bool>;
@@ -169,40 +61,39 @@ pub trait File<B: BlockData>: Store + Sized + 'static {
     /// Copy all blocks from the source `File` into this `File`.
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
 
-    /// Create a new [`Self::Block`].
+    /// Create a new block.
+    ///
+    /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block(
         &self,
         txn_id: TxnId,
         name: BlockId,
         initial_value: B,
-    ) -> TCResult<Self::Block>;
+        size_hint: usize,
+    ) -> TCResult<Self::Write>;
+
+    // TODO: rename to create_block_unique
+    /// Create a new [`Self::Block`].
+    ///
+    /// `size_hint` should be the maximum allowed size of the block.
+    async fn create_block_tmp(
+        &self,
+        txn_id: TxnId,
+        initial_value: B,
+        size_hint: usize,
+    ) -> TCResult<(BlockId, Self::Write)>;
 
     /// Delete the block with the given ID.
     async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()>;
 
-    /// Return a lockable owned reference to the block at `name`.
-    async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Block>;
-
     /// Get a read lock on the block at `name`.
-    async fn read_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B, Self>>::ReadLock>;
+    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
 
     /// Get a read lock on the block at `name`, without borrowing.
-    async fn read_block_owned(
-        self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B, Self>>::ReadLock>;
+    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
 
     /// Get a read lock on the block at `name` as of [`TxnId`].
-    async fn write_block(
-        &self,
-        txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<<Self::Block as Block<B, Self>>::WriteLock>;
+    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Write>;
 
     /// Delete all of this `File`'s blocks.
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()>;
@@ -223,37 +114,41 @@ pub trait Dir: Store + Send + Sized + 'static {
     /// Create a new `Dir`.
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
+    // TODO: rename to create_dir_unique
     /// Create a new `Dir` with a new unique ID.
     async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<F: TryFrom<Self::File, Error = TCError>, C: Send>(
-        &self,
-        txn_id: TxnId,
-        name: Id,
-        class: C,
-    ) -> TCResult<F>
+    async fn create_file<C, F, B>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
     where
-        Self::FileClass: From<C>;
+        C: Copy + Send + fmt::Display,
+        F: Clone,
+        B: BlockData,
+        Self::FileClass: From<C>,
+        Self::File: AsType<F>,
+        F: File<B>;
 
+    // TODO: rename to create_file_unique
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp<F: TryFrom<Self::File, Error = TCError>, C: Send>(
-        &self,
-        txn_id: TxnId,
-        class: C,
-    ) -> TCResult<F>
+    async fn create_file_tmp<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
-        Self::FileClass: From<C>;
+        C: Copy + Send + fmt::Display,
+        F: Clone,
+        B: BlockData,
+        Self::FileClass: From<C>,
+        Self::File: AsType<F>,
+        F: File<B>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
     /// Get a [`Self::File`] in this `Dir`.
-    async fn get_file<F: TryFrom<Self::File, Error = TCError>>(
-        &self,
-        txn_id: TxnId,
-        name: &Id,
-    ) -> TCResult<Option<F>>;
+    async fn get_file<F, B>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
+    where
+        F: Clone,
+        B: BlockData,
+        Self::File: AsType<F>,
+        F: File<B>;
 }
 
 /// Defines how to load a persistent data structure from the filesystem.
@@ -284,6 +179,7 @@ pub trait CopyFrom<D: Dir, I>: Persist<D> {
 /// Defines how to restore persistent state from backup.
 #[async_trait]
 pub trait Restore<D: Dir>: Persist<D> {
+    /// Restore this persistent state from a backup.
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
 }
 
@@ -293,10 +189,12 @@ pub trait Hash<'en, D: Dir> {
     type Item: en::IntoStream<'en> + Send + 'en;
     type Txn: Transaction<D>;
 
+    /// Return the SHA256 hash of this state as a hexadecimal string.
     async fn hash_hex(&'en self, txn: &'en Self::Txn) -> TCResult<String> {
         self.hash(txn).map_ok(|hash| hex::encode(hash)).await
     }
 
+    /// Compute the SHA256 hash of this state.
     async fn hash(&'en self, txn: &'en Self::Txn) -> TCResult<Bytes> {
         let mut data = self.hashable(txn).await?;
 
@@ -309,6 +207,7 @@ pub trait Hash<'en, D: Dir> {
         Ok(Bytes::from(digest.to_vec()))
     }
 
+    /// Return a stream of hashable items which this state comprises, in a consistent order.
     async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCBoxTryStream<'en, Self::Item>>;
 }
 

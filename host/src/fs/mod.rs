@@ -1,114 +1,34 @@
 //! The transactional filesystem interface.
 
-use std::fmt;
-use std::fs::Metadata;
 use std::io;
-use std::path::PathBuf;
-
-use futures::TryFutureExt;
-use log::debug;
-use tokio::fs;
+use std::path::Path;
 
 use tc_error::*;
-use tcgeneric::{label, Label, PathSegment};
+use tcgeneric::{label, Label};
 
-pub use cache::*;
+pub use block::*;
 pub use dir::*;
 pub use file::*;
 
-mod cache;
+mod block;
 mod dir;
+#[allow(unused)]
 mod file;
 
 const VERSION: Label = label(".version");
-const TMP: &'static str = "tmp";
-
-type DirContents = Vec<(fs::DirEntry, Metadata)>;
-
-pub async fn load(cache: Cache, path: PathBuf) -> TCResult<Dir> {
-    let entries = dir_contents(&path).await?;
-    dir::Dir::load(cache, path, entries).await
-}
-
-async fn create_parent(path: &PathBuf) -> TCResult<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            tokio::fs::create_dir_all(parent)
-                .map_err(|e| io_err(e, parent))
-                .await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadata)>> {
-    let mut contents = vec![];
-    let mut handles = fs::read_dir(dir_path)
-        .map_err(|e| io_err(e, dir_path))
-        .await?;
-
-    while let Some(handle) = handles
-        .next_entry()
-        .map_err(|e| io_err(e, dir_path))
-        .await?
-    {
-        if handle
-            .path()
-            .file_name()
-            .expect("file name")
-            .to_str()
-            .expect("file name")
-            .starts_with('.')
-        {
-            debug!("skip hidden file {:?}", handle.path());
-            continue;
-        }
-
-        let meta = handle
-            .metadata()
-            .map_err(|e| io_err(e, handle.path()))
-            .await?;
-
-        contents.push((handle, meta));
-    }
-
-    Ok(contents)
-}
 
 #[inline]
-fn file_ext(path: &'_ PathBuf) -> Option<&'_ str> {
+fn file_ext(path: &'_ Path) -> Option<&'_ str> {
     path.extension().and_then(|ext| ext.to_str())
 }
 
-fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
-    if let Some(name) = handle.path().file_stem() {
-        let name = name.to_str().ok_or_else(|| {
-            TCError::internal(format!("invalid file name at {:?}", handle.path()))
-        })?;
-
-        name.parse()
-    } else {
-        Err(TCError::internal("Cannot load file with no name!"))
-    }
-}
-
-#[inline]
-fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
-    let mut path = mount_point.clone();
-    path.push(name.to_string());
-    path
-}
-
-fn io_err<I: fmt::Debug + Send>(err: io::Error, info: I) -> TCError {
+pub fn io_err(err: io::Error) -> TCError {
     match err.kind() {
-        io::ErrorKind::NotFound => {
-            TCError::internal(format!("host filesystem has no such entry {:?}", info))
-        }
+        io::ErrorKind::NotFound => TCError::not_found(err),
         io::ErrorKind::PermissionDenied => TCError::internal(format!(
-            "TinyChain does not have permission to access the host filesystem: {:?}",
-            info
+            "TinyChain does not have permission to access the host filesystem: {}",
+            err
         )),
-        other => TCError::internal(format!("host filesystem error: {:?}: {}", other, err)),
+        _ => TCError::internal(format!("host filesystem error: {}", err)),
     }
 }

@@ -19,17 +19,13 @@ afarray = { version = "~0.7.2", optional = true }
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.5"
-env_logger = "0.9"
 futures = "0.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
 rand = "0.8"
-serde = { version = "1.0", features = [] }
+safecast = "~0.1.2"
 sha2 = "0.9"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
 tcgeneric = "~0.2.2"
 tc-error = "~0.2.5"
 tc-value = "~0.2.1"
-tokio = { version = "1.11", features = ["io-util", "sync"] }
-tokio-util = { version = "0.6", features = ["io"] }
-uuid = { version = "0.8", features = ["v4"] }

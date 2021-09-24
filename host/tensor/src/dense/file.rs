@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
@@ -10,6 +9,7 @@ use destream::de;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, try_join, TryFutureExt};
 use log::debug;
+use safecast::AsType;
 use strided::Stride;
 
 use tc_btree::Node;
@@ -24,9 +24,10 @@ use crate::transform;
 use crate::{coord_bounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
-use super::{DenseAccess, DenseAccessor, DenseWrite, PER_BLOCK};
+use super::{DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
 
-const MEBIBYTE: usize = 1_048_576;
+/// The size of a dense tensor block on disk, in bytes (1 mebibyte + 5 bytes overhead).
+const BLOCK_SIZE: usize = MEBIBYTE + 5;
 
 /// A wrapper around a `DenseTensor` [`File`]
 #[derive(Clone)]
@@ -109,7 +110,8 @@ where
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
             .map_ok(|(id, block)| {
                 let len = block.len() as u64;
-                file.create_block(txn_id, id, block).map_ok(move |_| len)
+                file.create_block(txn_id, id, block, BLOCK_SIZE)
+                    .map_ok(move |_| len)
             })
             .try_buffer_unordered(num_cpus::get())
             .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
@@ -151,7 +153,9 @@ where
             size += chunk.len() as u64;
             let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
-            file.create_block(txn_id, block_id, block).await?;
+            file.create_block(txn_id, block_id, block, BLOCK_SIZE)
+                .await?;
+
             i += 1;
         }
 
@@ -211,6 +215,7 @@ where
         } else if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
+
             block.sort(true)?;
             return Ok(());
         }
@@ -220,7 +225,9 @@ where
             let block_id = BlockId::from(block_id);
 
             let left = self.file.write_block(txn_id, block_id);
+
             let right = self.file.write_block(txn_id, next_block_id);
+
             let (mut left, mut right) = try_join!(left, right)?;
 
             let mut block = Array::concatenate(&left, &right)?;
@@ -272,6 +279,7 @@ where
             .map(|(block_id, r)| r.map(|array| (block_id, array)))
             .map_ok(|(block_id, array)| async {
                 let mut block = self.file.write_block(txn_id, block_id).await?;
+
                 *block = array;
                 Ok(())
             })
@@ -302,10 +310,11 @@ impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
@@ -377,10 +386,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     async fn write<B: DenseAccess<FD, FS, D, T>>(
@@ -506,10 +516,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -526,6 +537,7 @@ where
 
             let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let block = self.file.read_block(*txn.id(), block_id).await?;
+
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
             Ok((coord, value))
@@ -707,14 +719,14 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
         &self,
         block_id: u64,
         block: ArrayExt<T>,
-    ) -> Result<<F as File<Array>>::Block, E>
+    ) -> Result<F::Write, E>
     where
         Array: From<ArrayExt<T>>,
     {
         debug!("BlockListVisitor::create_block {}", block_id);
 
         self.file
-            .create_block(self.txn_id, block_id.into(), block.into())
+            .create_block(self.txn_id, block_id.into(), block.into(), BLOCK_SIZE)
             .map_err(de::Error::custom)
             .await
     }
@@ -878,6 +890,7 @@ impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
                 let im = ArrayExt::<T>::from_iter(im.iter().cloned());
                 let block = ArrayExt::from((re, im));
                 self.visitor.create_block(block_id, block).await?;
+
                 size += block_size as u64;
                 block_id += 1;
             }
@@ -960,10 +973,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
@@ -999,6 +1013,7 @@ where
                         block_offsets(&af_indices, &af_offsets, start, block_id);
 
                     let block = file_clone.read_block(txn_id, block_id.into()).await?;
+
                     values.extend(block.get(&block_offsets.into()).to_vec());
                     start = new_start;
                 }
@@ -1029,10 +1044,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array> + TryFrom<D::File, Error = TCError>,
-    FS: File<Node> + TryFrom<D::File, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;

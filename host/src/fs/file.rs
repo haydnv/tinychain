@@ -1,201 +1,249 @@
 //! A transactional file
 
-use std::collections::hash_map::{Entry, HashMap};
-use std::collections::HashSet;
-use std::convert::TryFrom;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::iter::FromIterator;
 use std::marker::PhantomData;
-use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use destream::{de, en};
-use futures::future::{join_all, try_join_all, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt};
-use futures::{try_join, TryStreamExt};
+use freqfs::*;
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::try_join;
 use log::debug;
-use tokio::sync::RwLock;
+use safecast::AsType;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{self, BlockData, BlockId, Store};
-use tc_transact::lock::TxnLock;
+use tc_transact::fs;
+use tc_transact::lock::{TxnLock, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 
-use super::cache::*;
-use super::{file_name, fs_path, DirContents, TMP};
+use super::{io_err, CacheBlock, VERSION};
 
-#[derive(Clone)]
-pub struct Block<B> {
-    name: BlockId,
-    txn_id: TxnId,
-    lock: CacheLock<B>,
-}
-
-#[async_trait]
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::Block<B, File<B>> for Block<B>
-where
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-{
-    type ReadLock = CacheLockReadGuard<B>;
-    type WriteLock = CacheLockWriteGuard<B>;
-
-    async fn read(self) -> Self::ReadLock {
-        self.lock.read().await
-    }
-
-    async fn write(self) -> Self::WriteLock {
-        self.lock.write().await
-    }
-}
+type Blocks = HashMap<fs::BlockId, TxnLock<TxnId>>;
 
 /// A transactional file
-#[derive(Clone)]
 pub struct File<B> {
-    path: PathBuf,
-    cache: Cache,
-    contents: TxnLock<HashSet<BlockId>>,
-    mutated: Arc<RwLock<HashMap<TxnId, HashSet<BlockId>>>>,
+    canon: DirLock<CacheBlock>,
+
+    // don't try to keep the block contents in a TxnLock, since the block versions
+    // may need to be backed up to disk--just keep a lock on the TxnId of the last mutation
+    // and guard the block content by acquiring a lock on the mutation ID
+    // before allowing access to a block
+    blocks: Arc<RwLock<Blocks>>,
+
+    present: TxnLock<HashSet<fs::BlockId>>,
+    versions: DirLock<CacheBlock>,
     phantom: PhantomData<B>,
 }
 
-impl<B: BlockData> File<B> {
-    fn _new(cache: Cache, path: PathBuf, block_ids: HashSet<BlockId>) -> Self {
-        let txn_lock_name = format!("file contents at {:?}", &path);
-
-        File {
-            path,
-            cache,
-            contents: TxnLock::new(txn_lock_name, block_ids),
-            mutated: Arc::new(RwLock::new(HashMap::new())),
+impl<B> Clone for File<B> {
+    fn clone(&self) -> Self {
+        Self {
+            canon: self.canon.clone(),
+            blocks: self.blocks.clone(),
+            present: self.present.clone(),
+            versions: self.versions.clone(),
             phantom: PhantomData,
         }
     }
+}
 
-    async fn mutate(&self, txn_id: TxnId, block_id: BlockId) {
-        let mut mutated = self.mutated.write().await;
-        match mutated.entry(txn_id) {
-            Entry::Vacant(entry) => entry.insert(HashSet::new()).insert(block_id),
-            Entry::Occupied(mut entry) => entry.get_mut().insert(block_id),
-        };
-    }
-
-    pub fn new(cache: Cache, mut path: PathBuf, ext: &str) -> Self {
-        path.set_extension(ext);
-        Self::_new(cache, path, HashSet::new())
-    }
-
-    pub fn load(cache: Cache, path: PathBuf, contents: DirContents) -> TCResult<Self> {
-        if contents.iter().all(|(_, meta)| meta.is_file()) {
-            let contents = contents
-                .into_iter()
-                .filter(|(handle, _)| {
-                    handle.path().extension().and_then(|e| e.to_str()) != Some(TMP)
-                })
-                .map(|(handle, _)| file_name(&handle))
-                .collect::<TCResult<HashSet<BlockId>>>()?;
-
-            Ok(Self::_new(cache, path, contents))
-        } else {
-            Err(TCError::internal(format!(
-                "directory at {:?} contains both blocks and subdirectories",
-                path
-            )))
+impl<B: fs::BlockData> File<B>
+where
+    CacheBlock: AsType<B>,
+{
+    pub async fn new(canon: DirLock<CacheBlock>) -> TCResult<Self> {
+        let mut fs_dir = canon.write().await;
+        if fs_dir.len() > 0 {
+            return Err(TCError::internal("new file is not empty"));
         }
+
+        Ok(Self {
+            canon,
+            blocks: Arc::new(RwLock::new(HashMap::new())),
+            present: TxnLock::new(format!("block listing for {:?}", &*fs_dir), HashSet::new()),
+            versions: fs_dir.create_dir(VERSION.to_string()).map_err(io_err)?,
+            phantom: PhantomData,
+        })
     }
 
-    pub async fn sync_block<'en>(
+    pub(super) async fn load(canon: DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
+        let mut fs_dir = canon.write().await;
+
+        let mut blocks = HashMap::new();
+        let mut present = HashSet::new();
+        for (name, _) in fs_dir.iter() {
+            if name.starts_with('.') {
+                debug!("File::load skipping hidden filesystem entry");
+                continue;
+            }
+
+            if name.len() < B::ext().len() + 1 || !name.ends_with(B::ext()) {
+                return Err(TCError::internal(format!(
+                    "block has invalid extension: {}",
+                    name
+                )));
+            }
+
+            let block_id: fs::BlockId = name[..(name.len() - B::ext().len() - 1)].parse()?;
+
+            present.insert(block_id.clone());
+
+            let lock_name = format!("block {}", block_id);
+            blocks.insert(block_id, TxnLock::new(lock_name, txn_id));
+        }
+
+        Ok(Self {
+            canon,
+            blocks: Arc::new(RwLock::new(blocks)),
+            present: TxnLock::new(format!("block listing for {:?}", &*fs_dir), present),
+            versions: fs_dir
+                .get_or_create_dir(VERSION.to_string())
+                .map_err(io_err)?,
+            phantom: PhantomData,
+        })
+    }
+
+    async fn get_block(
         &self,
         txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<CacheLockWriteGuard<B>>
-    where
-        B: en::IntoStream<'en> + 'en,
-        CacheBlock: From<CacheLock<B>>,
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-    {
-        debug!("File::sync_block");
-        self.cache
-            .sync(&block_version(&self.path, &txn_id, &name))
-            .await?;
+        block_id: fs::BlockId,
+        mutate: bool,
+    ) -> TCResult<FileLock<CacheBlock>> {
+        let present = self.present.read(txn_id).await?;
+        let blocks = self.blocks.read().await;
+        if !present.contains(&block_id) {
+            return Err(TCError::not_found(block_id));
+        }
 
-        fs::File::write_block(self, txn_id, name).await
+        let mut version = self.version(&txn_id).await?;
+
+        if mutate {
+            let mut last_mutation = blocks
+                .get(&block_id)
+                .expect("block last mutation ID")
+                .write(txn_id)
+                .await?;
+
+            assert!(&*last_mutation <= &txn_id);
+            *last_mutation = txn_id;
+        } else {
+            // just acquire the lock to reserve this TxnId
+            blocks
+                .get(&block_id)
+                .expect("block last mutation ID")
+                .read(txn_id)
+                .await?;
+        }
+
+        let name = Self::file_name(&block_id);
+
+        let block = if let Some(block) = version.get_file(&name) {
+            debug!("read existing version of block {} at {}", block_id, txn_id);
+
+            block
+        } else {
+            let canon = self.canon.read().await;
+            let block_canon = canon.get_file(&name).expect("canonical block");
+            let size_hint = block_canon.size_hint().await;
+            let value = block_canon.read().map_err(io_err).await?;
+            let block_version = version
+                .create_file(name, B::clone(&*value), size_hint)
+                .map_err(io_err)?;
+
+            debug!("created new version of block {} at {}", block_id, txn_id);
+
+            block_version
+        };
+
+        Ok(block)
+    }
+
+    async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
+        let version = {
+            let mut versions = self.versions.write().await;
+            versions
+                .get_or_create_dir(txn_id.to_string())
+                .map_err(io_err)?
+        };
+
+        version.write().map(Ok).await
+    }
+
+    fn file_name(block_id: &fs::BlockId) -> String {
+        format!("{}.{}", block_id, B::ext())
     }
 }
 
 #[async_trait]
-impl<B: BlockData> Store for File<B> {
+impl<B: fs::BlockData> fs::Store for File<B> {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        self.contents
+        self.present
             .read(txn_id)
-            .map_ok(|contents| contents.is_empty())
+            .map_ok(|present| present.is_empty())
             .await
     }
 }
 
 #[async_trait]
-impl<'en, B: BlockData + en::IntoStream<'en> + 'en> fs::File<B> for File<B>
+impl<B> fs::File<B> for File<B>
 where
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    B: fs::BlockData,
+    CacheBlock: AsType<B>,
 {
-    type Block = Block<B>;
+    type Read = FileReadGuard<CacheBlock, B>;
+    type Write = FileWriteGuard<CacheBlock, B>;
 
-    async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>> {
-        let contents = self.contents.read(txn_id).await?;
-        Ok((*contents).clone())
-    }
-
-    async fn unique_id(&self, txn_id: TxnId) -> TCResult<BlockId> {
-        let contents = self.contents.read(txn_id).await?;
-        let id = loop {
-            let id: BlockId = Uuid::new_v4().into();
-            if !contents.contains(&id) {
-                break id;
-            }
-        };
-
-        Ok(id)
-    }
-
-    async fn contains_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<bool> {
-        self.contents
+    async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<fs::BlockId>> {
+        self.present
             .read(txn_id)
-            .map_ok(|contents| contents.contains(name))
+            .map_ok(|present| present.clone())
+            .await
+    }
+
+    async fn contains_block(&self, txn_id: TxnId, name: &fs::BlockId) -> TCResult<bool> {
+        self.present
+            .read(txn_id)
+            .map_ok(|present| present.contains(name))
             .await
     }
 
     async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()> {
-        let (new_block_ids, mut contents) =
-            try_join!(other.contents.read(txn_id), self.contents.write(txn_id))?;
+        let (mut this_present, that_present) =
+            try_join!(self.present.write(txn_id), other.present.read(txn_id))?;
 
-        let mut copied_block_ids = HashSet::with_capacity(new_block_ids.len());
+        let (mut this_version, mut that_version) =
+            try_join!(self.version(&txn_id), other.version(&txn_id))?;
 
-        let mut block_copies =
-            FuturesUnordered::from_iter(new_block_ids.iter().cloned().map(|block_id| {
-                let path = block_version(&self.path, &txn_id, &block_id);
+        let mut blocks = self.blocks.write().await;
+        let canon = other.canon.read().await;
 
-                other
-                    .read_block(txn_id, block_id.clone())
-                    .and_then(|source| self.cache.write(path, source.clone()))
-                    .map_ok(|_lock| block_id)
-            }));
+        for block_id in that_present.iter() {
+            let file_name = Self::file_name(block_id);
+            let source = if let Some(version) = that_version.get_file(&file_name) {
+                version
+            } else {
+                canon.get_file(&file_name).expect("block version")
+            };
 
-        while let Some(block_id) = block_copies.try_next().await? {
-            contents.insert(block_id.clone());
-            copied_block_ids.insert(block_id);
-        }
+            this_present.insert(block_id.clone());
 
-        let mut mutated = self.mutated.write().await;
-        match mutated.entry(txn_id) {
-            Entry::Vacant(entry) => {
-                entry.insert(copied_block_ids);
+            if let Some(last_mutation) = blocks.get_mut(block_id) {
+                *last_mutation.write(txn_id).await? = txn_id;
+            } else {
+                let lock_name = format!("block {}", block_id);
+                blocks.insert(block_id.clone(), TxnLock::new(lock_name, txn_id));
             }
-            Entry::Occupied(mut entry) => entry.get_mut().extend(copied_block_ids),
-        };
+
+            let block = source.read().map_err(io_err).await?;
+            let size_hint = source.size_hint().await;
+            this_version.delete(file_name.clone());
+            this_version
+                .create_file(file_name, block.clone(), size_hint)
+                .map_err(io_err)?;
+        }
 
         Ok(())
     }
@@ -203,274 +251,242 @@ where
     async fn create_block(
         &self,
         txn_id: TxnId,
-        name: BlockId,
+        block_id: fs::BlockId,
         initial_value: B,
-    ) -> TCResult<Self::Block> {
-        let mut contents = self.contents.write(txn_id).await?;
-        if contents.contains(&name) {
-            return Err(TCError::bad_request(
-                "there is already a block with this ID",
-                name,
-            ));
+        size_hint: usize,
+    ) -> TCResult<Self::Write> {
+        debug!("File::create_block {}", block_id);
+
+        let present = self.present.write(txn_id).await?;
+        if present.contains(&block_id) {
+            return Err(TCError::bad_request("block already exists", block_id));
         }
 
-        let version = block_version(&self.path, &txn_id, &name);
-        contents.insert(name.clone());
+        let blocks = self.blocks.write().await;
+        let version = self.version(&txn_id).await?;
 
-        self.mutate(txn_id, name.clone()).await;
-        self.cache
-            .write(version, initial_value)
-            .map_ok(|lock| Block { name, txn_id, lock })
-            .await
+        let block = create_block_inner(
+            present,
+            blocks,
+            version,
+            txn_id,
+            block_id,
+            initial_value,
+            size_hint,
+        )
+        .await?;
+
+        block.write().map_err(io_err).await
     }
 
-    async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()> {
-        let mut contents = self.contents.write(txn_id).await?;
-        if !contents.remove(&name) {
-            return Err(TCError::not_found(format!("block named {}", name)));
+    async fn create_block_tmp(
+        &self,
+        txn_id: TxnId,
+        initial_value: B,
+        size_hint: usize,
+    ) -> TCResult<(fs::BlockId, Self::Write)> {
+        debug!("File::create_block_tmp");
+
+        let present = self.present.write(txn_id).await?;
+        let block_id = loop {
+            let name = Uuid::new_v4().into();
+            if !present.contains(&name) {
+                break name;
+            }
+        };
+
+        let blocks = self.blocks.write().await;
+        let version = self.version(&txn_id).await?;
+
+        let block = create_block_inner(
+            present,
+            blocks,
+            version,
+            txn_id,
+            block_id.clone(),
+            initial_value,
+            size_hint,
+        )
+        .await?;
+
+        let lock = block.write().map_err(io_err).await?;
+        Ok((block_id, lock))
+    }
+
+    async fn delete_block(&self, txn_id: TxnId, block_id: fs::BlockId) -> TCResult<()> {
+        debug!("File::delete_block {}", block_id);
+
+        let mut present = self.present.write(txn_id).await?;
+        let mut blocks = self.blocks.write().await;
+        if let Some(block) = blocks.get_mut(&block_id) {
+            *block.write(txn_id).await? = txn_id;
+
+            // keep the version directory in sync in case create_block is called later
+            // with the same block_id
+            let mut version = self.version(&txn_id).await?;
+            version.delete(Self::file_name(&block_id));
         }
 
-        let version = block_version(&self.path, &txn_id, &name);
-        self.mutate(txn_id, name).await;
-        self.cache.delete(version).await;
+        present.remove(&block_id);
         Ok(())
     }
 
-    async fn get_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Block<B>> {
-        debug!("File::get_block {}", name);
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: fs::BlockId,
+    ) -> TCResult<FileReadGuard<CacheBlock, B>> {
+        debug!("File::read_block {}", block_id);
 
-        {
-            let contents = self.contents.read(txn_id).await?;
-            if !contents.contains(&name) {
-                return Err(TCError::not_found(format!("block named {}", name)));
-            }
-        }
-
-        let version = block_version(&self.path, &txn_id, &name);
-        if let Some(lock) = self.cache.read(&version).await? {
-            debug!("File::get_block {} from cache", name);
-            Ok(Block { name, txn_id, lock })
-        } else {
-            let canon = fs_path(&self.path, &name);
-            let block = self.cache.read(&canon).await?;
-            let block = block.ok_or_else(|| TCError::internal("failed reading block"))?;
-            let data = block.read().await;
-
-            debug!("File::get_block {} caching new version", name);
-            let block = self
-                .cache
-                .write(version, data.deref().clone())
-                .map_ok(|lock| Block { name, txn_id, lock })
-                .await;
-
-            block
-        }
-    }
-
-    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<CacheLockReadGuard<B>> {
-        debug!("File::read_block {}", name);
-
-        let block = self.get_block(txn_id, name).await?;
-        Ok(fs::Block::read(block).await)
+        let block = self.get_block(txn_id, block_id, false).await?;
+        block.read().map_err(io_err).await
     }
 
     async fn read_block_owned(
         self,
         txn_id: TxnId,
-        name: BlockId,
-    ) -> TCResult<CacheLockReadGuard<B>> {
-        debug!("File::read_block_owned {}", name);
+        block_id: fs::BlockId,
+    ) -> TCResult<FileReadGuard<CacheBlock, B>> {
+        debug!("File::read_block_owned {}", block_id);
 
-        let block = self.get_block(txn_id, name).await?;
-        Ok(fs::Block::read(block).await)
+        let block = self.get_block(txn_id, block_id, false).await?;
+        block.read().map_err(io_err).await
     }
 
-    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<CacheLockWriteGuard<B>> {
-        debug!("File::write_block");
-        let block = self.get_block(txn_id, name.clone()).await?;
-        self.mutate(txn_id, name).await;
-        Ok(fs::Block::write(block).await)
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: fs::BlockId,
+    ) -> TCResult<FileWriteGuard<CacheBlock, B>> {
+        debug!("File::write_block {}", block_id);
+
+        let block = self.get_block(txn_id, block_id, true).await?;
+        block.write().map_err(io_err).await
     }
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
-        let mut contents = self.contents.write(txn_id).await?;
-        let deletes = FuturesUnordered::from_iter(contents.drain().map(|block_id| async move {
-            let path = block_version(&self.path, &txn_id, &block_id);
-            self.cache.delete(path).await;
-            block_id
-        }));
+        let mut contents = self.present.write(txn_id).await?;
+        let mut version = self.version(&txn_id).await?;
+        for block_id in contents.drain() {
+            version.delete(Self::file_name(&block_id));
+        }
 
-        let mut mutated = self.mutated.write().await;
-        mutated.insert(txn_id, deletes.collect().await);
         Ok(())
     }
 }
 
 #[async_trait]
-impl<'en, B: BlockData + 'en> Transact for File<B>
+impl<B> Transact for File<B>
 where
-    B: en::IntoStream<'en>,
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    B: fs::BlockData,
+    CacheBlock: AsType<B>,
 {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("commit file {:?} at {}", &self.path, txn_id);
+        debug!("File::commit");
 
-        let file_path = &self.path;
-        let cache = &self.cache;
+        let mut blocks = self.blocks.write().await;
+
+        self.present.commit(txn_id).await;
+        debug!("File::commit committed block listing");
+
+        join_all(
+            blocks
+                .values()
+                .map(|last_mutation| last_mutation.commit(txn_id)),
+        )
+        .await;
+
         {
-            let contents = self.contents.read(*txn_id).await.expect("file block list");
-            let mutated = self.mutated.read().await;
-            if let Some(blocks) = mutated.get(&txn_id) {
-                let commits = blocks
-                    .iter()
-                    .filter(|block_id| contents.contains(block_id))
-                    .map(|block_id| async move {
-                        let version_path = block_version(file_path, &txn_id, block_id);
-                        let block_path = fs_path(file_path, block_id);
-
-                        cache.sync(&version_path).await?;
-                        if let Some(source) = cache.read(&version_path).await? {
-                            let source = source.write().await;
-                            cache.write(block_path.clone(), (&*source).clone()).await?;
-                            cache.sync(&block_path).map_ok(|_| ()).await
+            let present = self.present.read(*txn_id).await.expect("file block list");
+            let version = self.version(txn_id).await.expect("file block versions");
+            let mut canon = self.canon.write().await;
+            let mut deleted = Vec::with_capacity(blocks.len());
+            let mut synchronize = Vec::with_capacity(present.len());
+            for block_id in blocks.keys() {
+                let name = Self::file_name(block_id);
+                if present.contains(block_id) {
+                    if let Some(version) = version.get_file(&name) {
+                        let block = version.read().await.expect("block version");
+                        let canon = if let Some(canon) = canon.get_file(&name) {
+                            *canon.write().await.expect("canonical block") = block.clone();
+                            canon
                         } else {
-                            Err(TCError::internal(format!(
-                                "missing transaction version of block {}",
-                                block_id
-                            )))
-                        }
-                    });
+                            let size_hint = version.size_hint().await;
+                            canon
+                                .create_file(name, block.clone(), size_hint)
+                                .expect("new canonical block")
+                        };
 
-                try_join_all(commits).await.expect("commit file blocks");
-            } else {
-                debug!("no blocks mutated at {}", txn_id);
+                        synchronize.push(async move { canon.sync(true).await });
+                    } else {
+                        debug!("block {} has no version to commit at {}", block_id, txn_id);
+                    }
+                } else {
+                    canon.delete(name);
+                    deleted.push(block_id.clone());
+                }
             }
+
+            for block_id in deleted.into_iter() {
+                assert!(blocks.remove(&block_id).is_some());
+            }
+
+            try_join_all(synchronize)
+                .await
+                .expect("sync block contents to disk");
         }
 
-        self.contents.commit(&txn_id).await;
-        debug!("committed {:?} at {}", &self.path, txn_id);
+        try_join!(self.canon.sync(false), self.versions.sync(false))
+            .expect("sync file commit to disk");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("finalize file {:?} at {}", &self.path, txn_id);
+        let mut versions = self.versions.write().await;
+        versions.delete(txn_id.to_string());
 
-        let file_path = &self.path;
-        let cache = &self.cache;
-        {
-            let contents = self.contents.read(*txn_id).await.expect("file block list");
-            let mut mutated = self.mutated.write().await;
-            if let Some(blocks) = mutated.remove(txn_id) {
-                let deletes = blocks
-                    .iter()
-                    .filter(|block_id| !contents.contains(block_id))
-                    .map(|block_id| {
-                        let block_path = fs_path(file_path, block_id);
-                        cache.delete(block_path.clone())
-                    });
+        let blocks = self.blocks.read().await;
+        join_all(
+            blocks
+                .values()
+                .map(|last_commit_id| last_commit_id.finalize(txn_id)),
+        )
+        .await;
 
-                join_all(deletes).await;
-            }
-        }
-
-        let version = file_version(&self.path, txn_id);
-        if version.exists() {
-            tokio::fs::remove_dir_all(&version)
-                .map_err(|e| panic!("file I/O error: {}", e))
-                .await
-                .expect("delete file version")
-        }
-
-        self.contents.finalize(txn_id).await;
-        debug!("finalized {:?} at {}", &self.path, txn_id);
+        self.present.finalize(txn_id).await
     }
 }
 
-impl<B> Eq for File<B> {}
-
-impl<B> PartialEq for File<B> {
-    fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
-    }
-}
-
-impl<B> fmt::Display for File<B> {
+impl<B: Send + Sync + 'static> fmt::Display for File<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "file at {:?}", &self.path)
+        write!(f, "file of {} blocks", std::any::type_name::<B>())
     }
 }
 
-#[async_trait]
-impl<'en, B: BlockData + de::FromStream<Context = ()> + 'en> de::FromStream for File<B>
-where
-    B: en::IntoStream<'en>,
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-{
-    type Context = (TxnId, File<B>);
-
-    async fn from_stream<D: de::Decoder>(
-        cxt: Self::Context,
-        decoder: &mut D,
-    ) -> Result<Self, D::Error> {
-        let visitor = FileVisitor {
-            txn_id: cxt.0,
-            file: cxt.1,
-        };
-
-        decoder.decode_seq(visitor).await
-    }
-}
-
-struct FileVisitor<B> {
+async fn create_block_inner<'a, B: fs::BlockData + 'a>(
+    mut present: TxnLockWriteGuard<HashSet<fs::BlockId>>,
+    mut blocks: RwLockWriteGuard<'a, Blocks>,
+    mut version: DirWriteGuard<CacheBlock>,
     txn_id: TxnId,
-    file: File<B>,
-}
-
-#[async_trait]
-impl<'en, B: fs::BlockData + de::FromStream<Context = ()> + 'en> de::Visitor for FileVisitor<B>
+    block_id: fs::BlockId,
+    value: B,
+    size: usize,
+) -> TCResult<FileLock<CacheBlock>>
 where
-    B: en::IntoStream<'en>,
-    CacheBlock: From<CacheLock<B>>,
-    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+    CacheBlock: AsType<B>,
 {
-    type Value = File<B>;
+    debug_assert!(!blocks.contains_key(&block_id));
 
-    fn expecting() -> &'static str {
-        "a File"
-    }
+    blocks.insert(
+        block_id.clone(),
+        TxnLock::new(format!("block {}", block_id), txn_id),
+    );
 
-    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let mut i = 0u64;
-        while let Some(block) = seq
-            .next_element(())
-            .map_err(|e| de::Error::custom(format!("invalid block: {}", e)))
-            .await?
-        {
-            debug!("decoded file block {}", i);
-            fs::File::create_block(&self.file, self.txn_id, i.into(), block)
-                .map_err(de::Error::custom)
-                .await?;
+    let name = format!("{}.{}", block_id, B::ext());
+    let block = version
+        .create_file(name, value, Some(size))
+        .map_err(io_err)?;
 
-            i += 1;
-            debug!("checking whether to decode file block {}...", i);
-        }
+    present.insert(block_id);
 
-        Ok(self.file)
-    }
-}
-
-#[inline]
-fn file_version(file_path: &PathBuf, txn_id: &TxnId) -> PathBuf {
-    let mut path = file_path.clone();
-    path.push(super::VERSION.to_string());
-    path.push(txn_id.to_string());
-    path
-}
-
-#[inline]
-fn block_version(file_path: &PathBuf, txn_id: &TxnId, block_id: &BlockId) -> PathBuf {
-    let mut path = file_version(file_path, txn_id);
-    path.push(block_id.to_string());
-    path
+    Ok(block.into())
 }
