@@ -670,15 +670,32 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        todo!()
+        let slice = self.source.slice(bounds)?;
+        Ok(BlockListConst::new(
+            slice,
+            self.other,
+            self.combinator,
+            self.value_combinator,
+        ))
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        todo!()
+        let transpose = self.source.transpose(permutation)?;
+        Ok(BlockListConst::new(
+            transpose,
+            self.other,
+            self.combinator,
+            self.value_combinator,
+        ))
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
-        todo!()
+        let combinator = self.combinator;
+        let other = self.other;
+        self.source
+            .read_values(txn, coords)
+            .map_ok(|values| combinator(values, other))
+            .await
     }
 }
 

@@ -2,9 +2,14 @@ import inspect
 
 from pydoc import locate
 
+from tinychain.state import State
 from tinychain.util import form_of, uri, URI
 
 from .meta import Meta
+
+
+class Object(State, metaclass=Meta):
+    pass
 
 
 def _get_rtype(fn, default_rtype):

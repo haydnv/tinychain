@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import tinychain as tc
 import unittest
@@ -10,18 +9,13 @@ ENDPOINT = "/transact/hypothetical"
 
 
 @tc.post_op
-def sigmoid(cxt, Z: tc.tensor.Dense):
-    e = tc.tensor.Dense.constant(Z.shape(), math.e)
-    one = tc.tensor.Dense.constant(Z.shape(), 1)
-    zero = tc.tensor.Dense.constant(Z.shape(), 1)
-    cxt.pow = zero - Z
-    return one / (one + e**cxt.pow)
+def sigmoid(Z: tc.tensor.Dense):
+    return 1 / (1 + (-Z).exp())
 
 
 @tc.post_op
 def relu(Z: tc.tensor.Dense):
-    zero = tc.tensor.Dense.constant(Z.shape(), 0)
-    return Z * (Z > zero)
+    return Z * (Z > 0)
 
 
 def nn_layer(input_size, output_size, activation):
@@ -66,7 +60,11 @@ class NeuralNetTests(unittest.TestCase):
         cxt.nn = NeuralNet([nn_layer(8, 8, cxt.relu), nn_layer(8, 4, cxt.sigmoid)])
         cxt.result = cxt.nn.eval(cxt.inputs)
 
-        print(self.host.post(ENDPOINT, cxt))
+        print(tc.to_json(cxt))
+        response = self.host.post(ENDPOINT, cxt)
+        contents = response[str(tc.uri(tc.tensor.Dense))]
+        self.assertEqual(contents[0], [[4], str(tc.uri(tc.F64))])
+        self.assertEqual(len(contents[1]), 4)
 
     @classmethod
     def tearDownClass(cls):

@@ -14,7 +14,7 @@ from tinychain.collection.schema import Column
 from tinychain.collection.table import Table
 from tinychain.decorators import delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
 from tinychain.ref import After, If, Case
-from tinychain.reflect.meta import Meta
+from tinychain.reflect import Meta, Object
 from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple
 from tinychain.value import *
 from tinychain.util import form_of, to_json, uri, use, Context, URI

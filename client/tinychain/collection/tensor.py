@@ -43,6 +43,9 @@ class Tensor(Collection):
     def __add__(self, other):
         return self.add(other)
 
+    def __radd__(self, other):
+        return self.add(other)
+
     def __eq__(self, other):
         return self.eq(other)
 
@@ -61,8 +64,14 @@ class Tensor(Collection):
     def __mul__(self, other):
         return self.mul(other)
 
+    def __rmul__(self, other):
+        return self.mul(other)
+
     def __ne__(self, other):
         return self.ne(other)
+
+    def __neg__(self):
+        return 0 - self
 
     def __pow__(self, other):
         return self.pow(other)
@@ -70,8 +79,14 @@ class Tensor(Collection):
     def __sub__(self, other):
         return self.sub(other)
 
+    def __rsub__(self, other):
+        return self + (other * -1)
+
     def __truediv__(self, other):
         return self.div(other)
+
+    def __rtruediv__(self, other):
+        return self * (1 / other)
 
     def abs(self):
         """Return the element-wise absolute value of this `Tensor`."""
@@ -112,6 +127,11 @@ class Tensor(Collection):
         """Return a boolean `Tensor` with element-wise equality values."""
 
         return self._post("eq", Map(r=other), Tensor)
+
+    def exp(self):
+        """Raise `e` to the power of this `Tensor`."""
+
+        return self._get("exp", rtype=self.__class__)
 
     def expand_dims(self, axis):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
