@@ -1128,23 +1128,38 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        todo!()
+        let combinator = self.combinator;
+        let other = self.other;
+        let filled = self.source.filled(txn).await?;
+        Ok(Box::pin(filled.map_ok(move |(coord, value)| {
+            (coord, combinator(value, other))
+        })))
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        todo!()
+        self.source.filled_at(txn, axes).await
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
-        todo!()
+        self.source.filled_count(txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        todo!()
+        let slice = self.source.slice(bounds)?;
+        Ok(SparseConstCombinator::new(
+            slice,
+            self.other,
+            self.combinator,
+        ))
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        todo!()
+        let transpose = self.source.transpose(permutation)?;
+        Ok(SparseConstCombinator::new(
+            transpose,
+            self.other,
+            self.combinator,
+        ))
     }
 }
 

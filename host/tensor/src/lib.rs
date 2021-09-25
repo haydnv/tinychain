@@ -750,7 +750,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>
+    D::FileClass: From<TensorType>,
 {
     type Combine = Self;
 
