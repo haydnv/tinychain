@@ -9,13 +9,13 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
@@ -23,7 +23,7 @@ use super::transform;
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
     TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorMathConst,
-    TensorReduce, TensorTransform, TensorType, TensorUnary,
+    TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -569,6 +569,10 @@ where
     }
 
     fn pow(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        if !other.dtype().is_real() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
         debug!("SparseTensor::pow");
         self.left_combine(other, Number::pow)
     }
@@ -644,6 +648,10 @@ impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A> {
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        if !other.class().is_real() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
         Ok(SparseConstCombinator::new(self.accessor, other, Number::pow).into())
     }
 
@@ -777,7 +785,15 @@ where
     }
 
     fn exp(&self) -> TCResult<Self::Unary> {
-        todo!()
+        fn exp(n: Number) -> Number {
+            let n = f64::cast_from(n);
+            n.exp().into()
+        }
+
+        let dtype = NumberType::Float(FloatType::F64);
+        let source = self.accessor.clone().accessor();
+        let accessor = SparseUnary::new(source, exp, dtype);
+        Ok(SparseTensor::from(accessor))
     }
 
     async fn all(self, txn: Self::Txn) -> TCResult<bool> {

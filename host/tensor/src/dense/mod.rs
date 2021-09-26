@@ -9,13 +9,13 @@ use destream::{de, en, EncodeSeq};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
@@ -23,7 +23,7 @@ use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
     TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorMathConst,
-    TensorReduce, TensorTransform, TensorType, TensorUnary,
+    TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -577,6 +577,10 @@ where
     }
 
     fn pow(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
+        if !other.dtype().is_real() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
         fn pow_array(l: &Array, r: &Array) -> Array {
             debug_assert_eq!(l.len(), r.len());
             l.pow(r)
@@ -681,6 +685,10 @@ where
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        if !other.class().is_real() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
         fn pow_array(l: Array, r: Number) -> Array {
             l.pow_const(r)
         }
@@ -836,7 +844,19 @@ where
     }
 
     fn exp(&self) -> TCResult<Self::Unary> {
-        todo!()
+        fn exp(n: Number) -> Number {
+            let n = f64::cast_from(n);
+            n.exp().into()
+        }
+
+        let blocks = BlockListUnary::new(
+            self.blocks.clone(),
+            Array::exp,
+            exp,
+            NumberType::Float(FloatType::F64),
+        );
+
+        Ok(DenseTensor::from(blocks))
     }
 
     async fn all(self, txn: T) -> TCResult<bool> {

@@ -31,6 +31,7 @@ mod sparse;
 mod stream;
 mod transform;
 
+const ERR_COMPLEX_EXPONENT: &str = "raising to a complex power is not supported";
 const ERR_INF: &str = "Tensor combination resulted in an infinite value";
 const ERR_NAN: &str = "Tensor combination resulted in a non-numeric value";
 
