@@ -21,9 +21,9 @@ use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::transform;
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorMathConst,
-    TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
+    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
+    TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -189,7 +189,6 @@ impl<FD, FS, D, T, A> TensorInstance for SparseTensor<FD, FS, D, T, A> {
     }
 }
 
-#[async_trait]
 impl<FD, FS, D, T, L, R> TensorBoolean<SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
@@ -216,7 +215,6 @@ where
     }
 }
 
-#[async_trait]
 impl<FD, FS, D, T, A> TensorBoolean<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
     D: Dir,
@@ -249,6 +247,32 @@ where
             Tensor::Dense(other) => self.into_dense().xor(other).map(Tensor::from),
             Tensor::Sparse(other) => self.xor(other).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> TensorBooleanConst for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Combine = SparseTensor<FD, FS, D, T, SparseConstCombinator<FD, FS, D, T, A>>;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseConstCombinator::new(self.accessor, other, Number::and);
+        Ok(access.into())
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseConstCombinator::new(self.accessor, other, Number::or);
+        Ok(access.into())
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseConstCombinator::new(self.accessor, other, Number::xor);
+        Ok(access.into())
     }
 }
 

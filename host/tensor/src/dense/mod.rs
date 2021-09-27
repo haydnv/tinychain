@@ -21,9 +21,9 @@ use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorCompare,
-    TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath, TensorMathConst,
-    TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
+    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
+    TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -232,6 +232,44 @@ where
             Tensor::Dense(dense) => self.xor(dense).map(Tensor::from),
             Tensor::Sparse(sparse) => self.and(sparse.into_dense()).map(Tensor::from),
         }
+    }
+}
+
+impl<FD, FS, D, T, B> TensorBooleanConst for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        fn array_and(l: Array, r: Number) -> Array {
+            l.and_const(r)
+        }
+
+        let blocks = BlockListConst::new(self.blocks, other, array_and, Number::and);
+        Ok(blocks.into())
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        fn array_or(l: Array, r: Number) -> Array {
+            l.or_const(r)
+        }
+
+        let blocks = BlockListConst::new(self.blocks, other, array_or, Number::or);
+        Ok(blocks.into())
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        fn array_xor(l: Array, r: Number) -> Array {
+            l.xor_const(r)
+        }
+
+        let blocks = BlockListConst::new(self.blocks, other, array_xor, Number::xor);
+        Ok(blocks.into())
     }
 }
 

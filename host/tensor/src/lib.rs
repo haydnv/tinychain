@@ -157,6 +157,21 @@ pub trait TensorBoolean<O> {
     fn xor(self, other: O) -> TCResult<Self::Combine>;
 }
 
+/// [`Tensor`] boolean operations in relation to a constant.
+pub trait TensorBooleanConst {
+    /// The result type of a boolean operation.
+    type Combine: TensorInstance;
+
+    /// Logical and
+    fn and_const(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Logical or
+    fn or_const(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Logical xor
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine>;
+}
+
 /// Tensor comparison operations
 pub trait TensorCompare<O> {
     /// The result of a comparison operation
@@ -525,6 +540,39 @@ where
         match self {
             Self::Dense(dense) => dense.xor(other),
             Self::Sparse(sparse) => sparse.xor(other),
+        }
+    }
+}
+
+impl<FD, FS, D, T> TensorBooleanConst for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+{
+    type Combine = Self;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.and_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.and_const(other).map(Self::from),
+        }
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.or_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.or_const(other).map(Self::from),
+        }
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.xor_const(other).map(Self::from),
+            Self::Sparse(sparse) => sparse.xor_const(other).map(Self::from),
         }
     }
 }

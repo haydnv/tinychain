@@ -12,7 +12,7 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
-afarray = "~0.9.1"
+afarray = "~0.9.2"
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.5"
