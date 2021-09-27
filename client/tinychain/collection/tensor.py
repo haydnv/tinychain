@@ -71,7 +71,7 @@ class Tensor(Collection):
         return self.ne(other)
 
     def __neg__(self):
-        return 0 - self
+        return self * -1
 
     def __pow__(self, other):
         return self.pow(other)
@@ -80,7 +80,7 @@ class Tensor(Collection):
         return self.sub(other)
 
     def __rsub__(self, other):
-        return self + (other * -1)
+        return -(self - other)
 
     def __truediv__(self, other):
         return self.div(other)

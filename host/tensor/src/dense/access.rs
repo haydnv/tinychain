@@ -37,6 +37,8 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
 
     /// Return a stream of the [`Array`]s which this [`DenseTensor`] comprises.
     fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
+        debug!("DenseAccess::block_stream");
+
         Box::pin(async move {
             let blocks = self.value_stream(txn).await?;
             let blocks = blocks
@@ -51,6 +53,8 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
 
     /// Return a stream of the elements of this [`DenseTensor`].
     fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
+        debug!("DenseAccess::value_stream");
+
         Box::pin(async move {
             let values = self.block_stream(txn).await?;
 
@@ -610,6 +614,8 @@ impl<FD, FS, D, T, B> BlockListConst<FD, FS, D, T, B> {
         combinator: fn(Array, Number) -> Array,
         value_combinator: fn(Number, Number) -> Number,
     ) -> Self {
+        debug!("BlockListConst::new");
+
         Self {
             source,
             other,
@@ -667,6 +673,18 @@ where
         };
 
         DenseAccessor::Const(Box::new(this))
+    }
+
+    fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
+        Box::pin(async move {
+            let combinator = (self.combinator);
+            let right = self.other;
+
+            let left = self.source.block_stream(txn).await?;
+            let blocks = left.map_ok(move |block| combinator(block, right));
+            let blocks: TCBoxTryStream<'a, Array> = Box::pin(blocks);
+            Ok(blocks)
+        })
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {

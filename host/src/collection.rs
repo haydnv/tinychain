@@ -37,13 +37,17 @@ pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Tx
 #[cfg(feature = "tensor")]
 pub type Tensor = tc_tensor::Tensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
-pub type DenseTensor<B> = tc_tensor::DenseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
+pub type DenseTensor<B> =
+    tc_tensor::DenseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
-pub type DenseTensorFile = tc_tensor::BlockListFile<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type DenseTensorFile =
+    tc_tensor::BlockListFile<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
-pub type SparseTensor<A> = tc_tensor::SparseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
+pub type SparseTensor<A> =
+    tc_tensor::SparseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
-pub type SparseTable = tc_tensor::SparseTable<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type SparseTable =
+    tc_tensor::SparseTable<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -169,8 +173,8 @@ impl From<Tensor> for Collection {
 }
 
 #[cfg(feature = "tensor")]
-impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
-    From<DenseTensor<B>> for Collection
+impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> From<DenseTensor<B>>
+    for Collection
 {
     fn from(tensor: DenseTensor<B>) -> Self {
         Self::Tensor(tensor.into())
@@ -178,8 +182,8 @@ impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
 }
 
 #[cfg(feature = "tensor")]
-impl<A: SparseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>>
-    From<SparseTensor<A>> for Collection
+impl<A: SparseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> From<SparseTensor<A>>
+    for Collection
 {
     fn from(tensor: SparseTensor<A>) -> Self {
         Self::Tensor(tensor.into())

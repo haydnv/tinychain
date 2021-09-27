@@ -15,6 +15,7 @@ use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler};
+use crate::scalar::Scalar;
 use crate::state::State;
 use crate::stream::TCStream;
 use crate::txn::Txn;
@@ -423,21 +424,44 @@ impl Route for TensorType {
 struct DualHandler {
     tensor: Tensor,
     op: fn(Tensor, Tensor) -> TCResult<Tensor>,
+    op_const: fn(Tensor, Number) -> TCResult<Tensor>,
 }
 
 impl DualHandler {
-    fn new<T>(tensor: T, op: fn(Tensor, Tensor) -> TCResult<Tensor>) -> Self
+    fn new<T>(
+        tensor: T,
+        op: fn(Tensor, Tensor) -> TCResult<Tensor>,
+        op_const: fn(Tensor, Number) -> TCResult<Tensor>,
+    ) -> Self
     where
         Tensor: From<T>,
     {
         Self {
             tensor: tensor.into(),
             op,
+            op_const,
         }
     }
 }
 
 impl<'a> Handler<'a> for DualHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, r| {
+            Box::pin(async move {
+                let r = Number::try_cast_from(r, |r| {
+                    TCError::bad_request("expected a Number, not", r)
+                })?;
+
+                (self.op_const)(self.tensor, r)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
         'b: 'a,
@@ -445,16 +469,29 @@ impl<'a> Handler<'a> for DualHandler {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let l = self.tensor;
-                let r: Tensor = params.require(&label("r").into())?;
+                let r = params.remove(&label("r").into()).ok_or_else(|| {
+                    TCError::bad_request("missing right-hand-side parameter r", &params)
+                })?;
+
                 params.expect_empty()?;
 
-                if l.shape() == r.shape() {
-                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
-                    (self.op)(l, r).map(Collection::from).map(State::from)
-                } else {
-                    let (l, r) = broadcast(l, r)?;
-                    debug!("tensor dual op with shapes {} {}", l.shape(), r.shape());
-                    (self.op)(l, r).map(Collection::from).map(State::from)
+                match r {
+                    State::Collection(Collection::Tensor(r)) => {
+                        if l.shape() == r.shape() {
+                            (self.op)(l, r).map(Collection::from).map(State::from)
+                        } else {
+                            let (l, r) = broadcast(l, r)?;
+                            (self.op)(l, r).map(Collection::from).map(State::from)
+                        }
+                    }
+                    State::Scalar(Scalar::Value(r)) if r.matches::<Number>() => {
+                        let r = r.opt_cast_into().unwrap();
+                        (self.op_const)(l, r).map(Collection::from).map(State::from)
+                    }
+                    other => Err(TCError::bad_request(
+                        "expected a Tensor or Number, found",
+                        other,
+                    )),
                 }
             })
         }))
@@ -705,17 +742,53 @@ where
             "elements" => Some(Box::new(ElementsHandler::new(tensor))),
 
             // boolean ops
-            "and" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::and))),
-            "or" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::or))),
-            "xor" => Some(Box::new(DualHandler::new(tensor, TensorBoolean::xor))),
+            "and" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorBoolean::and,
+                TensorBooleanConst::and_const,
+            ))),
+            "or" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorBoolean::or,
+                TensorBooleanConst::or_const,
+            ))),
+            "xor" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorBoolean::xor,
+                TensorBooleanConst::xor_const,
+            ))),
 
             // comparison ops
-            "eq" => Some(Box::new(DualHandler::new(tensor, TensorCompare::eq))),
-            "gt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gt))),
-            "gte" => Some(Box::new(DualHandler::new(tensor, TensorCompare::gte))),
-            "lt" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lt))),
-            "lte" => Some(Box::new(DualHandler::new(tensor, TensorCompare::lte))),
-            "ne" => Some(Box::new(DualHandler::new(tensor, TensorCompare::ne))),
+            "eq" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::eq,
+                TensorCompareConst::eq_const,
+            ))),
+            "gt" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::gt,
+                TensorCompareConst::gt_const,
+            ))),
+            "gte" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::gte,
+                TensorCompareConst::gte_const,
+            ))),
+            "lt" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::lt,
+                TensorCompareConst::lt_const,
+            ))),
+            "lte" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::lte,
+                TensorCompareConst::lte_const,
+            ))),
+            "ne" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorCompare::ne,
+                TensorCompareConst::ne_const,
+            ))),
 
             // unary ops
             "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
@@ -727,14 +800,35 @@ where
                 tensor.into(),
                 TensorUnary::any,
             ))),
+            "exp" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::exp))),
             "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
 
             // basic math
-            "add" => Some(Box::new(DualHandler::new(tensor, TensorMath::add))),
-            "div" => Some(Box::new(DualHandler::new(tensor, TensorMath::div))),
-            "mul" => Some(Box::new(DualHandler::new(tensor, TensorMath::mul))),
-            "pow" => Some(Box::new(DualHandler::new(tensor, TensorMath::pow))),
-            "sub" => Some(Box::new(DualHandler::new(tensor, TensorMath::sub))),
+            "add" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorMath::add,
+                TensorMathConst::add_const,
+            ))),
+            "div" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorMath::div,
+                TensorMathConst::div_const,
+            ))),
+            "mul" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorMath::mul,
+                TensorMathConst::mul_const,
+            ))),
+            "pow" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorMath::pow,
+                TensorMathConst::pow_const,
+            ))),
+            "sub" => Some(Box::new(DualHandler::new(
+                tensor,
+                TensorMath::sub,
+                TensorMathConst::sub_const,
+            ))),
 
             // transforms
             "cast" => Some(Box::new(CastHandler::from(tensor))),
