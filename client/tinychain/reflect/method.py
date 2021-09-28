@@ -31,6 +31,12 @@ class Method(object):
     def dtype(self):
         return self.__class__.__name__
 
+    def subject(self):
+        if isinstance(self.header, State):
+            return ref.MethodSubject(self.header, self.name)
+        else:
+            return uri(self.header).append(self.name)
+
 
 class Get(Method):
     __uri__ = uri(op.Get)
@@ -40,7 +46,7 @@ class Get(Method):
         Method.__init__(self, header, form, name)
 
     def __call__(self, key=None):
-        return self.rtype(ref.Get(uri(self.header).append(self.name), key))
+        return self.rtype(ref.Get(self.subject(), key))
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -73,7 +79,7 @@ class Put(Method):
         Method.__init__(self, header, form, name)
 
     def __call__(self, key, value):
-        return ref.Put(uri(self.header).append(self.name), key, value)
+        return ref.Put(self.subject(), key, value)
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -128,8 +134,7 @@ class Post(Method):
 
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
-        print("POST", self.header, self.name, uri(self.header), uri(self.header).append(self.name))
-        return rtype(ref.Post(uri(self.header).append(self.name), params))
+        return rtype(ref.Post(self.subject(), params))
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -157,7 +162,7 @@ class Delete(Method):
         Method.__init__(self, header, form, name)
 
     def __call__(self, key=None):
-        return ref.Delete(uri(self.header).append(self.name), key)
+        return ref.Delete(self.subject(), key)
 
     def __form__(self):
         return Get.__form__(self)

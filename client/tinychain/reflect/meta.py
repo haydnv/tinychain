@@ -77,9 +77,6 @@ class Meta(type):
         parent = mro[1]
         return {str(uri(parent)): to_json(form_of(cls))}
 
-    def __ref__(cls, name):
-        print("ref", cls, name)
-
 
 class Attribute(object):
     def __init__(self, stub):
@@ -93,7 +90,8 @@ class Attribute(object):
         if rtype == inspect.Parameter.empty:
             raise AttributeError(f"attribute {name} is missing a return annotation")
 
-        accessor = rtype(uri(header).append(name))
+        from tinychain.ref import MethodSubject
+        accessor = rtype(MethodSubject(header, name))
         accessor.accessor = True
         return accessor
 

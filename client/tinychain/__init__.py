@@ -12,8 +12,8 @@ from tinychain.cluster import Cluster, write_cluster
 from tinychain.collection.btree import BTree
 from tinychain.collection.schema import Column
 from tinychain.collection.table import Table
-from tinychain.decorators import attribute, delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
-from tinychain.ref import After, Case, If, New
+from tinychain.decorators import attribute, closure, delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
+from tinychain.ref import After, Before, Case, If, New, While
 from tinychain.reflect import Meta, Object
 from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple
 from tinychain.value import *

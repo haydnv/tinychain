@@ -49,9 +49,9 @@ def is_op(fn):
 
 
 def is_ref(state):
-    from tinychain.ref import Ref
+    from tinychain.ref import MethodSubject, Ref
 
-    if isinstance(state, Ref) or isinstance(state, URI):
+    if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
         return True
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))

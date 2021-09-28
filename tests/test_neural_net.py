@@ -57,10 +57,11 @@ class Layer(tc.Object):
         pass
 
     @tc.post_method
-    def eval(self, cxt, inputs: Dense) -> Dense:
-        cxt.dot = inputs * self.weights.transpose()
+    def eval(self, cxt, state: tc.Map) -> tc.Map:
+        cxt.dot = Dense(state["Z"]) * self.weights.transpose()
         cxt.Z = (cxt.dot + self.bias).sum(1)
-        return self.activation.forward(Z=cxt.Z)
+        cxt.A = self.activation.forward(Z=cxt.Z)
+        return {"A": cxt.A, "Z": cxt.Z}
 
 
 def layer_init(input_size, output_size, activation):
@@ -76,15 +77,45 @@ def layer_init(input_size, output_size, activation):
 
 class NeuralNet(tc.Tuple):
     def eval(self, inputs):
-        @tc.post_op
-        def eval_layer(item: Layer, state: Dense):
-            return item.eval(inputs=state)
-
-        return self.fold(inputs.expand_dims(-1), eval_layer)
+        inner = Layer(self[0]).eval(state=tc.Map(Z=inputs.expand_dims(-1)))
+        output = Layer(self[1]).eval(state=inner)
+        return output["Z"]
 
     def error(self, inputs, labels):
         output = self.eval(inputs)
         return (output - labels)**2
+
+    def train(self, inputs, labels):
+        num_layers = 2  # TODO: parameterize this by putting it into a schema class
+
+        outer_layer = Layer(self[1])
+        inner_layer = Layer(self[0])
+
+        inner = inner_layer.eval(state=tc.Map(Z=inputs.expand_dims()))
+        output = outer_layer.eval(state=inner)
+        error = (Dense(output["Z"]) - labels)**2
+
+        dA = (outer_layer.weights / error) - ((1 - outer_layer.weights) / (1 - error))
+        dZ = outer_layer.activation.backward(dA=dA, Z=output["Z"]).copy()
+        d_weights = (dZ.transpose() * inner["A"]).sum(0) / num_layers
+        d_bias = dZ.sum(1) / num_layers
+
+        update_outer = (
+            outer_layer.weights.write(None, outer_layer.weights - (LEARNING_RATE * d_weights)),
+            outer_layer.bias.write(None, outer_layer.bias - (LEARNING_RATE * d_bias)),
+        )
+
+        dA = tc.tensor.einsum("ji,jk->kj", [outer_layer.weights, dZ])
+        dZ = inner_layer.activation.backward(dA=dA, Z=inner["Z"])
+        d_weights = (dZ * inner["A"]).sum(0) / num_layers
+        d_bias = dZ.sum(0) / num_layers
+
+        update_inner = (
+            inner_layer.weights.write(None, inner_layer.weights - (LEARNING_RATE * d_weights)),
+            inner_layer.bias.write(None, inner_layer.bias - (LEARNING_RATE * d_bias)),
+        )
+
+        return update_outer, update_inner
 
 
 class NeuralNetTests(unittest.TestCase):
@@ -110,11 +141,12 @@ class NeuralNetTests(unittest.TestCase):
         cxt.l2 = layer_init(2, 1, cxt.Sigmoid)
         cxt.nn = NeuralNet([tc.New(cxt.Layer, cxt.l1), tc.New(cxt.Layer, cxt.l2)])
 
-        cxt.result = cxt.nn.error(cxt.inputs, cxt.labels)
+        cxt.result = tc.After(cxt.nn.train(cxt.inputs, cxt.labels), cxt.nn.eval(cxt.inputs))
 
         response = self.host.post(ENDPOINT, cxt)
+
         contents = response[str(tc.uri(Dense))]
-        self.assertEqual(contents[0], [[4], str(tc.uri(tc.F64))])
+        self.assertEqual(contents[0], [[4], str(tc.uri(tc.F32))])
         self.assertEqual(len(contents[1]), 4)
 
     @classmethod

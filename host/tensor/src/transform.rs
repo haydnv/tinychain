@@ -102,14 +102,15 @@ impl Broadcast {
             }
         }
 
-        let source_bounds = Bounds::from(source_bounds);
-
-        // TODO: is there a better way of doing this?
-        if let Some(coord) = source_bounds.as_coord() {
-            // can't broadcast a slice of shape []
-            coord.into_iter().map(|i| AxisBounds::In(i..i + 1)).collect()
+        if source_bounds.iter().all(|bound| bound.is_index()) {
+            // can't broadcast a slice with shape []
+            // TODO: can this be handled in the conversion above?
+            source_bounds.into_iter().map(|bound| match bound {
+                AxisBounds::At(i) => AxisBounds::In(i..i + 1),
+                other => other
+            }).collect()
         } else {
-            source_bounds
+            Bounds::from(source_bounds)
         }
     }
 

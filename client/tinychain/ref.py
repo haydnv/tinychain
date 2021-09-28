@@ -144,7 +144,7 @@ class While(Ref):
 
     __uri__ = uri(Ref) + "/while"
 
-    def __init__(self, cond, op, state):
+    def __init__(self, cond, op, state=None):
         self.cond = cond
         self.op = op
         self.state = state
