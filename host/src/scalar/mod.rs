@@ -257,6 +257,13 @@ impl Scalar {
                     .map(Box::new)
                     .map(Scalar::Ref),
 
+                RT::New => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::New)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
                 RT::Op(ort) => {
                     debug!("cast into op ref from {}", self);
 

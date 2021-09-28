@@ -21,7 +21,7 @@ use tcgeneric::*;
 use crate::chain::*;
 use crate::closure::*;
 use crate::collection::*;
-use crate::object::{Object, ObjectType};
+use crate::object::{InstanceClass, Object, ObjectType};
 use crate::route::Public;
 use crate::scalar::*;
 use crate::stream::TCStream;
@@ -902,6 +902,31 @@ impl TryCastFrom<State> for Link {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for InstanceClass {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(map) => map.values().all(Scalar::can_cast_from),
+            State::Object(Object::Class(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<InstanceClass> {
+        match state {
+            State::Map(map) => {
+                let proto = map
+                    .into_iter()
+                    .map(|(id, state)| Scalar::opt_cast_from(state).map(|scalar| (id, scalar)))
+                    .collect::<Option<Map<Scalar>>>()?;
+
+                Some(InstanceClass::new(None, proto))
+            }
+            State::Object(Object::Class(class)) => Some(class),
             _ => None,
         }
     }
