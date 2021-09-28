@@ -133,7 +133,7 @@ class Tensor(Collection):
 
         return self._get("exp", rtype=self.__class__)
 
-    def expand_dims(self, axis):
+    def expand_dims(self, axis=None):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
         return self._get("expand_dims", axis, self.__class__)

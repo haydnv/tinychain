@@ -102,7 +102,15 @@ impl Broadcast {
             }
         }
 
-        source_bounds.into()
+        let source_bounds = Bounds::from(source_bounds);
+
+        // TODO: is there a better way of doing this?
+        if let Some(coord) = source_bounds.as_coord() {
+            // can't broadcast a slice of shape []
+            coord.into_iter().map(|i| AxisBounds::In(i..i + 1)).collect()
+        } else {
+            source_bounds
+        }
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Coord {

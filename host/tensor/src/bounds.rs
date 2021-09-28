@@ -200,10 +200,11 @@ impl Bounds {
     pub fn as_coord(&self) -> Option<Coord> {
         let mut coord = Vec::with_capacity(self.axes.len());
         for x in &self.axes {
-            if let AxisBounds::At(i) = x {
-                coord.push(*i);
-            } else {
-                return None;
+            match x {
+                AxisBounds::At(i) => coord.push(*i),
+                AxisBounds::In(range) if range.end - range.start == 1 => coord.push(range.start),
+                AxisBounds::Of(indices) if indices.len() == 1 => coord.push(indices[0]),
+                _ => return None,
             }
         }
 

@@ -2,14 +2,14 @@ use std::convert::TryInto;
 
 use futures::{future, Future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::*;
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;
-use tc_value::{Bound, Number, NumberClass, Range, TCString, Value, ValueType};
+use tc_value::{Bound, Number, NumberClass, NumberInstance, Range, TCString, Value, ValueType};
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
@@ -303,7 +303,7 @@ struct ExpandHandler<T> {
 
 impl<'a, T> Handler<'a> for ExpandHandler<T>
 where
-    T: TensorTransform + Send + 'a,
+    T: TensorAccess + TensorTransform + Send + 'a,
     Tensor: From<T::Expand>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -312,7 +312,18 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let axis = key.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
+                let axis = if key.is_none() {
+                    self.tensor.ndim()
+                } else {
+                    let axis: Number =
+                        key.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
+
+                    if axis >= 0.into() {
+                        axis.cast_into()
+                    } else {
+                        self.tensor.ndim() - usize::cast_from(axis.abs())
+                    }
+                };
 
                 self.tensor
                     .expand_dims(axis)

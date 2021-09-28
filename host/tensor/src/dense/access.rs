@@ -1,3 +1,5 @@
+use std::fmt;
+
 use afarray::{Array, ArrayExt, Coords, Offsets};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
@@ -15,16 +17,20 @@ use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF, ERR_NAN};
+use crate::{
+    transform, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF,
+    ERR_NAN,
+};
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
 use super::{DenseTensor, PER_BLOCK};
+use std::fmt::{Formatter, Write};
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
 pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
-    Clone + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + Sized + 'static
+    Clone + ReadValueAt<D, Txn = T> + TensorAccess + fmt::Display + Send + Sync + Sized + 'static
 {
     /// The type returned by `slice`
     type Slice: DenseAccess<FD, FS, D, T>;
@@ -385,6 +391,24 @@ where
     }
 }
 
+impl<FD, FS, D, T> fmt::Display for DenseAccessor<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(file) => fmt::Display::fmt(file, f),
+            Self::Slice(slice) => fmt::Display::fmt(slice, f),
+            Self::Broadcast(broadcast) => fmt::Display::fmt(broadcast, f),
+            Self::Cast(cast) => fmt::Display::fmt(cast, f),
+            Self::Combine(combine) => fmt::Display::fmt(combine, f),
+            Self::Const(combine) => fmt::Display::fmt(combine, f),
+            Self::Expand(expand) => fmt::Display::fmt(expand, f),
+            Self::Reduce(reduce) => fmt::Display::fmt(reduce, f),
+            Self::Sparse(sparse) => fmt::Display::fmt(sparse, f),
+            Self::Transpose(transpose) => fmt::Display::fmt(transpose, f),
+            Self::Unary(unary) => fmt::Display::fmt(unary, f),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct BlockListCombine<FD, FS, D, T, L, R> {
     left: L,
@@ -519,6 +543,11 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!(
+            "slice {} from BlockListCombine {}, {}",
+            bounds, self.left, self.right
+        );
+
         let left = self.left.slice(bounds.clone())?;
         let right = self.right.slice(bounds)?;
 
@@ -595,6 +624,12 @@ where
                 Ok((coord, value))
             }
         })
+    }
+}
+
+impl<FD, FS, D, T, L, R> fmt::Display for BlockListCombine<FD, FS, D, T, L, R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("dense Tensor-Tensor op")
     }
 }
 
@@ -739,6 +774,12 @@ where
     }
 }
 
+impl<FD, FS, D, T, B> fmt::Display for BlockListConst<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor-constant op")
+    }
+}
+
 #[derive(Clone)]
 pub struct BlockListBroadcast<FD, FS, D, T, B> {
     source: B,
@@ -840,10 +881,13 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("slice {} from broadcast of {}", bounds, self.source.shape());
         self.shape().validate_bounds(&bounds)?;
 
         let shape = bounds.to_shape(self.shape())?;
         let bounds = self.rebase.invert_bounds(bounds);
+        debug!("source bounds are {}, broadcast into {}", bounds, shape);
+
         let source = self.source.slice(bounds)?;
         BlockListBroadcast::new(source, shape)
     }
@@ -884,6 +928,12 @@ where
             .map_ok(|(_, val)| (coord, val));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, B> fmt::Display for BlockListBroadcast<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor broadcast")
     }
 }
 
@@ -1005,6 +1055,12 @@ where
             .map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
 
         Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, B> fmt::Display for BlockListCast<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor type cast")
     }
 }
 
@@ -1131,6 +1187,12 @@ where
     }
 }
 
+impl<FD, FS, D, T, B> fmt::Display for BlockListExpand<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor expansion")
+    }
+}
+
 // TODO: &Txn, not Txn
 type Reductor<FD, FS, D, T> =
     fn(&DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>, T) -> TCBoxTryFuture<Number>;
@@ -1219,6 +1281,7 @@ where
                     let reductor = self.reductor;
                     let source_bounds = self.rebase.invert_coord(&coord);
                     Box::pin(async move {
+                        debug!("slice {} from {}", source_bounds, source);
                         let slice = source.slice(source_bounds)?;
                         reductor(&slice.accessor().into(), txn.clone()).await
                     })
@@ -1283,6 +1346,12 @@ where
 
             Ok((coord, value))
         })
+    }
+}
+
+impl<FD, FS, D, T, B> fmt::Display for BlockListReduce<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor reduction")
     }
 }
 
@@ -1435,6 +1504,12 @@ where
     }
 }
 
+impl<FD, FS, D, T, B> fmt::Display for BlockListTranspose<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor transpose")
+    }
+}
+
 #[derive(Clone)]
 pub struct BlockListSparse<FD, FS, D, T, A> {
     source: A,
@@ -1549,6 +1624,12 @@ impl<FD, FS, D, T, A> From<A> for BlockListSparse<FD, FS, D, T, A> {
             source,
             phantom: Phantom::default(),
         }
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for BlockListSparse<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("dense representation of a sparse Tensor")
     }
 }
 
@@ -1696,5 +1777,11 @@ where
                 .map_ok(|(coord, value)| (coord, transform(value)))
                 .await
         })
+    }
+}
+
+impl<FD, FS, D, T, B> fmt::Display for BlockListUnary<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor unary op")
     }
 }

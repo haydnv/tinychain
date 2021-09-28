@@ -631,6 +631,12 @@ where
     }
 }
 
+impl<FD, FS, D, T> fmt::Display for BlockListFile<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor file")
+    }
+}
+
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for BlockListFile<FD, FS, D, T>
 where
@@ -1062,6 +1068,12 @@ where
             let (_, value) = self.source.read_value_at(txn, source_coord).await?;
             Ok((coord, value))
         })
+    }
+}
+
+impl<FD, FS, D, T> fmt::Display for BlockListFileSlice<FD, FS, D, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("dense Tensor slice")
     }
 }
 

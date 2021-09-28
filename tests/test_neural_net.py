@@ -14,8 +14,19 @@ def sigmoid(Z: tc.tensor.Dense):
 
 
 @tc.post_op
+def sigmoid_backward(dA: tc.tensor.Dense, Z: tc.tensor.Dense):
+    sig = sigmoid(Z)
+    return dA * sig * (1 - sig)
+
+
+@tc.post_op
 def relu(Z: tc.tensor.Dense):
     return Z * (Z > 0)
+
+
+@tc.post_op
+def relu_backward(dA, Z):
+    return dA * (Z > 0)
 
 
 def nn_layer(input_size, output_size, activation):
@@ -41,7 +52,11 @@ class NeuralNet(tc.Tuple):
             cxt.Z = cxt.dot + item["bias"]
             return cxt.activation(Z=cxt.Z)
 
-        return self.fold(inputs, eval_layer)
+        return self.fold(inputs.expand_dims(), eval_layer)
+
+    def error(self, inputs, labels):
+        output = self.eval(inputs)
+        return (output - labels)**2
 
 
 class NeuralNetTests(unittest.TestCase):
@@ -53,14 +68,18 @@ class NeuralNetTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.sigmoid = sigmoid
         cxt.relu = relu
-        cxt.inputs = tc.tensor.Dense.load([1, 8], tc.U8, [
-            0, 1, 0, 1,
-            0, 0, 1, 1
-        ])
-        cxt.nn = NeuralNet([nn_layer(8, 8, cxt.relu), nn_layer(8, 4, cxt.sigmoid)])
-        cxt.result = cxt.nn.eval(cxt.inputs)
 
-        print(tc.to_json(cxt))
+        cxt.inputs = tc.tensor.Dense.load([4, 2], tc.Bool, [
+            False, False,
+            False, True,
+            True, False,
+            True, True,
+        ])
+        cxt.labels = tc.tensor.Dense.load([4], tc.Bool, [False, True, True, False])
+
+        cxt.nn = NeuralNet([nn_layer(2, 2, cxt.relu), nn_layer(2, 1, cxt.sigmoid)])
+        cxt.result = cxt.nn.error(cxt.inputs, cxt.labels)
+
         response = self.host.post(ENDPOINT, cxt)
         contents = response[str(tc.uri(tc.tensor.Dense))]
         self.assertEqual(contents[0], [[4], str(tc.uri(tc.F64))])
