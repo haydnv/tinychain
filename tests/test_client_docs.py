@@ -128,7 +128,6 @@ class ClientDocTests(unittest.TestCase):
                 txn.insert,
                 txn.table.count())
 
-        print(tc.to_json(num_rows))
         actual = self.host.post(ENDPOINT, tc.form_of(num_rows))
         expected = 1
         self.assertEqual(actual, expected)

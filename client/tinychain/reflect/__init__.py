@@ -2,13 +2,13 @@ import inspect
 
 from pydoc import locate
 
-from tinychain.state import State
-from tinychain.util import form_of, uri, URI
+from tinychain.state import Class, Instance, Map, State
+from tinychain.util import form_of, to_json, uri, URI
 
-from .meta import Meta
+from .meta import gen_headers, Meta
 
 
-class Object(State, metaclass=Meta):
+class Object(Class, metaclass=Meta):
     pass
 
 

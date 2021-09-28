@@ -86,7 +86,7 @@ class Tensor(Collection):
         return self.div(other)
 
     def __rtruediv__(self, other):
-        return self * (1 / other)
+        return other * (self.pow(-1))
 
     def abs(self):
         """Return the element-wise absolute value of this `Tensor`."""

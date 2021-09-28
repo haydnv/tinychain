@@ -1,11 +1,10 @@
 use std::fmt;
-use std::iter::FromIterator;
 
 use log::debug;
 
 use tc_error::*;
 use tc_value::Value;
-use tcgeneric::{Id, Instance, Map, PathSegment, TCPath, Tuple};
+use tcgeneric::{Id, Instance, Map, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -148,13 +147,15 @@ where
     Self: ToState,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("{} route {}", self, TCPath::from(path));
+        debug!("{} route {} (parent is {} {})", self, TCPath::from(path), std::any::type_name::<T>(), self.parent());
 
         if path.is_empty() {
             debug!("routing to parent: {}", self.parent());
             self.parent().route(path)
-        } else if let Some(member) = self.proto().get(&path[0]) {
-            match member {
+        } else if let Some(attr) = self.proto().get(&path[0]) {
+            debug!("{} found in instance proto", &path[0]);
+
+            match attr {
                 Scalar::Op(OpDef::Get(get_op)) => Some(Box::new(GetMethod {
                     subject: self,
                     method: get_op.clone(),
@@ -177,14 +178,15 @@ where
                 })),
                 other => other.route(&path[1..]),
             }
+        } else if let Some(handler) = self.parent().route(path) {
+            debug!("{} found in parent", TCPath::from(path));
+            Some(handler)
+        } else if let Some(attr) = self.proto().get(&path[0]) {
+            debug!("{} found in class proto", path[0]);
+            attr.route(&path[1..])
         } else {
-            debug!(
-                "{} not found in instance prototype (contents: {}), routing to parent",
-                &path[0],
-                Tuple::<&Id>::from_iter(self.proto().keys()),
-            );
-
-            self.parent().route(path)
+            debug!("not found in {}: {}", self, TCPath::from(path));
+            None
         }
     }
 }

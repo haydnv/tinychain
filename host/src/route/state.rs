@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 
+use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_value::{Link, Number};
@@ -118,6 +119,8 @@ impl Route for StateType {
 
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("{} route {}", self.class(), TCPath::from(path));
+
         if let Some(handler) = match self {
             Self::Chain(chain) => chain.route(path),
             Self::Closure(closure) if path.is_empty() => {

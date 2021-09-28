@@ -117,6 +117,28 @@ class If(Ref):
             self.cond = reference(cxt, self.cond)
 
 
+class New(Ref):
+    """A flow control operator to construct a new instance of a `Class`."""
+    __uri__ = uri(Ref) + "/new"
+
+    def __init__(self, cls, data):
+        self.cls = cls
+        self.data = data
+
+    def __deps__(self):
+        deps = set()
+        deps.update(requires(self.cls))
+        deps.update(requires(self.data))
+        return deps
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.cls, self.data])}
+
+    def __ns__(self, cxt):
+        deanonymize(self.cls, cxt)
+        deanonymize(self.data, cxt)
+
+
 class While(Ref):
     """A flow control operator to execute a closure repeatedly until a condition is met."""
 

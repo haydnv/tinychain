@@ -1,7 +1,11 @@
 from tinychain.ref import With
-from tinychain.reflect.meta import MethodStub
+from tinychain.reflect.meta import Attribute, MethodStub
 from tinychain.reflect import method, op
 from tinychain.util import requires
+
+
+def attribute(stub):
+    return Attribute(stub)
 
 
 def closure(op):

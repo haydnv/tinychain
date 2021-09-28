@@ -14,6 +14,7 @@ from tinychain.util import form_of, uri, URI, to_json
 class Cluster(object, metaclass=Meta):
     """A hosted TinyChain service."""
 
+    # TODO: get rid of this
     @classmethod
     def __use__(cls):
         instance = cls()
@@ -28,7 +29,7 @@ class Cluster(object, metaclass=Meta):
                     logging.warning(f"cluster at {uri(cls)} serves class with different URI: {uri(attr)}")
 
                 @get_method
-                def ctr(self, txn, form) -> attr:
+                def ctr(self, form) -> attr:
                     return attr(form)
 
                 setattr(instance, name, ctr.method(instance, name))

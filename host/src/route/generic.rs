@@ -5,11 +5,12 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use futures::stream::{self, StreamExt, TryStreamExt};
+use log::debug;
 use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, Value};
-use tcgeneric::{label, Id, Instance, Label, Map, PathSegment, Tuple};
+use tcgeneric::{label, Id, Instance, Label, Map, PathSegment, TCPath, Tuple};
 
 use crate::closure::Closure;
 use crate::scalar::Scalar;
@@ -194,9 +195,16 @@ where
     State: From<T>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("{} route {}", self, TCPath::from(path));
+
+        if !path.is_empty() {
+            debug!("{} contains {}? {}", self, path[0], self.contains_key(&path[0]));
+        }
+
         if path.is_empty() {
             Some(Box::new(MapHandler { map: self }))
         } else if let Some(state) = self.deref().get(&path[0]) {
+            debug!("member {} route {}", state, TCPath::from(&path[1..]));
             state.route(&path[1..])
         } else if path.len() == 1 {
             match path[0].as_str() {

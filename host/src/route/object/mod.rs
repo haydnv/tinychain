@@ -37,6 +37,8 @@ impl Route for InstanceClass {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             Some(Box::new(ClassHandler { class: self }))
+        } else if let Some(attribute) = self.proto().get(&path[0]) {
+            attribute.route(&path[1..])
         } else {
             None
         }

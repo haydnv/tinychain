@@ -5,7 +5,7 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -23,7 +23,6 @@ pub use instance::*;
 mod class;
 mod instance;
 
-const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; use an OpRef instead";
 const PREFIX: PathLabel = path_label(&["state", "object"]);
 
 /// The type of a user-defined [`Object`].
@@ -130,15 +129,6 @@ impl TryCastFrom<Object> for Value {
 }
 
 #[async_trait]
-impl de::FromStream for Object {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_map(ObjectVisitor).await
-    }
-}
-
-#[async_trait]
 impl<'en> IntoView<'en, Dir> for Object {
     type Txn = Txn;
     type View = ObjectView<'en>;
@@ -192,29 +182,30 @@ impl<'en> en::IntoStream<'en> for ObjectView<'en> {
     }
 }
 
-struct ObjectVisitor;
+/// A helper struct for Object deserialization
+pub struct ObjectVisitor;
 
-#[async_trait]
-impl de::Visitor for ObjectVisitor {
-    type Value = Object;
-
-    fn expecting() -> &'static str {
-        "a user-defined Class or Instance"
+impl ObjectVisitor {
+    pub fn new() -> Self {
+        Self
     }
 
-    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Object, A::Error> {
-        let key = access
-            .next_key::<TCPathBuf>(())
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+    pub async fn visit_map_value<Err: de::Error>(
+        self,
+        class: ObjectType,
+        state: State,
+    ) -> Result<Object, Err> {
+        match class {
+            ObjectType::Class => {
+                let proto =
+                    state.try_cast_into(|s| de::Error::invalid_value(s, "a Class prototype"))?;
 
-        if let Some(class) = ObjectType::from_path(&key) {
-            match class {
-                ObjectType::Class => access.next_value(()).map_ok(Object::Class).await,
-                ObjectType::Instance => Err(de::Error::custom(ERR_DECODE_INSTANCE)),
+                Ok(Object::Class(InstanceClass::new(None, proto)))
             }
-        } else {
-            Err(de::Error::invalid_value(key, Self::expecting()))
+            ObjectType::Instance => Ok(Object::Instance(InstanceExt::new(
+                state,
+                InstanceClass::default(),
+            ))),
         }
     }
 }

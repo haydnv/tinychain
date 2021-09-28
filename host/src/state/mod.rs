@@ -21,7 +21,7 @@ use tcgeneric::*;
 use crate::chain::*;
 use crate::closure::*;
 use crate::collection::*;
-use crate::object::{InstanceClass, Object, ObjectType};
+use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 use crate::route::Public;
 use crate::scalar::*;
 use crate::stream::TCStream;
@@ -76,6 +76,7 @@ impl NativeClass for StateType {
                 match path[1].as_str() {
                     "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "chain" => ChainType::from_path(path).map(Self::Chain),
+                    "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
                 }
@@ -1129,19 +1130,14 @@ impl StateVisitor {
                     .await
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
-            StateType::Object(ot) => match ot {
-                ObjectType::Class => {
-                    access
-                        .next_value(())
-                        .map_ok(Object::Class)
-                        .map_ok(State::Object)
-                        .await
-                }
-                ObjectType::Instance => {
-                    let op_ref = access.next_value(()).map_ok(TCRef::Op).await?;
-                    Ok(State::Scalar(Scalar::Ref(op_ref.into())))
-                }
-            },
+            StateType::Object(ot) => {
+                let txn = self.txn.subcontext_tmp().map_err(de::Error::custom).await?;
+                let state = access.next_value(txn).await?;
+                ObjectVisitor::new()
+                    .visit_map_value(ot, state)
+                    .map_ok(State::Object)
+                    .await
+            }
             StateType::Scalar(st) => {
                 ScalarVisitor::visit_map_value(st, access)
                     .map_ok(State::Scalar)

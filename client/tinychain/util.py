@@ -44,10 +44,7 @@ class Context(object):
     def __getattr__(self, name):
         if name in self.form:
             value = self.form[name]
-            if inspect.isclass(value):
-                from .state import Class
-                return Class(URI(name))
-            elif hasattr(value, "__ref__"):
+            if hasattr(value, "__ref__"):
                 return get_ref(value, name)
             else:
                 logging.info(f"context attribute {value} has no __ref__ method")
@@ -85,7 +82,14 @@ def form_of(state):
 def get_ref(subject, name):
     """Return a named reference to the given state."""
 
-    if hasattr(subject, "__ref__"):
+    if inspect.isclass(subject):
+        def ctr(*args, **kwargs):
+            return subject(*args, **kwargs)
+
+        ctr.__uri__ = URI(name)
+        ctr.__json__ = lambda: to_json(uri(ctr))
+        return ctr
+    elif hasattr(subject, "__ref__"):
         return subject.__ref__(name)
     else:
         return subject
@@ -274,10 +278,11 @@ def requires(subject):
 def uri(subject):
     """Return the `URI` of the given state."""
 
+    if isinstance(subject, URI):
+        return subject
+
     if hasattr(subject, "__uri__"):
         return subject.__uri__
-    elif isinstance(subject, URI):
-        return subject
     elif hasattr(type(subject), "__uri__"):
         return uri(type(subject))
     else:

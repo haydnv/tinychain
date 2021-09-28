@@ -37,12 +37,12 @@ impl<T: tcgeneric::Instance> InstanceExt<T> {
         }
     }
 
-    /// Return the parent of this instance.
+    /// Borrow the parent of this instance.
     pub fn parent(&self) -> &T {
         &self.parent
     }
 
-    /// Return the class prototype of this instance.
+    /// Borrow the class prototype of this instance.
     pub fn proto(&self) -> &Map<Scalar> {
         self.class.proto()
     }

@@ -225,9 +225,6 @@ class Class(State):
 
     __uri__ = uri(State) + "/object/class"
 
-    def __json__(self):
-        return {str(uri(Class)): to_json(form_of(self))}
-
 
 class Instance(State):
     """An instance of a user-defined :class:`Class`."""
