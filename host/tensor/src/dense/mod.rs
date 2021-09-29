@@ -1197,9 +1197,16 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
             // an error can't be encoded within an array
             // so in case of a read error, let the receiver figure out that the tensor
             // doesn't have enough elements
-            blocks
-                .take_while(|r| future::ready(r.is_ok()))
-                .map(|r| r.expect("tensor block").type_cast().to_vec())
+
+            #[cfg(not(debug_assertions))]
+            {
+                blocks
+                    .take_while(|r| future::ready(r.is_ok()))
+                    .map(|r| r.expect("tensor block").type_cast().to_vec())
+            }
+
+            #[cfg(debug_assertions)]
+            blocks.map(|r| r.expect("tensor block").type_cast().to_vec())
         }
 
         match self.dtype {
