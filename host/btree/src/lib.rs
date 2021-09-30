@@ -274,6 +274,15 @@ impl<'a> From<&'a Column> for (&'a Id, ValueType) {
     }
 }
 
+impl fmt::Debug for Column {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.max_len {
+            Some(max_len) => write!(f, "{}: {}({})", self.name, self.dtype, max_len),
+            None => write!(f, "{}: {}", self.name, self.dtype),
+        }
+    }
+}
+
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.max_len {

@@ -301,9 +301,6 @@ where
                     .map(|child_id| self._delete_range(txn_id, child_id, range))
                     .collect();
 
-                // free the write lock on this node before deleting from the child nodes
-                std::mem::drop(node);
-
                 deletes.try_fold((), |(), ()| future::ready(Ok(()))).await
             } else {
                 let child_id = node.children[r].clone();
@@ -365,16 +362,11 @@ where
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
 
-                            // don't need this write lock anymore
-                            std::mem::drop(node);
-
                             let child = file.write_block(txn_id, child_id).await?;
                             self._insert(txn_id, child, key).await
                         }
                     }
                 } else {
-                    // don't need this write lock any more
-                    std::mem::drop(node);
                     self._insert(txn_id, child, key).await
                 }
             }
@@ -531,7 +523,7 @@ where
         mut child: F::Write,
         i: usize,
     ) -> TCResult<F::Write> {
-        debug!("btree::split_child");
+        debug!("BTree::split_child");
 
         let file = &self.inner.file;
         let order = self.inner.order;
@@ -548,6 +540,8 @@ where
         let (new_node_id, mut new_node) = file
             .create_block_tmp(txn_id, new_node, DEFAULT_BLOCK_SIZE)
             .await?;
+
+        debug!("BTree::split_child created new node {}", new_node_id);
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(order - 1));
@@ -699,8 +693,6 @@ where
 
             self._insert(txn_id, new_root, key).await
         } else {
-            // no need to keep this write lock since we're not splitting the root node
-            std::mem::drop(root_id);
             self._insert(txn_id, root, key).await
         }
     }
@@ -734,12 +726,18 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
     }
 
     async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
+        debug!("BTreeFile::load {:?}", schema);
+
         let order = validate_schema(&schema)?;
 
         let txn_id = *txn.id();
         let mut root = None;
         for block_id in file.block_ids(txn_id).await? {
+            debug!("BTreeFile::load block {}", block_id);
+
             let block = file.read_block(txn_id, block_id.clone()).await?;
+
+            debug!("BTreeFile::loaded block {}", block_id);
 
             if block.parent.is_none() {
                 root = Some(block_id);
