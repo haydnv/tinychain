@@ -77,18 +77,6 @@ class DenseTests(unittest.TestCase):
         expected = expect_dense(tc.F64, shape, np.arange(1, 4))
         self.assertEqual(actual, expected)
 
-    def testDivideByZero(self):
-        shape = [3]
-
-        cxt = tc.Context()
-        cxt.left = tc.tensor.Dense.arange(shape, 2., 8.)
-        cxt.right = tc.tensor.Dense.zeros(shape)
-        cxt.result = cxt.left / cxt.right
-
-        actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.F64, shape, [])
-        self.assertEqual(actual, expected)
-
     def testMul(self):
         shape = [5, 2, 1]
 

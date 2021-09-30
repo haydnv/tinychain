@@ -14,7 +14,7 @@ ENDPOINT = "/transact/hypothetical"
 class Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_einsum", cache_size="10G")
+        cls.host = start_host("test_einsum", cache_size="1G")
 
     def testExpandDims(self):
         cxt = tc.Context()
@@ -95,14 +95,10 @@ class Tests(unittest.TestCase):
             x = rand_dim(i)
             y = rand_dim(i)
             A = (np.random.random([x, y]) * 256).astype(np.int32)
-            print(A)
 
             self.execute("ij->i", A)
 
             B = (np.random.random([y, x]) * 512).astype(np.int32)
-
-            print(A)
-            print(B)
 
             self.execute("ij,jk->ik", A, B)
             self.execute("ij,jk->ki", A, B)
