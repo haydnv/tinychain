@@ -2,7 +2,7 @@ use std::mem;
 use std::pin::Pin;
 
 use futures::ready;
-use futures::stream::{Fuse, Stream, StreamExt};
+use futures::stream::{Fuse, FusedStream, Stream, StreamExt};
 use futures::task::{Context, Poll};
 use pin_project::pin_project;
 
@@ -17,19 +17,22 @@ pub struct SparseValueStream<S> {
     #[pin]
     filled: Fuse<S>,
 
-    coords: Coords,
-    next: Option<(Coord, Number)>,
+    affected: Coords,
+    next_coord: Option<Coord>,
+    next_filled: Option<(Coord, Number)>,
     zero: Number,
 }
 
 impl<'a, S: StreamExt + 'a> SparseValueStream<S> {
     pub async fn new(filled: S, bounds: Bounds, zero: Number) -> TCResult<Self> {
-        let coords = bounds.affected();
+        let mut affected = bounds.affected();
+        let next_coord = affected.next();
 
         Ok(Self {
             filled: filled.fuse(),
-            coords,
-            next: None,
+            affected,
+            next_coord,
+            next_filled: None,
             zero,
         })
     }
@@ -42,32 +45,46 @@ impl<S: Stream<Item = TCResult<(Coord, Number)>>> Stream for SparseValueStream<S
         let mut this = self.project();
 
         Poll::Ready(loop {
-            let next_coord = match this.coords.next() {
-                Some(coord) => coord,
-                None => break None,
+            let next_coord = if let Some(next_coord) = this.next_coord {
+                next_coord
+            } else {
+                break None;
             };
 
             let mut next = None;
-            mem::swap(this.next, &mut next);
+            mem::swap(this.next_filled, &mut next);
             if let Some((filled_coord, value)) = next {
-                break if next_coord == filled_coord {
+                break if next_coord == &filled_coord {
+                    *(this.next_coord) = this.affected.next();
                     Some(Ok(value))
                 } else {
-                    *(this.next) = Some((filled_coord, value));
+                    *(this.next_coord) = this.affected.next();
+                    *(this.next_filled) = Some((filled_coord, value));
                     Some(Ok(*this.zero))
                 };
+            } else if this.filled.is_terminated() {
+                *(this.next_coord) = this.affected.next();
+                break Some(Ok(*this.zero));
             } else {
                 match ready!(this.filled.as_mut().poll_next(cxt)) {
                     Some(Ok((filled_coord, value))) => {
-                        break if next_coord == filled_coord {
+                        break if next_coord == &filled_coord {
+                            *(this.next_coord) = this.affected.next();
                             Some(Ok(value))
                         } else {
-                            *(this.next) = Some((filled_coord, value));
+                            *(this.next_coord) = this.affected.next();
+                            *(this.next_filled) = Some((filled_coord, value));
                             Some(Ok(*this.zero))
-                        }
+                        };
                     }
-                    None => break Some(Ok(*this.zero)),
-                    Some(Err(cause)) => break Some(Err(cause)),
+                    None => {
+                        *(this.next_coord) = this.affected.next();
+                        break Some(Ok(*this.zero));
+                    }
+                    Some(Err(cause)) => {
+                        *(this.next_coord) = this.affected.next();
+                        break Some(Err(cause));
+                    }
                 }
             }
         })

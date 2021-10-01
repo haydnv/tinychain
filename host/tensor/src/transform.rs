@@ -86,6 +86,7 @@ impl Broadcast {
     pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let source_ndim = self.source_shape.len();
         let mut source_bounds = Vec::with_capacity(source_ndim);
+
         for axis in 0..source_ndim {
             if axis + self.offset < bounds.len() {
                 if self.broadcast[axis + self.offset] {
@@ -105,10 +106,13 @@ impl Broadcast {
         if source_bounds.iter().all(|bound| bound.is_index()) {
             // can't broadcast a slice with shape []
             // TODO: can this be handled in the conversion above?
-            source_bounds.into_iter().map(|bound| match bound {
-                AxisBounds::At(i) => AxisBounds::In(i..i + 1),
-                other => other
-            }).collect()
+            source_bounds
+                .into_iter()
+                .map(|bound| match bound {
+                    AxisBounds::At(i) => AxisBounds::In(i..i + 1),
+                    other => other,
+                })
+                .collect()
         } else {
             Bounds::from(source_bounds)
         }

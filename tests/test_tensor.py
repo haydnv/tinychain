@@ -324,7 +324,6 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.I32, [2, 3, 5], expected)
         self.assertEqual(actual, expected)
 
-    @unittest.skip
     def testProduct(self):
         shape = [2, 4, 3, 5]
         axis = 2
@@ -377,7 +376,6 @@ class TensorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_tensor", cache_size="1G")
 
-    @unittest.skip
     def testAdd(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
