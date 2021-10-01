@@ -538,7 +538,7 @@ where
 
         let new_node = Node::new(child.leaf, Some(node_id));
         let (new_node_id, mut new_node) = file
-            .create_block_tmp(txn_id, new_node, DEFAULT_BLOCK_SIZE)
+            .create_block_unique(txn_id, new_node, DEFAULT_BLOCK_SIZE)
             .await?;
 
         debug!("BTree::split_child created new node {}", new_node_id);
@@ -682,7 +682,7 @@ where
             new_root.children.push(old_root_id.clone());
 
             let (new_root_id, new_root) = file
-                .create_block_tmp(txn_id, new_root, DEFAULT_BLOCK_SIZE)
+                .create_block_unique(txn_id, new_root, DEFAULT_BLOCK_SIZE)
                 .await?;
 
             (*root_id) = new_root_id;

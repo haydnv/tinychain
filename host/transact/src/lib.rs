@@ -13,7 +13,7 @@ mod id;
 pub mod fs;
 pub mod lock;
 
-pub use id::{MIN_ID, TxnId};
+pub use id::{TxnId, MIN_ID};
 
 /// Trait to define a view which can be encoded with [`en::IntoStream`].
 #[async_trait]

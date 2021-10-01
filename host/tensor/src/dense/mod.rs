@@ -1062,7 +1062,7 @@ where
         let txn_id = *txn.id();
         let file = txn
             .context()
-            .create_file_tmp(txn_id, TensorType::Dense)
+            .create_file_unique(txn_id, TensorType::Dense)
             .map_err(de::Error::custom)
             .await?;
 

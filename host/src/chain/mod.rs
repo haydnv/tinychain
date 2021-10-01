@@ -298,7 +298,7 @@ impl Subject {
                 State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
                     let file = txn
                         .context()
-                        .create_file_tmp(txn_id, TensorType::Dense)
+                        .create_file_unique(txn_id, TensorType::Dense)
                         .await?;
 
                     let backup = tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;
@@ -313,7 +313,7 @@ impl Subject {
             #[cfg(feature = "tensor")]
             Self::Sparse(tensor) => match backup {
                 State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
-                    let dir = txn.context().create_dir_tmp(txn_id).await?;
+                    let dir = txn.context().create_dir_unique(txn_id).await?;
                     let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
                     tensor.restore(&backup, txn_id).await
                 }

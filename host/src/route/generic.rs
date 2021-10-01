@@ -198,7 +198,12 @@ where
         debug!("{} route {}", self, TCPath::from(path));
 
         if !path.is_empty() {
-            debug!("{} contains {}? {}", self, path[0], self.contains_key(&path[0]));
+            debug!(
+                "{} contains {}? {}",
+                self,
+                path[0],
+                self.contains_key(&path[0])
+            );
         }
 
         if path.is_empty() {

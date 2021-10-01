@@ -94,7 +94,7 @@ impl<'a> Handler<'a> for CopyHandler {
                     Tensor::Dense(source) => {
                         let file = txn
                             .context()
-                            .create_file_tmp(*txn.id(), TensorType::Dense)
+                            .create_file_unique(*txn.id(), TensorType::Dense)
                             .await?;
 
                         let blocks =
@@ -103,7 +103,7 @@ impl<'a> Handler<'a> for CopyHandler {
                         DenseTensor::from(blocks.accessor()).into()
                     }
                     Tensor::Sparse(source) => {
-                        let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                        let dir = txn.context().create_dir_unique(*txn.id()).await?;
                         let table = SparseTable::copy_from(source, dir, txn).await?;
                         SparseTensor::from(table.accessor()).into()
                     }
@@ -171,7 +171,7 @@ impl<'a> Handler<'a> for CopySparseHandler {
                 let elements = source.into_stream(txn.clone()).await?;
 
                 let txn_id = *txn.id();
-                let dir = txn.context().create_dir_tmp(txn_id).await?;
+                let dir = txn.context().create_dir_unique(txn_id).await?;
                 let tensor = SparseTensor::create(&dir, schema, txn_id).await?;
 
                 let elements = elements
@@ -229,7 +229,7 @@ impl<'a> Handler<'a> for CreateHandler {
                     }
                     TensorType::Sparse => {
                         let txn_id = *txn.id();
-                        let dir = txn.context().create_dir_tmp(txn_id).await?;
+                        let dir = txn.context().create_dir_unique(txn_id).await?;
 
                         SparseTensor::create(&dir, schema, txn_id)
                             .map_ok(Tensor::from)
@@ -911,7 +911,7 @@ where
 
 async fn create_file(txn: &Txn) -> TCResult<fs::File<Array>> {
     txn.context()
-        .create_file_tmp(*txn.id(), TensorType::Dense)
+        .create_file_unique(*txn.id(), TensorType::Dense)
         .await
 }
 

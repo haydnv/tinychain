@@ -47,7 +47,7 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let txn_id = *txn.id();
 
-                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                let dir = txn.context().create_dir_unique(*txn.id()).await?;
                 let table = TableIndex::create(&dir, schema, *txn.id()).await?;
 
                 let rows = source.into_stream(txn.clone()).await?;
@@ -88,7 +88,7 @@ impl<'a> Handler<'a> for CreateHandler {
                     TCError::bad_request("invalid Table schema", v)
                 })?;
 
-                let dir = txn.context().create_dir_tmp(*txn.id()).await?;
+                let dir = txn.context().create_dir_unique(*txn.id()).await?;
                 TableIndex::create(&dir, schema, *txn.id())
                     .map_ok(Collection::from)
                     .map_ok(State::from)

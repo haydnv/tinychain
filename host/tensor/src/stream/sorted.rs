@@ -31,7 +31,7 @@ where
     let txn_id = *txn.id();
     let file: FD = txn
         .context()
-        .create_file_tmp(txn_id, TensorType::Dense)
+        .create_file_unique(txn_id, TensorType::Dense)
         .await?;
 
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;

@@ -374,7 +374,7 @@ where
         block.write().map_err(io_err).await
     }
 
-    async fn create_block_tmp(
+    async fn create_block_unique(
         &self,
         txn_id: TxnId,
         initial_value: B,

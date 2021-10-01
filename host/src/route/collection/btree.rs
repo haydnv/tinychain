@@ -47,7 +47,7 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let file = txn
                     .context()
-                    .create_file_tmp(*txn.id(), BTreeType::default())
+                    .create_file_unique(*txn.id(), BTreeType::default())
                     .await?;
 
                 let btree = BTreeFile::create(file, schema, txn_id).await?;
@@ -91,7 +91,7 @@ impl<'a> Handler<'a> for CreateHandler {
 
                 let file = txn
                     .context()
-                    .create_file_tmp(*txn.id(), BTreeType::default())
+                    .create_file_unique(*txn.id(), BTreeType::default())
                     .await?;
 
                 BTreeFile::create(file, schema, *txn.id())

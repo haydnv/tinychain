@@ -285,7 +285,7 @@ impl Transaction<fs::Dir> for Txn {
     // TODO: rename to subcontext_unique
     async fn subcontext_tmp(&self) -> TCResult<Self> {
         self.dir
-            .create_dir_tmp(*self.id())
+            .create_dir_unique(*self.id())
             .map_ok(|dir| Self {
                 active: self.active.clone(),
                 gateway: self.gateway.clone(),

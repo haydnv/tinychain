@@ -53,12 +53,12 @@ impl TxnServer {
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
                 let active = entry.get();
-                let dir = active.workspace.create_dir_tmp(txn_id).await?;
+                let dir = active.workspace.create_dir_unique(txn_id).await?;
                 Ok(Txn::new(active.clone(), gateway, dir, request))
             }
             Entry::Vacant(entry) => {
                 let workspace = self.txn_dir(txn_id).await?;
-                let dir = workspace.create_dir_tmp(txn_id).await?;
+                let dir = workspace.create_dir_unique(txn_id).await?;
                 let active = Arc::new(Active::new(&txn_id, workspace, expires));
                 let txn = Txn::new(active.clone(), gateway, dir, request);
                 entry.insert(active);

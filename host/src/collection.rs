@@ -229,7 +229,7 @@ impl CollectionVisitor {
                 let file = self
                     .txn
                     .context()
-                    .create_file_tmp(*self.txn.id(), BTreeType::default())
+                    .create_file_unique(*self.txn.id(), BTreeType::default())
                     .map_err(de::Error::custom)
                     .await?;
 

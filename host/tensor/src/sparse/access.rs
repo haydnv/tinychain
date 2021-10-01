@@ -608,10 +608,7 @@ where
         let coords = filled_at
             .map_ok(move |coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
-            .map_ok(move |coord| {
-                debug!("SparseBroadcast::filled at source coord {:?}", coord);
-                rebase.map_coord(coord)
-            })
+            .map_ok(move |coord| rebase.map_coord(coord))
             .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
             .try_flatten();
 

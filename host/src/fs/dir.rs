@@ -393,7 +393,7 @@ impl fs::Dir for Dir {
         Ok(subdir)
     }
 
-    async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Dir> {
+    async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Dir> {
         let mut contents = self.contents.write(txn_id).await?;
         let name = loop {
             let name = Uuid::new_v4().into();
@@ -436,7 +436,7 @@ impl fs::Dir for Dir {
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
 
-    async fn create_file_tmp<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         StateType: From<C>,

@@ -147,7 +147,13 @@ where
     Self: ToState,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("{} route {} (parent is {} {})", self, TCPath::from(path), std::any::type_name::<T>(), self.parent());
+        debug!(
+            "{} route {} (parent is {} {})",
+            self,
+            TCPath::from(path),
+            std::any::type_name::<T>(),
+            self.parent()
+        );
 
         if path.is_empty() {
             debug!("routing to parent: {}", self.parent());

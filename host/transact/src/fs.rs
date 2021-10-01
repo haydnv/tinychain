@@ -1,4 +1,4 @@
-//! Transactional filesystem traits and data structures. Unstable.
+//! Transactional filesystem traits and data structures.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -72,11 +72,10 @@ pub trait File<B: Clone>: Store + Sized + 'static {
         size_hint: usize,
     ) -> TCResult<Self::Write>;
 
-    // TODO: rename to create_block_unique
     /// Create a new [`Self::Block`].
     ///
     /// `size_hint` should be the maximum allowed size of the block.
-    async fn create_block_tmp(
+    async fn create_block_unique(
         &self,
         txn_id: TxnId,
         initial_value: B,
@@ -114,9 +113,8 @@ pub trait Dir: Store + Send + Sized + 'static {
     /// Create a new `Dir`.
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
-    // TODO: rename to create_dir_unique
     /// Create a new `Dir` with a new unique ID.
-    async fn create_dir_tmp(&self, txn_id: TxnId) -> TCResult<Self>;
+    async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
     async fn create_file<C, F, B>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
@@ -128,9 +126,8 @@ pub trait Dir: Store + Send + Sized + 'static {
         Self::File: AsType<F>,
         F: File<B>;
 
-    // TODO: rename to create_file_unique
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_tmp<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         F: Clone,
