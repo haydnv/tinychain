@@ -71,10 +71,21 @@ where
 
     pub(super) async fn load(canon: DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
         let mut fs_dir = canon.write().await;
+        let versions = fs_dir
+            .get_or_create_dir(VERSION.to_string())
+            .map_err(io_err)?;
 
         let mut blocks = HashMap::new();
         let mut present = HashSet::new();
-        for (name, _) in fs_dir.iter() {
+        let mut version = versions
+            .write()
+            .await
+            .create_dir(txn_id.to_string())
+            .map_err(io_err)?
+            .write()
+            .await;
+
+        for (name, block) in fs_dir.iter() {
             if name.starts_with('.') {
                 debug!("File::load skipping hidden filesystem entry");
                 continue;
@@ -87,27 +98,51 @@ where
                 )));
             }
 
+            let (size_hint, contents) = match block {
+                DirEntry::File(block) => {
+                    let size_hint = block.size_hint().await;
+                    let contents = block
+                        .read()
+                        .map_ok(|contents| B::clone(&*contents))
+                        .map_err(io_err)
+                        .await?;
+
+                    (size_hint, contents)
+                }
+                DirEntry::Dir(_) => {
+                    return Err(TCError::internal(format!(
+                        "expected block file but found directory: {}",
+                        name
+                    )))
+                }
+            };
+
             let block_id: fs::BlockId = name[..(name.len() - B::ext().len() - 1)].parse()?;
 
             present.insert(block_id.clone());
 
             let lock_name = format!("block {}", block_id);
             blocks.insert(block_id, TxnLock::new(lock_name, txn_id));
+
+            version
+                .create_file(name.clone(), contents, size_hint)
+                .map_err(io_err)?;
         }
 
         Ok(Self {
             canon,
             blocks: Arc::new(RwLock::new(blocks)),
             present: TxnLock::new(format!("block listing for {:?}", &*fs_dir), present),
-            versions: fs_dir
-                .get_or_create_dir(VERSION.to_string())
-                .map_err(io_err)?,
-
+            versions,
             phantom: PhantomData,
         })
     }
 
-    async fn lock_block(&self, txn_id: TxnId, block_id: &fs::BlockId) -> TCResult<TxnLock<TxnId>> {
+    async fn block_read(
+        &self,
+        txn_id: TxnId,
+        block_id: &fs::BlockId,
+    ) -> TCResult<TxnLockReadGuard<TxnId>> {
         let present = self.present.read(txn_id).await?;
         let blocks = self.blocks.read().await;
         if !present.contains(block_id) {
@@ -119,7 +154,26 @@ where
             .cloned()
             .expect("block last mutation ID");
 
-        Ok(block)
+        block.read(txn_id).await
+    }
+
+    async fn block_write(
+        &self,
+        txn_id: TxnId,
+        block_id: &fs::BlockId,
+    ) -> TCResult<TxnLockWriteGuard<TxnId>> {
+        let present = self.present.read(txn_id).await?;
+        let blocks = self.blocks.read().await;
+        if !present.contains(block_id) {
+            return Err(TCError::not_found(block_id));
+        }
+
+        let block = blocks
+            .get(block_id)
+            .cloned()
+            .expect("block last mutation ID");
+
+        block.write(txn_id).await
     }
 
     async fn read_block_inner(
@@ -128,34 +182,50 @@ where
         block_id: fs::BlockId,
         last_mutation: &TxnId,
     ) -> TCResult<FileLock<CacheBlock>> {
-        let mut version = self.version(&txn_id).await?;
+        debug!("File::read_block_inner {} at {}", block_id, txn_id);
+
         let name = Self::file_name(&block_id);
-        if let Some(block) = version.get_file(&name) {
+        if let Some(block) = self.version_read(&txn_id).await?.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
-            Ok(block)
-        } else {
-            let canon = self.canon.read().await;
-            let block_canon = canon.get_file(&name).expect("canonical block");
-            let size_hint = block_canon.size_hint().await;
-            let value = block_canon.read().map_err(io_err).await?;
-            let block = version
-                .create_file(name, B::clone(&*value), size_hint)
-                .map_err(io_err)?;
-
-            debug!("created new version of block {} at {}", block_id, txn_id);
-
-            Ok(block)
+            return Ok(block);
         }
+
+        assert!(last_mutation < &txn_id);
+        debug!("last mutation of block {} was at {}", block_id, txn_id);
+
+        let last_version = self
+            .versions
+            .read()
+            .await
+            .get_dir(&last_mutation.to_string())
+            .expect("prior txn version dir")
+            .read()
+            .await;
+
+        debug!("got read lock on last version {} dir", last_mutation);
+
+        let block_version = last_version.get_file(&name).expect("block prior value");
+
+        let size_hint = block_version.size_hint().await;
+        let value = block_version.read().map_err(io_err).await?;
+        let block = self
+            .version_write(&txn_id)
+            .await?
+            .create_file(name, B::clone(&*value), size_hint)
+            .map_err(io_err)?;
+
+        debug!("created new version of block {} at {}", block_id, txn_id);
+
+        Ok(block)
     }
 
     async fn write_block_inner(
         &self,
         txn_id: TxnId,
         block_id: fs::BlockId,
-        last_mutation: &TxnId,
     ) -> TCResult<FileLock<CacheBlock>> {
         let name = Self::file_name(&block_id);
-        let mut version = self.version(&txn_id).await?;
+        let mut version = self.version_write(&txn_id).await?;
         let block = if let Some(block) = version.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             block
@@ -179,13 +249,20 @@ where
         Ok(block)
     }
 
-    async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
-        let version = {
-            let mut versions = self.versions.write().await;
-            versions
-                .get_or_create_dir(txn_id.to_string())
-                .map_err(io_err)?
-        };
+    async fn version_read(&self, txn_id: &TxnId) -> TCResult<DirReadGuard<CacheBlock>> {
+        let mut versions = self.versions.write().await;
+        let version = versions
+            .get_or_create_dir(txn_id.to_string())
+            .map_err(io_err)?;
+
+        version.read().map(Ok).await
+    }
+
+    async fn version_write(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
+        let mut versions = self.versions.write().await;
+        let version = versions
+            .get_or_create_dir(txn_id.to_string())
+            .map_err(io_err)?;
 
         version.write().map(Ok).await
     }
@@ -233,7 +310,7 @@ where
             try_join!(self.present.write(txn_id), other.present.read(txn_id))?;
 
         let (mut this_version, mut that_version) =
-            try_join!(self.version(&txn_id), other.version(&txn_id))?;
+            try_join!(self.version_write(&txn_id), other.version_write(&txn_id))?;
 
         let mut blocks = self.blocks.write().await;
         let canon = other.canon.read().await;
@@ -281,7 +358,7 @@ where
         }
 
         let blocks = self.blocks.write().await;
-        let version = self.version(&txn_id).await?;
+        let version = self.version_write(&txn_id).await?;
 
         let block = create_block_inner(
             present,
@@ -314,7 +391,7 @@ where
         };
 
         let blocks = self.blocks.write().await;
-        let version = self.version(&txn_id).await?;
+        let version = self.version_write(&txn_id).await?;
 
         let block = create_block_inner(
             present,
@@ -341,7 +418,7 @@ where
 
             // keep the version directory in sync in case create_block is called later
             // with the same block_id
-            let mut version = self.version(&txn_id).await?;
+            let mut version = self.version_write(&txn_id).await?;
             version.delete(Self::file_name(&block_id));
         }
 
@@ -355,8 +432,7 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
         debug!("File::read_block {}", block_id);
-        let txn_lock = self.lock_block(txn_id, &block_id).await?;
-        let last_mutation = txn_lock.read(txn_id).await?;
+        let last_mutation = self.block_read(txn_id, &block_id).await?;
         let block = self
             .read_block_inner(txn_id, block_id, &*last_mutation)
             .await?;
@@ -378,18 +454,17 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileWriteGuard<CacheBlock, B>> {
         debug!("File::write_block {}", block_id);
-        let txn_lock = self.lock_block(txn_id, &block_id).await?;
-        let last_mutation = txn_lock.write(txn_id).await?;
-        let block = self
-            .write_block_inner(txn_id, block_id, &*last_mutation)
-            .await?;
+        let mut last_mutation = self.block_write(txn_id, &block_id).await?;
+        *last_mutation = txn_id;
+
+        let block = self.write_block_inner(txn_id, block_id).await?;
 
         block.write().map_err(io_err).await
     }
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
         let mut contents = self.present.write(txn_id).await?;
-        let mut version = self.version(&txn_id).await?;
+        let mut version = self.version_write(&txn_id).await?;
         for block_id in contents.drain() {
             version.delete(Self::file_name(&block_id));
         }
@@ -421,7 +496,11 @@ where
 
         {
             let present = self.present.read(*txn_id).await.expect("file block list");
-            let version = self.version(txn_id).await.expect("file block versions");
+            let version = self
+                .version_write(txn_id)
+                .await
+                .expect("file block versions");
+
             let mut canon = self.canon.write().await;
             let mut deleted = Vec::with_capacity(blocks.len());
             let mut synchronize = Vec::with_capacity(present.len());
