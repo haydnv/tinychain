@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs;
-use tc_transact::lock::{TxnLock, TxnLockWriteGuard};
+use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 
 use super::{io_err, CacheBlock, VERSION};
@@ -107,78 +107,55 @@ where
         })
     }
 
+    async fn lock_block(&self, txn_id: TxnId, block_id: &fs::BlockId) -> TCResult<TxnLock<TxnId>> {
+        let present = self.present.read(txn_id).await?;
+        let blocks = self.blocks.read().await;
+        if !present.contains(block_id) {
+            return Err(TCError::not_found(block_id));
+        }
+
+        let block = blocks
+            .get(block_id)
+            .cloned()
+            .expect("block last mutation ID");
+
+        Ok(block)
+    }
+
     async fn read_block_inner(
         &self,
         txn_id: TxnId,
         block_id: fs::BlockId,
+        last_mutation: &TxnId,
     ) -> TCResult<FileLock<CacheBlock>> {
-        let present = self.present.read(txn_id).await?;
-        let blocks = self.blocks.read().await;
-        if !present.contains(&block_id) {
-            return Err(TCError::not_found(block_id));
-        }
-
         let mut version = self.version(&txn_id).await?;
-        let last_mutation = {
-            // just acquire the lock to reserve this TxnId
-            *blocks
-                .get(&block_id)
-                .expect("block last mutation ID")
-                .read(txn_id)
-                .await?
-        };
-
         let name = Self::file_name(&block_id);
-
-        let block = if let Some(block) = version.get_file(&name) {
+        if let Some(block) = version.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
-
-            block
+            Ok(block)
         } else {
             let canon = self.canon.read().await;
             let block_canon = canon.get_file(&name).expect("canonical block");
             let size_hint = block_canon.size_hint().await;
             let value = block_canon.read().map_err(io_err).await?;
-            let block_version = version
+            let block = version
                 .create_file(name, B::clone(&*value), size_hint)
                 .map_err(io_err)?;
 
             debug!("created new version of block {} at {}", block_id, txn_id);
 
-            block_version
-        };
-
-        Ok(block)
+            Ok(block)
+        }
     }
 
     async fn write_block_inner(
         &self,
         txn_id: TxnId,
         block_id: fs::BlockId,
+        last_mutation: &TxnId,
     ) -> TCResult<FileLock<CacheBlock>> {
-        let present = self.present.read(txn_id).await?;
-        let blocks = self.blocks.read().await;
-        if !present.contains(&block_id) {
-            return Err(TCError::not_found(block_id));
-        }
-
-        let mut version = self.version(&txn_id).await?;
-
-        let last_mutation = {
-            let mut last_mutation = blocks
-                .get(&block_id)
-                .expect("block last mutation ID")
-                .write(txn_id)
-                .await?;
-
-            assert!(&*last_mutation <= &txn_id);
-            let prev_mutation = *last_mutation;
-            *last_mutation = txn_id;
-            prev_mutation
-        };
-
         let name = Self::file_name(&block_id);
-
+        let mut version = self.version(&txn_id).await?;
         let block = if let Some(block) = version.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             block
@@ -190,13 +167,13 @@ where
             let block_canon = canon.get_file(&name).expect("canonical block");
             let size_hint = block_canon.size_hint().await;
             let value = block_canon.read().map_err(io_err).await?;
-            let block_version = version
+            let block = version
                 .create_file(name, B::clone(&*value), size_hint)
                 .map_err(io_err)?;
 
             debug!("created new version of block {} at {}", block_id, txn_id);
 
-            block_version
+            block
         };
 
         Ok(block)
@@ -378,7 +355,12 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
         debug!("File::read_block {}", block_id);
-        let block = self.read_block_inner(txn_id, block_id).await?;
+        let txn_lock = self.lock_block(txn_id, &block_id).await?;
+        let last_mutation = txn_lock.read(txn_id).await?;
+        let block = self
+            .read_block_inner(txn_id, block_id, &*last_mutation)
+            .await?;
+
         block.read().map_err(io_err).await
     }
 
@@ -387,9 +369,7 @@ where
         txn_id: TxnId,
         block_id: fs::BlockId,
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
-        debug!("File::read_block_owned {}", block_id);
-        let block = self.read_block_inner(txn_id, block_id).await?;
-        block.read().map_err(io_err).await
+        self.read_block(txn_id, block_id).await
     }
 
     async fn write_block(
@@ -398,7 +378,12 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileWriteGuard<CacheBlock, B>> {
         debug!("File::write_block {}", block_id);
-        let block = self.write_block_inner(txn_id, block_id).await?;
+        let txn_lock = self.lock_block(txn_id, &block_id).await?;
+        let last_mutation = txn_lock.write(txn_id).await?;
+        let block = self
+            .write_block_inner(txn_id, block_id, &*last_mutation)
+            .await?;
+
         block.write().map_err(io_err).await
     }
 
