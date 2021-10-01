@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::marker::PhantomData;
 
-use afarray::{Array, CoordBlocks, Coords};
+use afarray::{Array, CoordBlocks, CoordUnique, Coords};
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
@@ -135,12 +135,10 @@ where
         let coords = CoordBlocks::new(coords, shape.len(), PER_BLOCK);
 
         if sort {
-            debug!("SparseTable::filled_at shape is {:?}", shape);
             let coords = sorted_coords::<FD, FS, D, T, _>(&txn, shape.into(), coords).await?;
             Ok(Box::pin(coords))
         } else {
-            debug!("SparseTable::filled_at has no need to sort");
-            Ok(Box::pin(coords))
+            Ok(Box::pin(CoordUnique::new(coords, shape.into(), PER_BLOCK)))
         }
     }
 
