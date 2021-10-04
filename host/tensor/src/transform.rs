@@ -105,17 +105,12 @@ impl Broadcast {
 
         if source_bounds.iter().all(|bound| bound.is_index()) {
             // can't broadcast a slice with shape []
-            // TODO: can this be handled in the conversion above?
-            source_bounds
-                .into_iter()
-                .map(|bound| match bound {
-                    AxisBounds::At(i) => AxisBounds::In(i..i + 1),
-                    other => other,
-                })
-                .collect()
-        } else {
-            Bounds::from(source_bounds)
+            if let Some(AxisBounds::At(i)) = source_bounds.pop() {
+                source_bounds.push(AxisBounds::In(i..i + 1));
+            }
         }
+
+        Bounds::from(source_bounds)
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Coord {

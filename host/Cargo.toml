@@ -46,7 +46,7 @@ tbon = "~0.3.5"
 tc-btree = "~0.2.1"
 tc-error = "0.3"
 tc-table = "~0.1.8"
-tc-tensor = { version = "~0.2.1", optional = true }
+tc-tensor = { path = "tensor", optional = true }
 tc-transact = "0.9"
 tc-value = "~0.2.2"
 tcgeneric = "~0.2.3"
