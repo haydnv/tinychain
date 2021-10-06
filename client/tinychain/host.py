@@ -11,6 +11,7 @@ import urllib.parse
 
 from tinychain.error import *
 from tinychain.util import to_json, uri, URI
+from tinychain.value import Nil
 
 
 DEFAULT_PORT = 8702
@@ -73,7 +74,7 @@ class Host(object):
 
         url = self.link(path)
         headers = auth_header(auth)
-        if key:
+        if key and not isinstance(key, Nil):
             key = json.dumps(to_json(key)).encode(ENCODING)
             request = lambda: requests.get(url, params={"key": key}, headers=headers)
         else:
@@ -86,9 +87,14 @@ class Host(object):
 
         url = self.link(path)
         headers = auth_header(auth)
-        key = json.dumps(to_json(key)).encode(ENCODING)
+        if key and not isinstance(key, Nil):
+            key = json.dumps(to_json(key)).encode(ENCODING)
+            params = {"key": key}
+        else:
+            params = {}
+
         value = json.dumps(to_json(value)).encode(ENCODING)
-        request = lambda: requests.put(url, params={"key": key}, data=value, headers=headers)
+        request = lambda: requests.put(url, params=params, data=value, headers=headers)
 
         return self._handle(request)
 
@@ -107,7 +113,7 @@ class Host(object):
 
         url = self.link(path)
         headers = auth_header(auth)
-        if key:
+        if key and not isinstance(key, Nil):
             key = json.dumps(to_json(key)).encode(ENCODING)
             request = lambda: requests.delete(url, params={"key": key}, headers=headers)
         else:

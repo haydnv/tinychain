@@ -1,20 +1,22 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::future::TryFutureExt;
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Column};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist, Restore, Store};
+#[cfg(feature = "tensor")]
+use tc_tensor::TensorPersist;
+use tc_transact::fs::{Dir, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Link, Value, ValueType};
+use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::collection::{
@@ -26,7 +28,7 @@ use crate::collection::{
 };
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
-use crate::state::{State, StateView};
+use crate::state::{State, StateType, StateView};
 use crate::txn::Txn;
 
 pub use block::BlockChain;
@@ -43,11 +45,7 @@ const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
-/// The name of the file containing a [`Chain`]'s [`Subject`]'s data.
-pub const SUBJECT: Label = label("subject");
-
-/// The file extension of a directory of [`ChainBlock`]s on disk.
-pub const EXT: &str = "chain";
+const SUBJECT: Label = label("subject");
 
 /// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
 #[derive(Clone)]
@@ -58,7 +56,7 @@ pub enum Schema {
     Dense(tc_tensor::Schema),
     #[cfg(feature = "tensor")]
     Sparse(tc_tensor::Schema),
-    Value(Value),
+    Tuple(Tuple<Schema>),
 }
 
 impl Schema {
@@ -112,7 +110,11 @@ impl Schema {
                 },
                 other => Err(TCError::bad_request("invalid Chain schema", other)),
             },
-            Scalar::Value(value) => Ok(Self::Value(value)),
+            Scalar::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|scalar| Schema::from_scalar(scalar))
+                .collect::<TCResult<Tuple<Schema>>>()
+                .map(Schema::Tuple),
             other => Err(TCError::bad_request("invalid Chain schema", other)),
         }
     }
@@ -149,7 +151,7 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.encode_entry(TensorType::Dense.path(), (schema,))?;
                 map.end()
             }
-            Self::Value(value) => value.into_stream(encoder),
+            Self::Tuple(tuple) => tuple.into_stream(encoder),
         }
     }
 }
@@ -158,12 +160,12 @@ impl fmt::Display for Schema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(schema) => write!(f, "{}", Tuple::<&Column>::from_iter(schema)),
-            Self::Table(schema) => fmt::Display::fmt(schema, f),
-            Self::Value(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Dense(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Sparse(schema) => fmt::Display::fmt(schema, f),
+            Self::Table(schema) => fmt::Display::fmt(schema, f),
+            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
     }
 }
@@ -177,157 +179,212 @@ pub enum Subject {
     Dense(DenseTensor<DenseTensorFile>),
     #[cfg(feature = "tensor")]
     Sparse(SparseTensor<SparseTable>),
-    Value(fs::File<Value>),
+    Tuple(Tuple<Subject>),
 }
 
 impl Subject {
     /// Create a new `Subject` with the given `Schema`.
-    pub async fn create(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        match schema {
-            Schema::BTree(schema) => {
-                let file = dir
-                    .create_file(txn_id, SUBJECT.into(), BTreeType::default())
-                    .await?;
+    pub fn create<'a>(schema: Schema, dir: &'a fs::Dir, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
+        Box::pin(async move {
+            match schema {
+                #[cfg(feature = "tensor")]
+                Schema::Dense(schema) => {
+                    let file = dir
+                        .create_file(txn_id, SUBJECT.into(), TensorType::Dense)
+                        .await?;
 
-                BTreeFile::create(file, schema, txn_id)
-                    .map_ok(Self::BTree)
-                    .await
-            }
-            Schema::Table(schema) => {
-                TableIndex::create(dir, schema, txn_id)
-                    .map_ok(Self::Table)
-                    .await
-            }
-            #[cfg(feature = "tensor")]
-            Schema::Dense(schema) => {
-                let file = dir
-                    .create_file(txn_id, SUBJECT.into(), TensorType::Dense)
-                    .await?;
-
-                DenseTensor::create(file, schema, txn_id)
-                    .map_ok(Self::Dense)
-                    .await
-            }
-            #[cfg(feature = "tensor")]
-            Schema::Sparse(schema) => {
-                let dir = dir.create_dir(txn_id, SUBJECT.into()).await?;
-                let tensor = SparseTensor::create(&dir, schema, txn_id)
-                    .map_ok(Self::Sparse)
-                    .await?;
-
-                Ok(tensor)
-            }
-            Schema::Value(value) => {
-                let file: fs::File<Value> = dir
-                    .create_file(txn_id, SUBJECT.into(), value.class())
-                    .await?;
-
-                file.create_block(txn_id, SUBJECT.into(), value.clone(), BLOCK_SIZE)
-                    .await?;
-
-                Ok(Self::Value(file))
-            }
-        }
-    }
-
-    async fn load(txn: &Txn, schema: Schema, dir: &fs::Dir) -> TCResult<Self> {
-        match schema {
-            Schema::BTree(schema) => {
-                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
-                    BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
-                } else {
-                    Self::create(Schema::BTree(schema), dir, *txn.id()).await
+                    DenseTensor::create(file, schema, txn_id)
+                        .map_ok(Self::Dense)
+                        .await
                 }
-            }
-            Schema::Table(schema) => {
-                if dir.is_empty(*txn.id()).await? {
-                    Self::create(Schema::Table(schema), dir, *txn.id()).await
-                } else {
-                    TableIndex::load(txn, schema, dir.clone())
+                #[cfg(feature = "tensor")]
+                Schema::Sparse(schema) => {
+                    let dir = dir.create_dir(txn_id, SUBJECT.into()).await?;
+                    let tensor = SparseTensor::create(&dir, schema, txn_id)
+                        .map_ok(Self::Sparse)
+                        .await?;
+
+                    Ok(tensor)
+                }
+                Schema::Table(schema) => {
+                    TableIndex::create(dir, schema, txn_id)
                         .map_ok(Self::Table)
                         .await
                 }
-            }
-            #[cfg(feature = "tensor")]
-            Schema::Dense(schema) => {
-                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
-                    DenseTensor::load(txn, schema, file)
-                        .map_ok(Self::Dense)
-                        .await
-                } else {
-                    Self::create(Schema::Dense(schema), dir, *txn.id()).await
+                Schema::Tuple(schema) => {
+                    try_join_all(
+                        schema
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, schema)| async move {
+                                let dir = dir.create_dir(txn_id, i.into()).await?;
+                                Self::create(schema, &dir, txn_id).await
+                            }),
+                    )
+                    .map_ok(Tuple::from)
+                    .map_ok(Self::Tuple)
+                    .await
                 }
-            }
-            #[cfg(feature = "tensor")]
-            Schema::Sparse(schema) => {
-                if let Some(dir) = dir.get_dir(*txn.id(), &SUBJECT.into()).await? {
-                    SparseTensor::load(txn, schema, dir)
-                        .map_ok(Self::Sparse)
-                        .await
-                } else {
-                    Self::create(Schema::Sparse(schema), dir, *txn.id()).await
-                }
-            }
-            Schema::Value(value) => {
-                if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
-                    Ok(Self::Value(file))
-                } else {
-                    Self::create(Schema::Value(value), dir, *txn.id()).await
-                }
-            }
-        }
-    }
-
-    async fn restore(&self, txn: &Txn, backup: State) -> TCResult<()> {
-        let txn_id = *txn.id();
-        match self {
-            Self::BTree(btree) => match backup {
-                State::Collection(Collection::BTree(BTree::File(backup))) => {
-                    btree.restore(&backup, txn_id).await
-                }
-                other => Err(TCError::bad_request("cannot restore a BTree from", other)),
-            },
-            Self::Table(table) => match backup {
-                State::Collection(Collection::Table(Table::Table(backup))) => {
-                    table.restore(&backup, txn_id).await
-                }
-                other => Err(TCError::bad_request("cannot restore a Table from", other)),
-            },
-            #[cfg(feature = "tensor")]
-            Self::Dense(tensor) => match backup {
-                State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
-                    let file = txn
-                        .context()
-                        .create_file_unique(txn_id, TensorType::Dense)
+                Schema::BTree(schema) => {
+                    let file = dir
+                        .create_file(txn_id, SUBJECT.into(), BTreeType::default())
                         .await?;
 
-                    let backup = tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;
-
-                    tensor.restore(&backup, txn_id).await
+                    BTreeFile::create(file, schema, txn_id)
+                        .map_ok(Self::BTree)
+                        .await
                 }
-                other => Err(TCError::bad_request(
-                    "cannot restore a dense Tensor from",
-                    other,
-                )),
-            },
-            #[cfg(feature = "tensor")]
-            Self::Sparse(tensor) => match backup {
-                State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
-                    let dir = txn.context().create_dir_unique(txn_id).await?;
-                    let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
-                    tensor.restore(&backup, txn_id).await
-                }
-                other => Err(TCError::bad_request(
-                    "cannot restore a sparse Tensor from",
-                    other,
-                )),
-            },
-            Self::Value(file) => {
-                let backup = backup.try_into()?;
-                let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
-                *block = backup;
-                Ok(())
             }
+        })
+    }
+
+    fn load<'a>(txn: &'a Txn, schema: Schema, dir: &'a fs::Dir) -> TCBoxTryFuture<'a, Self> {
+        Box::pin(async move {
+            match schema {
+                Schema::BTree(schema) => {
+                    if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
+                        BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
+                    } else {
+                        Self::create(Schema::BTree(schema), dir, *txn.id()).await
+                    }
+                }
+                Schema::Table(schema) => {
+                    if dir.is_empty(*txn.id()).await? {
+                        Self::create(Schema::Table(schema), dir, *txn.id()).await
+                    } else {
+                        TableIndex::load(txn, schema, dir.clone())
+                            .map_ok(Self::Table)
+                            .await
+                    }
+                }
+                #[cfg(feature = "tensor")]
+                Schema::Dense(schema) => {
+                    if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
+                        DenseTensor::load(txn, schema, file)
+                            .map_ok(Self::Dense)
+                            .await
+                    } else {
+                        Self::create(Schema::Dense(schema), dir, *txn.id()).await
+                    }
+                }
+                #[cfg(feature = "tensor")]
+                Schema::Sparse(schema) => {
+                    if let Some(dir) = dir.get_dir(*txn.id(), &SUBJECT.into()).await? {
+                        SparseTensor::load(txn, schema, dir)
+                            .map_ok(Self::Sparse)
+                            .await
+                    } else {
+                        Self::create(Schema::Sparse(schema), dir, *txn.id()).await
+                    }
+                }
+                Schema::Tuple(schema) => {
+                    let txn_id = *txn.id();
+                    try_join_all(
+                        schema
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, schema)| async move {
+                                if let Some(dir) = dir.get_dir(txn_id, &i.into()).await? {
+                                    Self::load(txn, schema, &dir).await
+                                } else {
+                                    let dir = dir.create_dir(txn_id, i.into()).await?;
+                                    Self::create(schema, &dir, txn_id).await
+                                }
+                            }),
+                    )
+                    .map_ok(Tuple::from)
+                    .map_ok(Self::Tuple)
+                    .await
+                }
+            }
+        })
+    }
+
+    fn restore<'a>(&'a self, txn: &'a Txn, backup: State) -> TCBoxTryFuture<()> {
+        Box::pin(async move {
+            let txn_id = *txn.id();
+            match self {
+                Self::BTree(btree) => match backup {
+                    State::Collection(Collection::BTree(BTree::File(backup))) => {
+                        btree.restore(&backup, txn_id).await
+                    }
+                    other => Err(TCError::bad_request("cannot restore a BTree from", other)),
+                },
+                #[cfg(feature = "tensor")]
+                Self::Dense(tensor) => match backup {
+                    State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
+                        let file = txn
+                            .context()
+                            .create_file_unique(txn_id, TensorType::Dense)
+                            .await?;
+
+                        let backup =
+                            tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;
+
+                        tensor.restore(&backup, txn_id).await
+                    }
+                    other => Err(TCError::bad_request(
+                        "cannot restore a dense Tensor from",
+                        other,
+                    )),
+                },
+                #[cfg(feature = "tensor")]
+                Self::Sparse(tensor) => match backup {
+                    State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
+                        let dir = txn.context().create_dir_unique(txn_id).await?;
+                        let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
+                        tensor.restore(&backup, txn_id).await
+                    }
+                    other => Err(TCError::bad_request(
+                        "cannot restore a sparse Tensor from",
+                        other,
+                    )),
+                },
+                Self::Table(table) => match backup {
+                    State::Collection(Collection::Table(Table::Table(backup))) => {
+                        table.restore(&backup, txn_id).await
+                    }
+                    other => Err(TCError::bad_request("cannot restore a Table from", other)),
+                },
+                Self::Tuple(tuple) => match backup {
+                    State::Tuple(backup) if backup.len() == tuple.len() => {
+                        let restores =
+                            tuple
+                                .iter()
+                                .zip(backup)
+                                .map(|(subject, backup)| async move {
+                                    subject.restore(txn, backup).await
+                                });
+
+                        try_join_all(restores).await?;
+                        Ok(())
+                    }
+                    State::Tuple(_) => Err(TCError::bad_request(
+                        "backup has the wrong number of subjects for schema",
+                        tuple,
+                    )),
+                    backup => Err(TCError::unsupported(format!(
+                        "invalid backup for schema {}: {}",
+                        tuple, backup
+                    ))),
+                },
+            }
+        })
+    }
+}
+
+impl Instance for Subject {
+    type Class = StateType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::BTree(btree) => CollectionType::BTree(btree.class()).into(),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => CollectionType::Tensor(dense.class()).into(),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => CollectionType::Tensor(sparse.class()).into(),
+            Self::Table(table) => CollectionType::Table(table.class()).into(),
+            Self::Tuple(_) => StateType::Tuple,
         }
     }
 }
@@ -344,7 +401,14 @@ impl Transact for Subject {
             Self::Dense(tensor) => tensor.commit(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(tensor) => tensor.commit(txn_id).await,
-            Self::Value(file) => file.commit(txn_id).await,
+            Self::Tuple(tuple) => {
+                join_all(
+                    tuple
+                        .iter()
+                        .map(|subject| async move { subject.commit(txn_id).await }),
+                )
+                .await;
+            }
         }
     }
 
@@ -358,7 +422,12 @@ impl Transact for Subject {
             Self::Dense(tensor) => tensor.finalize(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(tensor) => tensor.finalize(txn_id).await,
-            Self::Value(file) => file.finalize(txn_id).await,
+            Self::Tuple(tuple) => {
+                join_all(tuple.iter().map(|subject| async move {
+                    subject.finalize(txn_id).await;
+                }))
+                .await;
+            }
         }
     }
 }
@@ -368,19 +437,42 @@ impl de::FromStream for Subject {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let value = Value::from_stream((), decoder).await?;
+        let state = State::from_stream(txn, decoder).await?;
+        from_state(state)
+    }
+}
 
-        let file: fs::File<Value> = txn
-            .context()
-            .create_file(*txn.id(), SUBJECT.into(), value.class())
-            .map_err(de::Error::custom)
-            .await?;
+fn from_state<E: de::Error>(state: State) -> Result<Subject, E> {
+    const ERR_INVALID: &str =
+        "a Chain subject (must be a collection like a BTree, Table, or Tensor";
 
-        file.create_block(*txn.id(), SUBJECT.into(), value, BLOCK_SIZE)
-            .map_err(de::Error::custom)
-            .await?;
+    match state {
+        State::Collection(collection) => match collection {
+            Collection::BTree(BTree::File(btree)) => Ok(Subject::BTree(btree)),
+            Collection::Table(Table::Table(table)) => Ok(Subject::Table(table)),
+            #[cfg(feature = "tensor")]
+            Collection::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => dense
+                    .as_persistent()
+                    .map(Subject::Dense)
+                    .ok_or_else(|| de::Error::invalid_type("a Dense tensor view", ERR_INVALID)),
 
-        Ok(Self::Value(file))
+                Tensor::Sparse(sparse) => sparse
+                    .as_persistent()
+                    .map(Subject::Sparse)
+                    .ok_or_else(|| de::Error::invalid_type("a Sparse tensor view", ERR_INVALID)),
+            },
+            other => Err(de::Error::invalid_type(other, ERR_INVALID)),
+        },
+        State::Tuple(tuple) => {
+            let subject = tuple
+                .into_iter()
+                .map(from_state)
+                .collect::<Result<Tuple<Subject>, E>>()?;
+
+            Ok(Subject::Tuple(subject))
+        }
+        other => Err(de::Error::invalid_type(other.class(), ERR_INVALID)),
     }
 }
 
@@ -391,17 +483,33 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
-            Self::Value(file) => {
-                let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                State::from(value.clone()).into_view(txn).await
-            }
+            Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
             Self::Table(table) => State::from(Table::Table(table)).into_view(txn).await,
             #[cfg(feature = "tensor")]
             Self::Dense(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
-            Self::BTree(btree) => State::from(BTree::File(btree)).into_view(txn).await,
+            Self::Tuple(tuple) => {
+                let views = tuple
+                    .into_iter()
+                    .map(|subject| subject.into_view(txn.clone()));
+
+                try_join_all(views).map_ok(StateView::Tuple).await
+            }
+        }
+    }
+}
+
+impl From<Subject> for State {
+    fn from(subject: Subject) -> Self {
+        match subject {
+            Subject::BTree(btree) => State::Collection(btree.into()),
+            #[cfg(feature = "tensor")]
+            Subject::Dense(dense) => State::Collection(dense.into()),
+            #[cfg(feature = "tensor")]
+            Subject::Sparse(sparse) => State::Collection(sparse.into()),
+            Subject::Table(table) => State::Collection(table.into()),
+            Subject::Tuple(tuple) => State::Tuple(tuple.into_iter().map(State::from).collect()),
         }
     }
 }
@@ -415,7 +523,7 @@ impl fmt::Display for Subject {
             Self::Dense(_) => write!(f, "chain Subject, {}", TensorType::Dense),
             #[cfg(feature = "tensor")]
             Self::Sparse(_) => write!(f, "chain Subject, {}", TensorType::Sparse),
-            Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
+            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
     }
 }

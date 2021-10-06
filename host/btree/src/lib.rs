@@ -542,6 +542,7 @@ where
             file,
             dir: PhantomData,
         };
+
         decoder.decode_seq(visitor).await
     }
 }

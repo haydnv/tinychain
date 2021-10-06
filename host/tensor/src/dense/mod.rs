@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
@@ -26,11 +26,11 @@ use super::{
     TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
+use crate::TensorPersist;
 use access::*;
 pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
 
-#[allow(unused)]
 mod access;
 mod file;
 mod stream;
@@ -91,6 +91,17 @@ where
     }
 }
 
+impl<FD, FS, D, T, B> Instance for DenseTensor<FD, FS, D, T, B>
+where
+    Self: Send + Sync,
+{
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Dense
+    }
+}
+
 impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
     D: Dir,
@@ -131,6 +142,17 @@ where
         BlockListFile::range(file, txn_id, shape.into(), start, stop)
             .map_ok(Self::from)
             .await
+    }
+}
+
+impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>> {
+    type Persistent = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    fn as_persistent(self) -> Option<Self::Persistent> {
+        match self.into_inner() {
+            DenseAccessor::File(file) => Some(file.into()),
+            _ => None,
+        }
     }
 }
 

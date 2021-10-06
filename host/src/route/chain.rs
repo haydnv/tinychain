@@ -1,15 +1,12 @@
 use log::debug;
-use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::fs::File;
 use tc_transact::Transaction;
-use tc_value::Value;
-use tcgeneric::{Instance, PathSegment, TCPath};
+use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, ChainType, Subject, SUBJECT};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject};
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
+use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 
 impl Route for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -19,140 +16,17 @@ impl Route for ChainType {
 
 impl Route for Subject {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("Chain::route {}", TCPath::from(path));
-        Some(Box::new(SubjectHandler::new(self, path)))
-    }
-}
+        debug!("Subject::route {}", TCPath::from(path));
 
-struct SubjectHandler<'a> {
-    subject: &'a Subject,
-    path: &'a [PathSegment],
-}
-
-impl<'a> SubjectHandler<'a> {
-    fn new(subject: &'a Subject, path: &'a [PathSegment]) -> Self {
-        debug!("SubjectHandler {}", TCPath::from(path));
-        Self { subject, path }
-    }
-}
-
-impl<'a> Handler<'a> for SubjectHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                debug!("Subject::get {} {}", TCPath::from(self.path), key);
-                match self.subject {
-                    Subject::BTree(btree) => btree.get(&txn, self.path, key).await,
-                    Subject::Table(table) => Public::get(table, &txn, self.path, key).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Dense(tensor) => tensor.get(&txn, self.path, key).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
-                    Subject::Value(file) => {
-                        let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        if self.path.is_empty() {
-                            Ok(value.clone().into())
-                        } else {
-                            value.get(&txn, self.path, key).await
-                        }
-                    }
-                }
-            })
-        }))
-    }
-
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                match self.subject {
-                    Subject::BTree(btree) => btree.put(&txn, self.path, key, value).await,
-                    Subject::Table(table) => table.put(&txn, self.path, key, value).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Dense(tensor) => tensor.put(&txn, self.path, key, value).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Sparse(tensor) => tensor.put(&txn, self.path, key, value).await,
-                    Subject::Value(file) if self.path.is_empty() => {
-                        let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
-
-                        let value = Value::try_cast_from(value, |s| {
-                            TCError::bad_request(
-                                format!("invalid Value {} for Chain subject, expected", s),
-                                subject.class(),
-                            )
-                        })?;
-
-                        *subject = value;
-
-                        Ok(())
-                    }
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        subject.put(&txn, self.path, key, value).await
-                    }
-                }
-            })
-        }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, params| {
-            Box::pin(async move {
-                debug!("Subject::post {}", params);
-                match self.subject {
-                    Subject::BTree(btree) => btree.post(&txn, self.path, params).await,
-                    Subject::Table(table) => table.post(&txn, self.path, params).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Dense(tensor) => tensor.post(&txn, self.path, params).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        subject.post(&txn, self.path, params).await
-                    }
-                }
-            })
-        }))
-    }
-
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                match self.subject {
-                    Subject::BTree(btree) => btree.delete(&txn, self.path, key).await,
-                    Subject::Table(table) => Public::delete(table, &txn, self.path, key).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Dense(tensor) => tensor.delete(&txn, self.path, key).await,
-                    #[cfg(feature = "tensor")]
-                    Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
-                    Subject::Value(file) if self.path.is_empty() => {
-                        let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
-
-                        *subject = Value::None;
-                        Ok(())
-                    }
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        subject.delete(&txn, self.path, key).await
-                    }
-                }
-            })
-        }))
+        match self {
+            Self::BTree(btree) => btree.route(path),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.route(path),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => sparse.route(path),
+            Self::Table(table) => table.route(path),
+            Self::Tuple(tuple) => tuple.route(path),
+        }
     }
 }
 
