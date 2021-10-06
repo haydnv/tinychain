@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::transform;
@@ -30,7 +30,6 @@ use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
 
-#[allow(unused)]
 mod access;
 mod combine;
 mod table;
@@ -52,6 +51,17 @@ impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A> {
     /// Consume this [`SparseTensor`] and return its accessor.
     pub fn into_inner(self) -> A {
         self.accessor
+    }
+}
+
+impl<FD, FS, D, T, A> Instance for SparseTensor<FD, FS, D, T, A>
+where
+    Self: Send + Sync,
+{
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Sparse
     }
 }
 

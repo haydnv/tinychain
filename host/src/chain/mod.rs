@@ -26,7 +26,7 @@ use crate::collection::{
 };
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
-use crate::state::{State, StateView};
+use crate::state::{State, StateType, StateView};
 use crate::txn::Txn;
 
 pub use block::BlockChain;
@@ -371,6 +371,22 @@ impl Subject {
     }
 }
 
+impl Instance for Subject {
+    type Class = StateType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::BTree(btree) => CollectionType::BTree(btree.class()).into(),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => CollectionType::Tensor(dense.class()).into(),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => CollectionType::Tensor(sparse.class()).into(),
+            Self::Table(table) => CollectionType::Table(table.class()).into(),
+            Self::Tuple(_) => StateType::Tuple,
+        }
+    }
+}
+
 #[async_trait]
 impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
@@ -445,6 +461,20 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
                 .map_ok(StateView::Tuple)
                 .await
             }
+        }
+    }
+}
+
+impl From<Subject> for State {
+    fn from(subject: Subject) -> Self {
+        match subject {
+            Subject::BTree(btree) => State::Collection(btree.into()),
+            #[cfg(feature = "tensor")]
+            Subject::Dense(dense) => State::Collection(dense.into()),
+            #[cfg(feature = "tensor")]
+            Subject::Sparse(sparse) => State::Collection(sparse.into()),
+            Subject::Table(table) => State::Collection(table.into()),
+            Subject::Tuple(tuple) => State::Tuple(tuple.into_iter().map(State::from).collect()),
         }
     }
 }

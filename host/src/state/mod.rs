@@ -18,7 +18,7 @@ use tc_transact::Transaction;
 use tc_value::{Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::*;
+use crate::chain::{self, Chain, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -557,6 +557,12 @@ impl From<Tuple<State>> for State {
 impl From<Tuple<Scalar>> for State {
     fn from(tuple: Tuple<Scalar>) -> Self {
         Self::Scalar(tuple.into())
+    }
+}
+
+impl From<Tuple<chain::Subject>> for State {
+    fn from(tuple: Tuple<chain::Subject>) -> Self {
+        Self::Tuple(tuple.into_iter().map(Self::from).collect())
     }
 }
 

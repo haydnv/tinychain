@@ -48,7 +48,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.get(&txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
-                    Subject::Tuple(tuple) => todo!(),
+                    Subject::Tuple(tuple) => Public::get(tuple, &txn, self.path, key).await,
                 }
             })
         }))
@@ -67,7 +67,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.put(&txn, self.path, key, value).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.put(&txn, self.path, key, value).await,
-                    Subject::Tuple(tuple) => todo!(),
+                    Subject::Tuple(tuple) => tuple.put(&txn, self.path, key, value).await,
                 }
             })
         }))
@@ -87,7 +87,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.post(&txn, self.path, params).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
-                    Subject::Tuple(tuple) => todo!(),
+                    Subject::Tuple(tuple) => tuple.post(&txn, self.path, params).await,
                 }
             })
         }))
@@ -106,7 +106,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.delete(&txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
-                    Subject::Tuple(tuple) => todo!(),
+                    Subject::Tuple(tuple) => tuple.delete(&txn, self.path, key).await,
                 }
             })
         }))

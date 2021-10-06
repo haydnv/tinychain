@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
@@ -88,6 +88,17 @@ where
         )?;
 
         Ok(DenseTensor::from(blocks))
+    }
+}
+
+impl<FD, FS, D, T, B> Instance for DenseTensor<FD, FS, D, T, B>
+where
+    Self: Send + Sync,
+{
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Dense
     }
 }
 
