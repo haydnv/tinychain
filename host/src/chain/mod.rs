@@ -12,6 +12,8 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Column};
 use tc_error::*;
+#[cfg(feature = "tensor")]
+use tc_tensor::TensorPersist;
 use tc_transact::fs::{Dir, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
@@ -435,7 +437,42 @@ impl de::FromStream for Subject {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        Err(de::Error::custom("not implemented: decode a Chain subject"))
+        let state = State::from_stream(txn, decoder).await?;
+        from_state(state)
+    }
+}
+
+fn from_state<E: de::Error>(state: State) -> Result<Subject, E> {
+    const ERR_INVALID: &str =
+        "a Chain subject (must be a collection like a BTree, Table, or Tensor";
+
+    match state {
+        State::Collection(collection) => match collection {
+            Collection::BTree(BTree::File(btree)) => Ok(Subject::BTree(btree)),
+            Collection::Table(Table::Table(table)) => Ok(Subject::Table(table)),
+            #[cfg(feature = "tensor")]
+            Collection::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => dense
+                    .as_persistent()
+                    .map(Subject::Dense)
+                    .ok_or_else(|| de::Error::invalid_type("a Dense tensor view", ERR_INVALID)),
+
+                Tensor::Sparse(sparse) => sparse
+                    .as_persistent()
+                    .map(Subject::Sparse)
+                    .ok_or_else(|| de::Error::invalid_type("a Sparse tensor view", ERR_INVALID)),
+            },
+            other => Err(de::Error::invalid_type(other, ERR_INVALID)),
+        },
+        State::Tuple(tuple) => {
+            let subject = tuple
+                .into_iter()
+                .map(from_state)
+                .collect::<Result<Tuple<Subject>, E>>()?;
+
+            Ok(Subject::Tuple(subject))
+        }
+        other => Err(de::Error::invalid_type(other.class(), ERR_INVALID)),
     }
 }
 
@@ -453,13 +490,11 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
             #[cfg(feature = "tensor")]
             Self::Sparse(tensor) => State::from(Tensor::from(tensor)).into_view(txn).await,
             Self::Tuple(tuple) => {
-                try_join_all(
-                    tuple
-                        .into_iter()
-                        .map(|subject| subject.into_view(txn.clone())),
-                )
-                .map_ok(StateView::Tuple)
-                .await
+                let views = tuple
+                    .into_iter()
+                    .map(|subject| subject.into_view(txn.clone()));
+
+                try_join_all(views).map_ok(StateView::Tuple).await
             }
         }
     }
