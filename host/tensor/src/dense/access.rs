@@ -17,15 +17,11 @@ use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::{
-    transform, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF,
-    ERR_NAN,
-};
+use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF, ERR_NAN};
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
 use super::{DenseTensor, PER_BLOCK};
-use std::fmt::{Formatter, Write};
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
@@ -712,7 +708,7 @@ where
 
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
-            let combinator = (self.combinator);
+            let combinator = self.combinator;
             let right = self.other;
 
             let left = self.source.block_stream(txn).await?;

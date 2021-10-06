@@ -26,11 +26,11 @@ use super::{
     TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
+use crate::TensorPersist;
 use access::*;
 pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
 
-#[allow(unused)]
 mod access;
 mod file;
 mod stream;
@@ -142,6 +142,17 @@ where
         BlockListFile::range(file, txn_id, shape.into(), start, stop)
             .map_ok(Self::from)
             .await
+    }
+}
+
+impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>> {
+    type Persistent = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    fn as_persistent(self) -> Option<Self::Persistent> {
+        match self.into_inner() {
+            DenseAccessor::File(file) => Some(file.into()),
+            _ => None,
+        }
     }
 }
 

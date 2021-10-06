@@ -26,6 +26,7 @@ use super::{
     TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
+use crate::TensorPersist;
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
@@ -158,6 +159,17 @@ where
         SparseTable::create(dir, schema, txn_id)
             .map_ok(Self::from)
             .await
+    }
+}
+
+impl<FD, FS, D, T> TensorPersist for SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>> {
+    type Persistent = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
+
+    fn as_persistent(self) -> Option<Self::Persistent> {
+        match self.accessor {
+            SparseAccessor::Table(table) => Some(table.into()),
+            _ => None,
+        }
     }
 }
 

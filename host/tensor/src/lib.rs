@@ -294,6 +294,15 @@ pub trait TensorMathConst {
     fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
+/// Methods to access this [`Tensor`] as a persistent type.
+pub trait TensorPersist: Sized {
+    type Persistent;
+
+    fn as_persistent(self) -> Option<Self::Persistent> {
+        None
+    }
+}
+
 /// [`Tensor`] reduction operations
 pub trait TensorReduce<D: Dir> {
     /// The type of [`Transaction`] to expect
