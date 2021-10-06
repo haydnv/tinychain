@@ -61,7 +61,7 @@ class TestApp(tc.Graph):
         txn.product_ids = self.order_products.forward(txn.order_ids)
         return self.products.read_vector(txn.product_ids)
 
-
+# TODO: test replication between multiple hosts & interaction between multiple apps, including a18n
 class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
