@@ -51,6 +51,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.get(&txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
+                    Subject::Tuple(tuple) => todo!(),
                     Subject::Value(file) => {
                         let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
 
@@ -92,6 +93,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
 
                         Ok(())
                     }
+                    Subject::Tuple(tuple) => todo!(),
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
 
@@ -116,6 +118,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.post(&txn, self.path, params).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
+                    Subject::Tuple(tuple) => todo!(),
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
 
@@ -139,15 +142,14 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.delete(&txn, self.path, key).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
+                    Subject::Tuple(tuple) => todo!(),
                     Subject::Value(file) if self.path.is_empty() => {
                         let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
-
                         *subject = Value::None;
                         Ok(())
                     }
                     Subject::Value(file) => {
                         let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
                         subject.delete(&txn, self.path, key).await
                     }
                 }
