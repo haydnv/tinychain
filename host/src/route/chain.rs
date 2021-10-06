@@ -1,13 +1,10 @@
 use log::debug;
-use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::fs::File;
 use tc_transact::Transaction;
-use tc_value::Value;
-use tcgeneric::{Instance, PathSegment, TCPath};
+use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, ChainType, Subject, SUBJECT};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject};
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
@@ -52,15 +49,6 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.get(&txn, self.path, key).await,
                     Subject::Tuple(tuple) => todo!(),
-                    Subject::Value(file) => {
-                        let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        if self.path.is_empty() {
-                            Ok(value.clone().into())
-                        } else {
-                            value.get(&txn, self.path, key).await
-                        }
-                    }
                 }
             })
         }))
@@ -79,26 +67,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     Subject::Dense(tensor) => tensor.put(&txn, self.path, key, value).await,
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.put(&txn, self.path, key, value).await,
-                    Subject::Value(file) if self.path.is_empty() => {
-                        let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
-
-                        let value = Value::try_cast_from(value, |s| {
-                            TCError::bad_request(
-                                format!("invalid Value {} for Chain subject, expected", s),
-                                subject.class(),
-                            )
-                        })?;
-
-                        *subject = value;
-
-                        Ok(())
-                    }
                     Subject::Tuple(tuple) => todo!(),
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        subject.put(&txn, self.path, key, value).await
-                    }
                 }
             })
         }))
@@ -119,11 +88,6 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.post(&txn, self.path, params).await,
                     Subject::Tuple(tuple) => todo!(),
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-
-                        subject.post(&txn, self.path, params).await
-                    }
                 }
             })
         }))
@@ -143,15 +107,6 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
                     #[cfg(feature = "tensor")]
                     Subject::Sparse(tensor) => tensor.delete(&txn, self.path, key).await,
                     Subject::Tuple(tuple) => todo!(),
-                    Subject::Value(file) if self.path.is_empty() => {
-                        let mut subject = file.write_block(*txn.id(), SUBJECT.into()).await?;
-                        *subject = Value::None;
-                        Ok(())
-                    }
-                    Subject::Value(file) => {
-                        let subject = file.read_block(*txn.id(), SUBJECT.into()).await?;
-                        subject.delete(&txn, self.path, key).await
-                    }
                 }
             })
         }))

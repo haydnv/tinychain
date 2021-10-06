@@ -1,6 +1,6 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 
@@ -12,9 +12,9 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeType, Column};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist, Restore, Store};
+use tc_transact::fs::{Dir, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{Link, Value, ValueType};
+use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::collection::{
@@ -43,11 +43,7 @@ const CHAIN: Label = label("chain");
 const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
-/// The name of the file containing a [`Chain`]'s [`Subject`]'s data.
-pub const SUBJECT: Label = label("subject");
-
-/// The file extension of a directory of [`ChainBlock`]s on disk.
-pub const EXT: &str = "chain";
+const SUBJECT: Label = label("subject");
 
 /// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
 #[derive(Clone)]
@@ -59,7 +55,6 @@ pub enum Schema {
     #[cfg(feature = "tensor")]
     Sparse(tc_tensor::Schema),
     Tuple(Tuple<Schema>),
-    Value(Value),
 }
 
 impl Schema {
@@ -118,7 +113,6 @@ impl Schema {
                 .map(|scalar| Schema::from_scalar(scalar))
                 .collect::<TCResult<Tuple<Schema>>>()
                 .map(Schema::Tuple),
-            Scalar::Value(value) => Ok(Self::Value(value)),
             other => Err(TCError::bad_request("invalid Chain schema", other)),
         }
     }
@@ -156,7 +150,6 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.end()
             }
             Self::Tuple(tuple) => tuple.into_stream(encoder),
-            Self::Value(value) => value.into_stream(encoder),
         }
     }
 }
@@ -165,12 +158,11 @@ impl fmt::Display for Schema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(schema) => write!(f, "{}", Tuple::<&Column>::from_iter(schema)),
-            Self::Table(schema) => fmt::Display::fmt(schema, f),
-            Self::Value(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Dense(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Sparse(schema) => fmt::Display::fmt(schema, f),
+            Self::Table(schema) => fmt::Display::fmt(schema, f),
             Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
     }
@@ -186,7 +178,6 @@ pub enum Subject {
     #[cfg(feature = "tensor")]
     Sparse(SparseTensor<SparseTable>),
     Tuple(Tuple<Subject>),
-    Value(fs::File<Value>),
 }
 
 impl Subject {
@@ -194,21 +185,6 @@ impl Subject {
     pub fn create<'a>(schema: Schema, dir: &'a fs::Dir, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
             match schema {
-                Schema::Value(value) => {
-                    let file: fs::File<Value> = dir
-                        .create_file(txn_id, SUBJECT.into(), value.class())
-                        .await?;
-
-                    file.create_block(txn_id, SUBJECT.into(), value.clone(), BLOCK_SIZE)
-                        .await?;
-
-                    Ok(Self::Value(file))
-                }
-                Schema::Table(schema) => {
-                    TableIndex::create(dir, schema, txn_id)
-                        .map_ok(Self::Table)
-                        .await
-                }
                 #[cfg(feature = "tensor")]
                 Schema::Dense(schema) => {
                     let file = dir
@@ -227,6 +203,11 @@ impl Subject {
                         .await?;
 
                     Ok(tensor)
+                }
+                Schema::Table(schema) => {
+                    TableIndex::create(dir, schema, txn_id)
+                        .map_ok(Self::Table)
+                        .await
                 }
                 Schema::Tuple(schema) => {
                     try_join_all(
@@ -313,13 +294,6 @@ impl Subject {
                     .map_ok(Self::Tuple)
                     .await
                 }
-                Schema::Value(value) => {
-                    if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
-                        Ok(Self::Value(file))
-                    } else {
-                        Self::create(Schema::Value(value), dir, *txn.id()).await
-                    }
-                }
             }
         })
     }
@@ -333,12 +307,6 @@ impl Subject {
                         btree.restore(&backup, txn_id).await
                     }
                     other => Err(TCError::bad_request("cannot restore a BTree from", other)),
-                },
-                Self::Table(table) => match backup {
-                    State::Collection(Collection::Table(Table::Table(backup))) => {
-                        table.restore(&backup, txn_id).await
-                    }
-                    other => Err(TCError::bad_request("cannot restore a Table from", other)),
                 },
                 #[cfg(feature = "tensor")]
                 Self::Dense(tensor) => match backup {
@@ -370,6 +338,12 @@ impl Subject {
                         other,
                     )),
                 },
+                Self::Table(table) => match backup {
+                    State::Collection(Collection::Table(Table::Table(backup))) => {
+                        table.restore(&backup, txn_id).await
+                    }
+                    other => Err(TCError::bad_request("cannot restore a Table from", other)),
+                },
                 Self::Tuple(tuple) => match backup {
                     State::Tuple(backup) if backup.len() == tuple.len() => {
                         let restores =
@@ -392,12 +366,6 @@ impl Subject {
                         tuple, backup
                     ))),
                 },
-                Self::Value(file) => {
-                    let backup = backup.try_into()?;
-                    let mut block = file.write_block(txn_id, SUBJECT.into()).await?;
-                    *block = backup;
-                    Ok(())
-                }
             }
         })
     }
@@ -423,7 +391,6 @@ impl Transact for Subject {
                 )
                 .await;
             }
-            Self::Value(file) => file.commit(txn_id).await,
         }
     }
 
@@ -443,7 +410,6 @@ impl Transact for Subject {
                 }))
                 .await;
             }
-            Self::Value(file) => file.finalize(txn_id).await,
         }
     }
 }
@@ -453,19 +419,7 @@ impl de::FromStream for Subject {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let value = Value::from_stream((), decoder).await?;
-
-        let file: fs::File<Value> = txn
-            .context()
-            .create_file(*txn.id(), SUBJECT.into(), value.class())
-            .map_err(de::Error::custom)
-            .await?;
-
-        file.create_block(*txn.id(), SUBJECT.into(), value, BLOCK_SIZE)
-            .map_err(de::Error::custom)
-            .await?;
-
-        Ok(Self::Value(file))
+        Err(de::Error::custom("not implemented: decode a Chain subject"))
     }
 }
 
@@ -491,10 +445,6 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
                 .map_ok(StateView::Tuple)
                 .await
             }
-            Self::Value(file) => {
-                let value = file.read_block(*txn.id(), SUBJECT.into()).await?;
-                State::from(value.clone()).into_view(txn).await
-            }
         }
     }
 }
@@ -509,7 +459,6 @@ impl fmt::Display for Subject {
             #[cfg(feature = "tensor")]
             Self::Sparse(_) => write!(f, "chain Subject, {}", TensorType::Sparse),
             Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
-            Self::Value(_) => write!(f, "chain Subject, {}", ValueType::Value),
         }
     }
 }
