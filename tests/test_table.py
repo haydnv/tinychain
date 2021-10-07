@@ -6,9 +6,8 @@ from num2words import num2words
 from testutils import PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
-SCHEMA = (
-    tc.schema.Table([tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
-)
+SCHEMA = tc.table.Schema(
+    [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
 
 
 class TableTests(unittest.TestCase):
@@ -22,7 +21,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
         cxt.result = cxt.table.aggregate(["views"], lambda group: tc.Tuple(group.count()))
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -30,7 +29,7 @@ class TableTests(unittest.TestCase):
 
     def testCreate(self):
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.result = tc.After(cxt.table.insert(("name",), (0,)), cxt.table.count())
 
         count = self.host.post(ENDPOINT, cxt)
@@ -42,7 +41,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.delete = tc.After(cxt.inserts, cxt.table.delete())
         cxt.result = tc.After(cxt.delete, cxt.table)
@@ -57,7 +56,7 @@ class TableTests(unittest.TestCase):
         remaining = sorted([k + v for k, v in zip(keys, values) if v[0] >= 40])
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.delete = tc.After(cxt.inserts, cxt.table.delete(tc.Map(views=slice(40))))
         cxt.result = tc.After(cxt.delete, cxt.table)
@@ -71,7 +70,7 @@ class TableTests(unittest.TestCase):
         keys = [[num2words(i)] for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
         cxt.update = cxt.table.update({"views": 0}, {"views": slice(10)})
         cxt.result = tc.After(cxt.update, cxt.table.where({"views": slice(1)}).count())
 
@@ -84,7 +83,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
 
@@ -97,7 +96,7 @@ class TableTests(unittest.TestCase):
             random.shuffle(keys)
 
             cxt = tc.Context()
-            cxt.table = tc.Table(SCHEMA)
+            cxt.table = tc.table.Table(SCHEMA)
             cxt.inserts = [
                 cxt.table.insert((num2words(i),), (i,))
                 for i in keys]
@@ -113,7 +112,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.limit(1))
 
@@ -128,7 +127,7 @@ class TableTests(unittest.TestCase):
         rows = list(reversed([list(k + v) for k, v in zip(keys, values)]))
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.order_by(["views"], True))
 
@@ -141,13 +140,13 @@ class TableTests(unittest.TestCase):
         keys = [[num2words(i)] for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.select(["name"]))
 
         expected = {
-            str(tc.uri(tc.Table)): [
-                tc.to_json(tc.schema.Table([tc.Column("name", tc.String, 512)])),
+            str(tc.uri(tc.table.Table)): [
+                tc.to_json(tc.table.Schema([tc.Column("name", tc.String, 512)])),
                 list(sorted(keys))
             ]
         }
@@ -162,7 +161,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.where({"name": "one"}))
 
@@ -175,7 +174,7 @@ class TableTests(unittest.TestCase):
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(SCHEMA)
+        cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.After(cxt.inserts, cxt.table.where({"views": slice(10, 20)}))
 
@@ -193,8 +192,7 @@ class SparseTests(unittest.TestCase):
         cls.host = start_host("test_sparse_table")
 
     def testSlice(self):
-        self.maxDiff = None
-        schema = tc.schema.Table([
+        schema = tc.table.Schema([
             tc.Column("0", tc.U64),
             tc.Column("1", tc.U64),
             tc.Column("2", tc.U64),
@@ -214,7 +212,7 @@ class SparseTests(unittest.TestCase):
         ]
 
         cxt = tc.Context()
-        cxt.table = tc.Table(schema)
+        cxt.table = tc.table.Table(schema)
         cxt.inserts = [cxt.table.insert(coord, [value]) for (coord, value) in data]
         cxt.result = tc.After(cxt.inserts, cxt.table.where({
             "0": slice(2),
@@ -241,7 +239,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
 
             def _configure(self):
-                self.table = tc.chain.Block(tc.Table(SCHEMA))
+                self.table = tc.chain.Block(tc.table.Table(SCHEMA))
 
             @tc.delete_method
             def truncate(self):
@@ -316,7 +314,7 @@ class ErrorTest(unittest.TestCase):
             __uri__ = tc.URI(f"/test/table")
 
             def _configure(self):
-                self.table = tc.chain.Block(tc.Table(SCHEMA))
+                self.table = tc.chain.Block(tc.table.Table(SCHEMA))
 
         self.host = start_host("table_error", [Persistent])
 
@@ -330,7 +328,7 @@ class ErrorTest(unittest.TestCase):
 
 
 def expected(schema, rows):
-    return {str(tc.uri(tc.Table)): [tc.to_json(schema), rows]}
+    return {str(tc.uri(tc.table.Table)): [tc.to_json(schema), rows]}
 
 
 if __name__ == "__main__":

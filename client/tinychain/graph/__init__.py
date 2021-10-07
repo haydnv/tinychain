@@ -1,6 +1,6 @@
-from tinychain.chain import Sync
+from tinychain.chain import Chain, Sync
 from tinychain.cluster import Cluster
-from tinychain.collection.schema import Column, Graph as Schema
+from tinychain.collection import Column
 from tinychain.collection.table import Table
 from tinychain.collection.tensor import einsum, Sparse
 from tinychain.error import BadRequest
@@ -10,8 +10,63 @@ from tinychain.state import Map, Tuple
 from tinychain.util import uri, Context, URI
 from tinychain.value import Bool, Nil, I64, U64, String
 
+from .edge import Edge, ForeignKey
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
+
+
+class Schema(object):
+    """A :class:`Graph` schema which comprises a set of :class:`Table` s and edges between :class:`Table` columns."""
+
+    def __init__(self, chain):
+        if not issubclass(chain, Chain):
+            raise ValueError(f"default Chain type must be a subclass of Chain, not {chain}")
+
+        self.chain = chain
+        self.tables = {}
+        self.edges = {}
+
+    def create_table(self, name, schema):
+        """Add a :class:`Table` to this `Graph`."""
+
+        self.tables[name] = schema
+        return self
+
+    def create_edge(self, name, edge):
+        """Add an :class:`Edge` between tables in this `Graph`."""
+
+        assert edge.from_table in self.tables
+        from_table = self.tables[edge.from_table]
+
+        assert edge.to_table in self.tables
+        to_table = self.tables[edge.to_table]
+
+        if from_table.key != [Column(edge.column, U64)]:
+            raise ValueError(f"invalid foreign key column: {edge.from_table}.{edge.column} (key is {from_table.key})")
+
+        [pk] = [col for col in from_table.key if col.name == edge.column]
+
+        if edge.from_table != edge.to_table:
+            if len(to_table.key) != 1:
+                raise ValueError("the primary key of a Graph node type must be a single U64 column, not", to_table.key)
+
+            [fk] = [col for col in to_table.values if col.name == edge.column]
+            if pk != fk:
+                raise ValueError(
+                    f"primary key {edge.from_table}.{pk.name} does not match foreign key {edge.to_table}.{fk.name}")
+
+            has_index = False
+            for (_name, columns) in to_table.indices:
+                if columns and columns[0] == edge.column:
+                    has_index = True
+
+            if not has_index:
+                raise ValueError(f"there is no index on {edge.to_table} to support the foreign key on {edge.column}")
+        elif to_table.key != [pk]:
+            raise ValueError(f"Graph node {edge.to_table} self-reference must be to the primary key, not {edge.column}")
+
+        self.edges[name] = edge
+        return self
 
 
 class Graph(Cluster):
@@ -57,49 +112,6 @@ class Graph(Cluster):
 
         edge = Sparse(Get(uri(self), label))
         return edge.write([from_node, to_node], False)
-
-
-class Edge(Sparse):
-    """A relationship between a primary key and itself."""
-
-    def match(self, node_ids, degrees):
-        """
-        Traverse this `Edge` breadth-first from the given `node_ids` for the given number of `degrees`.
-
-        Returns a new vector filled with the IDs of the matched nodes.
-        """
-
-        @post_op
-        def cond(i: U64):
-            return i < degrees
-
-        @post_op
-        def traverse(edge: Sparse, i: U64, neighbors: Sparse):
-            neighbors += Sparse.sum(edge * neighbors, 1)
-            return {"edge": edge, "i": i + 1, "neighbors": neighbors.copy()}
-
-        node_ids = Sparse(node_ids)
-        shape = node_ids.shape()
-        traversal = If(
-            shape.eq([I64.max()]),
-            While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
-            BadRequest(f"an edge input vector has shape [{I64.max()}], not {{shape}}", shape=shape))
-
-        return Sparse.sub(Map(traversal)["neighbors"], node_ids)
-
-
-class ForeignKey(Sparse):
-    """A relationship between a primary key and a column in another `Table`."""
-
-    def backward(self, node_ids):
-        """Return a vector of primary node IDs, given a vector of foreign node IDs."""
-
-        return einsum("ij,j->i", [self, node_ids])
-
-    def forward(self, node_ids):
-        """Return a vector of foreign node IDs, given a vector of primary node IDs."""
-
-        return einsum("ij,i->j", [self, node_ids])
 
 
 def graph_table(graph, schema, table_name):

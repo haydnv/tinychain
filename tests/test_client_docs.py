@@ -118,11 +118,11 @@ class ClientDocTests(unittest.TestCase):
         @tc.post_op
         def num_rows(txn):
             max_len = 100
-            schema = tc.schema.Table(
+            schema = tc.table.Schema(
                 [tc.Column("user_id", tc.Number)],
                 [tc.Column("name", tc.String, max_len), tc.Column("email", tc.String, max_len)])
 
-            txn.table = tc.Table(schema)
+            txn.table = tc.table.Table(schema)
             txn.insert = txn.table.insert((123,), ("Bob", "bob.roberts@example.com"))
             return tc.After(
                 txn.insert,

@@ -3,11 +3,30 @@ from tinychain.decorators import closure, delete_op, get_op, post_op
 from tinychain.error import BadRequest
 from tinychain.ref import Delete, If, Ref
 from tinychain.state import Map, Tuple, State, Stream
-from tinychain.util import form_of, uri, Context, URI
+from tinychain.util import form_of, to_json, uri, Context, URI
 from tinychain.value import Bool, UInt, Nil
 
 from .collection import Collection
 from .bound import Range
+
+
+class Schema(object):
+    """A `Table` schema which comprises a primary key and value :class:`Column` s."""
+
+    def __init__(self, key, values=[]):
+        self.key = key
+        self.values = values
+        self.indices = []
+
+    def __json__(self):
+        return to_json([[self.key, self.values], Tuple(self.indices)])
+
+    def columns(self):
+        return self.key + self.values
+
+    def create_index(self, name, columns):
+        self.indices.append((name, columns))
+        return self
 
 
 class Table(Collection):

@@ -7,7 +7,7 @@ from testutils import PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
-SCHEMA = tc.schema.BTree(tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
+SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
 
 
 class BTreeTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class BTreeTests(unittest.TestCase):
 
     def testCreate(self):
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
+        cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.result = tc.After(cxt.tree.insert((1, "one")), cxt.tree.count())
 
         count = self.host.post(ENDPOINT, cxt)
@@ -29,7 +29,7 @@ class BTreeTests(unittest.TestCase):
             random.shuffle(keys)
 
             cxt = tc.Context()
-            cxt.tree = tc.BTree(SCHEMA)
+            cxt.tree = tc.btree.BTree(SCHEMA)
             cxt.inserts = [
                 cxt.tree.insert((i, num2words(i)))
                 for i in keys]
@@ -43,7 +43,7 @@ class BTreeTests(unittest.TestCase):
         keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
+        cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.After(cxt.inserts, cxt.tree[(1,)])
 
@@ -54,7 +54,7 @@ class BTreeTests(unittest.TestCase):
         keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
+        cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.After(cxt.inserts, cxt.tree.reverse())
 
@@ -65,7 +65,7 @@ class BTreeTests(unittest.TestCase):
         keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
+        cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.After(cxt.inserts, cxt.tree[29:32])
 
@@ -76,7 +76,7 @@ class BTreeTests(unittest.TestCase):
         keys = [(i, num2words(i)) for i in range(100)]
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree(SCHEMA)
+        cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.delete = tc.After(cxt.inserts, cxt.tree.delete())
         cxt.result = tc.After(cxt.delete, cxt.tree)
@@ -91,7 +91,7 @@ class BTreeTests(unittest.TestCase):
         random.shuffle(keys)
 
         cxt = tc.Context()
-        cxt.tree = tc.BTree.load(SCHEMA, ordered)
+        cxt.tree = tc.btree.BTree.load(SCHEMA, ordered)
         cxt.delete = cxt.tree.delete([slice(25, 35)])
         cxt.result = tc.After(cxt.delete, cxt.tree)
 
@@ -111,7 +111,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/btree")
 
             def _configure(self):
-                self.tree = chain_type(tc.BTree(SCHEMA))
+                self.tree = chain_type(tc.btree.BTree(SCHEMA))
 
         return Persistent
 
@@ -152,7 +152,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
 
 def expected(rows):
-    return {str(tc.uri(tc.BTree)): [tc.to_json(SCHEMA), rows]}
+    return {str(tc.uri(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}
 
 
 if __name__ == "__main__":

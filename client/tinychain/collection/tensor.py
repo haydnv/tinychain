@@ -2,12 +2,26 @@
 
 from tinychain import ref
 from tinychain.state import Map, State, Stream, Tuple
-from tinychain.util import form_of, uri, URI
+from tinychain.util import form_of, to_json, uri, URI
 from tinychain.value import Bool, I16, F32, Number
 
-from . import schema
 from .bound import Range
 from .collection import Collection
+
+
+class Schema(object):
+    """
+    A `Tensor` schema which comprises a shape and data type.
+
+    The data type must be a subclass of `Number` and defaults to `F32`.
+    """
+
+    def __init__(self, shape, dtype=F32):
+        self.shape = shape
+        self.dtype = dtype
+
+    def __json__(self):
+        return to_json([self.shape, self.dtype])
 
 
 class Tensor(Collection):
@@ -30,7 +44,7 @@ class Tensor(Collection):
                 dense = tc.tensor.Dense.load([2, 3, 4], tc.i32, values)
         """
 
-        return super().load(schema.Tensor(shape, dtype), data)
+        return super().load(Schema(shape, dtype), data)
 
     def __getitem__(self, bounds):
         bounds = _handle_bounds(bounds)
@@ -304,7 +318,7 @@ class Sparse(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls(schema.Tensor(shape, dtype))
+        return cls(Schema(shape, dtype))
 
     def elements(self, bounds=None):
         """Return a :class:`Stream` of this tensor's (:class:`Tuple`, :class:`Number`) coordinate-value elements."""

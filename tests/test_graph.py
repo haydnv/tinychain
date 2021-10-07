@@ -4,30 +4,30 @@ import unittest
 from testutils import start_host
 
 
-class TestApp(tc.Graph):
+class TestGraph(tc.graph.Graph):
     __uri__ = tc.URI("/test/graph")
 
     def _schema(self):
-        users = tc.schema.Table(
+        users = tc.table.Schema(
             [tc.Column("user_id", tc.U64)],
             [tc.Column("email", tc.String, 320), tc.Column("display_name", tc.String, 100)])
 
-        products = tc.schema.Table(
+        products = tc.table.Schema(
             [tc.Column("sku", tc.U64)],
             [tc.Column("name", tc.String, 256), tc.Column("price", tc.U32)])
 
-        orders = tc.schema.Table(
+        orders = tc.table.Schema(
             [tc.Column("order_id", tc.U64)],
             [tc.Column("user_id", tc.U64), tc.Column("sku", tc.U64), tc.Column("quantity", tc.U32)]
         ).create_index("user", ["user_id"]).create_index("product", ["sku"])
 
-        schema = (tc.schema.Graph(tc.chain.Block)
+        schema = (tc.graph.Schema(tc.chain.Block)
                   .create_table("users", users)
                   .create_table("products", products)
                   .create_table("orders", orders)
-                  .create_edge("friends", tc.schema.Edge("users.user_id", "users.user_id"))
-                  .create_edge("order_products", tc.schema.Edge("products.sku", "orders.sku"))
-                  .create_edge("user_orders", tc.schema.Edge("users.user_id", "orders.user_id")))
+                  .create_edge("friends", tc.graph.edge.Schema("users.user_id", "users.user_id"))
+                  .create_edge("order_products", tc.graph.edge.Schema("products.sku", "orders.sku"))
+                  .create_edge("user_orders", tc.graph.edge.Schema("users.user_id", "orders.user_id")))
 
         return schema
 
@@ -61,13 +61,14 @@ class TestApp(tc.Graph):
         txn.product_ids = self.order_products.forward(txn.order_ids)
         return self.products.read_vector(txn.product_ids)
 
+
 # TODO: test replication between multiple hosts & interaction between multiple apps, including a18n
-class AppTests(unittest.TestCase):
+class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_app", [TestApp], overwrite=True, cache_size="1G")
+        cls.host = start_host("test_app", [TestGraph], overwrite=True, cache_size="1G")
 
-    def testGraphTraversal(self):
+    def testTraversal(self):
         user1 = {"email": "user12345@example.com", "display_name": "user 12345"}
         self.host.put("/test/graph/create_user", 12345, user1)
 

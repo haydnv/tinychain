@@ -1,17 +1,16 @@
 import tinychain.chain
 import tinychain.collection.bound as bound
-import tinychain.collection.schema as schema
-import tinychain.collection.tensor as tensor
 import tinychain.error
+import tinychain.graph
+import tinychain.graph.edge
 import tinychain.host
+import tinychain.ml
 import tinychain.op
 import tinychain.ref
 
-from tinychain.app import Graph
 from tinychain.cluster import Cluster, write_cluster
-from tinychain.collection.btree import BTree
-from tinychain.collection.schema import Column
-from tinychain.collection.table import Table
+from tinychain.collection import Column
+from tinychain.collection import btree, table, tensor
 from tinychain.decorators import attribute, closure, delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
 from tinychain.ref import After, Before, Case, If, New, While
 from tinychain.reflect import Meta, Object

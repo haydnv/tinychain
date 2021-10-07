@@ -8,11 +8,11 @@ class Database(tc.Cluster):
     __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/db")
 
     def _configure(self):
-        schema = tc.schema.Table(
+        schema = tc.table.Schema(
             [tc.Column("name", tc.String, 100)],
             [tc.Column("year", tc.UInt), tc.Column("description", tc.String, 1000)])
 
-        self.movies = tc.chain.Block(tc.Table(schema))
+        self.movies = tc.chain.Block(tc.table.Table(schema))
 
     @tc.get_method
     def has_movie(self, name: tc.String):
@@ -23,8 +23,8 @@ class Web(tc.Cluster):
     __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/web")
 
     def _configure(self):
-        schema = tc.schema.BTree(tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt))
-        self.cache = tc.chain.Sync(tc.BTree(schema))
+        schema = tc.btree.Schema((tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt)))
+        self.cache = tc.chain.Sync(tc.btree.BTree(schema))
 
     @tc.get_method
     def views(self, name: tc.String) -> tc.UInt:

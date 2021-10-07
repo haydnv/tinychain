@@ -2,11 +2,15 @@
 
 from tinychain.ref import Ref
 from tinychain.state import Map, State, Stream, Tuple
-from tinychain.util import form_of, uri, URI
+from tinychain.util import form_of, to_json, uri, URI
 from tinychain.value import UInt
 
 from .collection import Collection
 from .bound import Range
+
+
+class Schema(Tuple):
+    """A :class:`BTree` schema which comprises a tuple of :class:`Column` s."""
 
 
 class BTree(Collection):
