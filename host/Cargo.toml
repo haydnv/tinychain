@@ -48,8 +48,8 @@ tc-error = "0.3"
 tc-table = { path = "table" }
 tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact" }
-tc-value = "~0.2.2"
-tcgeneric = "~0.2.3"
+tc-value = { path = "value" }
+tcgeneric = { path = "generic" }
 tokio = { version = "1.12", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uuid = "0.8"
