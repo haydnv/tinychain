@@ -12,11 +12,11 @@ ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = 0.01
 
 
-def create_layer(input_size, output_size):
+def create_layer(input_size, output_size, activation):
     shape = (input_size, output_size)
-    # bias = np.random.random([output_size]).tolist()
+    bias = tc.tensor.Dense.load([output_size], tc.F32, np.random.random([output_size]).tolist())
     weights = tc.tensor.Dense.load(shape, tc.F32, np.random.random(input_size * output_size).tolist())
-    return tc.ml.layer(weights)
+    return tc.ml.layer(weights, bias, activation)
 
 
 class NeuralNetTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class NeuralNetTests(unittest.TestCase):
         ])
         cxt.labels = Dense.load([4], tc.Bool, [False, True, True, False])
 
-        cxt.nn = tc.ml.neural_net([create_layer(2, 2), create_layer(2, 1)])
+        cxt.nn = tc.ml.neural_net([create_layer(2, 2, tc.ml.ReLU()), create_layer(2, 1, tc.ml.Sigmoid())])
 
         cxt.result = cxt.nn.eval(cxt.inputs)
         # import json
@@ -45,7 +45,7 @@ class NeuralNetTests(unittest.TestCase):
         # print(response)
 
         contents = response[str(tc.uri(Dense))]
-        self.assertEqual(contents[0], [[4, 1], str(tc.uri(tc.F32))])
+        self.assertEqual(contents[0], [[4, 1], str(tc.uri(tc.F64))])
         self.assertEqual(len(contents[1]), 4)
 
     @classmethod
