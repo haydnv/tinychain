@@ -90,10 +90,10 @@ fn validate_args<T: TensorAccess>(
         for (label, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
             if let Some(known_dim) = dimensions.get(label) {
                 if *dim != *known_dim {
-                    return Err(TCError::bad_request(
-                        "einsum got inconsistent dimension for axis",
-                        label,
-                    ));
+                    return Err(TCError::unsupported(format!(
+                        "einsum got inconsistent dimension for axis {}: {} vs {}",
+                        label, dim, known_dim
+                    )));
                 }
             } else {
                 dimensions.insert(*label, *dim);

@@ -1,7 +1,7 @@
 from tinychain.ref import Post, Put
 from tinychain.reflect import is_ref
 from tinychain.state import Map, State, Tuple
-from tinychain.util import uri
+from tinychain.util import uri, URI
 
 
 class Collection(State):
@@ -47,7 +47,13 @@ class Collection(State):
         if is_ref(data):
             raise ValueError(f"cannot load data {data} (consider calling `Collection.copy_from` instead)")
 
-        return cls(Put(cls, schema, data))
+        class Load(cls):
+            def __ns__(self, cxt):
+                if not cxt.is_defined(name):
+                    setattr(cxt, name, Put(cls, schema, data))
+
+        name = f"{cls.__name__}_load_{format(id(data), 'x')}"
+        return Load(URI(name))
 
     def copy(self):
         """Return a copy of this `Collection`."""
