@@ -313,10 +313,12 @@ class MethodSubject(object):
         if uri(self):
             return
 
+        deanonymize(self.subject, cxt)
+
         name = f"{self.subject.__class__.__name__}_{format(id(self.subject), 'x')}"
         self.__uri__ = URI(name).append(self.method_name)
 
-        if name not in cxt.form:
+        if not cxt.is_defined(name):
             setattr(cxt, name, self.subject)
 
     def __json__(self):

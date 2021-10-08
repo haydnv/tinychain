@@ -38,6 +38,9 @@ class Meta(type):
             elif hasattr(attr, "accessor"):
                 if attr.accessor:
                     continue
+            elif inspect.ismethod(attr) and attr.__self__ is cls:
+                # it's a @classmethod
+                continue
 
             if isinstance(attr, Attribute):
                 setattr(header, name, attr.method(instance, name))
@@ -61,6 +64,9 @@ class Meta(type):
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
                         continue
+            elif inspect.ismethod(attr) and attr.__self__ is cls:
+                # it's a @classmethod
+                continue
 
             if isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(header, name))
