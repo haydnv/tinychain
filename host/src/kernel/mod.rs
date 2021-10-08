@@ -12,7 +12,7 @@ use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
-use crate::object::InstanceExt;
+use crate::object::{InstanceClass, InstanceExt};
 use crate::route::{Public, Static};
 use crate::scalar::{OpRefType, Scalar, ScalarType};
 use crate::state::{State, StateType};
@@ -169,9 +169,26 @@ impl Kernel {
             }
         } else if path == &hypothetical::PATH[..] {
             self.hypothetical.execute(txn, data).await
-        } else if let Some(class) = StateType::from_path(path) {
-            let params = data.try_into()?;
-            class.post(txn, path, params).await
+        } else if StateType::from_path(path).is_some() {
+            let extends = Link::from(TCPathBuf::from(path.to_vec()));
+
+            let proto =
+                data.try_into_map(|state| TCError::bad_request("invalid class prototype", state))?;
+
+            let proto = proto
+                .into_iter()
+                .map(|(key, state)| {
+                    state
+                        .try_cast_into(|s| {
+                            TCError::bad_request("Class prototype member must be a Scalar, not", s)
+                        })
+                        .map(|scalar| (key, scalar))
+                })
+                .collect::<TCResult<_>>()?;
+
+            Ok(State::Object(
+                InstanceClass::new(Some(extends), proto).into(),
+            ))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params: Map<State> = data.try_into()?;
 

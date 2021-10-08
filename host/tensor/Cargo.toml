@@ -25,7 +25,7 @@ safecast = "~0.1.2"
 strided = "~0.2.9"
 tc-btree = { path = "../btree" }
 tc-error = { version = "0.3", features = ["tensor"] }
-tc-value = "~0.2.2"
+tc-value = { path = "../value" }
 tc-table = { path = "../table" }
 tc-transact = { path = "../transact", features = ["tensor"] }
-tcgeneric = "~0.2.3"
+tcgeneric = { path = "../generic" }

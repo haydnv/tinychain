@@ -233,6 +233,7 @@ impl State {
                 .into_iter()
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
                 .collect()),
+
             other => Err((err)(other)),
         }
     }

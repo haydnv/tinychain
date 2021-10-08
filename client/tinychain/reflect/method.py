@@ -42,11 +42,11 @@ class Get(Method):
     __uri__ = uri(op.Get)
 
     def __init__(self, header, form, name):
-        self.rtype = _get_rtype(form, State)
         Method.__init__(self, header, form, name)
 
     def __call__(self, key=None):
-        return self.rtype(ref.Get(self.subject(), key))
+        rtype = _get_rtype(self.form, State)
+        return rtype(ref.Get(self.subject(), key))
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -122,18 +122,13 @@ class Put(Method):
 class Post(Method):
     __uri__ = uri(op.Post)
 
-    def __init__(self, header, form, name):
-        self.rtype = _get_rtype(form, State)
-        Method.__init__(self, header, form, name)
-
     def __call__(self, params=None, **kwargs):
         if params is None:
             params = kwargs
         elif kwargs:
             raise ValueError("Post method takes a single argument called `params`, or kwargs, not both")
 
-        rtype = inspect.signature(self.form).return_annotation
-        rtype = resolve_class(self.form, rtype, Nil)
+        rtype = _get_rtype(self.form, State)
         return rtype(ref.Post(self.subject(), params))
 
     def __form__(self):

@@ -68,6 +68,10 @@ class Tests(unittest.TestCase):
         self.execute('ij,jk->k', A, B)
         self.execute('ij,jk->', A, B)
 
+        A = np.array([[1], [2], [3], [4]])
+        B = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+        self.execute("kj,ki->ij", A, B)
+
     def test3DMulti(self):
         A = np.array([[1, 1, 1],
                       [2, 2, 2],

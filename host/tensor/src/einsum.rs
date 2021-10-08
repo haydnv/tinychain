@@ -5,6 +5,7 @@ use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
+use tcgeneric::Tuple;
 
 use super::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
 
@@ -40,21 +41,29 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
 
     let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
     for f_input in &f_inputs {
-        let labels: HashSet<char> = f_input.iter().cloned().collect();
-        if labels.len() != f_input.len() {
-            return Err(TCError::bad_request(
-                "duplicate label in einsum format",
-                f_input.iter().cloned().collect::<String>(),
-            ));
-        }
+        let mut invalid_labels = f_input
+            .iter()
+            .filter(|l| !valid_labels.contains(l))
+            .peekable();
 
-        let invalid_labels = labels.difference(&valid_labels).cloned().collect::<Label>();
-        if !invalid_labels.is_empty() {
+        if invalid_labels.peek().is_some() {
             return Err(TCError::bad_request(
                 "invalid labels in einsum format",
-                invalid_labels.into_iter().collect::<String>(),
+                invalid_labels.collect::<Tuple<&char>>(),
             ));
         }
+    }
+
+    let mut invalid_labels = f_output
+        .iter()
+        .filter(|l| !valid_labels.contains(l))
+        .peekable();
+
+    if invalid_labels.peek().is_some() {
+        return Err(TCError::bad_request(
+            "invalid labels in einsum format",
+            invalid_labels.collect::<Tuple<&char>>(),
+        ));
     }
 
     Ok((f_inputs, f_output))
@@ -90,10 +99,10 @@ fn validate_args<T: TensorAccess>(
         for (label, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
             if let Some(known_dim) = dimensions.get(label) {
                 if *dim != *known_dim {
-                    return Err(TCError::bad_request(
-                        "einsum got inconsistent dimension for axis",
-                        label,
-                    ));
+                    return Err(TCError::unsupported(format!(
+                        "einsum got inconsistent dimension for axis {}: {} vs {}",
+                        label, dim, known_dim
+                    )));
                 }
             } else {
                 dimensions.insert(*label, *dim);
@@ -202,9 +211,11 @@ where
         assert_eq!(f_input.len(), op.ndim());
 
         if !f_output.contains(&f_input[axis]) {
+            debug!("einsum will contract over axis {}", f_input[axis]);
             op = op.sum(axis)?;
             f_input.remove(axis);
         } else {
+            assert!(f_input.contains(&f_output[axis]));
             axis += 1;
         }
     }
@@ -218,6 +229,7 @@ where
             f_input,
             f_output
         );
+
         let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
         let permutation: Vec<usize> = f_output.iter().map(|l| *source.get(l).unwrap()).collect();
         op.transpose(Some(permutation))

@@ -233,12 +233,12 @@ impl<T: fmt::Display> fmt::Display for Map<T> {
 
         write!(
             f,
-            "{{\n{}\n}}",
+            "{{ {} }}",
             self.inner
                 .iter()
-                .map(|(k, v)| format!("\t{}: {}", k, v))
+                .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<String>>()
-                .join(",\n")
+                .join(", ")
         )
     }
 }

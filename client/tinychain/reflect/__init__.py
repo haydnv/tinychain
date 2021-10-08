@@ -3,13 +3,33 @@ import inspect
 from pydoc import locate
 
 from tinychain.state import Class, Instance, Map, State
-from tinychain.util import form_of, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, to_json, uri, URI
 
 from .meta import gen_headers, Meta
 
 
 class Object(Class, metaclass=Meta):
-    pass
+    def __init__(self, form=None):
+        self.class_uri = uri(self.__class__)
+        super().__init__(form)
+
+    def __json__(self):
+        form = form_of(self)
+        if is_ref(form):
+            return to_json(form)
+        else:
+            return {str(self.class_uri): to_json(form)}
+
+    def __ns__(self, cxt):
+        deanonymize(super(), cxt)
+
+        if uri(self.__class__) == uri(Class):
+            name = f"Class_{self.__class__.__name__}_{format(id(self.__class__), 'x')}"
+
+            if not cxt.is_defined(name):
+                setattr(cxt, name, self.__class__)
+
+            self.class_uri = URI(name)
 
 
 def _get_rtype(fn, default_rtype):

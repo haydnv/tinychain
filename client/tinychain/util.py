@@ -66,6 +66,9 @@ class Context(object):
         else:
             self.form[name] = state
 
+    def is_defined(self, name):
+        return name in self.form
+
 
 def form_of(state):
     """Return the form of the given state."""
