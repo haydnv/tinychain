@@ -37,7 +37,7 @@ class NeuralNetTests(unittest.TestCase):
 
         cxt.nn = tc.ml.neural_net([create_layer(2, 2, tc.ml.ReLU()), create_layer(2, 1, tc.ml.Sigmoid())])
 
-        cxt.result = cxt.nn.eval(cxt.inputs)
+        cxt.result = cxt.nn.train(cxt.inputs, cxt.labels)
         # import json
         # print(json.dumps(tc.to_json(cxt)))
 

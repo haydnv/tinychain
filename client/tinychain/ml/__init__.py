@@ -35,10 +35,17 @@ def layer(weights, bias, activation):
         def eval(self, inputs):
             return activation.forward(einsum("ij,ki->kj", [weights, inputs]) + bias)
 
+        def train_eval(self, inputs):
+            Z = einsum("ij,ki->kj", [weights, inputs]) + bias
+            A = activation.forward(Z)
+            return A, Z
+
     return Layer(weights)
 
 
 def neural_net(layers):
+    num_layers = len(layers)
+
     class NeuralNet(Tuple):
         def eval(self, inputs):
             state = layers[0].eval(inputs)
@@ -46,5 +53,18 @@ def neural_net(layers):
                 state = layers[i].eval(state)
 
             return state
+
+        def train(self, inputs, labels):
+            A = [inputs]
+            Z = [None]
+
+            for layer in layers:
+                A_l, Z_l = layer.train_eval(A[-1])
+                A.append(A_l)
+                Z.append(Z_l)
+
+            error = (A[-1] - labels.expand_dims())**2
+
+            return error
 
     return NeuralNet(layers)
