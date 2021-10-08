@@ -238,9 +238,14 @@ class Tensor(Collection):
         return self._get("transpose", permutation, self.__class__)
 
     def write(self, bounds, value):
-        """Write a `Tensor` or `Number` to the given slice of this one."""
+        """Write a `Tensor` or `Number` to the given slice of this one, broadcasting if needed."""
 
         return self.__setitem__(bounds, value)
+
+    def overwrite(self, value):
+        """Overwrite all elements of this `Tensor` with the given `value`, broadcasting if needed."""
+
+        return self.__setitem__(None, value)
 
 
 class Dense(Tensor):

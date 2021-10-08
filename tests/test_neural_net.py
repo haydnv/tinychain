@@ -37,12 +37,10 @@ class NeuralNetTests(unittest.TestCase):
 
         cxt.nn = tc.ml.neural_net([create_layer(2, 2, tc.ml.ReLU()), create_layer(2, 1, tc.ml.Sigmoid())])
 
-        cxt.result = cxt.nn.train(cxt.inputs, cxt.labels)
-        # import json
-        # print(json.dumps(tc.to_json(cxt)))
+        cxt.error = (cxt.nn.eval(cxt.inputs) - cxt.labels.expand_dims())**2
+        cxt.result = tc.After(cxt.nn.train(cxt.inputs, cxt.labels), cxt.error)
 
         response = self.host.post(ENDPOINT, cxt)
-        # print(response)
 
         contents = response[str(tc.uri(Dense))]
         self.assertEqual(contents[0], [[4, 1], str(tc.uri(tc.F64))])
