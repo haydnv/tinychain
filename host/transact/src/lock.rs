@@ -185,8 +185,6 @@ impl<T> TxnLock<T> {
 impl<T: Clone + Send> TxnLock<T> {
     /// Try to acquire a read lock.
     pub fn read(&self, txn_id: TxnId) -> TxnLockReadFuture<T> {
-        debug!("TxnLock::read");
-
         TxnLockReadFuture {
             lock: self.clone(),
             txn_id,
@@ -194,8 +192,6 @@ impl<T: Clone + Send> TxnLock<T> {
     }
 
     fn try_read(&self, txn_id: TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
-        debug!("TxnLock::try_read {} at {}", self.inner.name, txn_id);
-
         let mut state = self.lock_inner("TxnLock::try_read");
         for reserved in state.pending_writes.iter().rev() {
             if reserved > &state.last_commit && reserved < &txn_id {
@@ -226,16 +222,12 @@ impl<T: Clone + Send> TxnLock<T> {
             state.versions.insert(txn_id, version);
         }
 
-        debug!("TxnLock locking {} for read at {}", self.inner.name, txn_id);
-
         *state.readers.entry(txn_id).or_insert(0) += 1;
         Ok(Some(TxnLockReadGuard::new(self.clone(), txn_id)))
     }
 
     /// Try to acquire a write lock.
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        debug!("TxnLock::write");
-
         TxnLockWriteFuture {
             lock: self.clone(),
             txn_id,
@@ -243,8 +235,6 @@ impl<T: Clone + Send> TxnLock<T> {
     }
 
     fn try_write(&self, txn_id: TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        debug!("TxnLock::try_write {} at {}", self.inner.name, txn_id);
-
         let mut state = self.lock_inner("TxnLock::try_write");
 
         if state.last_commit >= txn_id {
