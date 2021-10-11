@@ -22,7 +22,7 @@ def create_layer(input_size, output_size, activation):
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_nn", overwrite=True)
+        cls.host = start_host("test_nn", overwrite=True, cache_size="1G")
 
     def testXOR(self):
         cxt = tc.Context()
@@ -33,12 +33,22 @@ class NeuralNetTests(unittest.TestCase):
             True, False,
             True, True,
         ])
+
         cxt.labels = Dense.load([4], tc.Bool, [False, True, True, False])
 
-        cxt.nn = tc.ml.neural_net([create_layer(2, 2, tc.ml.ReLU()), create_layer(2, 1, tc.ml.Sigmoid())])
+        cxt.layer1 = create_layer(2, 2, tc.ml.ReLU())
+        cxt.layer2 = create_layer(2, 1, tc.ml.Sigmoid())
+        cxt.nn = tc.ml.neural_net([cxt.layer1, cxt.layer2], LEARNING_RATE)
 
-        cxt.error = (cxt.nn.eval(cxt.inputs) - cxt.labels.expand_dims())**2
-        cxt.result = tc.After(cxt.nn.train(cxt.inputs, cxt.labels), cxt.error)
+        @tc.closure
+        @tc.post_op
+        def train(i: tc.UInt):
+            return tc.After(cxt.nn.train(cxt.inputs, cxt.labels), {"i": i + 1})
+
+        cxt.training = tc.While(tc.closure(tc.post_op(lambda i: tc.UInt(i) < 25)), train, {"i": 0})
+
+        error = (cxt.nn.eval(cxt.inputs) - cxt.labels.expand_dims())**2
+        cxt.result = tc.After(cxt.training, error)
 
         response = self.host.post(ENDPOINT, cxt)
 

@@ -16,4 +16,4 @@ from tinychain.ref import After, Before, Case, If, New, While
 from tinychain.reflect import Meta, Object
 from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple
 from tinychain.value import *
-from tinychain.util import form_of, to_json, uri, use, Context, URI
+from tinychain.util import form_of, print_json, to_json, uri, use, Context, URI

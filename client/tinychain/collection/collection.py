@@ -19,11 +19,11 @@ class Collection(State):
             .. code-block:: python
 
                 columns = [tc.Column("first", tc.String, 128), tc.Column("second", tc.String, 128)]
-                row_schema = tc.schema.BTree(*columns)
-                table_schema = tc.schema.Table([columns[0]], [columns[1]])
+                row_schema = tc.btree.Schema(*columns)
+                table_schema = tc.table.Schema([columns[0]], [columns[1]])
 
-                btree = tc.btree.load(row_schema, [["hello", "world"]])
-                table = tc.table.copy_from(table_schema, btree.keys())
+                btree = tc.btree.BTree.load(row_schema, [["hello", "world"]])
+                table = tc.table.Table.copy_from(table_schema, btree.keys())
         """
 
         return cls(Post(uri(cls) + "/copy_from", Map(schema=schema, source=source)))
@@ -42,17 +42,21 @@ class Collection(State):
         """
 
         if is_ref(schema):
-            raise ValueError(f"cannot load schema {schema} (consider calling `Collection.copy_from` instead)")
+            raise ValueError(f"cannot load schema {schema} (consider calling `copy_from` instead)")
 
         if is_ref(data):
-            raise ValueError(f"cannot load data {data} (consider calling `Collection.copy_from` instead)")
+            raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
+
+        name = f"{cls.__name__}_load_{format(id(data), 'x')}"
 
         class Load(cls):
             def __ns__(self, cxt):
                 if not cxt.is_defined(name):
                     setattr(cxt, name, Put(cls, schema, data))
 
-        name = f"{cls.__name__}_load_{format(id(data), 'x')}"
+            def __ref__(self, name):
+                return cls(URI(name))
+
         return Load(URI(name))
 
     def copy(self):

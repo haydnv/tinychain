@@ -1,6 +1,7 @@
 """Utility data structures and functions."""
 
 import inspect
+import json
 import logging
 
 from collections import OrderedDict
@@ -65,6 +66,10 @@ class Context(object):
             raise ValueError(f"Context already has a value named {name} (contents are {self.form}")
         else:
             self.form[name] = state
+
+    def __repr__(self):
+        data = list(self.form.keys())
+        return f"execution context with data {data}"
 
     def is_defined(self, name):
         return name in self.form
@@ -254,6 +259,10 @@ class URI(object):
 
     def startswith(self, prefix):
         return str(self).startswith(str(prefix))
+
+
+def print_json(obj):
+    print(json.dumps(to_json(obj), indent=4))
 
 
 def requires(subject):

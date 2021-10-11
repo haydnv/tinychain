@@ -1,6 +1,9 @@
 from abc import abstractmethod, ABC
-from tinychain.collection.tensor import einsum
+from tinychain.collection.tensor import einsum, Dense
+from tinychain.decorators import post_method
+from tinychain.ref import After, MethodSubject, Put
 from tinychain.state import Tuple
+from tinychain.util import URI
 
 
 class Activation(ABC):
@@ -33,7 +36,7 @@ class ReLU(Activation):
 def layer(weights, bias, activation):
     class Layer(Tuple):
         def eval(self, inputs):
-            return activation.forward(einsum("ij,ki->kj", [weights, inputs]) + bias)
+            return activation.forward(einsum("ij,ki->kj", [self[0], inputs]) + self[1])
 
         def gradients(self, A_prev, dA, Z, m):
             dZ = activation.backward(dA, Z).copy()
@@ -41,21 +44,23 @@ def layer(weights, bias, activation):
             d_weights = einsum("kj,ki->ij", [dZ, A_prev]) / m
             d_bias = dZ.sum(0) / m
 
-            dA_prev = einsum("ij,kj->kj", [weights, dZ])
+            dA_prev = einsum("ij,kj->kj", [self[0], dZ])
             return dA_prev, d_weights, d_bias
 
         def train_eval(self, inputs):
-            Z = einsum("ij,ki->kj", [weights, inputs]) + bias
+            Z = einsum("ij,ki->kj", [self[0], inputs]) + self[1]
             A = activation.forward(Z)
             return A, Z
 
         def update(self, d_weights, d_bias):
-            return weights.overwrite(weights - d_weights), bias.overwrite(bias - d_bias)
+            new_weights = weights - d_weights
+            new_bias = bias - d_bias
+            return Dense(self[0]).overwrite(new_weights), Dense(self[1]).overwrite(new_bias)
 
-    return Layer(weights)
+    return Layer([weights, bias])
 
 
-def neural_net(layers):
+def neural_net(layers, learning_rate):
     num_layers = len(layers)
 
     class NeuralNet(Tuple):
@@ -81,7 +86,8 @@ def neural_net(layers):
             updates = []
             for i in reversed(range(0, num_layers)):
                 dA, d_weights, d_bias = layers[i].gradients(A[i], dA, Z[i + 1], num_layers)
-                updates.append(layers[i].update(d_weights, d_bias))
+                update = layers[i].update(d_weights * learning_rate, d_bias * learning_rate)
+                updates.append(update)
 
             return updates
 

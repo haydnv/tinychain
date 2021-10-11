@@ -280,7 +280,6 @@ where
             .map(|(block_id, r)| r.map(|array| (block_id, array)))
             .map_ok(|(block_id, array)| async {
                 let mut block = self.file.write_block(txn_id, block_id).await?;
-
                 *block = array;
                 Ok(())
             })
@@ -948,7 +947,6 @@ where
     T: Transaction<D>,
 {
     fn new(source: BlockListFile<FD, FS, D, T>, bounds: Bounds) -> TCResult<Self> {
-        debug!("BlockListFileSlice::new {} {}", source.shape(), bounds);
         let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
         Ok(Self { source, rebase })
     }
