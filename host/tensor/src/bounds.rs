@@ -211,6 +211,10 @@ impl Bounds {
         Some(coord)
     }
 
+    pub fn ndim(&self) -> usize {
+        self.axes.iter().filter(|bound| !bound.is_index()).count()
+    }
+
     /// Expand these `Bounds` to the entire given [`Shape`].
     ///
     /// Example:

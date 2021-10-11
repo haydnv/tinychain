@@ -181,6 +181,26 @@ impl Expand {
             .collect()
     }
 
+    pub fn invert_axis(&self, bounds: &Bounds) -> Option<usize> {
+        debug!("invert expand axis {} in bounds {}", self.expand, bounds);
+        assert!(self.expand < bounds.len());
+
+        if bounds[self.expand].is_index() {
+            return None;
+        }
+
+        let mut expand = self.expand;
+        for bound in &bounds[..self.expand] {
+            if bound.is_index() {
+                expand -= 1;
+            }
+        }
+
+        debug!("bound at expansion index is {:?}", bounds.get(expand));
+
+        Some(expand)
+    }
+
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
     }

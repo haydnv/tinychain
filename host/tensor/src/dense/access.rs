@@ -666,7 +666,8 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        Ord::max(self.source.dtype(), self.other.class())
+        let combinator = self.value_combinator;
+        combinator(self.source.dtype().zero(), self.other.class().zero()).class()
     }
 
     fn ndim(&self) -> usize {
@@ -877,24 +878,14 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("slice {} from broadcast of {}", bounds, self.source.shape());
         self.shape().validate_bounds(&bounds)?;
-
         let shape = bounds.to_shape(self.shape())?;
         let bounds = self.rebase.invert_bounds(bounds);
-        debug!("source bounds are {}, broadcast into {}", bounds, shape);
-
         let source = self.source.slice(bounds)?;
         BlockListBroadcast::new(source, shape)
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        debug!(
-            "BlockListTranspose {:?} (shape is {})",
-            permutation,
-            self.shape()
-        );
-
         BlockListTranspose::new(self, permutation)
     }
 
@@ -966,7 +957,7 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        self.source.dtype()
+        self.dtype
     }
 
     fn ndim(&self) -> usize {
@@ -1121,8 +1112,8 @@ where
     D::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = B::Slice;
-    type Transpose = B::Transpose;
+    type Slice = DenseAccessor<FD, FS, D, T>;
+    type Transpose = BlockListExpand<FD, FS, D, T, B::Transpose>;
 
     fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let expand = BlockListExpand {
@@ -1145,13 +1136,43 @@ where
     fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
         self.shape().validate_bounds(&bounds)?;
         bounds.normalize(self.shape());
+        let ndim = bounds.ndim();
+
+        let expand_axis = self.rebase.invert_axis(&bounds);
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(bounds) // TODO: expand the result
+        let source = self.source.slice(bounds)?;
+
+        if ndim == source.ndim() {
+            Ok(source.accessor())
+        } else if let Some(axis) = expand_axis {
+            let rebase = transform::Expand::new(source.shape().clone(), axis)?;
+            let slice = BlockListExpand {
+                source,
+                rebase,
+                phantom: self.phantom,
+            };
+
+            Ok(slice.accessor())
+        } else {
+            Ok(source.accessor())
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let expand_axis = if let Some(permutation) = &permutation {
+            permutation[self.rebase.expand_axis()]
+        } else {
+            self.ndim() - self.rebase.expand_axis()
+        };
+
         let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
-        self.source.transpose(permutation) // TODO: expand the result
+        let source = self.source.transpose(permutation)?;
+        let rebase = transform::Expand::new(source.shape().clone(), expand_axis)?;
+        Ok(BlockListExpand {
+            source,
+            rebase,
+            phantom: self.phantom,
+        })
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
