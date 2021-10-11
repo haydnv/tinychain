@@ -9,14 +9,15 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.1
+MAX_ITERATIONS = 10
 
 
 def create_layer(input_size, output_size, activation):
     shape = (input_size, output_size)
-    bias = tc.tensor.Dense.load([output_size], tc.F32, np.random.random([output_size]).tolist())
+    # bias = tc.tensor.Dense.load([output_size], tc.F32, np.random.random([output_size]).tolist())
     weights = tc.tensor.Dense.load(shape, tc.F32, np.random.random(input_size * output_size).tolist())
-    return tc.ml.layer(weights, bias, activation)
+    return tc.ml.layer(weights, activation)
 
 
 class NeuralNetTests(unittest.TestCase):
@@ -24,37 +25,33 @@ class NeuralNetTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_nn", overwrite=True, cache_size="1G")
 
-    def testXOR(self):
+    def testIdentity(self):
         cxt = tc.Context()
 
-        cxt.inputs = Dense.load([4, 2], tc.Bool, [
-            False, False,
-            False, True,
-            True, False,
-            True, True,
-        ])
+        cxt.inputs = Dense.load([2, 1], tc.Bool, [True, False])
+        cxt.labels = Dense.load([2, 1], tc.Bool, [True, False])
 
-        cxt.labels = Dense.load([4], tc.Bool, [False, True, True, False])
+        cxt.input_layer = create_layer(1, 1, tc.ml.Sigmoid())
+        cxt.nn = tc.ml.neural_net([cxt.input_layer])
 
-        cxt.layer1 = create_layer(2, 2, tc.ml.ReLU())
-        cxt.layer2 = create_layer(2, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.neural_net([cxt.layer1, cxt.layer2], LEARNING_RATE)
+        @tc.closure
+        @tc.post_op
+        def while_cond(output: Dense, i: tc.UInt):
+            fit = ((output > 0.5) != cxt.labels).any()
+            return fit.logical_and(i < MAX_ITERATIONS)
 
         @tc.closure
         @tc.post_op
         def train(i: tc.UInt):
-            return tc.After(cxt.nn.train(cxt.inputs, cxt.labels), {"i": i + 1})
+            output = cxt.nn.train(cxt.inputs, lambda output: ((output - cxt.labels)**2) * LEARNING_RATE)
+            return {"output": output, "i": i + 1}
 
-        cxt.training = tc.While(tc.closure(tc.post_op(lambda i: tc.UInt(i) < 25)), train, {"i": 0})
-
-        error = (cxt.nn.eval(cxt.inputs) - cxt.labels.expand_dims())**2
-        cxt.result = tc.After(cxt.training, error)
+        cxt.training = tc.While(while_cond, train, {"output": cxt.nn.eval(cxt.inputs), "i": 0})
+        cxt.check = ((cxt.nn.eval(cxt.inputs) > 0.5) == cxt.labels).all()
+        cxt.result = tc.After(cxt.training, cxt.check)
 
         response = self.host.post(ENDPOINT, cxt)
-
-        contents = response[str(tc.uri(Dense))]
-        self.assertEqual(contents[0], [[4, 1], str(tc.uri(tc.F64))])
-        self.assertEqual(len(contents[1]), 4)
+        self.assertTrue(response)
 
     @classmethod
     def tearDownClass(cls):

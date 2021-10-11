@@ -1,9 +1,7 @@
 from abc import abstractmethod, ABC
 from tinychain.collection.tensor import einsum, Dense
-from tinychain.decorators import post_method
-from tinychain.ref import After, MethodSubject, Put
+from tinychain.ref import After
 from tinychain.state import Tuple
-from tinychain.util import URI
 
 
 class Activation(ABC):
@@ -33,34 +31,30 @@ class ReLU(Activation):
         return dA * (Z > 0)
 
 
-def layer(weights, bias, activation):
+def layer(weights, activation):
     class Layer(Tuple):
         def eval(self, inputs):
-            return activation.forward(einsum("ij,ki->kj", [self[0], inputs]) + self[1])
+            return activation.forward(einsum("ij,ki->kj", [self[0], inputs]))
 
         def gradients(self, A_prev, dA, Z, m):
             dZ = activation.backward(dA, Z).copy()
-
-            d_weights = einsum("kj,ki->ij", [dZ, A_prev]) / m
-            d_bias = dZ.sum(0) / m
-
-            dA_prev = einsum("ij,kj->kj", [self[0], dZ])
-            return dA_prev, d_weights, d_bias
+            d_weights = einsum("ki,kj->ij", [A_prev, dZ]) / m
+            dA_prev = einsum("ij,kj->kj", [dZ, self[0]])
+            return dA_prev, d_weights
 
         def train_eval(self, inputs):
-            Z = einsum("ij,ki->kj", [self[0], inputs]) + self[1]
+            Z = einsum("ij,ki->kj", [self[0], inputs])
             A = activation.forward(Z)
             return A, Z
 
-        def update(self, d_weights, d_bias):
+        def update(self, d_weights):
             new_weights = weights - d_weights
-            new_bias = bias - d_bias
-            return Dense(self[0]).overwrite(new_weights), Dense(self[1]).overwrite(new_bias)
+            return Dense(self[0]).overwrite(new_weights)
 
-    return Layer([weights, bias])
+    return Layer([weights])
 
 
-def neural_net(layers, learning_rate):
+def neural_net(layers):
     num_layers = len(layers)
 
     class NeuralNet(Tuple):
@@ -71,7 +65,7 @@ def neural_net(layers, learning_rate):
 
             return state
 
-        def train(self, inputs, labels):
+        def train(self, inputs, cost):
             A = [inputs]
             Z = [None]
 
@@ -80,15 +74,14 @@ def neural_net(layers, learning_rate):
                 A.append(A_l)
                 Z.append(Z_l)
 
-            labels = labels.expand_dims().copy()
-            dA = (labels / A[-1]) - ((1 - labels) / (1 - A[-1]))
+            dA = cost(A[-1]).copy()
 
-            updates = []
+            updates = [(A[-1], dA)]
             for i in reversed(range(0, num_layers)):
-                dA, d_weights, d_bias = layers[i].gradients(A[i], dA, Z[i + 1], num_layers)
-                update = layers[i].update(d_weights * learning_rate, d_bias * learning_rate)
-                updates.append(update)
+                dA_prev, d_weights = layers[i].gradients(A[i], dA, Z[i + 1], num_layers)
+                update = layers[i].update(d_weights)
+                updates.append(After(update, dA_prev))
 
-            return updates
+            return After(updates, A[-1])
 
     return NeuralNet(layers)

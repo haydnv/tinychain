@@ -123,7 +123,7 @@ class Tensor(Collection):
         return self._get("any", rtype=Bool)
 
     def cast(self, number_type):
-        """Attempt to cast the data type of `Tensor` into the given `number_type`."""
+        """Cast the data type of `Tensor` into the given `number_type`."""
 
         return self._get("cast", number_type, self.__class__)
 
