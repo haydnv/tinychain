@@ -137,7 +137,8 @@ class Local(Host):
             port=DEFAULT_PORT,
             log_level="warn",
             cache_size="1G",
-            force_create=False):
+            force_create=False,
+            request_ttl="30"):
 
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
@@ -162,6 +163,7 @@ class Local(Host):
             f"--http_port={port}",
             f"--log_level={log_level}",
             f"--cache_size={cache_size}",
+            f"--request_ttl={request_ttl}",
         ]
 
         if data_dir:
