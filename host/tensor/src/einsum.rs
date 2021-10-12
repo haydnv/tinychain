@@ -39,6 +39,7 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
 
     let f_output = parts.pop_back().unwrap_or("").chars().collect::<Label>();
 
+    let mut present_labels = HashSet::<char>::new();
     let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
     for f_input in &f_inputs {
         let mut invalid_labels = f_input
@@ -52,6 +53,8 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
                 invalid_labels.collect::<Tuple<&char>>(),
             ));
         }
+
+        present_labels.extend(f_input);
     }
 
     let mut invalid_labels = f_output
@@ -64,6 +67,12 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
             "invalid labels in einsum format",
             invalid_labels.collect::<Tuple<&char>>(),
         ));
+    }
+
+    for l in &f_output {
+        if !present_labels.contains(l) {
+            return Err(TCError::bad_request("no such input dimension", l));
+        }
     }
 
     Ok((f_inputs, f_output))
@@ -127,6 +136,7 @@ fn normalize<
         f_input,
         f_output
     );
+
     if f_input == f_output {
         return Ok(tensor);
     }
