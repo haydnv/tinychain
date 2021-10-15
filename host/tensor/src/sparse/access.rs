@@ -1722,7 +1722,7 @@ where
 
         self.shape().validate_bounds(&bounds)?;
 
-        let reduce_axis = self.rebase.reduce_axis(&bounds);
+        let reduce_axis = self.rebase.invert_axis(&bounds);
         let source_bounds = self.rebase.invert_bounds(bounds);
         debug!(
             "SparseReduce::slice source is {}, bounds are {}, source axis to reduce is {}",

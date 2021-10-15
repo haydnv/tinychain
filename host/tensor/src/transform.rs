@@ -266,14 +266,12 @@ pub struct Reduce {
 impl Reduce {
     pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
         if axis >= source_shape.len() {
-            return Err(TCError::bad_request(
-                &format!("tensor with shape {} has no such axis", source_shape),
-                axis,
-            ));
+            return Err(TCError::unsupported(format!("cannot reduce axis {} of tensor with shape {}", axis, source_shape)));
         }
 
         let mut shape = source_shape.clone();
         shape.remove(axis);
+
         Ok(Reduce {
             source_shape,
             shape,
@@ -291,7 +289,7 @@ impl Reduce {
             .collect()
     }
 
-    pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
+    pub fn invert_axis(&self, bounds: &Bounds) -> usize {
         let elided = bounds[..self.axis]
             .iter()
             .filter(|bound| bound.is_index())
@@ -313,6 +311,10 @@ impl Reduce {
         let mut bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
         bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
         bounds.into()
+    }
+
+    pub fn reduce_axis(&self) -> usize {
+        self.axis
     }
 }
 

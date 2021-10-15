@@ -5,7 +5,7 @@ use std::ops::{Add, Div, Mul, Sub};
 use afarray::{Array, ArrayInstance};
 use arrayfire as af;
 use async_trait::async_trait;
-use destream::{de, en, EncodeSeq};
+use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::{debug, warn};
@@ -23,10 +23,9 @@ use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
     TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
-use crate::TensorPersist;
 use access::*;
 pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
@@ -35,7 +34,7 @@ mod access;
 mod file;
 mod stream;
 
-/// The number of bytes in one mebibyte.s
+/// The number of bytes in one mebibyte.
 const MEBIBYTE: usize = 1_048_576;
 
 /// The number of elements per dense tensor block, equal to (1 mebibyte / 64 bits).
@@ -796,7 +795,7 @@ where
     type Reduce = DenseTensor<FD, FS, D, T, BlockListReduce<FD, FS, D, T, B>>;
 
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::new(self.blocks, axis, DenseTensor::product_all).map(DenseTensor::from)
+        BlockListReduce::product(self.blocks, axis).map(DenseTensor::from)
     }
 
     fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
@@ -820,7 +819,7 @@ where
     }
 
     fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::new(self.blocks, axis, DenseTensor::sum_all).map(DenseTensor::from)
+        BlockListReduce::sum(self.blocks, axis).map(DenseTensor::from)
     }
 
     fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {
@@ -1195,6 +1194,8 @@ pub struct DenseTensorView<'en> {
 #[async_trait]
 impl<'en> en::IntoStream<'en> for DenseTensorView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeSeq;
+
         let mut seq = encoder.encode_seq(Some(2))?;
         seq.encode_element(self.schema)?;
         seq.encode_element(self.blocks)?;

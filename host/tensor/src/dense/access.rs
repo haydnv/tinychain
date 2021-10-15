@@ -17,7 +17,7 @@ use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType, ERR_INF, ERR_NAN};
+use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorReduce, TensorType, ERR_INF, ERR_NAN};
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
@@ -611,6 +611,7 @@ where
             let left = self.left.read_value_at(txn.clone(), coord.to_vec());
             let right = self.right.read_value_at(txn, coord);
             let ((coord, left), (_, right)) = try_join!(left, right)?;
+
             let value = (self.value_combinator)(left, right);
             if value.is_infinite() {
                 Err(TCError::unsupported(ERR_INF))
@@ -1210,15 +1211,43 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListExpand<FD, FS, D, T, B> {
     }
 }
 
-// TODO: &Txn, not Txn
-type Reductor<FD, FS, D, T> =
+#[derive(Copy, Clone)]
+pub enum Reductor {
+    Product(NumberType, u64),
+    Sum(NumberType, u64),
+}
+
+impl Reductor {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Product(dtype, _) => *dtype,
+            Self::Sum(dtype, _) => *dtype,
+        }
+    }
+
+    fn call(self, blocks: TCBoxTryStream<Array>) -> TCBoxTryStream<Array> {
+        let reduced = match self {
+            Self::Product(dtype, stride) => {
+                afarray::reduce_product(blocks, dtype, PER_BLOCK, stride)
+            }
+            Self::Sum(dtype, stride) => {
+                afarray::reduce_sum(blocks, dtype, PER_BLOCK, stride)
+            },
+        };
+
+        std::pin::Pin::new(reduced)
+    }
+}
+
+type ReduceAll<FD, FS, D, T> =
     fn(&DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>, T) -> TCBoxTryFuture<Number>;
 
 #[derive(Clone)]
 pub struct BlockListReduce<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Reduce,
-    reductor: Reductor<FD, FS, D, T>,
+    reductor: Reductor,
+    reduce_all: ReduceAll<FD, FS, D, T>,
 }
 
 impl<FD, FS, D, T, B> BlockListReduce<FD, FS, D, T, B>
@@ -1226,16 +1255,40 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    pub fn new(source: B, axis: usize, reductor: Reductor<FD, FS, D, T>) -> TCResult<Self> {
+    pub fn product(
+        source: B,
+        axis: usize,
+    ) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+        let dtype = afarray::product_dtype(source.dtype());
+        let stride = source.size() / (source.size() / source.shape()[axis]);
 
         Ok(BlockListReduce {
             source,
             rebase,
-            reductor,
+            reductor: Reductor::Product(dtype, stride),
+            reduce_all: TensorReduce::product_all,
+        })
+    }
+
+    pub fn sum(
+        source: B,
+        axis: usize,
+    ) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+        let dtype = afarray::sum_dtype(source.dtype());
+        let stride = source.size() / (source.size() / source.shape()[axis]);
+
+        Ok(BlockListReduce {
+            source,
+            rebase,
+            reductor: Reductor::Sum(dtype, stride),
+            reduce_all: TensorReduce::sum_all,
         })
     }
 }
@@ -1249,7 +1302,7 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        self.source.dtype()
+        self.reductor.dtype()
     }
 
     fn ndim(&self) -> usize {
@@ -1284,38 +1337,45 @@ where
             source: self.source.accessor(),
             rebase: self.rebase,
             reductor: self.reductor,
+            reduce_all: self.reduce_all,
         };
 
         DenseAccessor::Reduce(Box::new(reduce))
     }
 
-    fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
+    fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
         Box::pin(async move {
-            let values = stream::iter(Bounds::all(self.shape()).affected())
-                .map(move |coord| {
-                    let txn = txn.clone();
-                    let source = self.source.clone();
-                    let reductor = self.reductor;
-                    let source_bounds = self.rebase.invert_coord(&coord);
-                    Box::pin(async move {
-                        debug!("slice {} from {}", source_bounds, source);
-                        let slice = source.slice(source_bounds)?;
-                        reductor(&slice.accessor().into(), txn.clone()).await
-                    })
-                })
-                .buffered(num_cpus::get());
+            let reductor = self.reductor;
+            let axis = self.rebase.reduce_axis();
+            let ndim = self.source.ndim();
+            let source = self.source;
 
-            let values: TCBoxTryStream<'a, Number> = Box::pin(values);
-            Ok(values)
+            if axis == ndim - 1 {
+                let blocks = source.block_stream(txn).await?;
+                Ok(reductor.call(blocks))
+            } else {
+                let mut permutation: Vec<usize> = (0..ndim).collect();
+                permutation[axis] = ndim - 1;
+                permutation[ndim - 1] = axis;
+
+                let transpose = source.transpose(Some(permutation))?;
+                let blocks = transpose.block_stream(txn).await?;
+                Ok(reductor.call(blocks))
+            }
         })
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.shape().validate_bounds(&bounds)?;
-        let reduce_axis = self.rebase.reduce_axis(&bounds);
+        let reductor = self.reductor;
+        let reduce_axis = self.rebase.invert_axis(&bounds);
         let source_bounds = self.rebase.invert_bounds(bounds);
         let slice = self.source.slice(source_bounds)?;
-        BlockListReduce::new(slice, reduce_axis, self.reductor)
+
+        match reductor {
+            Reductor::Product(_, _) => BlockListReduce::product(slice, reduce_axis),
+            Reductor::Sum(_, _) => BlockListReduce::sum(slice, reduce_axis),
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -1356,11 +1416,10 @@ where
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             self.shape().validate_coord(&coord)?;
-            let reductor = self.reductor;
+            let reductor = self.reduce_all;
             let source_bounds = self.rebase.invert_coord(&coord);
             let slice = self.source.slice(source_bounds)?;
-            let value = reductor(&slice.accessor().into(), txn.clone()).await?;
-
+            let value = reductor(&slice.accessor().into(), txn).await?;
             Ok((coord, value))
         })
     }
