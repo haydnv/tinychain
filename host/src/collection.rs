@@ -37,11 +37,17 @@ pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Tx
 #[cfg(feature = "tensor")]
 pub type Tensor = tc_tensor::Tensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
+pub type DenseAccessor =
+    tc_tensor::DenseAccessor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+#[cfg(feature = "tensor")]
 pub type DenseTensor<B> =
     tc_tensor::DenseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile =
     tc_tensor::BlockListFile<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+#[cfg(feature = "tensor")]
+pub type SparseAccessor =
+    tc_tensor::SparseAccessor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type SparseTensor<A> =
     tc_tensor::SparseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
