@@ -12,9 +12,7 @@ use tc_transact::Transaction;
 use tc_value::{Bound, Number, NumberClass, NumberInstance, Range, TCString, Value, ValueType};
 use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
 
-use crate::collection::{
-    Collection, DenseAccessor, DenseTensor, DenseTensorFile, SparseAccessor, SparseTensor, Tensor,
-};
+use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler};
 use crate::scalar::Scalar;
@@ -80,9 +78,9 @@ impl<'a> Handler<'a> for ConstantHandler {
     }
 }
 
-struct CopyHandler;
+struct CopyFromHandler;
 
-impl<'a> Handler<'a> for CopyHandler {
+impl<'a> Handler<'a> for CopyFromHandler {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
         'b: 'a,
@@ -119,43 +117,6 @@ impl<'a> Handler<'a> for CopyHandler {
 
 struct CopyDenseHandler;
 
-impl CopyDenseHandler {
-    async fn copy_dense(txn: &Txn, source: DenseTensor<DenseAccessor>) -> TCResult<Tensor> {
-        let file = txn
-            .context()
-            .create_file_unique(*txn.id(), TensorType::Dense)
-            .await?;
-
-        DenseTensor::copy_from(source, file, txn)
-            .map_ok(Tensor::from)
-            .await
-    }
-
-    async fn copy_sparse(txn: &Txn, source: SparseTensor<SparseAccessor>) -> TCResult<Tensor> {
-        let dir = txn.context().create_dir_unique(*txn.id()).await?;
-        SparseTensor::copy_from(source, dir, txn)
-            .map_ok(Tensor::from)
-            .await
-    }
-
-    async fn copy_stream(txn: &Txn, schema: Schema, source: TCStream) -> TCResult<Tensor> {
-        let Schema { dtype, shape } = schema;
-        let elements = source.into_stream(txn.clone()).await?;
-        let elements = elements.map(|r| {
-            r.and_then(|n| {
-                Number::try_cast_from(n, |n| TCError::bad_request("invalid Tensor element", n))
-            })
-        });
-
-        let txn_id = *txn.id();
-        let file = create_file(txn).await?;
-        DenseTensorFile::from_values(file, txn_id, shape, dtype, elements)
-            .map_ok(DenseTensor::from)
-            .map_ok(Tensor::from)
-            .await
-    }
-}
-
 impl<'a> Handler<'a> for CopyDenseHandler {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
@@ -164,38 +125,29 @@ impl<'a> Handler<'a> for CopyDenseHandler {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
-                let schema: Schema =
+                let Schema { dtype, shape } =
                     schema.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
-                let source: State = params.require(&label("source").into())?;
+                let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
 
-                match source {
-                    State::Stream(stream) => Self::copy_stream(txn, schema, stream).await,
-                    State::Collection(Collection::Tensor(source))
-                        if source.dtype() != schema.dtype =>
-                    {
-                        Err(TCError::bad_request(
-                            "cannot copy into Tensor with different data type",
-                            Tuple::from((source.dtype(), schema.dtype)),
-                        ))
-                    }
-                    State::Collection(Collection::Tensor(source))
-                        if source.shape() != &schema.shape =>
-                    {
-                        Err(TCError::bad_request(
-                            "cannot copy into Tensor with different shape",
-                            Tuple::from((source.shape(), &schema.shape)),
-                        ))
-                    }
-                    State::Collection(Collection::Tensor(source)) => match source {
-                        Tensor::Dense(dense) => Self::copy_dense(txn, dense).await,
-                        Tensor::Sparse(sparse) => Self::copy_sparse(txn, sparse).await,
-                    },
-                    other => Err(TCError::bad_request("cannot copy a Tensor from", other)),
-                }
-                .map(Collection::Tensor)
-                .map(State::Collection)
+                let elements = source.into_stream(txn.clone()).await?;
+                let elements = elements.map(|r| {
+                    r.and_then(|n| {
+                        Number::try_cast_from(n, |n| {
+                            TCError::bad_request("invalid Tensor element", n)
+                        })
+                    })
+                });
+
+                let txn_id = *txn.id();
+                let file = create_file(txn).await?;
+                DenseTensorFile::from_values(file, txn_id, shape, dtype, elements)
+                    .map_ok(DenseTensor::from)
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::Tensor)
+                    .map_ok(State::Collection)
+                    .await
             })
         }))
     }
@@ -913,7 +865,7 @@ impl Route for Static {
         match path[0].as_str() {
             "dense" => TensorType::Dense.route(&path[1..]),
             "sparse" => TensorType::Sparse.route(&path[1..]),
-            "copy_from" if path.len() == 1 => Some(Box::new(CopyHandler)),
+            "copy_from" if path.len() == 1 => Some(Box::new(CopyFromHandler)),
             "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
             _ => None,
         }
