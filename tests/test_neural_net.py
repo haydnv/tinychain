@@ -10,19 +10,18 @@ Dense = tc.tensor.Dense
 
 ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = 0.01
-MAX_ITERATIONS = 500
+MAX_ITERATIONS = 1000
 
 
 def create_layer(input_size, output_size, activation):
     shape = (input_size, output_size)
     bias = tc.tensor.Dense.load([output_size], tc.F32, np.random.random([output_size]).tolist())
     weights = tc.tensor.Dense.load(shape, tc.F32, np.random.random(input_size * output_size).tolist())
-    return tc.ml.layer(weights, bias, activation)
+    return tc.ml.dnn.layer(weights, bias, activation)
 
 
-# TODO: optimize Tensor reduce ops & implement AdamOptimizer
-# so these tests will finish within the request timeout
-@unittest.skip
+# TODO: implement AdamOptimizer
+# @unittest.skip
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -35,7 +34,7 @@ class NeuralNetTests(unittest.TestCase):
         cxt.labels = Dense.load([2, 1], tc.Bool, [False, True])
 
         cxt.input_layer = create_layer(1, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
 
         self.execute(cxt)
 
@@ -46,7 +45,7 @@ class NeuralNetTests(unittest.TestCase):
         cxt.labels = Dense.load([2, 1], tc.Bool, [True, False])
 
         cxt.input_layer = create_layer(1, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
 
         self.execute(cxt)
 
@@ -62,7 +61,7 @@ class NeuralNetTests(unittest.TestCase):
         cxt.labels = Dense.load([4, 1], tc.Bool, [True, True, True, False])
 
         cxt.input_layer = create_layer(2, 1, tc.ml.ReLU())
-        cxt.nn = tc.ml.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
 
         self.execute(cxt)
 
