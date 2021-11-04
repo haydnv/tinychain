@@ -45,31 +45,17 @@ End users won't see TinyChain directly, but it makes the customer experience bet
 
 ## Getting started
 
-The easiest way to get started is to download the latest release from GitHub here: [github.com/haydnv/tinychain/releases](https://github.com/haydnv/tinychain/releases). Binary releases are currently only available for 64-bit x86 Linux (you should be able to build from source on other architectures, but this has not been tested).
+If your organization already has a TinyChain host or cluster up and running, all you should need is the Python client. You can install it with `pip3 install tinychain` (this may be `pip install tinychain` on very new systems).
 
-If you use the Rust programming language, you can install TinyChain on any platform by running `cargo install tinychain`. There are instructions for setting up a Cluster in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
+If you're completely new to TinyChain, you'll need to run a TinyChain host in order to try it out. This is easy to do with Docker:
 
-You can find in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory. There is also a [series of tutorial videos on YouTube](https://www.youtube.com/channel/UCC6brO3L3JR0wUiMSDoGjrw).
-
-To use TinyChain's **Tensor** feature, which enables automatic GPU acceleration, you'll have to first install [ArrayFire](https://arrayfire.org/docs/installing.htm). Then, follow the instructions for the [ArrayFire Rust wrapper](https://github.com/arrayfire/arrayfire-rust#use-from-cratesio--) to set the `LD_LIBRARY_PATH` and `AF_PATH` environment variables.
-
-TinyChain's tensor feature can be installed using cargo using the command below.
-
-`cargo install tinychain --features=tensor`
-
-**Note** 
-The tensor feature requires a package-config file for ArrayFire to in your environment's PKG_CONFIG_PATH. If you're not sure what to do about this, copy the file below to your TinyChain install directory and run ```export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:<path to your TinyChain install directory>/arrayfire.pc``` before building or running TinyChain with the `--features=tensor` flag.
-
-```arrayfire.pc
-    prefix=/usr
-    exec_prefix=${prefix}
-    includedir=${prefix}/include
-    libdir=${exec_prefix}/lib64
-    Name: arrayfire
-    Description: the ArrayFire library
-    Version: 3.8
-    Libs: -L${libdir}
+```bash
+# build the Dockerfile from the GitHub repo, then run a new container with TinyChain listening on host port 8702
+# the "-it" option also opens an interactive terminal
+docker run -d -it -p 127.0.0.1:8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q)
 ```
+
+For more advanced applications, see INSTALL.md for detailed installation instructions.
 
 ## Key features
 

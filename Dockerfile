@@ -33,3 +33,5 @@ RUN cargo install tinychain --features=tensor
 
 ENV HOME=/root
 ENV PYENV_ROOT=$HOME/.pyenv
+
+ENTRYPOINT ["tinychain"]
