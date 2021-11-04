@@ -140,8 +140,17 @@ async fn main() -> Result<(), TokioError> {
     };
 
     #[cfg(feature = "tensor")]
-    tc_tensor::print_af_info();
-    println!();
+    {
+        std::env::var("AF_PATH")
+            .expect("missing environment variable AF_PATH--see INSTALL.md for instructions");
+
+        std::env::var("LD_LIBRARY_PATH").expect(
+            "missing environment variable LD_LIBRARY_PATH--see INSTALL.md for instructions",
+        );
+
+        tc_tensor::print_af_info();
+        println!();
+    }
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
     let mut clusters = Vec::with_capacity(config.clusters.len());
