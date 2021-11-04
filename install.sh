@@ -41,8 +41,7 @@ fi
 # check for missing dependencies for this script
 if ! command -v curl &> /dev/null
 then
-    echo "install.sh requires curl"
-    exit
+    apt-get -y install curl
 fi
 
 # make sure cargo is installed
@@ -50,6 +49,7 @@ if ! command -v cargo &> /dev/null
 then
     echo "installing cargo (more info: https://doc.rust-lang.org/cargo/)"
     curl https://sh.rustup.rs -sSf | sh -s -- -y
+    source $HOME/.cargo/env
     echo "installed cargo"
 fi
 
@@ -57,16 +57,16 @@ fi
 if ! dpkg-query -l arrayfire > /dev/null 2>&1
 then
     echo "installing ArrayFire (more info: https://arrayfire.org/)"
-    apt install -y gnupg2 ca-certificates apt-utils software-properties-common
+    apt-get install -y gnupg2 ca-certificates apt-utils software-properties-common
     apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
     echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu $UBUNTU_CODENAME main" | tee /etc/apt/sources.list.d/arrayfire.list
-    apt update && apt install -y arrayfire
+    apt-get update && apt install -y arrayfire
 fi
 
 # make sure the C linker is installed
 if ! dpkg-query -l build-essential > /dev/null 2>&1
 then
-    apt install -y build-essential
+    apt-get install -y build-essential
 fi
 
 # install TinyChain

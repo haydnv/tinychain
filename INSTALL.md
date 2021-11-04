@@ -31,7 +31,7 @@ You can check that your installation succeeded by loading `http://127.0.0.1:8702
 An install script is provided for Ubuntu (only tested on Ubuntu 20.04):
 
 ```bash
-wget https://raw.githubusercontent.com/haydnv/tinychain/master/install.sh | sh
+curl https://raw.githubusercontent.com/haydnv/tinychain/master/install.sh -sSf | bash
 ```
 
 ## Manual install (Ubuntu)
