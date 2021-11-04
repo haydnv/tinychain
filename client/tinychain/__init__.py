@@ -4,7 +4,8 @@ import tinychain.error
 import tinychain.graph
 import tinychain.graph.edge
 import tinychain.host
-import tinychain.ml
+import tinychain.ml.conv
+import tinychain.ml.dnn
 import tinychain.op
 import tinychain.ref
 
