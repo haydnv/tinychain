@@ -52,7 +52,7 @@ If you're completely new to TinyChain, you'll need to run a TinyChain host in or
 ```bash
 # build the Dockerfile from the GitHub repo, then run a new container with TinyChain listening on host port 8702
 # the "-it" option also opens an interactive terminal
-docker run -d -it -p 127.0.0.1:8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q)
+docker run -d -it -p 8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q) ./tinychain --address=0.0.0.0
 ```
 
 For more advanced applications, see INSTALL.md for detailed installation instructions.

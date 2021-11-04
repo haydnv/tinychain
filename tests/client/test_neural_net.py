@@ -2,8 +2,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from testutils import start_host
-
+from testutils import ClientTest
 
 Dense = tc.tensor.Dense
 
@@ -21,12 +20,8 @@ def create_layer(input_size, output_size, activation):
 
 
 # TODO: implement AdamOptimizer
-# @unittest.skip
-class NeuralNetTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_nn", overwrite=True, cache_size="1G")
-
+@unittest.skip
+class NeuralNetTests(ClientTest):
     def testNot(self):
         cxt = tc.Context()
 
@@ -82,10 +77,6 @@ class NeuralNetTests(unittest.TestCase):
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
 
 if __name__ == "__main__":

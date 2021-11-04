@@ -39,35 +39,43 @@ then
 fi
 
 # check for missing dependencies for this script
-if ! command -v curl &> /dev/null
-then
+while ! command -v curl &> /dev/null
+do
+    echo "installing cURL"
     apt-get -y install curl
-fi
+done
 
 # make sure cargo is installed
-if ! command -v cargo &> /dev/null
-then
+while ! command -v cargo &> /dev/null
+do
     echo "installing cargo (more info: https://doc.rust-lang.org/cargo/)"
     curl https://sh.rustup.rs -sSf | sh -s -- -y
     source $HOME/.cargo/env
     echo "installed cargo"
-fi
+done
 
 # make sure ArrayFire is installed
-if ! dpkg-query -l arrayfire > /dev/null 2>&1
-then
+while ! dpkg-query -l arrayfire > /dev/null 2>&1
+do
     echo "installing ArrayFire (more info: https://arrayfire.org/)"
     apt-get install -y gnupg2 ca-certificates apt-utils software-properties-common
     apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
     echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu $UBUNTU_CODENAME main" | tee /etc/apt/sources.list.d/arrayfire.list
     apt-get update && apt install -y arrayfire
-fi
+done
 
 # make sure the C linker is installed
-if ! dpkg-query -l build-essential > /dev/null 2>&1
-then
+while ! dpkg-query -l build-essential > /dev/null 2>&1
+do
+    echo "installing build tools"
     apt-get install -y build-essential
-fi
+done
 
-# install TinyChain
-cargo install tinychain --features=tensor
+while ! command -v tinychain &> /dev/null
+do
+    # install TinyChain
+    echo "installing TinyChain"
+    cargo install tinychain --features=tensor
+done
+
+echo 'TinyChain installed successfully--remember to run source $HOME/.cargo/env before running the tinychain command'

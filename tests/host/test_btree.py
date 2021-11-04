@@ -3,8 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import PORT, start_host, PersistenceTest
-
+from testutils import PORT, printlines, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
