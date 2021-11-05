@@ -1,6 +1,6 @@
 [package]
 name = "tc-btree"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's BTree collection type"
@@ -19,8 +19,8 @@ futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
-tc-error = { path = "../error" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-error = "~0.3.1"
+tc-transact = "~0.9.1"
+tc-value = "~0.2.3"
+tcgeneric = "~0.2.4"
 uuid = { version = "0.8", features=["v4"] }
