@@ -21,7 +21,7 @@ The quick and easy way to get TinyChain up and running to try it out is to use D
 ```bash
 # build the Dockerfile from the GitHub repo, then run a new container with TinyChain listening on host port 8702
 # the "-it" option also opens an interactive terminal
-docker run -d -it -p 127.0.0.1:8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q)
+docker run -it -p 8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q) ./tinychain --address=0.0.0.0
 ```
 
 You can check that your installation succeeded by loading `http://127.0.0.1:8702/state/scalar/value/string?key="Hello, World!"` in your browser.
