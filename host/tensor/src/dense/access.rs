@@ -17,7 +17,10 @@ use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
-use crate::{transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorReduce, TensorType, ERR_INF, ERR_NAN};
+use crate::{
+    transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorReduce, TensorType, ERR_INF,
+    ERR_NAN,
+};
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
@@ -1230,9 +1233,7 @@ impl Reductor {
             Self::Product(dtype, stride) => {
                 afarray::reduce_product(blocks, dtype, PER_BLOCK, stride)
             }
-            Self::Sum(dtype, stride) => {
-                afarray::reduce_sum(blocks, dtype, PER_BLOCK, stride)
-            },
+            Self::Sum(dtype, stride) => afarray::reduce_sum(blocks, dtype, PER_BLOCK, stride),
         };
 
         std::pin::Pin::new(reduced)
@@ -1260,10 +1261,7 @@ where
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    pub fn product(
-        source: B,
-        axis: usize,
-    ) -> TCResult<Self> {
+    pub fn product(source: B, axis: usize) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
         let dtype = afarray::product_dtype(source.dtype());
         let stride = source.size() / (source.size() / source.shape()[axis]);
@@ -1276,10 +1274,7 @@ where
         })
     }
 
-    pub fn sum(
-        source: B,
-        axis: usize,
-    ) -> TCResult<Self> {
+    pub fn sum(source: B, axis: usize) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
         let dtype = afarray::sum_dtype(source.dtype());
         let stride = source.size() / (source.size() / source.shape()[axis]);

@@ -23,7 +23,8 @@ use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
     TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType, TensorUnary,
+    ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;

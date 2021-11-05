@@ -266,7 +266,10 @@ pub struct Reduce {
 impl Reduce {
     pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
         if axis >= source_shape.len() {
-            return Err(TCError::unsupported(format!("cannot reduce axis {} of tensor with shape {}", axis, source_shape)));
+            return Err(TCError::unsupported(format!(
+                "cannot reduce axis {} of tensor with shape {}",
+                axis, source_shape
+            )));
         }
 
         let mut shape = source_shape.clone();
