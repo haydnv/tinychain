@@ -45,14 +45,23 @@ End users won't see TinyChain directly, but it makes the customer experience bet
 
 ## Getting started
 
-If your organization already has a TinyChain host or cluster up and running, all you should need is the Python client. You can install it with `pip3 install tinychain` (this may be `pip install tinychain` on very new systems).
+If your organization already has a TinyChain host or cluster up and running, all you should need is the Python client. You can install it with `pip3 install tinychain` (this may be `pip install tinychain` on very new systems) and try it out by following along with the exercise in the [client README](https://github.com/haydnv/tinychain/tree/master/client).
 
 If you're completely new to TinyChain, you'll need to run a TinyChain host in order to try it out. This is easy to do with Docker:
 
 ```bash
 # build the Dockerfile from the GitHub repo, then run a new container with TinyChain listening on host port 8702
 # the "-it" option also opens an interactive terminal
-docker run -d -it -p 8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q) ./tinychain --address=0.0.0.0
+docker run -it -p 8702:8702/tcp $(docker build https://github.com/haydnv/tinychain.git -q) ./tinychain --address=0.0.0.0
+```
+
+This command can take several minutes depending on your connection speed. For live progress updates, run it as two separate commands:
+
+```bash
+# this will output an image ID--copy it into the `docker run...` command
+docker build https://github.com/haydnv/tinychain.git
+
+docker run -d -it -p 8702:8702/tcp <image ID> ./tinychain --address=0.0.0.0
 ```
 
 For more advanced applications, see INSTALL.md for detailed installation instructions.
