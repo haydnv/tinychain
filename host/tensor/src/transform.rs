@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::iter;
+use std::ops;
 
 use afarray::Coords;
 use log::debug;
@@ -253,6 +254,57 @@ impl Expand {
         debug_assert_eq!(coord.len(), self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
+    }
+}
+
+#[derive(Clone)]
+pub struct Flip {
+    shape: Shape,
+    axis: usize,
+}
+
+#[allow(unused)]
+impl Flip {
+    fn new(shape: Shape, axis: usize) -> TCResult<Self> {
+        if axis > shape.len() {
+            Err(TCError::unsupported(format!(
+                "invalid axis {} for shape {}",
+                axis, shape
+            )))
+        } else {
+            Ok(Self { shape, axis })
+        }
+    }
+
+    fn axis(&self) -> usize {
+        self.axis
+    }
+
+    fn flip_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if bounds.len() < self.axis {
+            return bounds;
+        }
+
+        let dim = self.shape[self.axis];
+        bounds[self.axis] = match &bounds[self.axis] {
+            AxisBounds::At(i) => AxisBounds::At(dim - i),
+            AxisBounds::In(ops::Range { start, end }) => AxisBounds::In((dim - end)..(dim - start)),
+            AxisBounds::Of(indices) => {
+                AxisBounds::Of(indices.into_iter().map(|i| dim - i).collect())
+            }
+        };
+
+        bounds
+    }
+
+    fn flip_coord(&self, mut coord: Coord) -> Coord {
+        assert_eq!(coord.len(), self.shape.len());
+        coord[self.axis] = self.shape[self.axis] - coord[self.axis];
+        coord
+    }
+
+    fn flip_coords(&self, coords: Coords) -> Coords {
+        coords.flip(&self.shape, self.axis)
     }
 }
 
