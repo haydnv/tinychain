@@ -187,6 +187,19 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
 
+    def testFlip(self):
+        shape = [5, 4, 3]
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.arange(shape, 0, 60)
+        cxt.result = cxt.x.flip(0)
+
+        expected = np.arange(0, 60).reshape(shape)
+        expected = np.flip(expected, 0)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

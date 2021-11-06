@@ -13,7 +13,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream, Tuple};
 
 use crate::dense::{DenseAccess, DenseAccessor, DenseTensor, PER_BLOCK};
 use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
@@ -82,6 +82,7 @@ pub enum SparseAccessor<FD, FS, D, T> {
     CombineLeft(Box<SparseLeftCombinator<FD, FS, D, T, Self, Self>>),
     Dense(Box<DenseToSparse<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>>),
     Expand(Box<SparseExpand<FD, FS, D, T, Self>>),
+    Flip(Box<SparseFlip<FD, FS, D, T, Self>>),
     Slice(SparseTableSlice<FD, FS, D, T>),
     Reduce(Box<SparseReduce<FD, FS, D, T>>),
     Table(SparseTable<FD, FS, D, T>),
@@ -107,6 +108,7 @@ where
             Self::CombineLeft(combine) => combine.dtype(),
             Self::Dense(dense) => dense.dtype(),
             Self::Expand(expand) => expand.dtype(),
+            Self::Flip(flip) => flip.dtype(),
             Self::Slice(slice) => slice.dtype(),
             Self::Reduce(reduce) => reduce.dtype(),
             Self::Table(table) => table.dtype(),
@@ -124,6 +126,7 @@ where
             Self::CombineLeft(combine) => combine.ndim(),
             Self::Dense(dense) => dense.ndim(),
             Self::Expand(expand) => expand.ndim(),
+            Self::Flip(flip) => flip.ndim(),
             Self::Slice(slice) => slice.ndim(),
             Self::Reduce(reduce) => reduce.ndim(),
             Self::Table(table) => table.ndim(),
@@ -141,6 +144,7 @@ where
             Self::CombineLeft(combine) => combine.shape(),
             Self::Dense(dense) => dense.shape(),
             Self::Expand(expand) => expand.shape(),
+            Self::Flip(flip) => flip.shape(),
             Self::Reduce(reduce) => reduce.shape(),
             Self::Slice(slice) => slice.shape(),
             Self::Table(table) => table.shape(),
@@ -158,6 +162,7 @@ where
             Self::CombineLeft(combine) => combine.size(),
             Self::Dense(dense) => dense.size(),
             Self::Expand(expand) => expand.size(),
+            Self::Flip(flip) => flip.size(),
             Self::Slice(slice) => slice.size(),
             Self::Reduce(reduce) => reduce.size(),
             Self::Table(table) => table.size(),
@@ -193,6 +198,7 @@ where
             Self::CombineLeft(combine) => combine.filled(txn).await,
             Self::Dense(dense) => dense.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
+            Self::Flip(flip) => flip.filled(txn).await,
             Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Slice(slice) => slice.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
@@ -210,6 +216,7 @@ where
             Self::CombineLeft(combine) => combine.filled_at(txn, axes).await,
             Self::Dense(dense) => dense.filled_at(txn, axes).await,
             Self::Expand(expand) => expand.filled_at(txn, axes).await,
+            Self::Flip(flip) => flip.filled_at(txn, axes).await,
             Self::Reduce(reduce) => reduce.filled_at(txn, axes).await,
             Self::Slice(slice) => slice.filled_at(txn, axes).await,
             Self::Table(table) => table.filled_at(txn, axes).await,
@@ -227,6 +234,7 @@ where
             Self::CombineLeft(combine) => combine.filled_count(txn).await,
             Self::Dense(dense) => dense.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
+            Self::Flip(flip) => flip.filled_count(txn).await,
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
@@ -244,6 +252,7 @@ where
             Self::CombineLeft(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
             Self::Dense(dense) => dense.slice(bounds).map(SparseAccess::accessor),
             Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
+            Self::Flip(flip) => flip.slice(bounds).map(SparseAccess::accessor),
             Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
             Self::Slice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
             Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
@@ -275,6 +284,8 @@ where
             Self::Dense(dense) => dense.transpose(permutation).map(SparseAccess::accessor),
 
             Self::Expand(expand) => expand.transpose(permutation).map(SparseAccess::accessor),
+
+            Self::Flip(flip) => flip.transpose(permutation).map(SparseAccess::accessor),
 
             Self::Reduce(reduce) => reduce.transpose(permutation).map(SparseAccess::accessor),
 
@@ -329,6 +340,7 @@ where
             Self::CombineLeft(combine) => combine.read_value_at(txn, coord),
             Self::Dense(dense) => dense.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
+            Self::Flip(flip) => flip.read_value_at(txn, coord),
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
@@ -348,6 +360,7 @@ impl<FD, FS, D, T> fmt::Display for SparseAccessor<FD, FS, D, T> {
             Self::CombineLeft(combinator) => fmt::Display::fmt(combinator, f),
             Self::Dense(dense) => fmt::Display::fmt(dense, f),
             Self::Expand(expand) => fmt::Display::fmt(expand, f),
+            Self::Flip(flip) => fmt::Display::fmt(flip, f),
             Self::Reduce(reduce) => fmt::Display::fmt(reduce, f),
             Self::Slice(slice) => fmt::Display::fmt(slice, f),
             Self::Table(table) => fmt::Display::fmt(table, f),
@@ -1590,6 +1603,176 @@ where
 impl<FD, FS, D, T, A> fmt::Display for SparseExpand<FD, FS, D, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a sparse Tensor expansion")
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseFlip<FD, FS, D, T, A> {
+    source: A,
+    rebase: transform::Flip,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, A> SparseFlip<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    pub fn new(source: A, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Flip::new(source.shape().clone(), axis)?;
+
+        Ok(Self {
+            source,
+            rebase,
+            phantom: Phantom::default(),
+        })
+    }
+}
+
+impl<FD, FS, D, T, A> TensorAccess for SparseFlip<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseFlip<FD, FS, D, T, A>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Slice = SparseAccessor<FD, FS, D, T>;
+    type Transpose = SparseFlip<FD, FS, D, T, A::Transpose>;
+
+    fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
+        SparseAccessor::Flip(Box::new(SparseFlip {
+            source: self.source.accessor(),
+            rebase: self.rebase,
+            phantom: Phantom::default(),
+        }))
+    }
+
+    async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        let rebase = self.rebase;
+        let filled = self.source.filled(txn).await?;
+        let filled = filled.map_ok(move |(coord, value)| (rebase.flip_coord(coord), value));
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseExpand::filled_at {:?}", axes);
+
+        self.shape().validate_axes(&axes)?;
+
+        if axes.is_empty() {
+            return Ok(Box::pin(stream::empty()));
+        }
+
+        let shape = self.shape().clone();
+        let rebase = self.rebase;
+
+        let coords = self.source.filled_at(txn.clone(), axes).await?;
+        let coords = coords.map_ok(move |coords| rebase.flip_coords(coords));
+        let coords = sorted_coords::<FD, FS, D, T, _>(&txn, shape, coords).await?;
+        Ok(Box::pin(coords))
+    }
+
+    async fn filled_count(self, txn: T) -> TCResult<u64> {
+        self.source.filled_count(txn).await
+    }
+
+    fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
+        debug!("SparseFlip {} slice {}", self.shape(), bounds);
+
+        self.shape().validate_bounds(&bounds)?;
+        bounds.normalize(self.shape());
+
+        if bounds == Bounds::all(self.shape()) {
+            return Ok(self.accessor());
+        }
+
+        if let Some(flip_axis) = self.rebase.invert_axis(&bounds) {
+            let source_bounds = self.rebase.flip_bounds(bounds);
+            let slice = self.source.slice(source_bounds)?;
+            SparseFlip::new(slice, flip_axis).map(|slice| slice.accessor())
+        } else {
+            let source_bounds = self.rebase.flip_bounds(bounds);
+            self.source
+                .slice(source_bounds)
+                .map(|slice| slice.accessor())
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let flip_axis = if let Some(permutation) = &permutation {
+            if permutation.len() == self.ndim() {
+                permutation[self.rebase.axis()]
+            } else {
+                return Err(TCError::bad_request(
+                    "invalid permutation",
+                    permutation.iter().collect::<Tuple<&usize>>(),
+                ));
+            }
+        } else {
+            self.ndim() - self.rebase.axis()
+        };
+
+        let source = self.source.transpose(permutation)?;
+        SparseFlip::new(source, flip_axis)
+    }
+}
+
+impl<FD, FS, D, T, A> ReadValueAt<D> for SparseFlip<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
+        let source_coord = self.rebase.flip_coord(coord.clone());
+        let read = self
+            .source
+            .read_value_at(txn, source_coord)
+            .map_ok(|(_, val)| (coord, val));
+
+        Box::pin(read)
+    }
+}
+
+impl<FD, FS, D, T, A> fmt::Display for SparseFlip<FD, FS, D, T, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a flipped sparse Tensor")
     }
 }
 

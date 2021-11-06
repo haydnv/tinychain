@@ -137,6 +137,11 @@ class Tensor(Collection):
 
         return self._post("div", Map(r=other), Tensor)
 
+    def flip(self, axis):
+        """Flip the elements in this `Tensor` along the specified `axis`."""
+
+        return self._get("flip", axis, Tensor)
+
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
 

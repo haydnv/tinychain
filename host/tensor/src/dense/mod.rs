@@ -849,6 +849,7 @@ where
     type Broadcast = DenseTensor<FD, FS, D, T, BlockListBroadcast<FD, FS, D, T, B>>;
     type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
     type Expand = DenseTensor<FD, FS, D, T, BlockListExpand<FD, FS, D, T, B>>;
+    type Flip = DenseTensor<FD, FS, D, T, BlockListFlip<FD, FS, D, T, B>>;
     type Slice = DenseTensor<FD, FS, D, T, B::Slice>;
     type Transpose = DenseTensor<FD, FS, D, T, B::Transpose>;
 
@@ -864,6 +865,11 @@ where
 
     fn expand_dims(self, axis: usize) -> TCResult<Self::Expand> {
         let blocks = BlockListExpand::new(self.blocks, axis)?;
+        Ok(DenseTensor::from(blocks))
+    }
+
+    fn flip(self, axis: usize) -> TCResult<Self::Flip> {
+        let blocks = BlockListFlip::new(self.blocks, axis)?;
         Ok(DenseTensor::from(blocks))
     }
 

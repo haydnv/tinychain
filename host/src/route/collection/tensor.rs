@@ -342,6 +342,41 @@ impl<T> From<T> for ExpandHandler<T> {
     }
 }
 
+struct FlipHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for FlipHandler<T>
+where
+    T: TensorAccess + TensorTransform + Send + 'a,
+    Tensor: From<T::Flip>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let axis: Number = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
+
+                let axis = if axis >= 0.into() {
+                    axis.cast_into()
+                } else {
+                    self.tensor.ndim() - usize::cast_from(axis.abs())
+                };
+
+                self.tensor.flip(axis).map(Tensor::from).map(Collection::from).map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for FlipHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct RangeHandler;
 
 impl<'a> Handler<'a> for RangeHandler {
@@ -711,6 +746,7 @@ where
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
+    Tensor: From<<T as TensorTransform>::Flip>,
     Tensor: From<<T as TensorTransform>::Slice>,
     Tensor: From<<T as TensorTransform>::Transpose>,
 {
@@ -844,6 +880,7 @@ where
 
             // transforms
             "cast" => Some(Box::new(CastHandler::from(tensor))),
+            "flip" => Some(Box::new(FlipHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 

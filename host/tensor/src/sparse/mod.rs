@@ -781,6 +781,7 @@ where
     type Broadcast = SparseTensor<FD, FS, D, T, SparseBroadcast<FD, FS, D, T, A>>;
     type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
     type Expand = SparseTensor<FD, FS, D, T, SparseExpand<FD, FS, D, T, A>>;
+    type Flip = SparseTensor<FD, FS, D, T, SparseFlip<FD, FS, D, T, A>>;
     type Slice = SparseTensor<FD, FS, D, T, A::Slice>;
     type Transpose = SparseTensor<FD, FS, D, T, A::Transpose>;
 
@@ -796,6 +797,11 @@ where
 
     fn expand_dims(self, axis: usize) -> TCResult<Self::Expand> {
         let accessor = SparseExpand::new(self.accessor, axis)?;
+        Ok(accessor.into())
+    }
+
+    fn flip(self, axis: usize) -> TCResult<Self::Flip> {
+        let accessor = SparseFlip::new(self.accessor, axis)?;
         Ok(accessor.into())
     }
 

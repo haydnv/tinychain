@@ -263,9 +263,8 @@ pub struct Flip {
     axis: usize,
 }
 
-#[allow(unused)]
 impl Flip {
-    fn new(shape: Shape, axis: usize) -> TCResult<Self> {
+    pub fn new(shape: Shape, axis: usize) -> TCResult<Self> {
         if axis > shape.len() {
             Err(TCError::unsupported(format!(
                 "invalid axis {} for shape {}",
@@ -276,11 +275,11 @@ impl Flip {
         }
     }
 
-    fn axis(&self) -> usize {
+    pub fn axis(&self) -> usize {
         self.axis
     }
 
-    fn flip_bounds(&self, mut bounds: Bounds) -> Bounds {
+    pub fn flip_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.axis {
             return bounds;
         }
@@ -297,14 +296,28 @@ impl Flip {
         bounds
     }
 
-    fn flip_coord(&self, mut coord: Coord) -> Coord {
+    pub fn flip_coord(&self, mut coord: Coord) -> Coord {
         assert_eq!(coord.len(), self.shape.len());
         coord[self.axis] = self.shape[self.axis] - coord[self.axis];
         coord
     }
 
-    fn flip_coords(&self, coords: Coords) -> Coords {
+    pub fn flip_coords(&self, coords: Coords) -> Coords {
         coords.flip(&self.shape, self.axis)
+    }
+
+    pub fn invert_axis(&self, bounds: &Bounds) -> Option<usize> {
+        if bounds.len() <= self.axis {
+            None
+        } else if bounds[self.axis].is_index() {
+            None
+        } else {
+            let elided = bounds[..self.axis]
+                .iter()
+                .filter(|bound| bound.is_index())
+                .count();
+            Some(self.axis - elided)
+        }
     }
 }
 

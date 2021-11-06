@@ -335,6 +335,9 @@ pub trait TensorTransform {
     /// A [`Tensor`] with an expanded dimension
     type Expand: TensorInstance;
 
+    /// A [`Tensor`] flipped around one axis
+    type Flip: TensorInstance;
+
     /// A [`Tensor`] slice
     type Slice: TensorInstance;
 
@@ -349,6 +352,9 @@ pub trait TensorTransform {
 
     /// Insert a new dimension of size 1 at the given `axis`.
     fn expand_dims(self, axis: usize) -> TCResult<Self::Expand>;
+
+    /// Flip this [`Tensor`] around the given `axis`.
+    fn flip(self, axis: usize) -> TCResult<Self::Flip>;
 
     /// Return a slice of this [`Tensor`] with the given `bounds`.
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
@@ -901,6 +907,7 @@ where
     type Broadcast = Self;
     type Cast = Self;
     type Expand = Self;
+    type Flip = Self;
     type Slice = Self;
     type Transpose = Self;
 
@@ -930,6 +937,13 @@ where
         match self {
             Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
             Self::Sparse(sparse) => sparse.expand_dims(axis).map(Self::from),
+        }
+    }
+
+    fn flip(self, axis: usize) -> TCResult<Self::Flip> {
+        match self {
+            Self::Dense(dense) => dense.flip(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.flip(axis).map(Self::from),
         }
     }
 
