@@ -12,7 +12,7 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
-afarray = "~0.10.1"
+afarray = "~0.10.2"
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.5"
@@ -23,9 +23,9 @@ num_cpus = "1.13"
 pin-project = "1.0"
 safecast = "~0.1.2"
 strided = "~0.2.9"
-tc-btree = "~0.2.2"
-tc-error = { version = "~0.3.1", features = ["tensor"] }
-tc-value = "~0.2.3"
-tc-table = "~0.1.9"
-tc-transact = { version = "~0.9.1", features = ["tensor"] }
-tcgeneric = "~0.2.4"
+tc-btree = { path = "../btree" }
+tc-error = { path = "../error", features = ["tensor"] }
+tc-value = { path = "../value" }
+tc-table = { path = "../table" }
+tc-transact = { path = "../transact", features = ["tensor"] }
+tcgeneric = { path = "../generic" }
