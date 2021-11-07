@@ -12,10 +12,22 @@ LEARNING_RATE = 0.01
 MAX_ITERATIONS = 1000
 
 
+def truncated_normal(mean, std, size):
+    while True:
+        dist = np.random.normal(mean, std, size)
+        truncate = np.abs(dist) > mean + (std * 2)
+        if truncate.any():
+            new_dist = np.random.normal(mean, std, size) * truncate
+            dist *= np.logical_not(truncate)
+            dist += new_dist
+        else:
+            return dist
+
+
 def create_layer(input_size, output_size, activation):
     shape = (input_size, output_size)
-    bias = tc.tensor.Dense.load([output_size], tc.F32, np.random.random([output_size]).tolist())
-    weights = tc.tensor.Dense.load(shape, tc.F32, np.random.random(input_size * output_size).tolist())
+    bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(0, 1, output_size).tolist())
+    weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(0, 1, input_size * output_size).tolist())
     return tc.ml.dnn.layer(weights, bias, activation)
 
 
