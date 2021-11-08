@@ -274,6 +274,16 @@ class Dense(Tensor):
         return cls(ref.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
+    def concatenate(cls, tensors, axis=None):
+        """Create a new `Dense` tensor by concatenating the given `tensors` along the given `axis`."""
+
+        params = {"tensors": tensors}
+        if axis:
+            params["axis"] = axis
+
+        return cls(ref.Post(uri(cls) + "/concatenate", params))
+
+    @classmethod
     def constant(cls, shape, value):
         """Return a `Dense` tensor filled with the given `value`."""
 

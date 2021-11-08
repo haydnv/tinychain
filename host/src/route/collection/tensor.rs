@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 
-use futures::{future, Future, StreamExt, TryFutureExt, TryStreamExt};
+use futures::future::{self, Future, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
@@ -9,8 +10,10 @@ use tc_error::*;
 use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;
-use tc_value::{Bound, Number, NumberClass, NumberInstance, Range, TCString, Value, ValueType};
-use tcgeneric::{label, PathSegment, TCBoxTryFuture, Tuple};
+use tc_value::{
+    Bound, Number, NumberClass, NumberInstance, NumberType, Range, TCString, Value, ValueType,
+};
+use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
@@ -21,6 +24,9 @@ use crate::stream::TCStream;
 use crate::txn::Txn;
 
 use super::{Handler, Route};
+
+const AXIS: Label = label("axis");
+const TENSORS: Label = label("tensors");
 
 struct CastHandler<T> {
     tensor: T,
@@ -53,6 +59,128 @@ where
 impl<T> From<T> for CastHandler<T> {
     fn from(tensor: T) -> Self {
         Self { tensor }
+    }
+}
+
+struct ConcatenateHandler;
+
+impl ConcatenateHandler {
+    async fn blank(
+        txn: &Txn,
+        shape: Vec<u64>,
+        dtype: NumberType,
+    ) -> TCResult<DenseTensor<DenseTensorFile>> {
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        DenseTensor::constant(file, txn_id, shape, dtype.zero()).await
+    }
+
+    async fn concatenate(
+        txn: &Txn,
+        shape_in: Shape,
+        dtype: NumberType,
+        tensors: Vec<Tensor>,
+    ) -> TCResult<Tensor> {
+        let mut shape_out = Vec::with_capacity(shape_in.len() + 1);
+        shape_out.push(tensors.len() as u64);
+        shape_out.extend(shape_in.iter().cloned());
+
+        let concatenated = Self::blank(txn, shape_out, dtype).await?;
+
+        let mut writes: FuturesUnordered<_> = tensors
+            .into_iter()
+            .enumerate()
+            .map(|(i, tensor)| {
+                let bounds = vec![AxisBounds::At(i as u64)].into();
+                concatenated.clone().write(txn.clone(), bounds, tensor)
+            })
+            .collect();
+
+        while let Some(()) = writes.try_next().await? {
+            // no-op
+        }
+
+        Ok(concatenated.into())
+    }
+
+    async fn concatenate_axis(
+        txn: &Txn,
+        shape_in: Shape,
+        axis: usize,
+        dtype: NumberType,
+        tensors: Vec<Tensor>,
+    ) -> TCResult<Tensor> {
+        let mut shape_out = shape_in.to_vec();
+        shape_out[axis] = shape_in[axis] * tensors.len() as u64;
+
+        let bounds: Bounds = shape_in.iter().map(|dim| AxisBounds::all(*dim)).collect();
+
+        let concatenated = Self::blank(txn, shape_out, dtype).await?;
+
+        let mut writes: FuturesUnordered<_> = tensors
+            .into_iter()
+            .enumerate()
+            .map(|(i, tensor)| {
+                let start = i as u64 * shape_in[axis];
+                let mut bounds = bounds.clone();
+                bounds[axis] = AxisBounds::In(start..(start + shape_in[axis]));
+                concatenated.clone().write(txn.clone(), bounds, tensor)
+            })
+            .collect();
+
+        while let Some(()) = writes.try_next().await? {
+            // no-op
+        }
+
+        Ok(concatenated.into())
+    }
+}
+
+impl<'a> Handler<'a> for ConcatenateHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let tensors: Vec<Tensor> = params.require(&TENSORS.into())?;
+                let axis: Value = params.or_default(&AXIS.into())?;
+                params.expect_empty()?;
+
+                if tensors.is_empty() {
+                    return Err(TCError::unsupported(
+                        "need at least one Tensor to concatenate",
+                    ));
+                }
+
+                let shape_in = tensors[0].shape().clone();
+                for i in 0..tensors.len() {
+                    if tensors[i].shape() != &shape_in {
+                        return Err(TCError::unsupported(
+                            "can only concatenate Tensors with the same shape",
+                        ));
+                    }
+                }
+
+                let dtype = tensors
+                    .iter()
+                    .map(TensorAccess::dtype)
+                    .fold(tensors[0].dtype(), Ord::max);
+
+                if axis.is_none() {
+                    Self::concatenate(txn, shape_in, dtype, tensors).await
+                } else {
+                    let axis = cast_axis(axis, shape_in.len())?;
+                    Self::concatenate_axis(txn, shape_in, axis, dtype, tensors).await
+                }
+                .map(Collection::Tensor)
+                .map(State::Collection)
+            })
+        }))
     }
 }
 
@@ -254,7 +382,7 @@ impl<'a> Handler<'a> for EinsumHandler {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let format: TCString = params.require(&label("format").into())?;
-                let tensors: Vec<Tensor> = params.require(&label("tensors").into())?;
+                let tensors: Vec<Tensor> = params.require(&TENSORS.into())?;
                 einsum(&format, tensors)
                     .map(Collection::from)
                     .map(State::from)
@@ -313,18 +441,7 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let axis = if key.is_none() {
-                    self.tensor.ndim()
-                } else {
-                    let axis: Number =
-                        key.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
-
-                    if axis >= 0.into() {
-                        axis.cast_into()
-                    } else {
-                        self.tensor.ndim() - usize::cast_from(axis.abs())
-                    }
-                };
+                let axis = cast_axis(key, self.tensor.ndim())?;
 
                 self.tensor
                     .expand_dims(axis)
@@ -357,15 +474,12 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let axis: Number = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
-
-                let axis = if axis >= 0.into() {
-                    axis.cast_into()
-                } else {
-                    self.tensor.ndim() - usize::cast_from(axis.abs())
-                };
-
-                self.tensor.flip(axis).map(Tensor::from).map(Collection::from).map(State::from)
+                let axis = cast_axis(key, self.tensor.ndim())?;
+                self.tensor
+                    .flip(axis)
+                    .map(Tensor::from)
+                    .map(Collection::from)
+                    .map(State::from)
             })
         }))
     }
@@ -456,6 +570,7 @@ impl Route for TensorType {
         match self {
             Self::Dense => match path[0].as_str() {
                 "copy_from" => Some(Box::new(CopyDenseHandler)),
+                "concatenate" => Some(Box::new(ConcatenateHandler)),
                 "constant" => Some(Box::new(ConstantHandler)),
                 "range" => Some(Box::new(RangeHandler)),
                 _ => None,
@@ -966,6 +1081,26 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
         Ok(dim - bound.abs() as u64)
     } else {
         Ok(bound as u64)
+    }
+}
+
+fn cast_axis(axis: Value, ndim: usize) -> TCResult<usize> {
+    if axis.is_none() {
+        Ok(ndim)
+    } else {
+        let axis: Number =
+            axis.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
+
+        if axis >= (ndim as u64).into() {
+            Err(TCError::unsupported(format!(
+                "axis {} is out of bounds for Tensor with {} dimensions",
+                axis, ndim
+            )))
+        } else if axis >= 0.into() {
+            Ok(axis.cast_into())
+        } else {
+            Ok(ndim - usize::cast_from(axis.abs()))
+        }
     }
 }
 
