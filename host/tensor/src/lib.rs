@@ -959,8 +959,10 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
-        if permutation == Some((0..self.ndim()).collect()) {
-            return Ok(self);
+        if let Some(permutation) = &permutation {
+            if permutation.iter().zip(0..self.ndim()).all(|(x, i)| x == &i) {
+                return Ok(self);
+            }
         }
 
         match self {

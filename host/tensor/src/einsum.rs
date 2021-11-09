@@ -5,6 +5,7 @@ use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
+use tc_transact::Transaction;
 use tcgeneric::Tuple;
 
 use super::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
@@ -37,7 +38,15 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
 
-    let f_output = parts.pop_back().unwrap_or("").chars().collect::<Label>();
+    let f_output = parts.pop_back().unwrap_or("");
+    if f_output.chars().collect::<HashSet<_>>().len() != f_output.len() {
+        return Err(TCError::bad_request(
+            "einsum output cannot include repeated subscripts",
+            f_output,
+        ));
+    }
+
+    let f_output = f_output.chars().collect::<Label>();
 
     let mut present_labels = HashSet::<char>::new();
     let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
@@ -122,14 +131,22 @@ fn validate_args<T: TensorAccess>(
     Ok(dimensions)
 }
 
-fn normalize<
-    T: TensorAccess + TensorTransform<Broadcast = T, Expand = T, Transpose = T> + Clone,
->(
+fn normalize<D, Txn, T>(
     tensor: T,
     f_input: &[char],
     f_output: &[char],
     dimensions: &BTreeMap<char, u64>,
-) -> TCResult<T> {
+) -> TCResult<T>
+where
+    D: Dir,
+    Txn: Transaction<D>,
+    T: TensorAccess
+        + TensorReduce<D, Txn = Txn, Reduce = T>
+        + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
+        + Clone,
+{
+    assert_eq!(tensor.ndim(), f_input.len());
+
     debug!(
         "normalize tensor with shape {} from {:?} -> {:?}",
         tensor.shape(),
@@ -141,19 +158,42 @@ fn normalize<
         return Ok(tensor);
     }
 
-    let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
-    let permutation: Vec<usize> = f_output
-        .iter()
-        .filter_map(|l| source.get(l))
-        .cloned()
-        .collect();
+    let mut permutation: Vec<usize> = (0..f_input.len()).collect();
+    permutation.sort_by(|x1, x2| {
+        let l1 = &f_input[*x1];
+        let l2 = &f_input[*x2];
+        f_output
+            .iter()
+            .position(|l| l == l1)
+            .cmp(&f_output.iter().position(|l| l == l2))
+    });
 
+    debug!("permutation of {:?} is {:?}", f_input, permutation);
+    let mut tensor = tensor.transpose(Some(permutation.clone()))?;
+
+    // sum over repeated subscripts
+    // the assumption that they have been transposed together is valid because subscripts
+    // in f_output are required to be unique
+    debug!(
+        "sum over repeated labels of {:?}",
+        permutation.iter().map(|x| f_input[*x]).collect::<Vec<char>>()
+    );
+
+    let mut x = 0;
     let mut labels = Vec::with_capacity(f_output.len());
-    for axis in &permutation {
-        labels.push(f_input[*axis]);
+    for i in 0..(f_input.len() - 1) {
+        let subscript = f_input[permutation[i]];
+        if subscript == f_input[permutation[i + 1]] {
+            tensor = tensor.sum(x)?;
+        } else {
+            labels.push(subscript);
+            x += 1;
+        }
     }
 
-    let mut tensor = tensor.transpose(Some(permutation))?;
+    labels.push(f_input[*permutation.last().unwrap()]);
+    debug!("after summation: {:?}", labels);
+    assert_eq!(tensor.ndim(), labels.len());
 
     let mut i = 0;
     while i < dimensions.len() {
@@ -164,6 +204,12 @@ fn normalize<
             i += 1;
         }
     }
+
+    debug!(
+        "input tensor with shape {} has labels {:?}",
+        tensor.shape(),
+        labels
+    );
 
     let shape = f_output
         .iter()
@@ -179,15 +225,17 @@ fn normalize<
     }
 }
 
-fn outer_product<D, T>(
+fn outer_product<D, Txn, T>(
     f_inputs: &[Label],
     dimensions: &BTreeMap<char, u64>,
     tensors: Vec<T>,
 ) -> TCResult<T>
 where
     D: Dir,
+    Txn: Transaction<D>,
     T: TensorAccess
         + TensorMath<D, T, LeftCombine = T>
+        + TensorReduce<D, Txn = Txn, Reduce = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + Clone,
 {

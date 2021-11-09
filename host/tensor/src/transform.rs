@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::ops;
 
@@ -562,7 +562,12 @@ pub struct Transpose {
 impl Transpose {
     pub fn new(source_shape: Shape, permutation: Option<Vec<usize>>) -> TCResult<Transpose> {
         let ndim = source_shape.len();
-        let permutation = permutation.unwrap_or_else(|| (0..ndim).rev().collect());
+
+        let permutation = if let Some(permutation) = permutation {
+            permutation
+        } else {
+            (0..ndim).rev().collect()
+        };
 
         if permutation.len() != ndim {
             return Err(TCError::unsupported(format!(
@@ -570,19 +575,23 @@ impl Transpose {
                 source_shape,
                 Tuple::from(permutation)
             )));
-        } else if let Some(max_axis) = permutation.iter().max() {
-            if max_axis >= &ndim {
-                return Err(TCError::bad_request(
-                    "cannot transpose nonexistent axis",
-                    max_axis,
-                ));
-            }
+        } else if permutation.iter().max().expect("transpose last axis") > &ndim {
+            return Err(TCError::bad_request(
+                "cannot transpose nonexistent axis",
+                permutation.iter().max().unwrap(),
+            ));
+        } else if permutation.iter().cloned().collect::<HashSet<_>>().len() != permutation.len() {
+            return Err(TCError::bad_request(
+                "cannot transpose the same axis twice",
+                Tuple::from(permutation),
+            ));
         }
 
         let mut shape: Coord = Vec::with_capacity(ndim);
         for axis in &permutation {
             shape.push(source_shape[*axis]);
         }
+
         let shape: Shape = shape.into();
 
         let mut inverse_permutation = vec![0; ndim];
