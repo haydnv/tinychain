@@ -95,12 +95,8 @@ class DNNTests(ClientTest):
 
 # TODO: implement AdamOptimizer
 class CNNTests(ClientTest):
-    @staticmethod
-    def conv_2d(input_shape, output_shape, kernel_shape, stride=1, activation=tc.ml.Sigmoid()):
-        assert len(input_shape) == 3
-        assert len(output_shape) == 3
-
-        num_spatial_dims = 2
+    @classmethod
+    def conv(cls, num_spatial_dims, input_shape, output_shape, kernel_shape):
         input_channels = input_shape[-1]
         output_channels = output_shape[-1]
 
@@ -112,9 +108,40 @@ class CNNTests(ClientTest):
         weights = truncated_normal(0, 1, reduce(operator.mul, weight_shape))
         weights = tc.tensor.Dense.load(weight_shape, tc.F32, weights.tolist())
 
+        return weights, bias
+
+    @classmethod
+    def conv_1d(cls, input_shape, output_shape, kernel_shape, stride=1, activation=tc.ml.Sigmoid()):
+        assert len(input_shape) == 2
+        assert len(output_shape) == 2
+
+        weights, bias = cls.conv(1, input_shape, output_shape, kernel_shape)
+
+        return tc.ml.cnn.conv_1d(input_shape, weights, bias, stride, activation)
+
+    @classmethod
+    def conv_2d(cls, input_shape, output_shape, kernel_shape, stride=1, activation=tc.ml.Sigmoid()):
+        assert len(input_shape) == 3
+        assert len(output_shape) == 3
+
+        weights, bias = cls.conv(2, input_shape, output_shape, kernel_shape)
+
         return tc.ml.cnn.conv_2d(input_shape, weights, bias, stride, activation)
 
-    def testIdentity(self):
+    def test1D(self):
+        data = [
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9],
+            [10, 11, 12],
+        ]
+
+        inputs = np.expand_dims(np.array(data), -1)
+        labels = np.expand_dims(np.array(data), -1)
+
+        self.execute(inputs, labels, self.conv_1d)
+
+    def test2D(self):
         none = [
             [0, 0, 0],
             [0, 0, 0],
@@ -142,13 +169,13 @@ class CNNTests(ClientTest):
         inputs = np.expand_dims(np.array([none, horiz, vert, cross]), -1)
         labels = np.expand_dims(np.array([none, horiz, vert, cross]), -1)
 
-        self.execute(inputs, labels)
+        self.execute(inputs, labels, self.conv_2d)
 
-    def execute(self, inputs, labels):
+    def execute(self, inputs, labels, conv):
         cxt = tc.Context()
         cxt.inputs = tc.tensor.Dense.load(inputs.shape, tc.F32, inputs.flatten().tolist())
         cxt.labels = tc.tensor.Dense.load(labels.shape, tc.F32, labels.flatten().tolist())
-        cxt.layer = self.conv_2d(inputs.shape[1:], labels.shape[1:], [2], 2)
+        cxt.layer = conv(inputs.shape[1:], labels.shape[1:], [2], 2)
         cxt.result = cxt.layer.eval(cxt.inputs)
 
         response = self.host.post(ENDPOINT, cxt)
