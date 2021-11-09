@@ -680,8 +680,9 @@ impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
     }
 }
 
-impl<'a, T: TensorReduce<fs::Dir> + Clone + Sync> Handler<'a> for ReduceHandler<'a, T>
+impl<'a, T> Handler<'a> for ReduceHandler<'a, T>
 where
+    T: TensorAccess + TensorReduce<fs::Dir> + Clone + Sync,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -696,7 +697,8 @@ where
                         .map_ok(State::from)
                         .await
                 } else {
-                    let axis = key.try_cast_into(|v| TCError::bad_request("invalid axis", v))?;
+                    let axis = cast_axis(key, self.tensor.ndim())?;
+
                     (self.reduce)(self.tensor.clone(), axis)
                         .map(Tensor::from)
                         .map(Collection::from)
@@ -870,6 +872,12 @@ where
     } else if path.len() == 1 {
         match path[0].as_str() {
             // attributes
+            "ndim" => {
+                return Some(Box::new(AttributeHandler::from(
+                    Value::Number((tensor.ndim() as u64).into())
+                )))
+            }
+
             "shape" => {
                 return Some(Box::new(AttributeHandler::from(
                     tensor
@@ -1085,6 +1093,8 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
 }
 
 fn cast_axis(axis: Value, ndim: usize) -> TCResult<usize> {
+    debug!("cast axis {} with ndim {}", axis, ndim);
+
     if axis.is_none() {
         Ok(ndim)
     } else {
