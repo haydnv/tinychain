@@ -3,7 +3,7 @@
 from tinychain import ref
 from tinychain.state import Map, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
-from tinychain.value import Bool, I16, F32, Number
+from tinychain.value import Bool, I16, F32, Number, UInt
 
 from .bound import Range
 from .collection import Collection
@@ -218,8 +218,14 @@ class Tensor(Collection):
         rtype = Number if axis is None else self.__class__
         return self._get("product", axis, rtype)
 
+    def ndim(self):
+        """Return the number of dimensions of this `Tensor`."""
+
+        return self._get("ndim", rtype=UInt)
+
     def shape(self):
         """Return the shape of this `Tensor`."""
+
         return self._get("shape", rtype=Tuple)
 
     def sub(self, other):
