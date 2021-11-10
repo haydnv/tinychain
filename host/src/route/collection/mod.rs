@@ -90,7 +90,7 @@ impl Route for Collection {
     }
 }
 
-pub struct Static;
+pub(super) struct Static;
 
 impl Route for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

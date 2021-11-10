@@ -166,6 +166,7 @@ impl Route for Static {
             "collection" => collection::Static.route(&path[1..]),
             "scalar" => scalar::Static.route(&path[1..]),
             "map" => Some(Box::new(MapHandler)),
+            "stream" => stream::Static.route(&path[1..]),
             "tuple" => Some(Box::new(TupleHandler)),
             _ => None,
         }

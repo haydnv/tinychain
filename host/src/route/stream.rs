@@ -1,5 +1,8 @@
 use futures::{TryFutureExt, TryStreamExt};
+use safecast::{Match, TryCastInto};
 
+use tc_error::TCError;
+use tc_value::Number;
 use tcgeneric::TCPathBuf;
 
 use crate::generic::{label, PathSegment};
@@ -55,12 +58,13 @@ impl<'a> Handler<'a> for Fold {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
+                let item_name = params.require(&label("item_name").into())?;
                 let op = params.require(&label("op").into())?;
                 let value = params.require(&label("value").into())?;
                 params.expect_empty()?;
 
                 self.source
-                    .fold(txn.clone(), value, op)
+                    .fold(txn.clone(), item_name, value, op)
                     .map_ok(State::from)
                     .await
             })
@@ -121,6 +125,47 @@ impl Route for TCStream {
             "fold" => Some(Box::new(Fold { source })),
             "for_each" => Some(Box::new(ForEach { source })),
             "map" => Some(Box::new(Map { source })),
+            _ => None,
+        }
+    }
+}
+
+struct RangeHandler;
+
+impl<'a> Handler<'a> for RangeHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.matches::<(Number, Number, Number)>() {
+                    let (start, stop, step) = key.opt_cast_into().expect("range");
+                    Ok(State::Stream(TCStream::Range(start, stop, step)))
+                } else if key.matches::<(Number, Number)>() {
+                    let (start, stop) = key.opt_cast_into().expect("range");
+                    Ok(State::Stream(TCStream::Range(start, stop, 1.into())))
+                } else if key.matches::<Number>() {
+                    let stop = key.opt_cast_into().expect("range stop");
+                    Ok(State::Stream(TCStream::Range(0.into(), stop, 1.into())))
+                } else {
+                    Err(TCError::bad_request("invalid range", key))
+                }
+            })
+        }))
+    }
+}
+
+pub(super) struct Static;
+
+impl Route for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.len() != 1 {
+            return None;
+        }
+
+        match path[0].as_str() {
+            "range" => Some(Box::new(RangeHandler)),
             _ => None,
         }
     }

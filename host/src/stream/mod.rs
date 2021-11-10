@@ -1,17 +1,22 @@
 //! A stream generator such as a `Collection` or a mapping or aggregation of its items
 
+use std::convert::TryInto;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use async_trait::async_trait;
 use destream::en;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{CastInto, TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom};
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
 use tc_table::TableStream;
 use tc_transact::{IntoView, Transaction};
-use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
+use tc_value::{Number, UInt};
+use tcgeneric::{Id, Map, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::closure::Closure;
 use crate::collection::Collection;
@@ -29,6 +34,7 @@ pub enum TCStream {
     Aggregate(Box<TCStream>),
     Collection(Collection),
     Map(Box<TCStream>, Closure),
+    Range(Number, Number, Number),
 }
 
 impl TCStream {
@@ -40,30 +46,20 @@ impl TCStream {
         Self::Aggregate(Box::new(self))
     }
 
-    /// Fold this stream with the given initial `Value` and `Closure`.
+    /// Fold this stream with the given initial `State` and `Closure`.
     ///
     /// For example, folding `[1, 2, 3]` with `0` and `Number::add` will produce `6`.
-    pub async fn fold(self, txn: Txn, mut value: Value, op: Closure) -> TCResult<Value> {
+    pub async fn fold(self, txn: Txn, item_name: Id, mut state: Map<State>, op: Closure) -> TCResult<State> {
         let mut source = self.into_stream(txn.clone()).await?;
-        loop {
-            if let Some(state) = source.try_next().await? {
-                let mut old_value = Value::None;
-                std::mem::swap(&mut old_value, &mut value);
-                let state = op
-                    .clone()
-                    .call(&txn, (old_value, state).cast_into())
-                    .await?;
 
-                value = state.try_cast_into(|s| {
-                    TCError::bad_request(
-                        "closure provided to Stream::fold must return a Value, not",
-                        s,
-                    )
-                })?;
-            } else {
-                break Ok(value);
-            }
+        while let Some(item) = source.try_next().await? {
+            let mut args = state.clone();
+            args.insert(item_name.clone(), item);
+            let result = op.clone().call(&txn, args.into()).await?;
+            state = result.try_into()?;
         }
+
+        Ok(State::Map(state))
     }
 
     /// Execute the given [`Closure`] with each item in the stream as its `args`.
@@ -103,6 +99,14 @@ impl TCStream {
                         .into_stream(txn.clone())
                         .map_ok(|source| Self::execute_map(source, txn, op))
                         .await
+                }
+                Self::Range(start, stop, step) => {
+                    let range = RangeStream::new(start, stop, step)
+                        .map(Value::Number)
+                        .map(State::from)
+                        .map(Ok);
+                    let range: TCBoxTryStream<_> = Box::pin(range);
+                    Ok(range)
                 }
             }
         })
@@ -160,7 +164,6 @@ impl TCStream {
                 }
                 tc_tensor::Tensor::Sparse(sparse) => {
                     use tc_tensor::SparseAccess;
-                    use tc_value::Number;
                     use tcgeneric::Tuple;
 
                     let filled = sparse.into_inner().filled(txn).await?;
@@ -205,5 +208,58 @@ where
 {
     fn from(collection: T) -> Self {
         Self::Collection(collection.into())
+    }
+}
+
+struct RangeStream {
+    current: Number,
+    step: Number,
+    stop: Number,
+}
+
+impl RangeStream {
+    fn new(start: Number, stop: Number, step: Number) -> Self {
+        Self {
+            current: start,
+            stop,
+            step,
+        }
+    }
+}
+
+impl Stream for RangeStream {
+    type Item = Number;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.current == self.stop {
+            Poll::Ready(None)
+        } else {
+            let next = self.current;
+            self.current = self.current + self.step;
+            Poll::Ready(Some(next))
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = (self.stop - self.current) / self.step;
+        match size {
+            Number::Bool(_) => (0, Some(1)),
+            Number::Complex(size) => {
+                let size = UInt::cast_from(size).cast_into();
+                (size, Some(size + 1))
+            }
+            Number::Float(size) => {
+                let size = UInt::cast_from(size).cast_into();
+                (size, Some(size + 1))
+            }
+            Number::Int(size) => {
+                let size = UInt::cast_from(size).cast_into();
+                (size, Some(size))
+            }
+            Number::UInt(size) => {
+                let size = UInt::cast_from(size).cast_into();
+                (size, Some(size))
+            }
+        }
     }
 }

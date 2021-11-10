@@ -98,6 +98,7 @@ class State(object):
         return self.is_none().logical_not()
 
 
+# TODO: document these methods
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
@@ -133,6 +134,7 @@ class Map(State):
         return self.eq(other).logical_not()
 
 
+# TODO: document these methods
 class Tuple(State):
     """A tuple of `State` s."""
 
@@ -199,6 +201,15 @@ class Stream(State):
 
     __uri__ = uri(State) + "/stream"
 
+    @classmethod
+    def range(cls, range):
+        """Return a stream of numbers in the given `range`.
+
+        `range` can be a positive number, a 2-Tuple like `(start, stop)`, or a 3-Tuple like `(start, stop, step)`
+        """
+
+        return cls(ref.Get(uri(cls) + "/range", range))
+
     def aggregate(self):
         return self._get("aggregate", rtype=Stream)
 
@@ -208,13 +219,25 @@ class Stream(State):
         return self._get("first", rtype=Scalar)
 
     def for_each(self, op):
+        """Run the given `op` for each item in this `Stream`, then return the last result.
+
+        This is useful when you need to execute an `op` for its side-effects and not its return value.
+        """
+
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("for_each", Map(op=op), rtype)
 
-    def fold(self, initial_state, op):
-        return self._post("fold", Map(value=initial_state, op=op), type(initial_state))
+    def fold(self, item_name, initial_state, op):
+        """Run the given `op` for each item in this `Stream` along with the previous result.
+
+        `op` must be a POST Op. The stream item to handle will be passed with the given `item_key` as its name.
+        """
+
+        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), type(initial_state))
 
     def map(self, op):
+        """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream."""
+
         return self._post("map", Map(op=op), Stream)
 
 
