@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import operator
 import tinychain as tc
@@ -14,7 +16,9 @@ LEARNING_RATE = 0.01
 MAX_ITERATIONS = 1000
 
 
-def truncated_normal(mean, std, size):
+def truncated_normal(size, mean=0., std=None):
+    std = std if std else math.sqrt(size)
+
     while True:
         dist = np.random.normal(mean, std, size)
         truncate = np.abs(dist) > mean + (std * 2)
@@ -32,8 +36,8 @@ class DNNTests(ClientTest):
     @staticmethod
     def create_layer(input_size, output_size, activation):
         shape = (input_size, output_size)
-        bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(0, 1, output_size).tolist())
-        weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(0, 1, input_size * output_size).tolist())
+        bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(output_size).tolist())
+        weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(input_size * output_size).tolist())
         return tc.ml.dnn.layer(weights, bias, activation)
 
     def testNot(self):
@@ -105,7 +109,7 @@ class CNNTests(ClientTest):
 
         bias = tc.tensor.Dense.zeros([output_channels])
 
-        weights = truncated_normal(0, 1, reduce(operator.mul, weight_shape))
+        weights = truncated_normal(reduce(operator.mul, weight_shape))
         weights = tc.tensor.Dense.load(weight_shape, tc.F32, weights.tolist())
 
         return weights, bias

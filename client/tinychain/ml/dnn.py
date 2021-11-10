@@ -13,8 +13,16 @@ def layer(weights, bias, activation):
     # dimensions (for `einsum`): k = number of examples, i = weight input dim, j = weight output dim
 
     class DNNLayer(Layer):
+        @property
+        def bias(self):
+            return Dense(self[1])
+
+        @property
+        def weights(self):
+            return Dense(self[0])
+
         def eval(self, inputs):
-            return activation.forward(einsum("ij,ki->kj", [self[0], inputs])) + self[1]
+            return activation.forward(einsum("ij,ki->kj", [self.weights, inputs])) + self.bias
 
         def gradients(self, A_prev, dA, Z):
             dZ = activation.backward(dA, Z).copy()
@@ -24,14 +32,12 @@ def layer(weights, bias, activation):
             return dA_prev, d_weights, d_bias
 
         def train_eval(self, inputs):
-            Z = einsum("ij,ki->kj", [self[0], inputs])
-            A = activation.forward(Z) + self[1]
+            Z = einsum("ij,ki->kj", [self.weights, inputs])
+            A = activation.forward(Z) + self.bias
             return A, Z
 
         def update(self, d_weights, d_bias):
-            w = Dense(self[0])
-            b = Dense(self[1])
-            return w.overwrite(w - d_weights), b.overwrite(b - d_bias)
+            return self.weights.overwrite(self.weights - d_weights), self.bias.overwrite(self.bias - d_bias)
 
     return DNNLayer([weights, bias])
 
