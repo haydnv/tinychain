@@ -64,7 +64,7 @@ def neural_net(layers):
                 A.append(A_l.copy())
                 Z.append(Z_l)
 
-            m = inputs.shape()[0]
+            m = inputs.shape[0]
             dA = cost(A[-1]).sum() / m
 
             updates = []

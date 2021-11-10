@@ -25,7 +25,7 @@ def conv_1d(input_shape, filters, bias=None, stride=1, activation=Sigmoid()):
 
     class Conv1D(Conv):
         def eval(self, inputs):
-            padded = Dense.zeros([inputs.shape()[0], length + padding, input_channels])
+            padded = Dense.zeros([inputs.shape[0], length + padding, input_channels])
             l, r = padding // 2, padding // 2 if length % 2 == 0 else math.ceil(padding / 2)
 
             strides = []
@@ -61,7 +61,7 @@ def conv_2d(input_shape, filters, bias=None, stride=1, activation=Sigmoid()):
 
     class Conv2D(Conv):
         def eval(self, inputs):
-            padded = Dense.zeros([inputs.shape()[0], width + padding, height + padding, input_channels])
+            padded = Dense.zeros([inputs.shape[0], width + padding, height + padding, input_channels])
 
             l, r = padding // 2, padding // 2 if width % 2 == 0 else math.ceil(padding / 2)
             t, b = padding // 2, padding // 2 if height % 2 == 0 else math.ceil(padding / 2)

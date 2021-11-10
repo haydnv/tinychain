@@ -218,11 +218,13 @@ class Tensor(Collection):
         rtype = Number if axis is None else self.__class__
         return self._get("product", axis, rtype)
 
+    @property
     def ndim(self):
         """Return the number of dimensions of this `Tensor`."""
 
         return self._get("ndim", rtype=UInt)
 
+    @property
     def shape(self):
         """Return the shape of this `Tensor`."""
 
