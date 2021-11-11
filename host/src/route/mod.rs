@@ -248,6 +248,39 @@ impl<'a, T> From<&'a T> for SelfHandler<'a, T> {
     }
 }
 
+struct SelfHandlerOwned<T> {
+    subject: T,
+}
+
+impl<'a, T: Send + Sync + fmt::Display + 'a> Handler<'a> for SelfHandlerOwned<T>
+where
+    State: From<T>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    Ok(self.subject.into())
+                } else {
+                    Err(TCError::not_found(format!(
+                        "attribute {} of {}",
+                        key, self.subject
+                    )))
+                }
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<T> for SelfHandlerOwned<T> {
+    fn from(subject: T) -> Self {
+        Self { subject }
+    }
+}
+
 pub struct Static;
 
 impl Route for Static {

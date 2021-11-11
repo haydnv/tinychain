@@ -441,6 +441,29 @@ class TensorTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, -(x * y * z))
 
+    def testSparseAsDense(self):
+        matrix = np.eye(3).astype(np.bool)
+        data = [(list(coord), bool(matrix[coord])) for coord in np.ndindex(matrix.shape) if matrix[coord] != 0]
+
+        cxt = tc.Context()
+        cxt.sparse = tc.tensor.Sparse.load([3, 3], tc.Bool, data)
+        cxt.dense = cxt.sparse.as_dense()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_dense(tc.Bool, [3, 3], matrix.flatten().tolist())
+        self.assertEqual(actual, expected)
+
+    def testDenseAsSparse(self):
+        matrix = np.eye(3).astype(np.int)
+
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.load([3, 3], tc.I32, matrix.flatten().tolist())
+        cxt.sparse = cxt.dense.as_sparse()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_sparse(tc.I32, [3, 3], matrix)
+        self.assertEqual(actual, expected)
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

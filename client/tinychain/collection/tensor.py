@@ -323,6 +323,11 @@ class Dense(Tensor):
         bounds = _handle_bounds(bounds)
         return self._get("elements", bounds, Stream)
 
+    def as_sparse(self):
+        """Return a :class:`Sparse` view of this `Dense` tensor."""
+
+        return self._get("sparse")
+
 
 class Sparse(Tensor):
     """
@@ -353,6 +358,11 @@ class Sparse(Tensor):
 
         bounds = _handle_bounds(bounds)
         return self._get("elements", bounds, Stream)
+
+    def as_dense(self):
+        """Return a :class:`Dense` view of this `Sparse` tensor."""
+
+        return self._get("dense")
 
 
 def einsum(format, tensors):

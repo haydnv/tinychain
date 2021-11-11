@@ -17,7 +17,7 @@ use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
 use crate::fs;
-use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler};
+use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::stream::TCStream;
@@ -846,6 +846,7 @@ impl Route for Tensor {
 fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>
 where
     T: TensorAccess
+        + TensorInstance
         + TensorIO<fs::Dir, Txn = Txn>
         + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorBoolean<Tensor, Combine = Tensor>
@@ -859,13 +860,14 @@ where
         + Sync,
     Collection: From<T>,
     Tensor: From<T>,
-    <T as TensorTransform>::Slice: TensorAccess + Send + 'a,
+    Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
     Tensor: From<<T as TensorTransform>::Flip>,
     Tensor: From<<T as TensorTransform>::Slice>,
     Tensor: From<<T as TensorTransform>::Transpose>,
+    <T as TensorTransform>::Slice: TensorAccess + Send + 'a,
 {
     if path.is_empty() {
         Some(Box::new(TensorHandler::from(tensor.clone())))
@@ -873,9 +875,9 @@ where
         match path[0].as_str() {
             // attributes
             "ndim" => {
-                return Some(Box::new(AttributeHandler::from(
-                    Value::Number((tensor.ndim() as u64).into())
-                )))
+                return Some(Box::new(AttributeHandler::from(Value::Number(
+                    (tensor.ndim() as u64).into(),
+                ))))
             }
 
             "shape" => {
@@ -911,6 +913,19 @@ where
         match path[0].as_str() {
             // to stream
             "elements" => Some(Box::new(ElementsHandler::new(tensor))),
+
+            // views
+            "dense" => {
+                return Some(Box::new(SelfHandlerOwned::from(Tensor::from(
+                    tensor.into_dense(),
+                ))));
+            }
+
+            "sparse" => {
+                return Some(Box::new(SelfHandlerOwned::from(Tensor::from(
+                    tensor.into_sparse(),
+                ))));
+            }
 
             // boolean ops
             "and" => Some(Box::new(DualHandler::new(
