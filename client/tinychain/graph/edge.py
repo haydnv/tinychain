@@ -1,13 +1,8 @@
-from tinychain.chain import Chain, Sync
-from tinychain.cluster import Cluster
-from tinychain.collection import Column
-from tinychain.collection.table import Table
 from tinychain.collection.tensor import einsum, Sparse
 from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.ref import After, Get, If, MethodSubject, While, With
 from tinychain.state import Map, Tuple
-from tinychain.util import uri, Context, URI
 from tinychain.value import Bool, Nil, I64, U64, String
 
 
@@ -59,7 +54,7 @@ class Edge(Sparse):
             return {"edge": edge, "i": i + 1, "neighbors": neighbors.copy()}
 
         node_ids = Sparse(node_ids)
-        shape = node_ids.shape()
+        shape = node_ids.shape
         traversal = If(
             shape.eq([I64.max()]),
             While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
