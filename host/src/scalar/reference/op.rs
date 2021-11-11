@@ -426,32 +426,30 @@ impl Refer for OpRef {
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
-                    let key = key.resolve(context, txn).await?;
+                    let key = resolve(key, context, txn).await?;
                     let key = key.try_cast_into(invalid_key(&link))?;
-
                     txn.get(link, key).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let key = key.resolve(context, txn).await?;
+                    let key = resolve(key, context, txn).await?;
                     let key = key.try_cast_into(invalid_key(&id_ref))?;
-
                     context.resolve_get(txn, id_ref.id(), &path, key).await
                 }
             },
             Self::Put((subject, key, value)) => match subject {
                 Subject::Link(link) => {
-                    let key = key.resolve(context, txn).await?;
+                    let key = resolve(key, context, txn).await?;
                     let key = key.try_cast_into(invalid_key(&link))?;
 
-                    let value = value.resolve(context, txn).await?;
+                    let value = resolve(value, context, txn).await?;
 
                     txn.put(link, key, value)
                         .map_ok(|()| State::default())
                         .await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let key = key.resolve(context, txn);
-                    let value = value.resolve(context, txn);
+                    let key = resolve(key, context, txn);
+                    let value = resolve(value, context, txn);
                     let (key, value) = try_join!(key, value)?;
 
                     let key = key.try_cast_into(invalid_key(&id_ref))?;
@@ -464,25 +462,23 @@ impl Refer for OpRef {
             },
             Self::Post((subject, params)) => match subject {
                 Subject::Link(link) => {
-                    let params = Scalar::Map(params).resolve(context, txn).await?;
+                    let params = resolve(Scalar::Map(params), context, txn).await?;
                     txn.post(link, params).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let params = Scalar::Map(params).resolve(context, txn).await?;
+                    let params = resolve(Scalar::Map(params), context, txn).await?;
                     let params = params.try_into()?;
-
                     context.resolve_post(txn, id_ref.id(), &path, params).await
                 }
             },
             Self::Delete((subject, key)) => match subject {
                 Subject::Link(link) => {
-                    let key = key.resolve(context, txn).await?;
+                    let key = resolve(key, context, txn).await?;
                     let key = key.try_cast_into(invalid_key(&link))?;
-
                     txn.delete(link, key).map_ok(|()| State::default()).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let key = key.resolve(context, txn).await?;
+                    let key = resolve(key, context, txn).await?;
                     let key = key.try_cast_into(invalid_key(&id_ref))?;
 
                     context
@@ -639,4 +635,17 @@ impl fmt::Display for OpRef {
             OpRef::Delete((link, key)) => write!(f, "{} {}?key={}", class, link, key),
         }
     }
+}
+
+async fn resolve<'a, T, S>(tc_ref: T, context: &'a Scope<'a, S>, txn: &'a Txn) -> TCResult<State>
+where
+    T: Refer,
+    S: ToState + Public + Instance,
+{
+    let mut state = tc_ref.resolve(context, txn).await?;
+    while state.is_ref() {
+        state = state.resolve(context, txn).await?;
+    }
+
+    Ok(state)
 }
