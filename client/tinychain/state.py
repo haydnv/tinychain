@@ -99,6 +99,7 @@ class State(object):
 
 
 # TODO: document these methods
+# TODO: keep track of type information when possible
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
@@ -135,6 +136,7 @@ class Map(State):
 
 
 # TODO: document these methods
+# TODO: keep track of type information when possible
 class Tuple(State):
     """A tuple of `State` s."""
 

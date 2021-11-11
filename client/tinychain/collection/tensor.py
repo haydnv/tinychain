@@ -326,7 +326,7 @@ class Dense(Tensor):
     def as_sparse(self):
         """Return a :class:`Sparse` view of this `Dense` tensor."""
 
-        return self._get("sparse")
+        return self._get("sparse", rtype=Sparse)
 
 
 class Sparse(Tensor):
@@ -362,7 +362,7 @@ class Sparse(Tensor):
     def as_dense(self):
         """Return a :class:`Dense` view of this `Sparse` tensor."""
 
-        return self._get("dense")
+        return self._get("dense", rtype=Dense)
 
 
 def einsum(format, tensors):

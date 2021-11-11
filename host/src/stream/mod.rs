@@ -49,7 +49,13 @@ impl TCStream {
     /// Fold this stream with the given initial `State` and `Closure`.
     ///
     /// For example, folding `[1, 2, 3]` with `0` and `Number::add` will produce `6`.
-    pub async fn fold(self, txn: Txn, item_name: Id, mut state: Map<State>, op: Closure) -> TCResult<State> {
+    pub async fn fold(
+        self,
+        txn: Txn,
+        item_name: Id,
+        mut state: Map<State>,
+        op: Closure,
+    ) -> TCResult<State> {
         let mut source = self.into_stream(txn.clone()).await?;
 
         while let Some(item) = source.try_next().await? {
@@ -231,11 +237,11 @@ impl Stream for RangeStream {
     type Item = Number;
 
     fn poll_next(mut self: Pin<&mut Self>, _cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.current == self.stop {
+        if self.current >= self.stop {
             Poll::Ready(None)
         } else {
             let next = self.current;
-            self.current = self.current + self.step;
+            self.current = next + self.step;
             Poll::Ready(Some(next))
         }
     }
