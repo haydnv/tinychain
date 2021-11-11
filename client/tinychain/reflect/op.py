@@ -38,6 +38,10 @@ class Op(object):
 class Get(Op):
     __uri__ = uri(op.Get)
 
+    def __init__(self, form):
+        self.rtype = _get_rtype(form, State)
+        Op.__init__(self, form)
+
     def __call__(self, key=None):
         return ref.Get(self, key)
 
@@ -56,7 +60,13 @@ class Get(Op):
         return key_name, cxt
 
     def __ref__(self, name):
-        return op.Get(URI(name))
+        rtype = self.rtype
+
+        class GetRef(op.Get):
+            def __call__(self, *args, **kwargs):
+                return rtype(op.Get.__call__(self, *args, **kwargs))
+
+        return GetRef(URI(name))
 
     def __repr__(self):
         return f"GET Op with form {to_json(self)}"
@@ -64,14 +74,6 @@ class Get(Op):
 
 class Put(Op):
     __uri__ = uri(op.Put)
-
-    def __init__(self, form):
-        rtype = _get_rtype(form, None)
-        if rtype not in [None, Nil]:
-            raise ValueError(f"{self.dtype()} can only return None, not f{rtype}")
-
-        self.rtype = rtype
-        Op.__init__(self, form)
 
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
@@ -113,7 +115,11 @@ class Put(Op):
         return key_name, value_name, cxt
 
     def __ref__(self, name):
-        return op.Put(URI(name))
+        class PutRef(op.Put):
+            def __call__(self, *args, **kwargs):
+                return Nil(op.Put.__call__(self, *args, **kwargs))
+
+        return PutRef(URI(name))
 
     def __repr__(self):
         return f"PUT Op with form {self.form}"
@@ -148,7 +154,13 @@ class Post(Op):
         return cxt
 
     def __ref__(self, name):
-        return op.Post(URI(name))
+        rtype = self.rtype
+
+        class PostRef(op.Post):
+            def __call__(self, *args, **kwargs):
+                return rtype(op.Post.__call__(self, *args, **kwargs))
+
+        return PostRef(URI(name))
 
     def __repr__(self):
         return f"POST Op with form {self.form}"
@@ -157,14 +169,6 @@ class Post(Op):
 class Delete(Op):
     __uri__ = uri(op.Delete)
 
-    def __init__(self, form):
-        rtype = _get_rtype(form, None)
-        if rtype not in [None, Nil]:
-            raise ValueError(f"Delete op can only return None, not f{rtype}")
-
-        self.rtype = rtype
-        Op.__init__(self, form)
-
     def __call__(self, key=None):
         return ref.Get(self, key)
 
@@ -172,7 +176,11 @@ class Delete(Op):
         return Get.__form__(self)
 
     def __ref__(self, name):
-        return op.Delete(URI(name))
+        class DeleteRef(op.Delete):
+            def __call__(self, *args, **kwargs):
+                return Nil(op.Delete.__call__(self, *args, **kwargs))
+
+        return DeleteRef(URI(name))
 
     def __repr__(self):
         return f"DELETE Op with form {self.form}"
