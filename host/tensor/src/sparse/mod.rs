@@ -606,7 +606,16 @@ where
 
     fn div(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
         debug!("SparseTensor::div");
-        self.left_combine(other, Number::div)
+        fn div(l: Number, r: Number) -> Number {
+            // to prevent a divide-by-zero error, treat the right-hand side as if it doesn't exist
+            if r == r.class().zero() {
+                Ord::max(l.class(), r.class()).zero()
+            } else {
+                l / r
+            }
+        }
+
+        self.left_combine(other, div)
     }
 
     fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {

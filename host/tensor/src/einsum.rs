@@ -176,7 +176,10 @@ where
     // in f_output are required to be unique
     debug!(
         "sum over repeated labels of {:?}",
-        permutation.iter().map(|x| f_input[*x]).collect::<Vec<char>>()
+        permutation
+            .iter()
+            .map(|x| f_input[*x])
+            .collect::<Vec<char>>()
     );
 
     let mut x = 0;
