@@ -40,6 +40,11 @@ class Tests(unittest.TestCase):
         self.execute('i->', A)
         self.execute('i->i', A)
 
+    def testRepeatIndex(self):
+        A = np.array([[1, 1], [2, 2]])
+        B = np.array([3, 2, 1])
+        self.execute('ii,j->ij', A, B)
+
     def test2D(self):
         A = np.array([[1, 1], [2, 2], [3, 3]])
         self.execute('ij->', A)
