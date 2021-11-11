@@ -119,7 +119,14 @@ where
             .await?;
 
         let shape = if let Some(shape) = shape {
-            if shape.size() != size {
+            if shape.size() < size {
+                return Err(TCError::unsupported(format!(
+                    "dense tensor with shape {} requires {} elements but found {}",
+                    shape,
+                    shape.size(),
+                    size
+                )));
+            } else if shape.size() > size {
                 return Err(TCError::unsupported(format!(
                     "dense tensor of shape {} requires {} elements but found {}--this could indicate a divide-by-zero error",
                     shape,

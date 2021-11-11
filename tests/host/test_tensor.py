@@ -93,6 +93,20 @@ class DenseTests(unittest.TestCase):
         expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
 
+    def testMulWithBroadcast(self):
+        tau = np.array([[4.188]])
+        v = np.array([[1], [0.618]])
+
+        cxt = tc.Context()
+        cxt.tau = tc.tensor.Dense.load([1, 1], tc.F32, tau.flatten().tolist())
+        cxt.v = tc.tensor.Dense.load([2, 1], tc.F32, v.flatten().tolist())
+        cxt.result = cxt.tau * tc.tensor.einsum("ij,kj->ik", [cxt.v, cxt.v])
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = tau * (v @ v.T)
+        self.assertEqual(expected.shape, tuple(actual[tc.uri(tc.tensor.Dense)][0][0]))
+        self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
+
     def testSub(self):
         shape = [1, 3]
 

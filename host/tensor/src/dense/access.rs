@@ -534,7 +534,12 @@ where
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(&l, &r))
+                .map_ok(move |(l, r)| {
+                    let combined = combinator(&l, &r);
+                    debug_assert_eq!(combined.len(), l.len());
+                    debug_assert_eq!(combined.len(), r.len());
+                    combined
+                })
                 .map(|result| {
                     result.and_then(|array| {
                         if array.is_nan().any() {

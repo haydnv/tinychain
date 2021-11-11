@@ -1144,7 +1144,7 @@ fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
         Bound::Ex(end) => cast_bound(dim, end)?,
     };
 
-    if end > start {
+    if end >= start {
         Ok(AxisBounds::In(start..end))
     } else {
         Err(TCError::bad_request(
