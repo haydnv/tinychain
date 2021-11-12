@@ -90,23 +90,47 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
 
     @closure
     @post_op
-    def svd_step(cxt, A: Tensor, U: Tensor, V_t: Tensor, k: UInt) -> Map:
+    def left(cxt, k: UInt, A: Tensor, U: Tensor) -> Map:
         cxt.transform = outer_cxt.householder(x=A[k:, k])
         cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
 
-        cxt.I_m = identity(outer_cxt.m, F32).as_dense().copy()
-        Q_k = After(cxt.I_m.write([slice(k, None), slice(k, None)], cxt.v_outer_tau), cxt.I_m)
-
         diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
         diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
+        A = After(A.write([slice(k, None), slice(k, None)], diagonal), A)
 
-        return {
-            "A": After(A.write([slice(k, None), slice(k, None)], diagonal), A),
-            "U": einsum("ij,jk->ik", [Q_k, U]),
-            "V_t": V_t,
-        }
+        cxt.I_m = identity(outer_cxt.m, F32).as_dense().copy()
+        Q_k = After(cxt.I_m.write([slice(k, None), slice(k, None)], cxt.v_outer_tau), cxt.I_m)
+        U = einsum("ij,jk->ik", [Q_k, U])
+
+        return {"U": U, "A": A}
+
+    @closure
+    @post_op
+    def right(cxt, k: UInt, A: Tensor, U: Tensor, V_t: Tensor) -> Map:
+        cxt.transform = outer_cxt.householder(x=A[k, k + 1:])
+        cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
+
+        diagonal = identity(outer_cxt.n - (k + 1)) - cxt.v_outer_tau
+        diagonal = einsum("ij,jk->ik", [A[k:, k + 1:], diagonal])
+        A = After(A.write([slice(k, None), slice(k + 1, None)], diagonal), A)
+
+        cxt.I_n = identity(outer_cxt.n, F32).as_dense().copy()
+        P = After(cxt.I_n.write([slice(k + 1, None), slice(k + 1, None)], cxt.v_outer_tau), cxt.I_n)
+        V_t = einsum("ij,jk->ik", [P, V_t])
+
+        return {"U": U, "A": A, "V_t": V_t}
+
+    cxt.left = left
+    cxt.right = right
+
+    @closure
+    @post_op
+    def step(A: Tensor, U: Tensor, V_t: Tensor, k: UInt) -> Map:
+        left = cxt.left(k=k, A=A, U=U)
+        right = cxt.right(k=k, A=left["A"], U=left["U"], V_t=V_t)
+        return If(k < cxt.n - 2, right, left)
 
     U = identity(cxt.m, F32).as_dense()
     V_t = identity(cxt.n, F32).as_dense()
 
-    return Stream.range(cxt.n).fold("k", Map(A=x, U=U, V_t=V_t), svd_step)
+    return Stream.range(cxt.n - 2).fold("k", Map(A=x, U=U, V_t=V_t), step)
