@@ -2,7 +2,10 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, If
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F32, Float, UInt
+from tinychain.value import Bool, F64, Float, UInt
+
+# approximate difference between 1.0 and the next representable 32-bit float
+EPS = 1.2 ** -7
 
 
 def identity(size, dtype=Bool):
@@ -16,14 +19,18 @@ def identity(size, dtype=Bool):
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
 def householder(cxt, x: Tensor) -> Tuple:
-    """Compute the Householder vector of the given column `a`."""
+    """Compute the Householder vector of the given column vector `a`."""
 
-    cxt.a = x.copy()  # make a copy in case X is updated before the return values are evaluated
-    cxt.a_norm = (cxt.a**2).sum()**0.5
-    cxt.v = (cxt.a / (cxt.a[0] + cxt.a_norm)).copy()
-    tau = 2 / (cxt.v**2).sum()
+    cxt.alpha = x[0]
+    cxt.s = (x[1:]**2).sum()
+    cxt.t = (cxt.alpha**2 + cxt.s)**0.5
 
-    return Tuple(After(cxt.v.write([0], 1), (cxt.v, tau)))
+    cxt.v = x.copy()  # make a copy in case X is updated before the return values are evaluated
+    cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
+    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero ** 2))
+    v = After(cxt.v.write([0], cxt.v_zero), cxt.v / cxt.v_zero)
+
+    return v, tau
 
 
 def norm(tensor: Tensor) -> Tensor:
@@ -65,16 +72,16 @@ def qr(cxt, x: Tensor) -> Tuple:
     def qr_step(cxt, Q: Tensor, R: Tensor, k: UInt) -> Map:
         cxt.transform = outer_cxt.householder(x=R[k:, k])
         cxt.v_outer = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]])
-        cxt.tau = F32(cxt.transform[1])
+        cxt.tau = F64(cxt.transform[1])
 
-        cxt.H = identity(outer_cxt.m, F32).as_dense().copy()
+        cxt.H = identity(outer_cxt.m, F64).as_dense().copy()
         cxt.H_sub = (cxt.H[k:, k:] - (cxt.v_outer * cxt.tau))
         return After(cxt.H.write([slice(k, None), slice(k, None)], cxt.H_sub), {
             "Q": einsum("ij,jk->ik", [cxt.H, Q]),
             "R": einsum("ij,jk->ik", [cxt.H, R]),
         })
 
-    state = Map(Q=identity(cxt.m, F32).as_dense(), R=x)
+    state = Map(Q=identity(cxt.m, F64).as_dense(), R=x)
     QR = Stream.range(cxt.n - 1).fold("k", state, qr_step)
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
 
@@ -98,7 +105,7 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
         diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
         A = After(A.write([slice(k, None), slice(k, None)], diagonal), A)
 
-        cxt.I_m = identity(outer_cxt.m, F32).as_dense().copy()
+        cxt.I_m = identity(outer_cxt.m, F64).as_dense().copy()
         Q_k = After(cxt.I_m.write([slice(k, None), slice(k, None)], cxt.v_outer_tau), cxt.I_m)
         U = einsum("ij,jk->ik", [Q_k, U])
 
@@ -106,7 +113,7 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
 
     @closure
     @post_op
-    def right(cxt, k: UInt, A: Tensor, U: Tensor, V_t: Tensor) -> Map:
+    def right(cxt, k: UInt, A: Tensor, U: Tensor, V: Tensor) -> Map:
         cxt.transform = outer_cxt.householder(x=A[k, k + 1:])
         cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
 
@@ -114,23 +121,23 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
         diagonal = einsum("ij,jk->ik", [A[k:, k + 1:], diagonal])
         A = After(A.write([slice(k, None), slice(k + 1, None)], diagonal), A)
 
-        cxt.I_n = identity(outer_cxt.n, F32).as_dense().copy()
+        cxt.I_n = identity(outer_cxt.n, F64).as_dense().copy()
         P = After(cxt.I_n.write([slice(k + 1, None), slice(k + 1, None)], cxt.v_outer_tau), cxt.I_n)
-        V_t = einsum("ij,jk->ik", [P, V_t])
+        V = einsum("ij,jk->ik", [P, V])
 
-        return {"U": U, "A": A, "V_t": V_t}
+        return {"U": U, "A": A, "V": V}
 
     cxt.left = left
     cxt.right = right
 
     @closure
     @post_op
-    def step(A: Tensor, U: Tensor, V_t: Tensor, k: UInt) -> Map:
+    def step(A: Tensor, U: Tensor, V: Tensor, k: UInt) -> Map:
         left = cxt.left(k=k, A=A, U=U)
-        right = cxt.right(k=k, A=left["A"], U=left["U"], V_t=V_t)
+        right = cxt.right(k=k, A=left["A"], U=left["U"], V=V)
         return If(k < cxt.n - 2, right, left)
 
-    U = identity(cxt.m, F32).as_dense()
-    V_t = identity(cxt.n, F32).as_dense()
+    U = identity(cxt.m, F64).as_dense()
+    V = identity(cxt.n, F64).as_dense()
 
-    return Stream.range(cxt.n - 2).fold("k", Map(A=x, U=U, V_t=V_t), step)
+    return Stream.range(cxt.n - 2).fold("k", Map(A=x.copy(), U=U, V=V), step)

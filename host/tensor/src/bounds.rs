@@ -215,6 +215,11 @@ impl Bounds {
         Some(coord)
     }
 
+    /// Return `true` if these `Bounds` consist of `shape.len()` number of `AxisBounds::At` items.
+    pub fn is_coord(&self, shape: &[u64]) -> bool {
+        self.len() == shape.len() && self.axes.iter().all(|bound| bound.is_index())
+    }
+
     pub fn ndim(&self) -> usize {
         self.axes.iter().filter(|bound| !bound.is_index()).count()
     }

@@ -742,7 +742,10 @@ where
                     )));
                 }
 
-                if let Some(coord) = bounds.as_coord(self.tensor.shape()) {
+                let shape = self.tensor.shape();
+                if bounds.is_coord(shape) {
+                    let coord = bounds.as_coord(shape).expect("tensor coordinate");
+
                     self.tensor
                         .read_value(txn.clone(), coord)
                         .map_ok(Value::from)

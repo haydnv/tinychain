@@ -366,6 +366,7 @@ class Sparse(Tensor):
         return self._get("dense", rtype=Dense)
 
 
+# TODO: allow eliding batch dimensions
 def einsum(format, tensors):
     """
     Return the Einstein summation of the given `tensors` according the the given `format` string.
