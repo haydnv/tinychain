@@ -1,12 +1,13 @@
 from tinychain.collection.tensor import einsum, Sparse
-from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
+from tinychain.error import BadRequest
 from tinychain.ref import After, Get, If, MethodSubject, While, With
 from tinychain.state import Map, Tuple
-from tinychain.value import Bool, Nil, I64, U64, String
+from tinychain.value import Bool, Nil, I32, U64, String
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
+DIM = I32.max()
 
 
 class Schema(object):
@@ -56,9 +57,9 @@ class Edge(Sparse):
         node_ids = Sparse(node_ids)
         shape = node_ids.shape
         traversal = If(
-            shape.eq([I64.max()]),
+            shape.eq([DIM]),
             While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
-            BadRequest(f"an edge input vector has shape [{I64.max()}], not {{shape}}", shape=shape))
+            BadRequest(f"an edge input vector has shape [{DIM}], not {{{shape}}}", shape=shape))
 
         return Sparse.sub(Map(traversal)["neighbors"], node_ids)
 

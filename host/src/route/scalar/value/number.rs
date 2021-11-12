@@ -2,9 +2,9 @@ use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_value::{Number, NumberClass, NumberInstance, Value};
-use tcgeneric::PathSegment;
+use tcgeneric::{label, PathSegment};
 
-use crate::route::{GetHandler, Handler, Route};
+use crate::route::{GetHandler, Handler, PostHandler, Route};
 use crate::state::State;
 
 struct Dual<F> {
@@ -28,6 +28,20 @@ where
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 let value = value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
+                (self.op)(value).map(Value::Number).map(State::from)
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let value: Number = params.require(&label("r").into())?;
+                params.expect_empty()?;
+
                 (self.op)(value).map(Value::Number).map(State::from)
             })
         }))

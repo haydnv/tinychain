@@ -647,7 +647,7 @@ impl<'a> Handler<'a> for DualHandler {
                         }
                     }
                     State::Scalar(Scalar::Value(r)) if r.matches::<Number>() => {
-                        let r = r.opt_cast_into().unwrap();
+                        let r = r.opt_cast_into().expect("numeric constant");
                         (self.op_const)(l, r).map(Collection::from).map(State::from)
                     }
                     other => Err(TCError::bad_request(
@@ -729,15 +729,24 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key| {
+        Some(Box::new(|txn, key| {
             Box::pin(async move {
                 debug!("GET Tensor: {}", key);
                 let bounds = cast_bounds(self.tensor.shape(), key)?;
-                self.tensor
-                    .slice(bounds)
-                    .map(Tensor::from)
-                    .map(Collection::from)
-                    .map(State::from)
+
+                if let Some(coord) = bounds.as_coord(self.tensor.shape()) {
+                    self.tensor
+                        .read_value(txn.clone(), coord)
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await
+                } else {
+                    self.tensor
+                        .slice(bounds)
+                        .map(Tensor::from)
+                        .map(Collection::from)
+                        .map(State::from)
+                }
             })
         }))
     }

@@ -99,7 +99,12 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     debug!("enqueue {}", id);
                     let state = self.scope.resolve_id(&id)?;
                     debug!("provider for {} is {}", id, state);
-                    providers.push(state.resolve(&self.scope, &self.txn).map(|r| (id, r)));
+                    providers.push(
+                        state
+                            .clone()
+                            .resolve(&self.scope, &self.txn)
+                            .map(|r| (id, r)),
+                    );
                 }
 
                 while let Some((id, r)) = providers.next().await {

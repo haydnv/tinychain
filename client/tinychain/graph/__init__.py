@@ -8,9 +8,9 @@ from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.ref import After, Get, If, MethodSubject, While, With
 from tinychain.state import Map, Tuple
 from tinychain.util import uri, Context, URI
-from tinychain.value import Bool, Nil, I64, U64, String
+from tinychain.value import Bool, Nil, U64, String
 
-from .edge import Edge, ForeignKey
+from .edge import DIM, Edge, ForeignKey
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
 
@@ -88,9 +88,9 @@ class Graph(Cluster):
 
         for (label, edge) in schema.edges.items():
             if edge.from_table == edge.to_table:
-                setattr(self, label, schema.chain(Edge.zeros([I64.max(), I64.max()], Bool)))
+                setattr(self, label, schema.chain(Edge.zeros([DIM, DIM], Bool)))
             else:
-                setattr(self, label, schema.chain(ForeignKey.zeros([I64.max(), I64.max()], Bool)))
+                setattr(self, label, schema.chain(ForeignKey.zeros([DIM, DIM], Bool)))
 
         for name in schema.tables:
             if hasattr(self, name):

@@ -330,10 +330,18 @@ pub struct Reduce {
 
 impl Reduce {
     pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
+        if source_shape.size() == 0 {
+            return Err(TCError::unsupported("cannot reduce a zero-size tensor"));
+        }
         if axis >= source_shape.len() {
             return Err(TCError::unsupported(format!(
                 "cannot reduce axis {} of tensor with shape {}",
                 axis, source_shape
+            )));
+        } else if source_shape[axis] == 0 {
+            return Err(TCError::unsupported(format!(
+                "cannot reduce axis {} with dimension 0",
+                axis
             )));
         }
 

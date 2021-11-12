@@ -112,6 +112,8 @@ where
 {
     /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
+        schema.validate()?;
+
         let Schema { shape, dtype } = schema;
         BlockListFile::constant(file, txn_id, shape, dtype.zero())
             .map_ok(Self::from)
@@ -123,7 +125,13 @@ where
     where
         Shape: From<S>,
     {
-        BlockListFile::constant(file, txn_id, shape.into(), value)
+        let schema = Schema {
+            shape: shape.into(),
+            dtype: value.class(),
+        };
+        schema.validate()?;
+
+        BlockListFile::constant(file, txn_id, schema.shape, value)
             .map_ok(Self::from)
             .await
     }
@@ -139,7 +147,13 @@ where
     where
         Shape: From<S>,
     {
-        BlockListFile::range(file, txn_id, shape.into(), start, stop)
+        let schema = Schema {
+            shape: shape.into(),
+            dtype: Ord::max(start.class(), stop.class()),
+        };
+        schema.validate()?;
+
+        BlockListFile::range(file, txn_id, schema.shape, start, stop)
             .map_ok(Self::from)
             .await
     }

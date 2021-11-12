@@ -197,7 +197,11 @@ impl Bounds {
     }
 
     /// Return `Some(Coord)` if these bounds match a single `Coord`, otherwise `None`
-    pub fn as_coord(&self) -> Option<Coord> {
+    pub fn as_coord(&self, shape: &[u64]) -> Option<Coord> {
+        if shape.len() != self.axes.len() {
+            return None;
+        }
+
         let mut coord = Vec::with_capacity(self.axes.len());
         for x in &self.axes {
             match x {
@@ -458,6 +462,7 @@ impl Shape {
 
     /// Return the number of elements contained within this `Shape`.
     pub fn size(&self) -> u64 {
+        log::debug!("size of {}?", self);
         self.0.iter().product()
     }
 

@@ -224,6 +224,7 @@ class Tensor(Collection):
 
         return self._get("ndim", rtype=UInt)
 
+    # TODO: use a custom shape object to support `type(x.shape[0]) == UInt`
     @property
     def shape(self):
         """Return the shape of this `Tensor`."""

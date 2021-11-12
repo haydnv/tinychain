@@ -481,10 +481,8 @@ where
         debug!("BlockListFile::write_value {} at {}", value, bounds);
         self.shape().validate_bounds(&bounds)?;
 
-        if bounds.len() == self.ndim() {
-            if let Some(coord) = bounds.as_coord() {
-                return self.write_value_at(txn_id, coord, value).await;
-            }
+        if let Some(coord) = bounds.as_coord(self.shape()) {
+            return self.write_value_at(txn_id, coord, value).await;
         }
 
         bounds.normalize(self.shape());

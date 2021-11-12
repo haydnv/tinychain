@@ -1,4 +1,4 @@
-from tinychain.collection.tensor import einsum, Schema, Sparse, Tensor
+from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, If
 from tinychain.state import Map, Stream, Tuple
@@ -16,11 +16,12 @@ def identity(size, dtype=Bool):
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
 def householder(cxt, x: Tensor) -> Tuple:
-    """Computes Householder vector for `a`."""
+    """Compute the Householder vector of the given column `a`."""
 
-    a = x.copy()
-    cxt.v = (a / (a[0] + norm(a))).copy()
-    tau = (2 / einsum("ji,jk->ik", [cxt.v, cxt.v]))
+    cxt.a = x.copy()  # make a copy in case X is updated before the return values are evaluated
+    cxt.a_norm = (cxt.a**2).sum()**0.5
+    cxt.v = (cxt.a / (cxt.a[0] + cxt.a_norm)).copy()
+    tau = 2 / (cxt.v**2).sum()
 
     return Tuple(After(cxt.v.write([0], 1), (cxt.v, tau)))
 
@@ -36,15 +37,14 @@ def norm(tensor: Tensor) -> Tensor:
     """
 
     squared = tensor**2
-    return If(tensor.ndim == 2,
+    return If(tensor.ndim <= 2,
               squared.sum()**0.5,
               squared.sum(-1).sum(-1)**0.5)
 
 
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
-# TODO: handle rectangular matrices
 @post_op
-def qr(cxt, matrix: Tensor) -> Tuple:
+def qr(cxt, x: Tensor) -> Tuple:
     """Compute the QR factorization of the given `matrix`.
 
     Args:
@@ -54,8 +54,8 @@ def qr(cxt, matrix: Tensor) -> Tuple:
         A `Tuple` of `Tensor`s `(Q, R)` where `A ~= QR` and `Q.transpose() == Q**-1`
     """
 
-    cxt.m = UInt(matrix.shape[0])
-    cxt.n = UInt(matrix.shape[1])
+    cxt.m = UInt(x.shape[0])
+    cxt.n = UInt(x.shape[1])
     cxt.householder = householder
 
     outer_cxt = cxt
@@ -63,17 +63,17 @@ def qr(cxt, matrix: Tensor) -> Tuple:
     @closure
     @post_op
     def qr_step(cxt, Q: Tensor, R: Tensor, k: UInt) -> Map:
-        cxt.column = R[k:, k].expand_dims()
-        cxt.transform = outer_cxt.householder(x=cxt.column)
-        v = Tensor(cxt.transform[0])
-        tau = Tensor(cxt.transform[1])
+        cxt.transform = outer_cxt.householder(x=R[k:, k])
+        cxt.v_outer = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]])
+        cxt.tau = F32(cxt.transform[1])
 
         cxt.H = identity(outer_cxt.m, F32).as_dense().copy()
-        cxt.H_sub = (cxt.H[k:, k:] - (tau * einsum("ij,kj->ik", [v, v])))
+        cxt.H_sub = (cxt.H[k:, k:] - (cxt.v_outer * cxt.tau))
         return After(cxt.H.write([slice(k, None), slice(k, None)], cxt.H_sub), {
             "Q": einsum("ij,jk->ik", [cxt.H, Q]),
             "R": einsum("ij,jk->ik", [cxt.H, R]),
         })
 
-    QR = Stream.range(cxt.n).fold("k", Map(Q=identity(cxt.m, F32).as_dense(), R=matrix.copy()), qr_step)
+    state = Map(Q=identity(cxt.m, F32).as_dense(), R=x)
+    QR = Stream.range(cxt.n - 1).fold("k", state, qr_step)
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]

@@ -50,7 +50,7 @@ class TestGraph(tc.graph.Graph):
 
     @tc.get_method
     def recommend(self, txn, user_id: tc.U64):
-        txn.vector = tc.tensor.Sparse.zeros([tc.I64.max()], tc.Bool)
+        txn.vector = tc.tensor.Sparse.zeros([tc.graph.edge.DIM], tc.Bool)
         txn.user_ids = tc.After(txn.vector.write([user_id], True), txn.vector)
         txn.friend_ids = tc.If(
             user_id.is_some(),

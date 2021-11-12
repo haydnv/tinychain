@@ -26,18 +26,18 @@ class LinearAlgebraTests(ClientTest):
     def testQR(self):
         THRESHOLD = 0.01
 
-        m = 3
+        m = 4
         n = 3
         matrix = np.arange(1, 1 + m * n).reshape(m, n)
 
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
         cxt.qr = tc.linalg.qr
-        cxt.result = cxt.qr(matrix=cxt.matrix)
+        cxt.result = cxt.qr(x=cxt.matrix)
         cxt.test = ((tc.tensor.einsum("ij,jk->ik", cxt.result) - cxt.matrix) < THRESHOLD).all()
 
-        cxt = tc.to_json(cxt)
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        response = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(response)
 
 
 if __name__ == "__main__":
