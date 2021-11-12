@@ -77,3 +77,36 @@ def qr(cxt, x: Tensor) -> Tuple:
     state = Map(Q=identity(cxt.m, F32).as_dense(), R=x)
     QR = Stream.range(cxt.n - 1).fold("k", state, qr_step)
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
+
+
+@post_op
+def bidiagonalize(cxt, x: Tensor) -> Tuple:
+    cxt.m = UInt(x.shape[0])
+    cxt.n = UInt(x.shape[1])
+
+    cxt.householder = householder
+
+    outer_cxt = cxt
+
+    @closure
+    @post_op
+    def svd_step(cxt, A: Tensor, U: Tensor, V_t: Tensor, k: UInt) -> Map:
+        cxt.transform = outer_cxt.householder(x=A[k:, k])
+        cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
+
+        cxt.I_m = identity(outer_cxt.m, F32).as_dense().copy()
+        Q_k = After(cxt.I_m.write([slice(k, None), slice(k, None)], cxt.v_outer_tau), cxt.I_m)
+
+        diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
+        diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
+
+        return {
+            "A": After(A.write([slice(k, None), slice(k, None)], diagonal), A),
+            "U": einsum("ij,jk->ik", [Q_k, U]),
+            "V_t": V_t,
+        }
+
+    U = identity(cxt.m, F32).as_dense()
+    V_t = identity(cxt.n, F32).as_dense()
+
+    return Stream.range(cxt.n).fold("k", Map(A=x, U=U, V_t=V_t), svd_step)

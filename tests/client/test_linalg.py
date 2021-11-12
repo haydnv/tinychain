@@ -39,6 +39,20 @@ class LinearAlgebraTests(ClientTest):
         response = self.host.post(ENDPOINT, cxt)
         self.assertTrue(response)
 
+    def testSVD(self):
+        m = 5
+        n = 3
+
+        matrix = np.arange(m * n).reshape(m, n)
+
+        cxt = tc.Context()
+        cxt.svd = tc.linalg.bidiagonalize
+        cxt.matrix = tc.tensor.Dense.load([m, n], tc.F32, matrix.flatten().tolist())
+        cxt.result = cxt.svd(x=cxt.matrix)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        tc.print_json(actual)
+
 
 if __name__ == "__main__":
     unittest.main()
