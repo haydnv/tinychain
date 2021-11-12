@@ -51,7 +51,11 @@ impl Schema {
     pub fn validate(&self) -> TCResult<()> {
         let mut size = 1u64;
         for dim in &*self.shape {
-            if let Some(m) = size.checked_mul(*dim) {
+            if dim == 0 {
+                return Err(TCError::unsupported(
+                    "cannot construct a tensor with a zero-dimensional axis",
+                ));
+            } else if let Some(m) = size.checked_mul(*dim) {
                 size = m;
             } else {
                 return Err(TCError::bad_request(

@@ -734,6 +734,14 @@ where
                 debug!("GET Tensor: {}", key);
                 let bounds = cast_bounds(self.tensor.shape(), key)?;
 
+                if bounds.size() == 0 {
+                    return Err(TCError::unsupported(format!(
+                        "invalid bounds for tensor with shape {}: {}",
+                        self.tensor.shape(),
+                        bounds
+                    )));
+                }
+
                 if let Some(coord) = bounds.as_coord(self.tensor.shape()) {
                     self.tensor
                         .read_value(txn.clone(), coord)

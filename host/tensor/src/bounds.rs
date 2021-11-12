@@ -55,7 +55,7 @@ impl AxisBounds {
     /// The length of these bounds
     pub fn dim(&self) -> u64 {
         match self {
-            Self::At(_) => 0,
+            Self::At(_) => 1,
             Self::In(range) => range.end - range.start,
             Self::Of(indices) => indices.len() as u64,
         }
