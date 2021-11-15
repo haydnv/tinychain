@@ -28,7 +28,7 @@ def householder(cxt, x: Tensor) -> Tuple:
     cxt.v = x.copy()  # make a copy in case X is updated before the return values are evaluated
     cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
     tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero ** 2))
-    v = After(cxt.v.write([0], cxt.v_zero), cxt.v / cxt.v_zero)
+    v = After(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero)
 
     return v, tau
 
@@ -76,7 +76,7 @@ def qr(cxt, x: Tensor) -> Tuple:
 
         cxt.H = identity(outer_cxt.m, F64).as_dense().copy()
         cxt.H_sub = (cxt.H[k:, k:] - (cxt.v_outer * cxt.tau))
-        return After(cxt.H.write([slice(k, None), slice(k, None)], cxt.H_sub), {
+        return After(cxt.H[k:, k:].write(cxt.H_sub), {
             "Q": einsum("ij,jk->ik", [cxt.H, Q]),
             "R": einsum("ij,jk->ik", [cxt.H, R]),
         })
@@ -103,10 +103,10 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
 
         diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
         diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
-        A = After(A.write([slice(k, None), slice(k, None)], diagonal), A)
+        A = After(A[k:, k:].write(diagonal), A)
 
         cxt.I_m = identity(outer_cxt.m, F64).as_dense().copy()
-        Q_k = After(cxt.I_m.write([slice(k, None), slice(k, None)], cxt.v_outer_tau), cxt.I_m)
+        Q_k = After(cxt.I_m[k:, k:].write(cxt.v_outer_tau), cxt.I_m)
         U = einsum("ij,jk->ik", [Q_k, U])
 
         return {"U": U, "A": A}
@@ -119,10 +119,10 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
 
         diagonal = identity(outer_cxt.n - (k + 1)) - cxt.v_outer_tau
         diagonal = einsum("ij,jk->ik", [A[k:, k + 1:], diagonal])
-        A = After(A.write([slice(k, None), slice(k + 1, None)], diagonal), A)
+        A = After(A[k:, k + 1:].write(diagonal), A)
 
         cxt.I_n = identity(outer_cxt.n, F64).as_dense().copy()
-        P = After(cxt.I_n.write([slice(k + 1, None), slice(k + 1, None)], cxt.v_outer_tau), cxt.I_n)
+        P = After(cxt.I_n[k + 1:, k + 1:].write(cxt.v_outer_tau), cxt.I_n)
         V = einsum("ij,jk->ik", [P, V])
 
         return {"U": U, "A": A, "V": V}

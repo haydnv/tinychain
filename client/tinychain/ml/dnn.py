@@ -37,7 +37,7 @@ def layer(weights, bias, activation):
             return A, Z
 
         def update(self, d_weights, d_bias):
-            return self.weights.overwrite(self.weights - d_weights), self.bias.overwrite(self.bias - d_bias)
+            return self.weights.write(self.weights - d_weights), self.bias.write(self.bias - d_bias)
 
     return DNNLayer([weights, bias])
 

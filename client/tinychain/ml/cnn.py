@@ -32,7 +32,7 @@ def conv_1d(input_shape, filters, bias=None, stride=1, activation=Sigmoid()):
             for x in range(length):
                 strides.append(padded[:, x:(x + stride)].expand_dims(1))
 
-            strides = After(padded.write([slice(None), slice(l, -r)], inputs), Dense.concatenate(strides, 1))
+            strides = After(padded[:, l:-r].write(inputs), Dense.concatenate(strides, 1))
 
             # einsum dimensions:
             #   b = batch dim
@@ -74,9 +74,7 @@ def conv_2d(input_shape, filters, bias=None, stride=1, activation=Sigmoid()):
 
                 strides.append(Dense.concatenate(x_strides, 1).expand_dims(1))
 
-            strides = After(
-                padded.write([slice(None), slice(l, -r), slice(t, -b)], inputs),
-                Dense.concatenate(strides, 1))
+            strides = After(padded[:, l:-r, t:-b].write(inputs), Dense.concatenate(strides, 1))
 
             # einsum dimensions:
             #   b = batch dim

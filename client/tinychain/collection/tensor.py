@@ -47,12 +47,17 @@ class Tensor(Collection):
         return super().load(Schema(shape, dtype), data)
 
     def __getitem__(self, bounds):
+        parent = self
         bounds = _handle_bounds(bounds)
-        return self._get("", bounds, Tensor)
+
+        class Slice(self.__class__):
+            def write(self, value):
+                return parent._put("", bounds, value)
+
+        return self._get("", bounds, Slice)
 
     def __setitem__(self, bounds, value):
-        bounds = _handle_bounds(bounds)
-        return self._put("", bounds, value)
+        raise NotImplementedError("use Tensor.write instead")
 
     def __add__(self, other):
         return self.add(other)
@@ -251,15 +256,10 @@ class Tensor(Collection):
 
         return self._get("transpose", permutation, self.__class__)
 
-    def write(self, bounds, value):
-        """Write a `Tensor` or `Number` to the given slice of this one, broadcasting if needed."""
+    def write(self, value):
+        """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
 
-        return self.__setitem__(bounds, value)
-
-    def overwrite(self, value):
-        """Overwrite all elements of this `Tensor` with the given `value`, broadcasting if needed."""
-
-        return self.__setitem__(None, value)
+        return self._put("", None, value)
 
 
 class Dense(Tensor):

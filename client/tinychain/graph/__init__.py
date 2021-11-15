@@ -105,13 +105,13 @@ class Graph(Cluster):
         """Mark `from_node` -> `to_node` as `True` in the edge :class:`Tensor` with the given `label`."""
 
         edge = Sparse(Get(uri(self), label))
-        return edge.write([from_node, to_node], True)
+        return edge[from_node, to_node].write(True)
 
     def remove_edge(self, label, from_node, to_node):
         """Mark `from_node` -> `to_node` as `False` in the edge :class:`Tensor` with the given `label`."""
 
         edge = Sparse(Get(uri(self), label))
-        return edge.write([from_node, to_node], False)
+        return edge[from_node, to_node].write(False)
 
 
 def graph_table(graph, schema, table_name):
@@ -125,13 +125,13 @@ def graph_table(graph, schema, table_name):
         raise ValueError("Graph table key must be type U64, not", key_col.dtype)
 
     def delete_row(edge, adjacent, row):
-        delete_from = adjacent.write([row[edge.column]], False)
+        delete_from = adjacent[row[edge.column]].write(False)
 
         to_table = Table(URI(f"$self/{edge.to_table}"))
         if edge.cascade:
             delete_to = (
                 to_table.delete({edge.column: row[edge.column]}),
-                adjacent.write([slice(None), row[edge.column]], False))
+                adjacent[:, row[edge.column]].write(False))
         else:
             delete_to = If(
                 adjacent[:, row[edge.column]].any(),
@@ -150,7 +150,7 @@ def graph_table(graph, schema, table_name):
         args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
 
         # assumes row[0] is always the key
-        add = closure(put_op(lambda new_id, key: adjacent.write([new_id, key], True)))
+        add = closure(put_op(lambda new_id, key: adjacent[new_id, key].write(True)))
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
 
         return After(If(cond, delete_row(edge, adjacent, row)), add)
