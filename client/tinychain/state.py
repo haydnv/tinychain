@@ -98,8 +98,6 @@ class State(object):
         return self.is_none().logical_not()
 
 
-# TODO: document these methods
-# TODO: keep track of type information when possible
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
@@ -119,7 +117,12 @@ class Map(State):
         return self.eq(other)
 
     def __getitem__(self, key):
-        return self._get("", key)
+        form = form_of(self)
+        if hasattr(form, "__getitem__"):
+            rtype = type(form[key]) if issubclass(type(form[key]), State) else State
+            return self._get("", key, rtype)
+        else:
+            return self._get("", key)
 
     def __json__(self):
         return to_json(form_of(self))
@@ -128,15 +131,23 @@ class Map(State):
         return self.ne(other)
 
     def eq(self, other):
+        """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
+
         from .value import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
+        """Return a `Bool` indicating whether the keys and values in this `Map` are not equal to the given `other`."""
+
         return self.eq(other).logical_not()
 
+    def len(self):
+        """Return the number of elements in this `Map`."""
 
-# TODO: document these methods
-# TODO: keep track of type information when possible
+        from .value import UInt
+        return self._get("len", rtype=UInt)
+
+
 class Tuple(State):
     """A tuple of `State` s."""
 
@@ -151,33 +162,60 @@ class Tuple(State):
     def __json__(self):
         return to_json(form_of(self))
 
-    def __getitem__(self, key):
-        return self._get("", key)
+    def __getitem__(self, i):
+        form = form_of(self)
+        if hasattr(form, "__iter__"):
+            rtype = type(form[i]) if issubclass(type(form[i]), State) else State
+            return self._get("", i, rtype)
+        else:
+            return self._get("", i)
 
     def __ne__(self, other):
         return self.ne(other)
 
     def eq(self, other):
+        """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
+
         from .value import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
+        """Return a `Bool` indicating whether the elements in this `Tuple` do not equal those in the given `other`."""
+
         return self.eq(other).logical_not()
 
     def extend(self, other):
+        """Construct a new `Tuple` which is the concatenation of this `Tuple` and the given `other`."""
+
         return self._get("extend", other, Tuple)
 
+    def len(self):
+        """Return the number of elements in this `Tuple`."""
+
+        from .value import UInt
+        return self._get("len", rtype=UInt)
+
+    # TODO: update this method signature to match `Stream.fold`
     def fold(self, initial_state, op):
-        return self._post("fold", {"value": initial_state, "op": op}, type(initial_state))
+        """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results."""
+
+        rtype = type(initial_state) if issubclass(type(initial_state), State) else State
+        return self._post("fold", {"value": initial_state, "op": op}, rtype)
 
     def map(self, op):
+        """Construct a new `Tuple` by mapping the elements in this `Tuple` with the given `op`."""
+
         rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("map", {"op": op}, rtype)
 
     def unpack(self, length):
+        """A Python convenience method which yields an iterator over the first `length` elements in this `Tuple`."""
+
         yield from (self[i] for i in range(length))
 
     def zip(self, other):
+        """Construct a new `Tuple` of 2-tuples of the form `(self[i], other[i]) for i in self.len()`."""
+
         return self._get("zip", other, Tuple)
 
 

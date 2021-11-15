@@ -70,9 +70,8 @@ def qr(cxt, x: Tensor) -> Tuple:
     @closure
     @post_op
     def qr_step(cxt, Q: Tensor, R: Tensor, k: UInt) -> Map:
-        cxt.transform = outer_cxt.householder(x=R[k:, k])
-        cxt.v_outer = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]])
-        cxt.tau = F64(cxt.transform[1])
+        cxt.v, cxt.tau = outer_cxt.householder(x=R[k:, k]).unpack(2)
+        cxt.v_outer = einsum("i,j->ij", [cxt.v, cxt.v])
 
         cxt.H = identity(outer_cxt.m, F64).as_dense().copy()
         cxt.H_sub = (cxt.H[k:, k:] - (cxt.v_outer * cxt.tau))
@@ -98,8 +97,8 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
     @closure
     @post_op
     def left(cxt, k: UInt, A: Tensor, U: Tensor) -> Map:
-        cxt.transform = outer_cxt.householder(x=A[k:, k])
-        cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
+        cxt.v, cxt.tau = outer_cxt.householder(x=A[k:, k]).unpack(2)
+        cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
 
         diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
         diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
@@ -114,8 +113,8 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
     @closure
     @post_op
     def right(cxt, k: UInt, A: Tensor, U: Tensor, V: Tensor) -> Map:
-        cxt.transform = outer_cxt.householder(x=A[k, k + 1:])
-        cxt.v_outer_tau = einsum("i,j->ij", [cxt.transform[0], cxt.transform[0]]) * cxt.transform[1]
+        cxt.v, cxt.tau = outer_cxt.householder(x=A[k, k + 1:]).unpack(2)
+        cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
 
         diagonal = identity(outer_cxt.n - (k + 1)) - cxt.v_outer_tau
         diagonal = einsum("ij,jk->ik", [A[k:, k + 1:], diagonal])

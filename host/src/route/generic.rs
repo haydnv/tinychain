@@ -16,7 +16,7 @@ use crate::closure::Closure;
 use crate::scalar::Scalar;
 use crate::state::State;
 
-use super::{GetHandler, Handler, PostHandler, Route};
+use super::{AttributeHandler, GetHandler, Handler, PostHandler, Route};
 
 struct AppendHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
@@ -214,6 +214,9 @@ where
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "eq" => Some(Box::new(EqMapHandler::from(self.clone()))),
+                "len" => Some(Box::new(AttributeHandler::from(Number::from(
+                    self.len() as u64
+                )))),
                 _ => None,
             }
         } else {
@@ -405,6 +408,9 @@ where
             match path[0].as_str() {
                 "append" => Some(Box::new(AppendHandler::from(self))),
                 "fold" => Some(Box::new(TupleFoldHandler::from(self))),
+                "len" => Some(Box::new(AttributeHandler::from(Number::from(
+                    self.len() as u64
+                )))),
                 "eq" => Some(Box::new(EqTupleHandler::from(self.clone()))),
                 "map" => Some(Box::new(MapOpHandler::from(self))),
                 "zip" => Some(Box::new(ZipHandler::from(self))),
