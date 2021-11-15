@@ -13,7 +13,7 @@
 
 TinyChain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
-TinyChain features automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer. TinyChain also features automatic multithreading and GPU acceleration. These and other features are detailed in the [key features](#key-features) section.
+TinyChain features automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer. TinyChain also features automatic multithreading and GPU acceleration.
 
 TinyChain is early beta software. Many features are not fully tested, or not yet available in the public API. You should not assume that TinyChain is secure, and you should make regular backups of your data.
 
