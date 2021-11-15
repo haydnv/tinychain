@@ -1,6 +1,7 @@
 //! An [`OpDef`] which closes over zero or more [`State`]s
 
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -101,9 +102,7 @@ impl Closure {
                     .await
             }
             OpDef::Post(op_def) => {
-                let params: Map<State> = args
-                    .try_cast_into(|s| TCError::bad_request("invalid parameters for POST Op", s))?;
-
+                let params: Map<State> = args.try_into()?;
                 context.extend(params);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)

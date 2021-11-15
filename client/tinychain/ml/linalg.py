@@ -1,11 +1,11 @@
 from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
-from tinychain.ref import After, If
+from tinychain.ref import After, If, While
 from tinychain.state import Map, Stream, Tuple
 from tinychain.value import Bool, F64, Float, UInt
 
-# approximate difference between 1.0 and the next representable 32-bit float
-EPS = 1.2 ** -7
+# from "Numerical Recipes in C" p. 65
+EPS = 1**-6
 
 
 def identity(size, dtype=Bool):
@@ -141,3 +141,24 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
     V = identity(cxt.n, F64).as_dense()
 
     return Stream.range(cxt.n - 2).fold("k", Map(A=x.copy(), U=U, V=V), step)
+
+
+@post_op
+def svd(cxt, x: Tensor) -> Tuple:
+    cxt.bidiagonalize = bidiagonalize
+    cxt.bidiagonal = cxt.bidiagonalize(x=x)
+    cxt.n = UInt(x.shape[0])
+
+    outer_context = cxt
+
+    @closure
+    @post_op
+    def golub_reinsch(cxt, B: Tensor) -> Map:
+        # for i in range(0, n - 1):
+        #   if b[i][i + 1] <= EPS * (b[i][i] + b[i][i + 1]):
+        #       b[i][i] = 0
+
+        return {"B": B, "running": False}
+
+    U, B, V = [cxt.bidiagonal[k] for k in ["U", "A", "V"]]
+    return While(post_op(lambda running: running), golub_reinsch, Map(U=U, B=B, V=V, running=True))
