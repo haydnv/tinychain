@@ -5,7 +5,7 @@ from tinychain.state import Map, Stream, Tuple
 from tinychain.value import Bool, F64, Float, UInt
 
 # from "Numerical Recipes in C" p. 65
-EPS = 1**-6
+EPS = 10**-6
 
 
 def identity(size, dtype=Bool):
