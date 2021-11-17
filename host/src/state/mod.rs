@@ -456,6 +456,16 @@ impl From<Map<Scalar>> for State {
     }
 }
 
+impl From<Map<chain::Subject>> for State {
+    fn from(map: Map<chain::Subject>) -> Self {
+        Self::Map(
+            map.into_iter()
+                .map(|(name, subject)| (name, Self::from(subject)))
+                .collect(),
+        )
+    }
+}
+
 impl From<Number> for State {
     fn from(n: Number) -> Self {
         Self::Scalar(n.into())

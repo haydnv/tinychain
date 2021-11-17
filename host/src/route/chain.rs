@@ -20,12 +20,14 @@ impl Route for Subject {
 
         match self {
             Self::BTree(btree) => btree.route(path),
+            Self::Map(map) => map.route(path),
+            Self::Table(table) => table.route(path),
+            Self::Tuple(tuple) => tuple.route(path),
+
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.route(path),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.route(path),
-            Self::Table(table) => table.route(path),
-            Self::Tuple(tuple) => tuple.route(path),
         }
     }
 }
