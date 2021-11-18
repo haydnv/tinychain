@@ -12,11 +12,34 @@ class Value(Scalar):
 
     __uri__ = uri(Scalar) + "/value"
 
+    @classmethod
+    def max(cls, l, r):
+        return cls(If(l >= r, l, r))
+
+    @classmethod
+    def min(cls, l, r):
+        return cls(If(l <= r, l, r))
+
     def __eq__(self, other):
         return self.eq(other)
 
     def __ne__(self, other):
         return self.ne(other)
+
+    def __eq__(self, other):
+        return self.eq(other)
+
+    def __gt__(self, other):
+        return self.gt(other)
+
+    def __ge__(self, other):
+        return self.gte(other)
+
+    def __lt__(self, other):
+        return self.lt(other)
+
+    def __le__(self, other):
+        return self.lte(other)
 
     def eq(self, other):
         """Returns `true` if `self` is equal to `other`."""
@@ -27,6 +50,26 @@ class Value(Scalar):
         """Returns `true` if `self` is not equal to `other`."""
 
         return self._get("ne", other, Bool)
+
+    def gt(self, other):
+        """Return true if `self` is greater than `other`."""
+
+        return self._get("gt", other, Bool)
+
+    def gte(self, other):
+        """Return true if `self` is greater than or equal to `other`."""
+
+        return self._get("gte", other, Bool)
+
+    def lt(self, other):
+        """Return true if `self` is less than `other`."""
+
+        return self._get("lt", other, Bool)
+
+    def lte(self, other):
+        """Return true if `self` is less than or equal to `other`."""
+
+        return self._get("lte", other, Bool)
 
 
 class Nil(Value):
@@ -87,14 +130,6 @@ class Number(Value):
 
     __uri__ = uri(Value) + "/number"
 
-    @classmethod
-    def max(cls, l, r):
-        return cls(If(l >= r, l, r))
-
-    @classmethod
-    def min(cls, l, r):
-        return cls(If(l <= r, l, r))
-
     def __abs__(self):
         return self.abs()
 
@@ -106,21 +141,6 @@ class Number(Value):
 
     def __div__(self, other):
         return self.div(other)
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __gt__(self, other):
-        return self.gt(other)
-
-    def __ge__(self, other):
-        return self.gte(other)
-
-    def __lt__(self, other):
-        return self.lt(other)
-
-    def __le__(self, other):
-        return self.lte(other)
 
     def __mul__(self, other):
         return self.mul(other)
@@ -139,9 +159,6 @@ class Number(Value):
 
     def __rtruediv__(self, other):
         return self.__class__(other).div(self)
-
-    def __ne__(self, other):
-        return self.ne(other)
 
     def __pow__(self, other):
         return self.pow(other)
@@ -167,40 +184,10 @@ class Number(Value):
 
         return self._get("div", other, self.__class__)
 
-    def eq(self, other):
-        """Return true if `self` is equal to `other`."""
-
-        return self._get("eq", other, Bool)
-
-    def gt(self, other):
-        """Return true if `self` is greater than `other`."""
-
-        return self._get("gt", other, Bool)
-
-    def gte(self, other):
-        """Return true if `self` is greater than or equal to `other`."""
-
-        return self._get("gte", other, Bool)
-
-    def lt(self, other):
-        """Return true if `self` is less than `other`."""
-
-        return self._get("lt", other, Bool)
-
-    def lte(self, other):
-        """Return true if `self` is less than or equal to `other`."""
-
-        return self._get("lte", other, Bool)
-
     def mul(self, other):
         """Return the product of `self` and `other`."""
 
         return self._get("mul", other, self.__class__)
-
-    def ne(self, other):
-        """Return true if `self` is not equal to `other`."""
-
-        return self._get("ne", other, Bool)
 
     def pow(self, other):
         """Raise `self` to the power of `other`."""
@@ -291,11 +278,11 @@ class Int(Number):
     __uri__ = uri(Number) + "/int"
 
     @classmethod
-    def max(cls):
+    def max_value(cls):
         return cls(2**(cls.size() - 1) - 1)
 
     @classmethod
-    def min(cls):
+    def min_value(cls):
         return cls(-2**(cls.size() - 1) + 1)
 
     @staticmethod
@@ -339,11 +326,11 @@ class UInt(Number):
     __uri__ = uri(Number) + "/uint"
 
     @classmethod
-    def max(cls):
+    def max_value(cls):
         return cls(2**cls.size() - 1)
 
     @classmethod
-    def min(cls):
+    def min_value(cls):
         return cls(0)
 
     @staticmethod

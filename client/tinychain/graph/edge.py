@@ -7,7 +7,7 @@ from tinychain.value import Bool, Nil, I32, U64, String
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
-DIM = I32.max()
+DIM = I32.max_value()
 
 
 class Schema(object):
