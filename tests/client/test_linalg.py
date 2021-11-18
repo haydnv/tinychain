@@ -33,6 +33,21 @@ class LinearAlgebraTests(ClientTest):
         response = self.host.post(ENDPOINT, cxt)
         self.assertTrue(response)
 
+    def testMatmul(self):
+        l = np.random.random([2, 3, 4])
+        r = np.random.random([2, 4, 5])
+
+        cxt = tc.Context()
+        cxt.l = tc.tensor.Dense.load(l.shape, tc.F32, l.flatten().tolist())
+        cxt.r = tc.tensor.Dense.load(r.shape, tc.F32, r.flatten().tolist())
+        cxt.result = tc.linalg.matmul(cxt.l, cxt.r)
+
+        expected = np.matmul(l, r)
+        actual = self.host.post(ENDPOINT, cxt)
+        actual = actual[tc.uri(tc.tensor.Dense)][1]
+
+        self.assertTrue(np.allclose(expected.flatten(), actual))
+
     def testNorm(self):
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)

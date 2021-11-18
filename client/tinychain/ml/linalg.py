@@ -33,6 +33,21 @@ def householder(cxt, x: Tensor) -> Tuple:
     return v, tau
 
 
+def matmul(l: Tensor, r: Tensor):
+    """
+    Multiply two matrices, or two batches of matrices.
+
+    Args:
+        `l`: a `Tensor` with shape `[..., i, j]`
+        `r`: a `Tensor` with shape `[..., j, k]`
+
+    Returns:
+        A `Tensor` of shape `[..., i, k]`
+    """
+
+    return einsum("...ij,...jk->ik", [l, r])
+
+
 def norm(tensor: Tensor) -> Tensor:
     """Compute the 2D Frobenius (aka Euclidean) norm of the matrices in the given `tensor`.
 
@@ -40,7 +55,7 @@ def norm(tensor: Tensor) -> Tensor:
         `tensor`: a matrix or batch of matrices with shape `[..., M, N]`
 
     Returns:
-        A `Tensor` of shape [...] or a `Number` if the input `tensor` is itself 2-dimensional
+        A `Tensor` of shape `[...]` or a `Number` if the input `tensor` is itself 2-dimensional
     """
 
     squared = tensor**2
@@ -76,8 +91,8 @@ def qr(cxt, x: Tensor) -> Tuple:
         cxt.H = identity(outer_cxt.m, F64).as_dense().copy()
         cxt.H_sub = (cxt.H[k:, k:] - (cxt.v_outer * cxt.tau))
         return After(cxt.H[k:, k:].write(cxt.H_sub), {
-            "Q": einsum("ij,jk->ik", [cxt.H, Q]),
-            "R": einsum("ij,jk->ik", [cxt.H, R]),
+            "Q": matmul(cxt.H, Q),
+            "R": matmul(cxt.H, R),
         })
 
     state = Map(Q=identity(cxt.m, F64).as_dense(), R=x)
@@ -101,12 +116,12 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
         cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
 
         diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
-        diagonal = einsum("ij,jk->ik", [diagonal, A[k:, k:]])
+        diagonal = matmul(diagonal, A[k:, k:])
         A = After(A[k:, k:].write(diagonal), A)
 
         cxt.I_m = identity(outer_cxt.m, F64).as_dense().copy()
         Q_k = After(cxt.I_m[k:, k:].write(cxt.v_outer_tau), cxt.I_m)
-        U = einsum("ij,jk->ik", [Q_k, U])
+        U = matmul(Q_k, U)
 
         return {"U": U, "A": A}
 
@@ -117,12 +132,12 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
         cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
 
         diagonal = identity(outer_cxt.n - (k + 1)) - cxt.v_outer_tau
-        diagonal = einsum("ij,jk->ik", [A[k:, k + 1:], diagonal])
+        diagonal = matmul(A[k:, k + 1:], diagonal)
         A = After(A[k:, k + 1:].write(diagonal), A)
 
         cxt.I_n = identity(outer_cxt.n, F64).as_dense().copy()
         P = After(cxt.I_n[k + 1:, k + 1:].write(cxt.v_outer_tau), cxt.I_n)
-        V = einsum("ij,jk->ik", [P, V])
+        V = matmul(P, V)
 
         return {"U": U, "A": A, "V": V}
 

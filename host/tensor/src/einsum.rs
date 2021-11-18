@@ -12,13 +12,17 @@ use super::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
 
 type Label = Vec<char>;
 
-const VALID_LABELS: [char; 52] = [
+const DOT: char = '.';
+const ELLIPSIS: [char; 3] = [DOT, DOT, DOT];
+const VALID_SUBSCRIPTS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
     'J', 'k', 'K', 'l', 'L', 'm', 'M', 'n', 'N', 'o', 'O', 'p', 'P', 'q', 'Q', 'r', 'R', 's', 'S',
     't', 'T', 'u', 'U', 'v', 'V', 'w', 'W', 'x', 'X', 'y', 'Y', 'z', 'Z',
 ];
 
-fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
+fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<Label>, Label)> {
+    debug!("einsum format string is {}", format);
+
     if !format.contains("->") {
         return Err(TCError::bad_request(
             "invalid format for einsum (missing '->')",
@@ -31,10 +35,95 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
         return Err(TCError::bad_request("invalid format for einsum", format));
     }
 
+    let f_inputs = parts[0].split(',');
+    match f_inputs.count() {
+        count if count == inputs.len() => Ok(()),
+        count => Err(TCError::unsupported(format!(
+            "einsum got {} tensors with {} format strings",
+            inputs.len(),
+            count
+        ))),
+    }?;
+
+    let valid_subscripts: HashSet<char> = VALID_SUBSCRIPTS.iter().cloned().collect();
+
+    let mut elided = None;
+    let mut present_subscripts = HashSet::<char>::with_capacity(parts[0].len());
+    for (tensor, f_input) in inputs.iter().zip(parts[0].split(',')) {
+        if f_input.starts_with(&ELLIPSIS[..]) {
+            if !f_input[ELLIPSIS.len()..]
+                .chars()
+                .all(|c| valid_subscripts.contains(&c))
+            {
+                return Err(TCError::bad_request(
+                    "einsum got invalid subscript",
+                    f_input,
+                ));
+            }
+
+            let ndim = tensor.ndim();
+
+            if let Some(elided) = elided {
+                if f_input.len() - ELLIPSIS.len() + elided != ndim {
+                    return Err(TCError::unsupported(
+                        "einsum got inconsistent dimensions to elide",
+                    ));
+                } else {
+                    // pass
+                }
+            } else {
+                elided = Some(ndim - (f_input.len() - ELLIPSIS.len()));
+            }
+
+            present_subscripts.extend(f_input[ELLIPSIS.len()..].chars());
+        } else if f_input.contains(DOT) {
+            return Err(TCError::bad_request("invalid format for einsum", f_input));
+        } else {
+            if !f_input.chars().all(|c| valid_subscripts.contains(&c)) {
+                return Err(TCError::bad_request(
+                    "einsum got invalid subscript",
+                    f_input,
+                ));
+            }
+
+            present_subscripts.extend(f_input.chars());
+        }
+    }
+
+    let elided = if let Some(num_elided) = elided {
+        let elided: String = VALID_SUBSCRIPTS
+            .iter()
+            .filter(|c| !present_subscripts.contains(c))
+            .take(num_elided)
+            .collect();
+
+        if elided.len() == num_elided {
+            Ok(Some(elided))
+        } else {
+            Err(TCError::unsupported(
+                "einsum got too many dimensions to elide",
+            ))
+        }
+    } else {
+        Ok(None)
+    }?;
+
     let f_inputs = parts
         .pop_front()
         .unwrap()
         .split(',')
+        .map(|f_input| {
+            if f_input.starts_with(&ELLIPSIS[..]) {
+                format!(
+                    "{}{}",
+                    elided.as_ref().expect("elided subscripts"),
+                    &f_input[ELLIPSIS.len()..]
+                )
+            } else {
+                debug_assert!(!f_input.contains(DOT));
+                f_input.to_string()
+            }
+        })
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
 
@@ -48,41 +137,32 @@ fn parse_format(format: &str) -> TCResult<(Vec<Label>, Label)> {
 
     let f_output = f_output.chars().collect::<Label>();
 
-    let mut present_labels = HashSet::<char>::new();
-    let valid_labels: HashSet<char> = VALID_LABELS.iter().cloned().collect();
-    for f_input in &f_inputs {
-        let mut invalid_labels = f_input
-            .iter()
-            .filter(|l| !valid_labels.contains(l))
-            .peekable();
-
-        if invalid_labels.peek().is_some() {
-            return Err(TCError::bad_request(
-                "invalid labels in einsum format",
-                invalid_labels.collect::<Tuple<&char>>(),
-            ));
-        }
-
-        present_labels.extend(f_input);
-    }
-
-    let mut invalid_labels = f_output
+    let mut invalid_subscripts = f_output
         .iter()
-        .filter(|l| !valid_labels.contains(l))
+        .filter(|l| !valid_subscripts.contains(l))
         .peekable();
 
-    if invalid_labels.peek().is_some() {
+    if invalid_subscripts.peek().is_some() {
         return Err(TCError::bad_request(
-            "invalid labels in einsum format",
-            invalid_labels.collect::<Tuple<&char>>(),
+            "invalid subscripts in einsum format",
+            invalid_subscripts.collect::<Tuple<&char>>(),
         ));
     }
 
     for l in &f_output {
-        if !present_labels.contains(l) {
-            return Err(TCError::bad_request("no such input dimension", l));
+        if !present_subscripts.contains(l) {
+            return Err(TCError::bad_request(
+                "subscript in output but not in input",
+                l,
+            ));
         }
     }
+
+    let f_output = if let Some(elided) = elided {
+        elided.chars().chain(f_output).collect()
+    } else {
+        f_output
+    };
 
     Ok((f_inputs, f_output))
 }
@@ -114,16 +194,16 @@ fn validate_args<T: TensorAccess>(
             )));
         }
 
-        for (label, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
-            if let Some(known_dim) = dimensions.get(label) {
+        for (subscript, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
+            if let Some(known_dim) = dimensions.get(subscript) {
                 if *dim != *known_dim {
                     return Err(TCError::unsupported(format!(
                         "einsum got inconsistent dimension for axis {}: {} vs {}",
-                        label, dim, known_dim
+                        subscript, dim, known_dim
                     )));
                 }
             } else {
-                dimensions.insert(*label, *dim);
+                dimensions.insert(*subscript, *dim);
             }
         }
     }
@@ -175,7 +255,7 @@ where
     // the assumption that they have been transposed together is valid because subscripts
     // in f_output are required to be unique
     debug!(
-        "sum over repeated labels of {:?}",
+        "sum over repeated subscripts of {:?}",
         permutation
             .iter()
             .map(|x| f_input[*x])
@@ -183,35 +263,35 @@ where
     );
 
     let mut x = 0;
-    let mut labels = Vec::with_capacity(f_output.len());
+    let mut subscripts = Vec::with_capacity(f_output.len());
     for i in 0..(f_input.len() - 1) {
         let subscript = f_input[permutation[i]];
         if subscript == f_input[permutation[i + 1]] {
             tensor = tensor.sum(x)?;
         } else {
-            labels.push(subscript);
+            subscripts.push(subscript);
             x += 1;
         }
     }
 
-    labels.push(f_input[*permutation.last().unwrap()]);
-    debug!("after summation: {:?}", labels);
-    assert_eq!(tensor.ndim(), labels.len());
+    subscripts.push(f_input[*permutation.last().unwrap()]);
+    debug!("after summation: {:?}", subscripts);
+    assert_eq!(tensor.ndim(), subscripts.len());
 
     let mut i = 0;
     while i < dimensions.len() {
-        if i == labels.len() || labels[i] != f_output[i] {
+        if i == subscripts.len() || subscripts[i] != f_output[i] {
             tensor = tensor.expand_dims(i)?;
-            labels.insert(i, f_output[i]);
+            subscripts.insert(i, f_output[i]);
         } else {
             i += 1;
         }
     }
 
     debug!(
-        "input tensor with shape {} has labels {:?}",
+        "input tensor with shape {} has subscripts {:?}",
         tensor.shape(),
-        labels
+        subscripts
     );
 
     let shape = f_output
@@ -306,7 +386,7 @@ where
         + TensorReduce<D, Reduce = T>
         + Clone,
 {
-    let (f_inputs, f_output) = parse_format(format)?;
+    let (f_inputs, f_output) = parse_format(&tensors, format)?;
 
     debug!(
         "einsum with input labels: {:?}, output label {:?}",
