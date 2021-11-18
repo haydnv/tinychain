@@ -14,11 +14,13 @@ pub use link::*;
 pub use slice::*;
 pub use string::*;
 pub use value::*;
+pub use version::*;
 
 mod link;
 mod slice;
 mod string;
 mod value;
+mod version;
 
 /// [`Collate`] support for [`Value`]
 #[derive(Default, Clone)]
@@ -27,6 +29,7 @@ pub struct ValueCollator {
     link: Collator<Link>,
     number: NumberCollator,
     string: StringCollator,
+    version: Collator<Version>,
 }
 
 impl Collate for ValueCollator {

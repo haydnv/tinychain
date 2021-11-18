@@ -123,6 +123,16 @@ class String(Value):
             return self._post("render", kwargs, String)
 
 
+class Version(Value):
+    """
+    A semantic version of the form <major>.<minor>.<rev>, e.g. 1.2.34
+
+    See https://semver.org for the full specification.
+    """
+
+    __uri__ = uri(Value) + "/version"
+
+
 # Numeric types
 
 class Number(Value):

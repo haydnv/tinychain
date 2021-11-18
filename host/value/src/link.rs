@@ -383,6 +383,7 @@ impl TryCastFrom<Value> for Link {
             },
             Value::String(s) => Self::from_str(s).is_ok(),
             Value::Tuple(t) => t.iter().all(|v| Id::can_cast_from(v)),
+            Value::Version(_) => true,
         }
     }
 
@@ -409,6 +410,7 @@ impl TryCastFrom<Value> for Link {
 
                 Some(TCPathBuf::from(path).into())
             }
+            Value::Version(version) => Some(TCPathBuf::from(Id::from(version)).into()),
         }
     }
 }

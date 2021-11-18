@@ -21,7 +21,7 @@ use uuid::Uuid;
 use tc_error::*;
 use tcgeneric::*;
 
-use super::{Link, TCString};
+use super::{Link, TCString, Version};
 
 pub use number_general::*;
 
@@ -40,6 +40,7 @@ pub enum ValueType {
     String,
     Tuple,
     Value,
+    Version,
 }
 
 impl ValueType {
@@ -76,6 +77,15 @@ impl ValueType {
             Self::String => value.try_cast_into(on_err).map(Value::String),
             Self::Tuple => value.try_cast_into(on_err).map(Value::Tuple),
             Self::Value => Ok(value),
+            Self::Version => match value {
+                Value::String(s) => s.parse().map(Value::Version),
+                Value::Tuple(t) => {
+                    let (maj, min, rev) =
+                        t.try_cast_into(|t| TCError::bad_request("invalid semantic version", t))?;
+                    Ok(Value::Version(Version::from((maj, min, rev))))
+                }
+                other => Err(TCError::bad_request("cannot cast into Version from", other)),
+            },
         }
     }
 }
@@ -110,6 +120,7 @@ impl NativeClass for ValueType {
                     "none" => Some(Self::None),
                     "string" => Some(Self::String),
                     "tuple" => Some(Self::Tuple),
+                    "version" => Some(Self::Version),
                     _ => None,
                 }
             } else if path.len() == 5 && &path[3] == "number" {
@@ -220,6 +231,7 @@ impl NativeClass for ValueType {
             Self::String => prefix.append(label("string")),
             Self::Tuple => prefix.append(label("tuple")),
             Self::Value => prefix,
+            Self::Version => prefix.append(label("version")),
         }
     }
 }
@@ -250,8 +262,13 @@ impl Ord for ValueType {
             (Self::Bytes, _) => Greater,
             (_, Self::Bytes) => Less,
 
-            (Self::None, _) => Less,
-            (_, Self::None) => Greater,
+            (Self::Number(_), _) => Greater,
+            (_, Self::Number(_)) => Less,
+
+            (Self::Version, _) => Greater,
+            (_, Self::Version) => Less,
+
+            (Self::None, Self::None) => Equal,
         }
     }
 }
@@ -333,6 +350,7 @@ impl fmt::Display for ValueType {
             Self::String => f.write_str("type String"),
             Self::Tuple => f.write_str("type Tuple<Value>"),
             Self::Value => f.write_str("type Value"),
+            Self::Version => f.write_str("type Version"),
         }
     }
 }
@@ -392,6 +410,7 @@ pub enum Value {
     Number(Number),
     String(TCString),
     Tuple(Tuple<Self>),
+    Version(Version),
 }
 
 impl Value {
@@ -449,6 +468,7 @@ impl Value {
                 _ => None,
             },
             VT::Value => Some(self),
+            VT::Version => self.opt_cast_into().map(Self::Version),
         }
     }
 }
@@ -472,6 +492,7 @@ impl Instance for Value {
             Self::Number(n) => VT::Number(n.class()),
             Self::String(_) => VT::String,
             Self::Tuple(_) => VT::Tuple,
+            Self::Version(_) => VT::Version,
         }
     }
 }
@@ -511,6 +532,7 @@ impl Serialize for Value {
             },
             Self::String(s) => s.serialize(serializer),
             Self::Tuple(t) => t.as_slice().serialize(serializer),
+            Self::Version(v) => v.serialize(serializer),
         }
     }
 }
@@ -561,6 +583,7 @@ impl<'en> en::ToStream<'en> for Value {
             },
             Self::String(s) => s.to_stream(encoder),
             Self::Tuple(t) => t.to_stream(encoder),
+            Self::Version(v) => v.to_stream(encoder),
         }
     }
 }
@@ -592,6 +615,7 @@ impl<'en> en::IntoStream<'en> for Value {
             },
             Self::String(s) => s.into_stream(encoder),
             Self::Tuple(t) => t.into_inner().into_stream(encoder),
+            Self::Version(v) => v.into_stream(encoder),
         }
     }
 }
@@ -747,6 +771,7 @@ impl TryCastFrom<Value> for Number {
             }
             Value::Tuple(_) => false,
             Value::String(s) => f64::from_str(&s).is_ok(),
+            Value::Version(_) => false,
         }
     }
 
@@ -774,6 +799,7 @@ impl TryCastFrom<Value> for Number {
             }
             Value::Tuple(_) => None,
             Value::String(s) => Number::from_str(&s).ok(),
+            Value::Version(_) => None,
         }
     }
 }
@@ -823,6 +849,31 @@ impl TryCastFrom<Value> for Uuid {
     }
 }
 
+impl TryCastFrom<Value> for Version {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::String(s) => Version::from_str(s).is_ok(),
+            Value::Tuple(t) => <(u32, u32, u32) as TryCastFrom<Tuple<Value>>>::can_cast_from(t),
+            Value::Version(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Version::from_str(&s).ok(),
+
+            Value::Tuple(t) => t
+                .opt_cast_into()
+                .map(|tuple: (u32, u32, u32)| Version::from(tuple)),
+
+            Value::Version(version) => Some(version),
+
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for bool {
     fn can_cast_from(value: &Value) -> bool {
         Number::can_cast_from(value)
@@ -844,6 +895,16 @@ impl TryCastFrom<Value> for u8 {
 }
 
 impl TryCastFrom<Value> for usize {
+    fn can_cast_from(value: &Value) -> bool {
+        Number::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Number::opt_cast_from(value).map(|n| n.cast_into())
+    }
+}
+
+impl TryCastFrom<Value> for u32 {
     fn can_cast_from(value: &Value) -> bool {
         Number::can_cast_from(value)
     }
@@ -997,6 +1058,7 @@ impl fmt::Debug for Value {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
+            Self::Version(v) => fmt::Debug::fmt(v, f),
         }
     }
 }
@@ -1018,6 +1080,7 @@ impl fmt::Display for Value {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
+            Self::Version(v) => fmt::Display::fmt(v, f),
         }
     }
 }
@@ -1077,6 +1140,10 @@ impl ValueVisitor {
                 let v = map.next_value()?;
                 Ok(v)
             }
+            VT::Version => {
+                let v = map.next_value()?;
+                Ok(Value::Version(v))
+            }
         };
     }
 
@@ -1126,6 +1193,10 @@ impl ValueVisitor {
             VT::Value => {
                 let v = map.next_value(()).await?;
                 Ok(v)
+            }
+            VT::Version => {
+                let v = map.next_value(()).await?;
+                Ok(Value::Version(v))
             }
         };
     }
