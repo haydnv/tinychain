@@ -61,7 +61,7 @@ do
     apt-get install -y gnupg2 ca-certificates apt-utils software-properties-common
     apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
     echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu $UBUNTU_CODENAME main" | tee /etc/apt/sources.list.d/arrayfire.list
-    apt-get update && apt install -y arrayfire
+    apt-get update && apt-get install -y arrayfire
 done
 
 # make sure the C linker is installed
