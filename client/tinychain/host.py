@@ -162,6 +162,7 @@ class Local(Host):
         args = [
             path,
             f"--workspace={workspace}",
+            f"--address={self.ADDRESS}",
             f"--http_port={port}",
             f"--log_level={log_level}",
             f"--cache_size={cache_size}",

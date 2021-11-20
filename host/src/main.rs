@@ -51,7 +51,7 @@ fn duration(flag: &str) -> TCResult<Duration> {
 struct Config {
     #[structopt(
         long = "address",
-        default_value = "127.0.0.1",
+        default_value = "0.0.0.0",
         about = "The IP address to bind"
     )]
     pub address: IpAddr,
