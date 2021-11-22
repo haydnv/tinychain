@@ -12,6 +12,7 @@ Modules
    cluster
    decorators
    graph
+   ref
    state
    table
    tensor

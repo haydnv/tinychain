@@ -1,17 +1,30 @@
-"""Reference types."""
+"""
+Reference types.
+:class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
+"""
 
 from tinychain.reflect import is_conditional
 from tinychain.util import deanonymize, form_of, get_ref, requires, to_json, uri, URI
 
 
 class Ref(object):
-    """A reference to a :class:`State`."""
+    """A reference to a :class:`State`. Prefer to construct a subclass like :class:`If` or :class:`Get`."""
 
     __uri__ = URI("/state/scalar/ref")
 
 
 class After(Ref):
-    """A flow control operator used to delay execution conditionally."""
+    """
+    A flow control operator used to delay execution conditionally.
+
+    Args:
+        when (State or Ref): A reference to resolve before resolving `then`.
+
+        then (State or Ref): The state to return when this `Ref` is resolved.
+
+    Example:
+            num_rows = After(table.insert(["key"], ["value"]), table.count())`
+    """
 
     __uri__ = uri(Ref) + "/after"
 
@@ -36,34 +49,23 @@ class After(Ref):
             self.when = reference(cxt, self.when)
 
 
-class Before(Ref):
-    """A flow control operator used to delay execution conditionally."""
-
-    __uri__ = uri(Ref) + "/before"
-
-    def __init__(self, when, then):
-        self.when = when
-        self.then = then
-
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.when))
-        deps.update(requires(self.then))
-        return deps
-
-    def __json__(self):
-        return {str(uri(self)): to_json([self.when, self.then])}
-
-    def __ns__(self, cxt):
-        deanonymize(self.when, cxt)
-        deanonymize(self.then, cxt)
-
-        if is_conditional(self.when):
-            self.when = reference(cxt, self.when)
-
-
 class Case(Ref):
-    """A flow control operator used to branch execution conditionally."""
+    """
+    A flow control used to branch execution conditionally.
+
+    Args:
+        cond (Value or Ref): The Value to match each `switch` case against.
+
+        switch (Tuple): A Tuple of values to match `cond` against.
+
+        case: A Tuple of possible States to resolve, with length = `switch.len() + 1`, where the last is the default.
+
+    Example:
+        `equals_one = Case(1, [0, 1], [False, True, False])`
+
+    Raises:
+        `BadRequestError` if `case` is the wrong length or if `cond` or `switch` contains a nested conditional
+    """
 
     __uri__ = uri(Ref) + "/case"
 
@@ -89,7 +91,19 @@ class Case(Ref):
 
 
 class If(Ref):
-    """A flow control operator used to resolve a :class:`State` conditionally."""
+    """
+    A flow control used to branch execution conditionally.
+
+    Args:
+        cond (Bool or Ref): The condition determines which branch to execute
+
+        then (State or Ref): The State to resolve if `cond` resolves to `True`
+
+        or_else (State or Ref): The State to resolve if `cond` resolves to `False`
+
+    Raises:
+        `BadRequestError` if `cond` does not resolve to a :class:`Bool` or in case of a nested conditional
+    """
 
     __uri__ = uri(Ref) + "/if"
 
@@ -117,30 +131,20 @@ class If(Ref):
             self.cond = reference(cxt, self.cond)
 
 
-class New(Ref):
-    """A flow control operator to construct a new instance of a `Class`."""
-    __uri__ = uri(Ref) + "/new"
-
-    def __init__(self, cls, data):
-        self.cls = cls
-        self.data = data
-
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.cls))
-        deps.update(requires(self.data))
-        return deps
-
-    def __json__(self):
-        return {str(uri(self)): to_json([self.cls, self.data])}
-
-    def __ns__(self, cxt):
-        deanonymize(self.cls, cxt)
-        deanonymize(self.data, cxt)
-
-
 class While(Ref):
-    """A flow control operator to execute a closure repeatedly until a condition is met."""
+    """
+    A flow control operator to execute a closure repeatedly until a condition is met.
+
+    Args:
+        cond (Bool or Ref): The condition which determines which branch to execute.
+
+        then (State or Ref): The State to resolve if `cond` resolves to `True`.
+
+        or_else (State or Ref): The State to resolve if `cond` resolves to `False`.
+
+    Raises:
+        `BadRequestError` if `cond` does not resolve to a :class:`Bool` or in case of a nested conditional
+    """
 
     __uri__ = uri(Ref) + "/while"
 
@@ -166,7 +170,14 @@ class While(Ref):
 
 
 class With(Ref):
-    """A flow control operator to limit the scope of a lambda Op"""
+    """
+    Capture state from an enclosing context. Prefer using the `closure` decorator to construct a `With` automatically.
+
+    Args:
+        capture (Iterable): A Python iterable with the `Id` of each `State` to capture from the outer `Op` context.
+
+        op (Op): The Op to close over.
+    """
 
     __uri__ = uri(Ref) + "/with"
 
@@ -198,7 +209,7 @@ class With(Ref):
 
 
 class Op(Ref):
-    """A reference to an :class:`Op`."""
+    """A resolvable reference to an :class:`Op`."""
 
     __uri__ = uri(Ref) + "/op"
 
@@ -226,7 +237,14 @@ class Op(Ref):
 
 
 class Get(Op):
-    """A reference to an instance of :class:`Op.Get`."""
+    """
+    A `Get` :class:`Op` reference to resolve.
+
+    Args:
+        subject (State or URI): The instance of which this `Op` is a method (can be a `URI`).
+
+        key (Value or Ref): The `key` with which to call this `Op`.
+    """
 
     __uri__ = uri(Op) + "/get"
 
@@ -258,7 +276,16 @@ class Get(Op):
 
 
 class Put(Op):
-    """A reference to an instance of :class:`Op.Put`."""
+    """
+    A `Put` :class:`Op` reference to resolve.
+
+    Args:
+        subject (State or URI): The instance of which this `Op` is a method (can be a `URI`).
+
+        key (Value or Ref): The `key` with which to call this `Op`.
+
+        value (State or Ref): The `value` with which to call this `Op`.
+    """
 
     __uri__ = uri(Op) + "/put"
 
@@ -270,7 +297,14 @@ class Put(Op):
 
 
 class Post(Op):
-    """A reference to an instance of :class:`Op.Post`."""
+    """
+    A `Post` :class:`Op` reference to resolve.
+
+    Args:
+        subject (State or URI): The instance of which this `Op` is a method (can be a `URI`).
+
+        args (Map or Ref): The parameters with which to call this `Op`.
+    """
 
     __uri__ = uri(Op) + "/post"
 
@@ -282,7 +316,14 @@ class Post(Op):
 
 
 class Delete(Op):
-    """A reference to an instance of :class:`Op.Delete`."""
+    """
+    A `Delete` :class:`Op` reference to resolve.
+
+    Args:
+        subject (State or URI): The instance of which this `Op` is a method (can be a `URI`).
+
+        key (Value or Ref): The `key` with which to call this `Op`.
+    """
 
     __uri__ = uri(Op) + "/delete"
 

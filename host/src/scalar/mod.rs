@@ -230,13 +230,6 @@ impl Scalar {
                     .map(Box::new)
                     .map(Scalar::Ref),
 
-                RT::Before => self
-                    .opt_cast_into()
-                    .map(Box::new)
-                    .map(TCRef::Before)
-                    .map(Box::new)
-                    .map(Scalar::Ref),
-
                 RT::Case => self
                     .opt_cast_into()
                     .map(Box::new)
@@ -254,13 +247,6 @@ impl Scalar {
                     .opt_cast_into()
                     .map(Box::new)
                     .map(TCRef::If)
-                    .map(Box::new)
-                    .map(Scalar::Ref),
-
-                RT::New => self
-                    .opt_cast_into()
-                    .map(Box::new)
-                    .map(TCRef::New)
                     .map(Box::new)
                     .map(Scalar::Ref),
 

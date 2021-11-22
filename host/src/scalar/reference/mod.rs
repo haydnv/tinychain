@@ -20,20 +20,16 @@ use crate::txn::Txn;
 use super::{Scalar, Scope, Value};
 
 pub use after::After;
-pub use before::Before;
 pub use case::Case;
 pub use id::*;
-pub use new::New;
 pub use op::*;
 pub use r#if::IfRef;
 pub use r#while::While;
 pub use with::With;
 
 mod after;
-mod before;
 mod case;
 mod r#if;
-mod r#new;
 mod r#while;
 mod with;
 
@@ -76,11 +72,9 @@ pub trait Refer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RefType {
     After,
-    Before,
     Case,
     Id,
     If,
-    New,
     Op(OpRefType),
     While,
     With,
@@ -93,11 +87,9 @@ impl NativeClass for RefType {
         if path.len() == 4 && &path[0..3] == &PREFIX[..] {
             match path[3].as_str() {
                 "after" => Some(Self::After),
-                "before" => Some(Self::Before),
                 "case" => Some(Self::Case),
                 "id" => Some(Self::Id),
                 "if" => Some(Self::If),
-                "new" => Some(Self::New),
                 "while" => Some(Self::While),
                 "with" => Some(Self::With),
                 _ => None,
@@ -112,11 +104,9 @@ impl NativeClass for RefType {
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
             Self::After => "after",
-            Self::Before => "before",
             Self::Case => "case",
             Self::Id => "id",
             Self::If => "if",
-            Self::New => "new",
             Self::Op(ort) => return ort.path(),
             Self::While => "while",
             Self::With => "with",
@@ -130,11 +120,9 @@ impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After => f.write_str("After"),
-            Self::Before => f.write_str("Before"),
             Self::Case => f.write_str("Case"),
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
-            Self::New => f.write_str("New"),
             Self::Op(ort) => fmt::Display::fmt(ort, f),
             Self::While => f.write_str("While"),
             Self::With => f.write_str("With"),
@@ -146,11 +134,9 @@ impl fmt::Display for RefType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
     After(Box<After>),
-    Before(Box<Before>),
     Case(Box<Case>),
     Id(IdRef),
     If(Box<IfRef>),
-    New(Box<New>),
     Op(OpRef),
     While(Box<While>),
     With(Box<With>),
@@ -162,11 +148,9 @@ impl Instance for TCRef {
     fn class(&self) -> Self::Class {
         match self {
             Self::After(_) => RefType::After,
-            Self::Before(_) => RefType::Before,
             Self::Case(_) => RefType::Case,
             Self::Id(_) => RefType::Id,
             Self::If(_) => RefType::If,
-            Self::New(_) => RefType::New,
             Self::Op(op_ref) => RefType::Op(op_ref.class()),
             Self::While(_) => RefType::While,
             Self::With(_) => RefType::With,
@@ -182,10 +166,6 @@ impl Refer for TCRef {
                 let after = after.dereference_self(path);
                 Self::After(Box::new(after))
             }
-            Self::Before(before) => {
-                let before = before.dereference_self(path);
-                Self::Before(Box::new(before))
-            }
             Self::Case(case) => {
                 let case = case.dereference_self(path);
                 Self::Case(Box::new(case))
@@ -194,10 +174,6 @@ impl Refer for TCRef {
             Self::If(if_ref) => {
                 let if_ref = if_ref.dereference_self(path);
                 Self::If(Box::new(if_ref))
-            }
-            Self::New(new) => {
-                let new = new.dereference_self(path);
-                Self::New(Box::new(new))
             }
             Self::Op(op_ref) => Self::Op(op_ref.dereference_self(path)),
             Self::While(while_ref) => {
@@ -214,11 +190,9 @@ impl Refer for TCRef {
     fn is_conditional(&self) -> bool {
         match self {
             Self::After(after) => after.is_conditional(),
-            Self::Before(before) => before.is_conditional(),
             Self::Case(case) => case.is_conditional(),
             Self::Id(id_ref) => id_ref.is_conditional(),
             Self::If(if_ref) => if_ref.is_conditional(),
-            Self::New(new) => new.is_conditional(),
             Self::Op(op_ref) => op_ref.is_conditional(),
             Self::While(while_ref) => while_ref.is_conditional(),
             Self::With(with) => with.is_conditional(),
@@ -228,11 +202,9 @@ impl Refer for TCRef {
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             Self::After(after) => after.is_inter_service_write(cluster_path),
-            Self::Before(before) => before.is_inter_service_write(cluster_path),
             Self::Case(case) => case.is_inter_service_write(cluster_path),
             Self::Id(id_ref) => id_ref.is_inter_service_write(cluster_path),
             Self::If(if_ref) => if_ref.is_inter_service_write(cluster_path),
-            Self::New(new) => new.is_inter_service_write(cluster_path),
             Self::Op(op_ref) => op_ref.is_inter_service_write(cluster_path),
             Self::While(while_ref) => while_ref.is_inter_service_write(cluster_path),
             Self::With(with) => with.is_inter_service_write(cluster_path),
@@ -245,10 +217,6 @@ impl Refer for TCRef {
                 let after = after.reference_self(path);
                 Self::After(Box::new(after))
             }
-            Self::Before(before) => {
-                let before = before.reference_self(path);
-                Self::Before(Box::new(before))
-            }
             Self::Case(case) => {
                 let case = case.reference_self(path);
                 Self::Case(Box::new(case))
@@ -257,10 +225,6 @@ impl Refer for TCRef {
             Self::If(if_ref) => {
                 let if_ref = if_ref.reference_self(path);
                 Self::If(Box::new(if_ref))
-            }
-            Self::New(new) => {
-                let new = new.reference_self(path);
-                Self::New(Box::new(new))
             }
             Self::Op(op_ref) => Self::Op(op_ref.reference_self(path)),
             Self::While(while_ref) => {
@@ -277,11 +241,9 @@ impl Refer for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::After(after) => after.requires(deps),
-            Self::Before(before) => before.requires(deps),
             Self::Case(case) => case.requires(deps),
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::If(if_ref) => if_ref.requires(deps),
-            Self::New(new) => new.requires(deps),
             Self::Op(op_ref) => op_ref.requires(deps),
             Self::While(while_ref) => while_ref.requires(deps),
             Self::With(with) => with.requires(deps),
@@ -299,9 +261,7 @@ impl Refer for TCRef {
             Self::If(if_ref) => if_ref.resolve(context, txn).await,
             Self::Case(case) => case.resolve(context, txn).await,
             Self::After(after) => after.resolve(context, txn).await,
-            Self::Before(before) => before.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
-            Self::New(new) => new.resolve(context, txn).await,
             Self::Op(op_ref) => op_ref.resolve(context, txn).await,
             Self::While(while_ref) => while_ref.resolve(context, txn).await,
             Self::With(with) => with.resolve(context, txn).await,
@@ -369,13 +329,6 @@ impl RefVisitor {
                     .map_ok(TCRef::After)
                     .await
             }
-            RefType::Before => {
-                access
-                    .next_value(())
-                    .map_ok(Box::new)
-                    .map_ok(TCRef::Before)
-                    .await
-            }
             RefType::Case => {
                 access
                     .next_value(())
@@ -389,13 +342,6 @@ impl RefVisitor {
                     .next_value(())
                     .map_ok(Box::new)
                     .map_ok(TCRef::If)
-                    .await
-            }
-            RefType::New => {
-                access
-                    .next_value(())
-                    .map_ok(Box::new)
-                    .map_ok(TCRef::New)
                     .await
             }
             RefType::Op(ort) => {
@@ -490,10 +436,8 @@ impl<'en> ToStream<'en> for TCRef {
             Self::Op(_) => unimplemented!("this should not be possible"),
 
             Self::After(after) => map.encode_value(after),
-            Self::Before(before) => map.encode_value(before),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::New(new) => map.encode_value(new),
             Self::While(while_ref) => map.encode_value(while_ref),
             Self::With(with) => map.encode_value(with),
         }?;
@@ -518,10 +462,8 @@ impl<'en> IntoStream<'en> for TCRef {
             Self::Op(_) => unimplemented!("this should not be possible"),
 
             Self::After(after) => map.encode_value(after),
-            Self::Before(before) => map.encode_value(before),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::New(new) => map.encode_value(new),
             Self::While(while_ref) => map.encode_value(while_ref),
             Self::With(with) => map.encode_value(with),
         }?;
@@ -534,11 +476,9 @@ impl fmt::Debug for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After(after) => fmt::Debug::fmt(after, f),
-            Self::Before(before) => fmt::Debug::fmt(before, f),
             Self::Case(case) => fmt::Debug::fmt(case, f),
             Self::Id(id_ref) => fmt::Debug::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Debug::fmt(if_ref, f),
-            Self::New(new) => fmt::Debug::fmt(new, f),
             Self::Op(op_ref) => fmt::Debug::fmt(op_ref, f),
             Self::While(while_ref) => fmt::Debug::fmt(while_ref, f),
             Self::With(with) => fmt::Debug::fmt(with, f),
@@ -550,11 +490,9 @@ impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After(after) => fmt::Display::fmt(after, f),
-            Self::Before(before) => fmt::Display::fmt(before, f),
             Self::Case(case) => fmt::Display::fmt(case, f),
             Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Display::fmt(if_ref, f),
-            Self::New(new) => fmt::Display::fmt(new, f),
             Self::Op(op_ref) => fmt::Display::fmt(op_ref, f),
             Self::While(while_ref) => fmt::Display::fmt(while_ref, f),
             Self::With(with) => fmt::Display::fmt(with, f),

@@ -276,7 +276,7 @@ class Stream(State):
         return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), type(initial_state))
 
     def map(self, op):
-        """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream."""
+        """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream`."""
 
         return self._post("map", Map(op=op), Stream)
 
