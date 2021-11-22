@@ -9,9 +9,7 @@ def gen_headers(instance):
         if name.startswith('_'):
             continue
 
-        if isinstance(attr, Attribute):
-            setattr(instance, name, attr.method(instance, name))
-        elif isinstance(attr, MethodStub):
+        if isinstance(attr, MethodStub):
             setattr(instance, name, attr.method(instance, name))
 
 
@@ -42,9 +40,7 @@ class Meta(type):
                 # it's a @classmethod
                 continue
 
-            if isinstance(attr, Attribute):
-                setattr(header, name, attr.method(instance, name))
-            elif isinstance(attr, MethodStub):
+            if isinstance(attr, MethodStub):
                 setattr(header, name, attr.method(instance, name))
             elif isinstance(attr, State):
                 setattr(header, name, type(attr)(instance_uri.append(name)))
@@ -82,24 +78,6 @@ class Meta(type):
 
         parent = mro[1]
         return {str(uri(parent)): to_json(form_of(cls))}
-
-
-class Attribute(object):
-    def __init__(self, stub):
-        self.stub = stub
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"cannot call an Attribute; use tc.use(<class>) to generate attribute headers")
-
-    def method(self, header, name):
-        rtype = inspect.signature(self.stub).return_annotation
-        if rtype == inspect.Parameter.empty:
-            raise AttributeError(f"attribute {name} is missing a return annotation")
-
-        from tinychain.ref import MethodSubject
-        accessor = rtype(MethodSubject(header, name))
-        accessor.accessor = True
-        return accessor
 
 
 class MethodStub(object):
