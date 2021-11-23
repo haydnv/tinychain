@@ -3,7 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import PORT, printlines, start_host, PersistenceTest
+from testutils import DEFAULT_PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
@@ -107,7 +107,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def cluster(self, chain_type):
         class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/btree")
+            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/btree")
 
             def _configure(self):
                 self.tree = chain_type(tc.btree.BTree(SCHEMA))
