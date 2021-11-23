@@ -11,11 +11,19 @@ LINK = "http://127.0.0.1:8702/app/area"
 
 
 @tc.get_op
-def example(txn) -> tc.Number:
-    txn.a = tc.Number(5)            # this is a State
-    txn.b = tc.Number(10)           # this is a State
-    txn.product = txn.a * txn.b     # this is a Ref
-    return txn.product
+def loop(until: tc.Number) -> tc.Int:
+    @tc.closure  # this decorator captures referenced states from the outer scope (in this case "until")
+    @tc.post_op
+    def cond(i: tc.Int):
+        return i < until
+
+    @tc.post_op
+    def step(i: tc.Int) -> tc.Int:
+        return tc.Map(i=i + 1)  # here we return the new state of the loop
+
+    initial_state = tc.Map(i=0)
+
+    return tc.While(cond, step, initial_state)
 
 
 @tc.get_op
@@ -100,11 +108,11 @@ class ClientDocTests(unittest.TestCase):
         self.assertEqual(self.host.get(tc.uri(tc.String), hello), hello)
         self.assertEqual(self.host.post(ENDPOINT, tc.String(hello)), hello)
 
-    def testExampleOp(self):
+    def testWhile(self):
         cxt = tc.Context()
-        cxt.example = example
-        cxt.result = cxt.example()
-        self.assertEqual(self.host.post(ENDPOINT, cxt), 50)
+        cxt.loop = loop
+        cxt.result = cxt.loop(10)
+        self.assertEqual(self.host.post(ENDPOINT, cxt), {"i": 10})
 
     def testAreaService(self):
         service = tc.use(AreaService)
