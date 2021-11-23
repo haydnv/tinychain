@@ -9,6 +9,8 @@ PORT = 8702
 
 
 def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, timeout=30):
+    print(f"start_host at {host_uri}")
+
     if not os.path.isfile(TC_PATH):
         raise RuntimeError(f"invalid executable path: {TC_PATH}")
 
@@ -17,6 +19,8 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
         port = host_uri.port()
     elif clusters and tc.uri(clusters[0]).port():
         port = tc.uri(clusters[0]).port()
+
+    print(f"start_host on port {port}")
 
     config = []
     for cluster in clusters:
@@ -30,7 +34,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
-    host = tc.host.Local(
+    process = tc.host.Process(
         TC_PATH,
         workspace=f"/tmp/tc/tmp/{port}/{name}",
         data_dir=data_dir,
@@ -42,8 +46,8 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
         request_ttl=timeout)
 
     print(f"start host on port {port}")
-    host.start(wait_time=wait_time)
-    return host
+    process.start(wait_time)
+    return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 class PersistenceTest(object):

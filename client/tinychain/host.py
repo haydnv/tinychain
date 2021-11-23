@@ -124,12 +124,10 @@ class Host(object):
         return self._handle(request)
 
 
-class Local(Host):
-    """A local TinyChain host."""
+class Process(object):
+    """A local TinyChain host process."""
 
     ADDRESS = "127.0.0.1"
-    SHUTDOWN_TIME = 0.1
-    STARTUP_TIME = 1.
 
     def __init__(self,
             path,
@@ -141,6 +139,7 @@ class Local(Host):
             cache_size="1G",
             force_create=False,
             request_ttl="30"):
+        print(f"start host process on port {port}")
 
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
@@ -176,13 +175,13 @@ class Local(Host):
 
         self._args = args
 
-    def start(self, wait_time=STARTUP_TIME):
-        """Start this host process locally."""
+    def start(self, wait_time):
+        """Start this host `Process`."""
 
         if self._process:
             raise RuntimeError("tried to start a host that's already running")
 
-        self._process = subprocess.Popen(self._args)        
+        self._process = subprocess.Popen(self._args)
         time.sleep(wait_time)
 
         if self._process is None or self._process.poll() is not None:
@@ -190,8 +189,8 @@ class Local(Host):
         else:
             logging.info(f"new instance running at {uri(self)}")
 
-    def stop(self, wait_time=SHUTDOWN_TIME):
-        """Shut down this host."""
+    def stop(self, wait_time):
+        """Shut down this host `Process`."""
 
         logging.info(f"Shutting down TinyChain host {uri(self)}")
         if self._process:
@@ -204,13 +203,33 @@ class Local(Host):
 
         self._process = None
 
-    def wait(self):
-        """Block the current thread until the running host is shut down."""
-        self._process.wait()
-
     def __del__(self):
         if self._process:
             self.stop()
+
+
+class Local(Host):
+    """A local TinyChain host."""
+
+    SHUTDOWN_TIME = 0.1
+    STARTUP_TIME = 1.
+
+    def __init__(self, process, address):
+        self._process = process
+        Host.__init__(self, address)
+
+    def start(self, wait_time=STARTUP_TIME):
+        """Start this local `Host`."""
+
+        self._process.start(wait_time)
+
+    def stop(self, wait_time=SHUTDOWN_TIME):
+        """Shut down this local `Host`."""
+
+        self._process.stop(wait_time)
+
+    def __del__(self):
+        self._process.stop(self.SHUTDOWN_TIME)
 
 
 def auth_header(token):

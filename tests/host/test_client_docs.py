@@ -100,8 +100,9 @@ class ClientService(tc.Cluster):
 
 
 class ClientDocTests(unittest.TestCase):
-    def setUp(self):
-        self.host = start_host("test_client_docs", [AreaService, ClientService])
+    @classmethod
+    def setUpClass(cls):
+        cls.host = start_host("test_client_docs", [AreaService, ClientService])
 
     def testHello(self):
         hello = "Hello, World!"
@@ -140,8 +141,9 @@ class ClientDocTests(unittest.TestCase):
         expected = 1
         self.assertEqual(actual, expected)
 
-    def tearDown(self):
-        self.host.stop()
+    @classmethod
+    def tearDownClass(cls):
+        cls.host.stop()
 
 
 if __name__ == "__main__":
