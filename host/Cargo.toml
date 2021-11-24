@@ -50,7 +50,7 @@ tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }
 tcgeneric = { path = "generic" }
-tokio = { version = "1.13", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.14", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uuid = "0.8"
 url = { version = "2.2" }
