@@ -30,8 +30,6 @@ class Process(tc.host.Local.Process):
         if clusters and data_dir is None:
             raise ValueError("Hosting a cluster requires specifying a data_dir")
 
-        maybe_create_dir(workspace, force_create)
-
         if data_dir:
             maybe_create_dir(data_dir, force_create)
 

@@ -23,4 +23,6 @@ COPY host /host
 
 RUN . $HOME/.cargo/env && cargo install tinychain --features=tensor --path=/host
 
+RUN mkdir /data
+
 RUN ln -s $HOME/.cargo/bin/tinychain tinychain
