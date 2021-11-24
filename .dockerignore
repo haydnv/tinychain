@@ -1,6 +1,7 @@
 client
 config
-host
 tests
+host/target
+host/*/target
 LICENSE
 *.md

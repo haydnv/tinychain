@@ -3,7 +3,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from testutils import PORT, start_host, PersistenceTest
+from testutils import DEFAULT_PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -490,7 +490,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def cluster(self, chain_type):
         class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/tensor")
+            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
 
             def _configure(self):
                 schema = tc.tensor.Schema([2, 3], tc.I32)

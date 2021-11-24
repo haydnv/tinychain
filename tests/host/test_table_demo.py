@@ -1,11 +1,11 @@
 import tinychain as tc
 import unittest
 
-from testutils import PORT, start_host
+from testutils import DEFAULT_PORT, start_host
 
 
 class Database(tc.Cluster):
-    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/db")
+    __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/db")
 
     def _configure(self):
         schema = tc.table.Schema(
@@ -20,7 +20,7 @@ class Database(tc.Cluster):
 
 
 class Web(tc.Cluster):
-    __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/app/web")
+    __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/web")
 
     def _configure(self):
         schema = tc.btree.Schema((tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt)))
@@ -50,7 +50,7 @@ class DemoTests(unittest.TestCase):
     def setUp(self):
         self.hosts = []
         for i in range(3):
-            port = PORT + i
+            port = DEFAULT_PORT + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
             host = start_host("table_demo", [Database, Web], True, host_uri, wait_time=2)
             self.hosts.append(host)

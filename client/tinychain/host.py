@@ -1,12 +1,7 @@
 """Utilities for communicating with a TinyChain host."""
-
+import abc
 import json
-import logging
-import os
-import pathlib
 import requests
-import subprocess
-import time
 import urllib.parse
 
 from tinychain.error import *
@@ -127,102 +122,41 @@ class Host(object):
 class Local(Host):
     """A local TinyChain host."""
 
-    ADDRESS = "127.0.0.1"
+    class Process(object):
+        """A local TinyChain host process."""
+
+        @abc.abstractmethod
+        def start(self, wait_time):
+            """Start this host `Process`."""
+
+        @abc.abstractmethod
+        def stop(self, wait_time):
+            """Shut down this host `Process`."""
+
+        def __del__(self):
+            if self._process:
+                self.stop()
+
     SHUTDOWN_TIME = 0.1
     STARTUP_TIME = 1.
 
-    def __init__(self,
-            path,
-            workspace,
-            data_dir=None,
-            clusters=[],
-            port=DEFAULT_PORT,
-            log_level="warn",
-            cache_size="1G",
-            force_create=False,
-            request_ttl="30"):
-
-        # set _process first so it's available to __del__ in case of an exception
-        self._process = None
-
-        if port is None or not int(port) or int(port) < 0:
-            raise ValueError(f"invalid port: {port}")
-
-        if clusters and data_dir is None:
-            raise ValueError("Hosting a cluster requires specifying a data_dir")
-
-        maybe_create_dir(workspace, force_create)
-
-        if data_dir:
-            maybe_create_dir(data_dir, force_create)
-
-        address = "http://{}:{}".format(self.ADDRESS, port)
+    def __init__(self, process, address):
+        self._process = process
         Host.__init__(self, address)
 
-        args = [
-            path,
-            f"--workspace={workspace}",
-            f"--address={self.ADDRESS}",
-            f"--http_port={port}",
-            f"--log_level={log_level}",
-            f"--cache_size={cache_size}",
-            f"--request_ttl={request_ttl}",
-        ]
-
-        if data_dir:
-            args.append(f"--data_dir={data_dir}")
-
-        args.extend([f"--cluster={cluster}" for cluster in clusters])
-
-        self._args = args
-
     def start(self, wait_time=STARTUP_TIME):
-        """Start this host process locally."""
+        """Start this local `Host`."""
 
-        if self._process:
-            raise RuntimeError("tried to start a host that's already running")
-
-        self._process = subprocess.Popen(self._args)        
-        time.sleep(wait_time)
-
-        if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"TinyChain process at {uri(self)} crashed on startup")
-        else:
-            logging.info(f"new instance running at {uri(self)}")
+        self._process.start(wait_time)
 
     def stop(self, wait_time=SHUTDOWN_TIME):
-        """Shut down this host."""
+        """Shut down this local `Host`."""
 
-        logging.info(f"Shutting down TinyChain host {uri(self)}")
-        if self._process:
-            self._process.terminate()
-            self._process.wait()
-            logging.info(f"Host {uri(self)} shut down")
-            time.sleep(wait_time)
-        else:
-            logging.info(f"{uri(self)} not running")
-
-        self._process = None
-
-    def wait(self):
-        """Block the current thread until the running host is shut down."""
-        self._process.wait()
+        self._process.stop(wait_time)
 
     def __del__(self):
-        if self._process:
-            self.stop()
+        self._process.stop(self.SHUTDOWN_TIME)
 
 
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"} if token else {}
-
-
-def maybe_create_dir(path, force):
-    path = pathlib.Path(path)
-    if path.exists() and path.is_dir():
-        return
-    elif force:
-        os.makedirs(path)
-    else:
-        raise RuntimeError(f"no directory at {path}")
-
