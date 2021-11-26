@@ -383,6 +383,7 @@ impl<'a> Handler<'a> for EinsumHandler {
             Box::pin(async move {
                 let format: TCString = params.require(&label("format").into())?;
                 let tensors: Vec<Tensor> = params.require(&TENSORS.into())?;
+
                 einsum(&format, tensors)
                     .map(Collection::from)
                     .map(State::from)
@@ -423,6 +424,40 @@ where
                 Ok(TCStream::from(Collection::Tensor(tensor)).into())
             })
         }))
+    }
+}
+
+struct DiagonalHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for DiagonalHandler<T>
+where
+    T: TensorAccess + TensorDiagonal<fs::Dir, Txn = Txn> + Send + 'a,
+    Tensor: From<T::Diagonal>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                self.tensor
+                    .diagonal(txn.clone())
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::Collection)
+                    .await
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for DiagonalHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
     }
 }
 
@@ -867,10 +902,11 @@ fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handle
 where
     T: TensorAccess
         + TensorInstance
-        + TensorIO<fs::Dir, Txn = Txn>
-        + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorBoolean<Tensor, Combine = Tensor>
+        + TensorDiagonal<fs::Dir, Txn = Txn>
+        + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorIO<fs::Dir, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
         + TensorTransform
@@ -880,6 +916,7 @@ where
         + Sync,
     Collection: From<T>,
     Tensor: From<T>,
+    Tensor: From<<T as TensorDiagonal<fs::Dir>>::Diagonal>,
     Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
@@ -1041,6 +1078,9 @@ where
             "flip" => Some(Box::new(FlipHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
+
+            // other
+            "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
 
             _ => None,
         }

@@ -18,6 +18,8 @@ use tcgeneric::{
     TCPathBuf, Tuple,
 };
 
+use stream::ReadValueAt;
+
 pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
@@ -243,6 +245,18 @@ pub trait TensorCompareConst {
 
     /// Element-wise not-equal
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
+}
+
+/// [`Tensor`] linear algebra operations
+#[async_trait]
+pub trait TensorDiagonal<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
+    /// The type of [`Tensor`] returned by `diagonal`
+    type Diagonal: TensorAccess;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal>;
 }
 
 /// [`Tensor`] I/O operations
@@ -719,6 +733,28 @@ where
         match self {
             Self::Dense(dense) => dense.ne_const(other).map(Self::from),
             Self::Sparse(sparse) => sparse.ne_const(other).map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> TensorDiagonal<D> for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+{
+    type Txn = T;
+    type Diagonal = Self;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        match self {
+            Self::Dense(dense) => dense.diagonal(txn).map_ok(Self::from).await,
+            Self::Sparse(sparse) => sparse.diagonal(txn).map_ok(Self::from).await,
         }
     }
 }

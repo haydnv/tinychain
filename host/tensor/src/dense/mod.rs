@@ -2,7 +2,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
 
-use afarray::{Array, ArrayInstance};
+use afarray::{Array, ArrayInstance, CoordBlocks};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en};
@@ -22,9 +22,9 @@ use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
     Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
-    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType, TensorUnary,
-    ERR_COMPLEX_EXPONENT,
+    TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO, TensorInstance,
+    TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType,
+    TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -509,6 +509,58 @@ where
         }
 
         Ok(BlockListConst::new(self.blocks, other, ne_array, ne_number).into())
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> TensorDiagonal<D> for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    B: DenseWrite<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+    type Diagonal = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        if self.ndim() != 2 {
+            return Err(TCError::not_implemented(format!(
+                "diagonal of a {}-dimensional dense Tensor",
+                self.ndim()
+            )));
+        }
+
+        let size = self.shape()[0];
+        if size != self.shape()[1] {
+            return Err(TCError::bad_request(
+                "diagonal requires a square matrix but found",
+                self.shape(),
+            ));
+        }
+
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        let dtype = self.dtype();
+        let blocks = self.blocks;
+
+        // TODO: is is really necessary to allocate a new Vec for every Coord?
+        let coords = futures::stream::iter((0..size).into_iter().map(|i| Ok(vec![i, i])));
+        let values = CoordBlocks::new(coords, 2, PER_BLOCK)
+            .map_ok(|coords| blocks.clone().read_values(txn.clone(), coords))
+            .try_buffered(num_cpus::get());
+
+        let shape = vec![size].into();
+        let blocks = BlockListFile::from_blocks(file, txn_id, Some(shape), dtype, values).await?;
+
+        Ok(blocks.into())
     }
 }
 

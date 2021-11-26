@@ -26,7 +26,8 @@ use super::{
     TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
-use crate::TensorPersist;
+use crate::stream::ReadValueAt;
+use crate::{TensorDiagonal, TensorPersist};
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
@@ -467,6 +468,68 @@ impl<FD, FS, D, T, A> TensorCompareConst for SparseTensor<FD, FS, D, T, A> {
         }
 
         Ok(SparseConstCombinator::new(self.accessor, other, ne).into())
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorDiagonal<D> for SparseTensor<FD, FS, D, T, A>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+{
+    type Txn = T;
+    type Diagonal = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        if self.ndim() != 2 {
+            return Err(TCError::not_implemented(format!(
+                "diagonal of a {}-dimensional sparse Tensor",
+                self.ndim()
+            )));
+        }
+
+        let size = self.shape()[0];
+        if size != self.shape()[1] {
+            return Err(TCError::bad_request(
+                "diagonal requires a square matrix but found",
+                self.shape(),
+            ));
+        }
+
+        let txn_id = *txn.id();
+        let dir = txn.context().create_dir_unique(txn_id).await?;
+
+        let shape = vec![size].into();
+        let dtype = self.dtype();
+        let schema = Schema { shape, dtype };
+        let table = SparseTable::create(&dir, schema, txn_id).await?;
+
+        let filled = self.accessor.filled(txn).await?;
+        filled
+            .try_filter_map(|(mut coord, value)| {
+                future::ready(Ok({
+                    debug_assert!(coord.len() == 2);
+                    debug_assert_ne!(value, value.class().zero());
+
+                    if coord.pop() == Some(coord[0]) {
+                        Some((coord, value))
+                    } else {
+                        None
+                    }
+                }))
+            })
+            .map_ok(|(coord, value)| table.write_value(txn_id, coord, value))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await?;
+
+        Ok(table.into())
     }
 }
 
