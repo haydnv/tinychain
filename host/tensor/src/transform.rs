@@ -450,6 +450,23 @@ impl Reshape {
         let offsets = coords.to_offsets(&self.shape);
         Coords::from_offsets(offsets, &self.source_shape)
     }
+
+    pub fn map_coord(&self, coord: Coord) -> Coord {
+        assert_eq!(coord.len(), self.source_shape.len());
+
+        let offset: u64 = coord
+            .into_iter()
+            .zip(&self.source_bounds)
+            .map(|(x, bound)| x * bound)
+            .sum();
+
+        self.bounds
+            .iter()
+            .map(|bound| offset / bound)
+            .zip(self.shape.iter())
+            .map(|(axis_offset, dim)| axis_offset % dim)
+            .collect()
+    }
 }
 
 #[derive(Clone)]

@@ -1731,11 +1731,8 @@ where
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
-        Box::pin(async move {
-            self.shape().validate_coord(&coord)?;
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, coord).await
-        })
+        self.source
+            .read_value_at(txn, self.rebase.invert_coord(coord))
     }
 }
 
@@ -1813,7 +1810,7 @@ where
         let accessor = BlockListTranspose {
             source: self.source.accessor(),
             rebase: self.rebase,
-            phantom: Phantom::default(),
+            phantom: self.phantom,
         };
 
         DenseAccessor::Transpose(Box::new(accessor))
