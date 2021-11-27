@@ -214,6 +214,17 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
 
+    def testReshape(self):
+        source = [2, 3, 4, 1]
+        dest = [3, 8]
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.arange(source, 0, 24)
+        cxt.result = cxt.x.reshape(dest)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

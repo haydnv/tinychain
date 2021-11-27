@@ -554,6 +554,39 @@ impl<'a> Handler<'a> for RangeHandler {
     }
 }
 
+struct ReshapeHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for ReshapeHandler<T>
+where
+    T: TensorAccess + TensorTransform + Send + 'a,
+    Tensor: From<T::Reshape>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let shape = key.try_into()?;
+                let shape = cast_shape(shape, self.tensor.size())?;
+                self.tensor
+                    .reshape(shape.into())
+                    .map(Tensor::from)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ReshapeHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct TransposeHandler<T> {
     tensor: T,
 }
@@ -922,6 +955,7 @@ where
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
     Tensor: From<<T as TensorTransform>::Flip>,
+    Tensor: From<<T as TensorTransform>::Reshape>,
     Tensor: From<<T as TensorTransform>::Slice>,
     Tensor: From<<T as TensorTransform>::Transpose>,
     <T as TensorTransform>::Slice: TensorAccess + Send + 'a,
@@ -1077,6 +1111,7 @@ where
             "cast" => Some(Box::new(CastHandler::from(tensor))),
             "flip" => Some(Box::new(FlipHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
+            "reshape" => Some(Box::new(ReshapeHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
             // other
@@ -1273,5 +1308,53 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
             Ok(Bounds::from(axes))
         }
         other => Err(TCError::bad_request("invalid tensor bounds", other)),
+    }
+}
+
+fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
+    let mut shape = vec![1; value.len()];
+    if value.iter().filter(|dim| *dim == &Value::None).count() > 1 {
+        return Err(TCError::unsupported(
+            "Tensor /reshape only accepts one unknown dimension",
+        ));
+    }
+
+    let mut unknown = None;
+    for (x, dim) in value.iter().enumerate() {
+        match dim {
+            Value::Number(dim) if dim >= &Number::from(1) => {
+                shape[x] = (*dim).cast_into();
+            }
+            Value::None => {
+                unknown = Some(x);
+            }
+            Value::Number(dim) if dim == &Number::from(-1) => {
+                return Err(TCError::unsupported(
+                    "use value/none to specify an unknown dimension, not -1",
+                ));
+            }
+            other => return Err(TCError::bad_request("invalid dimension for Tensor", other)),
+        }
+    }
+
+    if let Some(unknown) = unknown {
+        let known: u64 = shape.iter().product();
+        if size % known == 0 {
+            shape[unknown] = size / known;
+        } else {
+            return Err(TCError::unsupported(format!(
+                "cannot reshape Tensor with size {} into shape {}",
+                size, value
+            )));
+        }
+    }
+
+    if shape.iter().product::<u64>() == size {
+        Ok(shape)
+    } else {
+        Err(TCError::unsupported(format!(
+            "cannot reshape Tensor with size {} into shape {}",
+            size, value
+        )))
     }
 }

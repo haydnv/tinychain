@@ -202,6 +202,12 @@ class Tensor(Collection):
 
         return self._post("xor", Map(r=other), Tensor)
 
+    @property
+    def ndim(self):
+        """Return the number of dimensions of this `Tensor`."""
+
+        return self._get("ndim", rtype=UInt)
+
     def mul(self, other):
         """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
@@ -223,11 +229,10 @@ class Tensor(Collection):
         rtype = Number if axis is None else self.__class__
         return self._get("product", axis, rtype)
 
-    @property
-    def ndim(self):
-        """Return the number of dimensions of this `Tensor`."""
+    def reshape(self, shape):
+        """Return a view of this `Tensor` with the given `shape`."""
 
-        return self._get("ndim", rtype=UInt)
+        return self._get("reshape", shape, self.__class__)
 
     # TODO: use a custom shape object to support `type(x.shape[0]) == UInt`
     @property

@@ -854,6 +854,7 @@ where
     type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
     type Expand = SparseTensor<FD, FS, D, T, SparseExpand<FD, FS, D, T, A>>;
     type Flip = SparseTensor<FD, FS, D, T, SparseFlip<FD, FS, D, T, A>>;
+    type Reshape = SparseTensor<FD, FS, D, T, SparseReshape<FD, FS, D, T, A>>;
     type Slice = SparseTensor<FD, FS, D, T, A::Slice>;
     type Transpose = SparseTensor<FD, FS, D, T, A::Transpose>;
 
@@ -874,6 +875,11 @@ where
 
     fn flip(self, axis: usize) -> TCResult<Self::Flip> {
         let accessor = SparseFlip::new(self.accessor, axis)?;
+        Ok(accessor.into())
+    }
+
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        let accessor = SparseReshape::new(self.accessor, shape)?;
         Ok(accessor.into())
     }
 
