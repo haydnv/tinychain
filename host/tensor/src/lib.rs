@@ -12,11 +12,13 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Number, NumberType, Value, ValueType};
+use tc_value::{FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, Tuple,
 };
+
+use stream::ReadValueAt;
 
 pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -245,6 +247,18 @@ pub trait TensorCompareConst {
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
 }
 
+/// [`Tensor`] linear algebra operations
+#[async_trait]
+pub trait TensorDiagonal<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
+    /// The type of [`Tensor`] returned by `diagonal`
+    type Diagonal: TensorAccess;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal>;
+}
+
 /// [`Tensor`] I/O operations
 #[async_trait]
 pub trait TensorIO<D: Dir> {
@@ -360,6 +374,9 @@ pub trait TensorTransform {
     /// A [`Tensor`] flipped around one axis
     type Flip: TensorInstance;
 
+    /// A reshaped [`Tensor`]
+    type Reshape: TensorInstance;
+
     /// A [`Tensor`] slice
     type Slice: TensorInstance;
 
@@ -377,6 +394,9 @@ pub trait TensorTransform {
 
     /// Flip this [`Tensor`] around the given `axis`.
     fn flip(self, axis: usize) -> TCResult<Self::Flip>;
+
+    /// Change the shape of this [`Tensor`].
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape>;
 
     /// Return a slice of this [`Tensor`] with the given `bounds`.
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
@@ -409,6 +429,63 @@ pub trait TensorUnary<D: Dir> {
 
     /// Element-wise logical not
     fn not(&self) -> TCResult<Self::Unary>;
+}
+
+/// Trigonometric [`Tensor`] operations
+#[async_trait]
+pub trait TensorTrig {
+    /// The return type of a unary operation
+    type Unary: TensorInstance;
+
+    /// Element-wise arcsine
+    fn asin(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise sine
+    fn sin(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arcsine
+    fn asinh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic sine
+    fn sinh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arccosine
+    fn acos(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise cosine
+    fn cos(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arccosine
+    fn acosh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic cosine
+    fn cosh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arctangent
+    fn atan(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise tangent
+    fn tan(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic tangent
+    fn tanh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arctangent
+    fn atanh(&self) -> TCResult<Self::Unary>;
+}
+
+fn trig_dtype(dtype: NumberType) -> NumberType {
+    match dtype {
+        NumberType::Int(it) => match it {
+            IntType::I64 => FloatType::F64.into(),
+            _ => FloatType::F32.into(),
+        },
+        NumberType::UInt(ut) => match ut {
+            UIntType::U64 => FloatType::F64.into(),
+            _ => FloatType::F32.into(),
+        },
+        other => other,
+    }
 }
 
 /// The [`Class`] of [`Tensor`]
@@ -724,6 +801,28 @@ where
 }
 
 #[async_trait]
+impl<FD, FS, D, T> TensorDiagonal<D> for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+{
+    type Txn = T;
+    type Diagonal = Self;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        match self {
+            Self::Dense(dense) => dense.diagonal(txn).map_ok(Self::from).await,
+            Self::Sparse(sparse) => sparse.diagonal(txn).map_ok(Self::from).await,
+        }
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
     D: Dir,
@@ -930,6 +1029,7 @@ where
     type Cast = Self;
     type Expand = Self;
     type Flip = Self;
+    type Reshape = Self;
     type Slice = Self;
     type Transpose = Self;
 
@@ -969,6 +1069,13 @@ where
         }
     }
 
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        match self {
+            Self::Dense(dense) => dense.reshape(shape).map(Self::from),
+            Self::Sparse(sparse) => sparse.reshape(shape).map(Self::from),
+        }
+    }
+
     fn slice(self, bounds: Bounds) -> TCResult<Self> {
         if bounds == Bounds::all(self.shape()) {
             return Ok(self);
@@ -992,6 +1099,44 @@ where
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
         }
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self> {
+            match self {
+                Self::Dense(dense) => dense.$fun().map(Self::from),
+                Self::Sparse(sparse) => sparse.$fun().map(Self::from),
+            }
+        }
+    };
+}
+
+impl<FD, FS, D, T> TensorTrig for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+{
+    type Unary = Self;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {asinh}
+    trig! {sinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {acosh}
+    trig! {cosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {atanh}
+    trig! {tanh}
 }
 
 #[async_trait]

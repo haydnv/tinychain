@@ -2,7 +2,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
 
-use afarray::{Array, ArrayInstance};
+use afarray::{Array, ArrayInstance, CoordBlocks};
 use arrayfire as af;
 use async_trait::async_trait;
 use destream::{de, en};
@@ -15,16 +15,16 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
-    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType, TensorUnary,
-    ERR_COMPLEX_EXPONENT,
+    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
+    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
+    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -513,6 +513,58 @@ where
 }
 
 #[async_trait]
+impl<FD, FS, D, T, B> TensorDiagonal<D> for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    B: DenseWrite<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+    type Diagonal = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        if self.ndim() != 2 {
+            return Err(TCError::not_implemented(format!(
+                "diagonal of a {}-dimensional dense Tensor",
+                self.ndim()
+            )));
+        }
+
+        let size = self.shape()[0];
+        if size != self.shape()[1] {
+            return Err(TCError::bad_request(
+                "diagonal requires a square matrix but found",
+                self.shape(),
+            ));
+        }
+
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        let dtype = self.dtype();
+        let blocks = self.blocks;
+
+        // TODO: is is really necessary to allocate a new Vec for every Coord?
+        let coords = futures::stream::iter((0..size).into_iter().map(|i| Ok(vec![i, i])));
+        let values = CoordBlocks::new(coords, 2, PER_BLOCK)
+            .map_ok(|coords| blocks.clone().read_values(txn.clone(), coords))
+            .try_buffered(num_cpus::get());
+
+        let shape = vec![size].into();
+        let blocks = BlockListFile::from_blocks(file, txn_id, Some(shape), dtype, values).await?;
+
+        Ok(blocks.into())
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T, B> TensorIO<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
@@ -864,6 +916,7 @@ where
     type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
     type Expand = DenseTensor<FD, FS, D, T, BlockListExpand<FD, FS, D, T, B>>;
     type Flip = DenseTensor<FD, FS, D, T, BlockListFlip<FD, FS, D, T, B>>;
+    type Reshape = DenseTensor<FD, FS, D, T, BlockListReshape<FD, FS, D, T, B>>;
     type Slice = DenseTensor<FD, FS, D, T, B::Slice>;
     type Transpose = DenseTensor<FD, FS, D, T, B::Transpose>;
 
@@ -887,6 +940,11 @@ where
         Ok(DenseTensor::from(blocks))
     }
 
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        let blocks = BlockListReshape::new(self.blocks, shape)?;
+        Ok(DenseTensor::from(blocks))
+    }
+
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let blocks = self.blocks.slice(bounds)?;
         Ok(DenseTensor::from(blocks))
@@ -896,6 +954,43 @@ where
         let blocks = self.blocks.transpose(permutation)?;
         Ok(DenseTensor::from(blocks))
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self::Unary> {
+            let dtype = trig_dtype(self.dtype());
+            let blocks = BlockListUnary::new(self.blocks.clone(), Array::$fun, Number::$fun, dtype);
+            Ok(DenseTensor::from(blocks))
+        }
+    };
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> TensorTrig for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {sinh}
+    trig! {asinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {cosh}
+    trig! {acosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {tanh}
+    trig! {atanh}
 }
 
 #[async_trait]

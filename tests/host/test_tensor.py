@@ -3,7 +3,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from testutils import PORT, start_host, PersistenceTest
+from testutils import DEFAULT_PORT, start_host, PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -213,6 +213,17 @@ class DenseTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
+
+    def testReshape(self):
+        source = [2, 3, 4, 1]
+        dest = [3, 8]
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.arange(source, 0, 24)
+        cxt.result = cxt.x.reshape(dest)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
 
     @classmethod
     def tearDownClass(cls):
@@ -490,7 +501,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def cluster(self, chain_type):
         class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/tensor")
+            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
 
             def _configure(self):
                 schema = tc.tensor.Schema([2, 3], tc.I32)

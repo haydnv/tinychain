@@ -383,6 +383,7 @@ impl<'a> Handler<'a> for EinsumHandler {
             Box::pin(async move {
                 let format: TCString = params.require(&label("format").into())?;
                 let tensors: Vec<Tensor> = params.require(&TENSORS.into())?;
+
                 einsum(&format, tensors)
                     .map(Collection::from)
                     .map(State::from)
@@ -423,6 +424,40 @@ where
                 Ok(TCStream::from(Collection::Tensor(tensor)).into())
             })
         }))
+    }
+}
+
+struct DiagonalHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for DiagonalHandler<T>
+where
+    T: TensorAccess + TensorDiagonal<fs::Dir, Txn = Txn> + Send + 'a,
+    Tensor: From<T::Diagonal>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                self.tensor
+                    .diagonal(txn.clone())
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::Collection)
+                    .await
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for DiagonalHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
     }
 }
 
@@ -516,6 +551,39 @@ impl<'a> Handler<'a> for RangeHandler {
                 }
             })
         }))
+    }
+}
+
+struct ReshapeHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for ReshapeHandler<T>
+where
+    T: TensorAccess + TensorTransform + Send + 'a,
+    Tensor: From<T::Reshape>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let shape = key.try_into()?;
+                let shape = cast_shape(shape, self.tensor.size())?;
+                self.tensor
+                    .reshape(shape.into())
+                    .map(Tensor::from)
+                    .map(Collection::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ReshapeHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
     }
 }
 
@@ -867,24 +935,28 @@ fn route<'a, T>(tensor: &'a T, path: &'a [PathSegment]) -> Option<Box<dyn Handle
 where
     T: TensorAccess
         + TensorInstance
-        + TensorIO<fs::Dir, Txn = Txn>
-        + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorBoolean<Tensor, Combine = Tensor>
+        + TensorDiagonal<fs::Dir, Txn = Txn>
+        + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorIO<fs::Dir, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
         + TensorTransform
+        + TensorTrig
         + TensorUnary<fs::Dir, Txn = Txn>
         + Clone
         + Send
         + Sync,
     Collection: From<T>,
     Tensor: From<T>,
+    Tensor: From<<T as TensorDiagonal<fs::Dir>>::Diagonal>,
     Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
     Tensor: From<<T as TensorTransform>::Flip>,
+    Tensor: From<<T as TensorTransform>::Reshape>,
     Tensor: From<<T as TensorTransform>::Slice>,
     Tensor: From<<T as TensorTransform>::Transpose>,
     <T as TensorTransform>::Slice: TensorAccess + Send + 'a,
@@ -996,6 +1068,22 @@ where
                 TensorCompareConst::ne_const,
             ))),
 
+            // trigonometry
+            "asin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asin))),
+            "sin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sin))),
+            "asinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asinh))),
+            "sinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sinh))),
+
+            "acos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acos))),
+            "cos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cos))),
+            "acosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acosh))),
+            "cosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cosh))),
+
+            "atan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atan))),
+            "tan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tan))),
+            "atanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atanh))),
+            "tanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tanh))),
+
             // unary ops
             "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
@@ -1040,7 +1128,11 @@ where
             "cast" => Some(Box::new(CastHandler::from(tensor))),
             "flip" => Some(Box::new(FlipHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
+            "reshape" => Some(Box::new(ReshapeHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
+
+            // other
+            "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
 
             _ => None,
         }
@@ -1233,5 +1325,53 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
             Ok(Bounds::from(axes))
         }
         other => Err(TCError::bad_request("invalid tensor bounds", other)),
+    }
+}
+
+fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
+    let mut shape = vec![1; value.len()];
+    if value.iter().filter(|dim| *dim == &Value::None).count() > 1 {
+        return Err(TCError::unsupported(
+            "Tensor /reshape only accepts one unknown dimension",
+        ));
+    }
+
+    let mut unknown = None;
+    for (x, dim) in value.iter().enumerate() {
+        match dim {
+            Value::Number(dim) if dim >= &Number::from(1) => {
+                shape[x] = (*dim).cast_into();
+            }
+            Value::None => {
+                unknown = Some(x);
+            }
+            Value::Number(dim) if dim == &Number::from(-1) => {
+                return Err(TCError::unsupported(
+                    "use value/none to specify an unknown dimension, not -1",
+                ));
+            }
+            other => return Err(TCError::bad_request("invalid dimension for Tensor", other)),
+        }
+    }
+
+    if let Some(unknown) = unknown {
+        let known: u64 = shape.iter().product();
+        if size % known == 0 {
+            shape[unknown] = size / known;
+        } else {
+            return Err(TCError::unsupported(format!(
+                "cannot reshape Tensor with size {} into shape {}",
+                size, value
+            )));
+        }
+    }
+
+    if shape.iter().product::<u64>() == size {
+        Ok(shape)
+    } else {
+        Err(TCError::unsupported(format!(
+            "cannot reshape Tensor with size {} into shape {}",
+            size, value
+        )))
     }
 }

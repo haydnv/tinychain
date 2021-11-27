@@ -33,6 +33,17 @@ class LinearAlgebraTests(ClientTest):
         response = self.host.post(ENDPOINT, cxt)
         self.assertTrue(response)
 
+    def testDiagonal(self):
+        x = np.arange(0, 9).reshape(3, 3)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
+        cxt.diag = tc.linalg.diagonal(cxt.x)
+
+        expected = np.diag(x)
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, {tc.uri(tc.tensor.Dense): [[[3], tc.uri(tc.I32)], expected.tolist()]})
+
     def testMatmul(self):
         l = np.random.random([2, 3, 4])
         r = np.random.random([2, 4, 5])

@@ -15,18 +15,19 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
+use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
-    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
+    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
+    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
-use crate::TensorPersist;
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
@@ -471,6 +472,68 @@ impl<FD, FS, D, T, A> TensorCompareConst for SparseTensor<FD, FS, D, T, A> {
 }
 
 #[async_trait]
+impl<FD, FS, D, T, A> TensorDiagonal<D> for SparseTensor<FD, FS, D, T, A>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    A: SparseAccess<FD, FS, D, T>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+{
+    type Txn = T;
+    type Diagonal = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
+
+    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
+        if self.ndim() != 2 {
+            return Err(TCError::not_implemented(format!(
+                "diagonal of a {}-dimensional sparse Tensor",
+                self.ndim()
+            )));
+        }
+
+        let size = self.shape()[0];
+        if size != self.shape()[1] {
+            return Err(TCError::bad_request(
+                "diagonal requires a square matrix but found",
+                self.shape(),
+            ));
+        }
+
+        let txn_id = *txn.id();
+        let dir = txn.context().create_dir_unique(txn_id).await?;
+
+        let shape = vec![size].into();
+        let dtype = self.dtype();
+        let schema = Schema { shape, dtype };
+        let table = SparseTable::create(&dir, schema, txn_id).await?;
+
+        let filled = self.accessor.filled(txn).await?;
+        filled
+            .try_filter_map(|(mut coord, value)| {
+                future::ready(Ok({
+                    debug_assert!(coord.len() == 2);
+                    debug_assert_ne!(value, value.class().zero());
+
+                    if coord.pop() == Some(coord[0]) {
+                        Some((coord, value))
+                    } else {
+                        None
+                    }
+                }))
+            })
+            .map_ok(|(coord, value)| table.write_value(txn_id, coord, value))
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await?;
+
+        Ok(table.into())
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T, L, R> TensorDualIO<D, SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
@@ -791,6 +854,7 @@ where
     type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
     type Expand = SparseTensor<FD, FS, D, T, SparseExpand<FD, FS, D, T, A>>;
     type Flip = SparseTensor<FD, FS, D, T, SparseFlip<FD, FS, D, T, A>>;
+    type Reshape = SparseTensor<FD, FS, D, T, SparseReshape<FD, FS, D, T, A>>;
     type Slice = SparseTensor<FD, FS, D, T, A::Slice>;
     type Transpose = SparseTensor<FD, FS, D, T, A::Transpose>;
 
@@ -814,6 +878,11 @@ where
         Ok(accessor.into())
     }
 
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        let accessor = SparseReshape::new(self.accessor, shape)?;
+        Ok(accessor.into())
+    }
+
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let accessor = self.accessor.slice(bounds)?;
         Ok(accessor.into())
@@ -823,6 +892,44 @@ where
         let accessor = self.accessor.transpose(permutation)?;
         Ok(accessor.into())
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self::Unary> {
+            let dtype = trig_dtype(self.dtype());
+            let source = self.accessor.clone().accessor();
+            let accessor = SparseUnary::new(source, Number::$fun, dtype);
+            Ok(SparseTensor::from(accessor))
+        }
+    };
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorTrig for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Unary = SparseTensor<FD, FS, D, T, SparseUnary<FD, FS, D, T>>;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {sinh}
+    trig! {asinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {cosh}
+    trig! {acosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {tanh}
+    trig! {atanh}
 }
 
 #[async_trait]

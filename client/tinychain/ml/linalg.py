@@ -1,11 +1,19 @@
 from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
-from tinychain.ref import After, If, While
+from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
 from tinychain.value import Bool, F64, Float, UInt
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
+
+
+def diagonal(matrix):
+    """Return the diagonal of the given `matrix`"""
+
+    rtype = type(matrix) if isinstance(matrix, Tensor) else Tensor
+    op = Get(MethodSubject(matrix, "diagonal"))
+    return rtype(op)
 
 
 def identity(size, dtype=Bool):

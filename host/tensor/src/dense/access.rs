@@ -112,10 +112,31 @@ pub enum DenseAccessor<FD, FS, D, T> {
     Flip(Box<BlockListFlip<FD, FS, D, T, Self>>),
     File(BlockListFile<FD, FS, D, T>),
     Reduce(Box<BlockListReduce<FD, FS, D, T, Self>>),
+    Reshape(Box<BlockListReshape<FD, FS, D, T, Self>>),
     Slice(BlockListFileSlice<FD, FS, D, T>),
     Sparse(BlockListSparse<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>),
     Transpose(Box<BlockListTranspose<FD, FS, D, T, Self>>),
     Unary(Box<BlockListUnary<FD, FS, D, T, Self>>),
+}
+
+macro_rules! dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            Self::File($var) => $call,
+            Self::Slice($var) => $call,
+            Self::Broadcast($var) => $call,
+            Self::Cast($var) => $call,
+            Self::Combine($var) => $call,
+            Self::Const($var) => $call,
+            Self::Expand($var) => $call,
+            Self::Flip($var) => $call,
+            Self::Reduce($var) => $call,
+            Self::Reshape($var) => $call,
+            Self::Sparse($var) => $call,
+            Self::Transpose($var) => $call,
+            Self::Unary($var) => $call,
+        }
+    };
 }
 
 impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T>
@@ -128,71 +149,19 @@ where
     D::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
-        match self {
-            Self::Broadcast(broadcast) => broadcast.dtype(),
-            Self::Cast(cast) => cast.dtype(),
-            Self::Combine(combine) => combine.dtype(),
-            Self::Const(combine) => combine.dtype(),
-            Self::Expand(expansion) => expansion.dtype(),
-            Self::File(file) => file.dtype(),
-            Self::Flip(flip) => flip.dtype(),
-            Self::Reduce(reduced) => reduced.dtype(),
-            Self::Slice(slice) => slice.dtype(),
-            Self::Sparse(sparse) => sparse.dtype(),
-            Self::Transpose(transpose) => transpose.dtype(),
-            Self::Unary(unary) => unary.dtype(),
-        }
+        dispatch!(self, this, this.dtype())
     }
 
     fn ndim(&self) -> usize {
-        match self {
-            Self::Broadcast(broadcast) => broadcast.ndim(),
-            Self::Cast(cast) => cast.ndim(),
-            Self::Combine(combine) => combine.ndim(),
-            Self::Const(combine) => combine.ndim(),
-            Self::Expand(expansion) => expansion.ndim(),
-            Self::File(file) => file.ndim(),
-            Self::Flip(flip) => flip.ndim(),
-            Self::Reduce(reduced) => reduced.ndim(),
-            Self::Slice(slice) => slice.ndim(),
-            Self::Sparse(sparse) => sparse.ndim(),
-            Self::Transpose(transpose) => transpose.ndim(),
-            Self::Unary(unary) => unary.ndim(),
-        }
+        dispatch!(self, this, this.ndim())
     }
 
     fn shape(&self) -> &Shape {
-        match self {
-            Self::Broadcast(broadcast) => broadcast.shape(),
-            Self::Cast(cast) => cast.shape(),
-            Self::Combine(combine) => combine.shape(),
-            Self::Const(combine) => combine.shape(),
-            Self::Expand(expansion) => expansion.shape(),
-            Self::File(file) => file.shape(),
-            Self::Flip(flip) => flip.shape(),
-            Self::Reduce(reduced) => reduced.shape(),
-            Self::Slice(slice) => slice.shape(),
-            Self::Sparse(sparse) => sparse.shape(),
-            Self::Transpose(transpose) => transpose.shape(),
-            Self::Unary(unary) => unary.shape(),
-        }
+        dispatch!(self, this, this.shape())
     }
 
     fn size(&self) -> u64 {
-        match self {
-            Self::Broadcast(broadcast) => broadcast.size(),
-            Self::Cast(cast) => cast.size(),
-            Self::Combine(combine) => combine.size(),
-            Self::Const(combine) => combine.size(),
-            Self::Expand(expansion) => expansion.size(),
-            Self::File(file) => file.size(),
-            Self::Flip(flip) => flip.size(),
-            Self::Reduce(reduced) => reduced.size(),
-            Self::Slice(slice) => slice.size(),
-            Self::Sparse(sparse) => sparse.size(),
-            Self::Transpose(transpose) => transpose.size(),
-            Self::Unary(unary) => unary.size(),
-        }
+        dispatch!(self, this, this.size())
     }
 }
 
@@ -214,120 +183,28 @@ where
     }
 
     fn block_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
-        match self {
-            Self::File(file) => file.block_stream(txn),
-            Self::Slice(slice) => slice.block_stream(txn),
-            Self::Broadcast(broadcast) => broadcast.block_stream(txn),
-            Self::Cast(cast) => cast.block_stream(txn),
-            Self::Const(combine) => combine.block_stream(txn),
-            Self::Combine(combine) => combine.block_stream(txn),
-            Self::Expand(expansion) => expansion.block_stream(txn),
-            Self::Flip(flip) => flip.block_stream(txn),
-            Self::Reduce(reduced) => reduced.block_stream(txn),
-            Self::Sparse(sparse) => sparse.block_stream(txn),
-            Self::Transpose(transpose) => transpose.block_stream(txn),
-            Self::Unary(unary) => unary.block_stream(txn),
-        }
+        dispatch!(self, this, this.block_stream(txn))
     }
 
     fn value_stream<'a>(self, txn: T) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
-        match self {
-            Self::File(file) => file.value_stream(txn),
-            Self::Slice(slice) => slice.value_stream(txn),
-            Self::Broadcast(broadcast) => broadcast.value_stream(txn),
-            Self::Cast(cast) => cast.value_stream(txn),
-            Self::Combine(combine) => combine.value_stream(txn),
-            Self::Const(combine) => combine.value_stream(txn),
-            Self::Expand(expansion) => expansion.value_stream(txn),
-            Self::Flip(flip) => flip.value_stream(txn),
-            Self::Reduce(reduced) => reduced.value_stream(txn),
-            Self::Sparse(sparse) => sparse.value_stream(txn),
-            Self::Transpose(transpose) => transpose.value_stream(txn),
-            Self::Unary(unary) => unary.value_stream(txn),
-        }
+        dispatch!(self, this, this.value_stream(txn))
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self> {
-        match self {
-            Self::File(file) => file.slice(bounds).map(Self::Slice),
-            Self::Slice(slice) => slice.slice(bounds).map(Self::Slice),
-            Self::Broadcast(broadcast) => broadcast.slice(bounds).map(|slice| slice.accessor()),
-            Self::Cast(cast) => cast.slice(bounds).map(|slice| slice.accessor()),
-            Self::Combine(combine) => combine.slice(bounds).map(|slice| slice.accessor()),
-            Self::Const(combine) => combine.slice(bounds).map(|slice| slice.accessor()),
-            Self::Expand(expansion) => expansion.slice(bounds).map(|slice| slice.accessor()),
-            Self::Flip(flip) => flip.slice(bounds).map(|slice| slice.accessor()),
-            Self::Reduce(reduced) => reduced.slice(bounds).map(|slice| slice.accessor()),
-            Self::Sparse(sparse) => sparse.slice(bounds).map(|slice| slice.accessor()),
-            Self::Transpose(transpose) => transpose.slice(bounds).map(|slice| slice.accessor()),
-            Self::Unary(unary) => unary.slice(bounds).map(|slice| slice.accessor()),
-        }
+        dispatch!(self, this, this.slice(bounds).map(|slice| slice.accessor()))
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
-        match self {
-            Self::File(file) => file
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Slice(slice) => slice
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Broadcast(broadcast) => broadcast
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Cast(cast) => cast
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Combine(combine) => combine
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Const(combine) => combine
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Expand(expansion) => expansion
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Flip(flip) => flip.transpose(permutation).map(|flip| flip.accessor()),
-
-            Self::Reduce(reduced) => reduced
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Sparse(sparse) => sparse
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-            Self::Transpose(transpose) => transpose
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-
-            Self::Unary(unary) => unary
-                .transpose(permutation)
-                .map(|transpose| transpose.accessor()),
-        }
+        dispatch!(
+            self,
+            this,
+            this.transpose(permutation)
+                .map(|transpose| transpose.accessor())
+        )
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
-        match self {
-            Self::File(file) => file.read_values(txn, coords).await,
-            Self::Slice(slice) => slice.read_values(txn, coords).await,
-            Self::Broadcast(broadcast) => broadcast.read_values(txn, coords).await,
-            Self::Cast(cast) => cast.read_values(txn, coords).await,
-            Self::Combine(combine) => combine.read_values(txn, coords).await,
-            Self::Const(combine) => combine.read_values(txn, coords).await,
-            Self::Expand(expansion) => expansion.read_values(txn, coords).await,
-            Self::Flip(flip) => flip.read_values(txn, coords).await,
-            Self::Reduce(reduced) => reduced.read_values(txn, coords).await,
-            Self::Sparse(sparse) => sparse.read_values(txn, coords).await,
-            Self::Transpose(transpose) => transpose.read_values(txn, coords).await,
-            Self::Unary(unary) => unary.read_values(txn, coords).await,
-        }
+        dispatch!(self, this, this.read_values(txn, coords).await)
     }
 }
 
@@ -373,20 +250,7 @@ where
     type Txn = T;
 
     fn read_value_at<'a>(self, txn: T, coord: Coord) -> Read<'a> {
-        match self {
-            Self::File(file) => file.read_value_at(txn, coord),
-            Self::Slice(slice) => slice.read_value_at(txn, coord),
-            Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
-            Self::Cast(cast) => cast.read_value_at(txn, coord),
-            Self::Combine(combine) => combine.read_value_at(txn, coord),
-            Self::Const(combine) => combine.read_value_at(txn, coord),
-            Self::Expand(expansion) => expansion.read_value_at(txn, coord),
-            Self::Flip(flip) => flip.read_value_at(txn, coord),
-            Self::Reduce(reduced) => reduced.read_value_at(txn, coord),
-            Self::Sparse(sparse) => sparse.read_value_at(txn, coord),
-            Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
-            Self::Unary(unary) => unary.read_value_at(txn, coord),
-        }
+        dispatch!(self, this, this.read_value_at(txn, coord))
     }
 }
 
@@ -404,20 +268,7 @@ where
 
 impl<FD, FS, D, T> fmt::Display for DenseAccessor<FD, FS, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::File(file) => fmt::Display::fmt(file, f),
-            Self::Slice(slice) => fmt::Display::fmt(slice, f),
-            Self::Broadcast(broadcast) => fmt::Display::fmt(broadcast, f),
-            Self::Cast(cast) => fmt::Display::fmt(cast, f),
-            Self::Combine(combine) => fmt::Display::fmt(combine, f),
-            Self::Const(combine) => fmt::Display::fmt(combine, f),
-            Self::Expand(expand) => fmt::Display::fmt(expand, f),
-            Self::Flip(flip) => fmt::Display::fmt(flip, f),
-            Self::Reduce(reduce) => fmt::Display::fmt(reduce, f),
-            Self::Sparse(sparse) => fmt::Display::fmt(sparse, f),
-            Self::Transpose(transpose) => fmt::Display::fmt(transpose, f),
-            Self::Unary(unary) => fmt::Display::fmt(unary, f),
-        }
+        dispatch!(self, this, fmt::Display::fmt(this, f))
     }
 }
 
@@ -1606,6 +1457,128 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListReduce<FD, FS, D, T, B> {
 }
 
 #[derive(Clone)]
+pub struct BlockListReshape<FD, FS, D, T, B> {
+    source: B,
+    rebase: transform::Reshape,
+    phantom: Phantom<FD, FS, D, T>,
+}
+
+impl<FD, FS, D, T, B> BlockListReshape<FD, FS, D, T, B>
+where
+    B: TensorAccess,
+{
+    pub fn new(source: B, shape: Shape) -> TCResult<Self> {
+        let rebase = transform::Reshape::new(source.shape().clone(), shape)?;
+        Ok(Self {
+            source,
+            rebase,
+            phantom: Phantom::default(),
+        })
+    }
+}
+
+impl<FD, FS, D, T, B> TensorAccess for BlockListReshape<FD, FS, D, T, B>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.shape().len()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReshape<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Slice = BlockListFile<FD, FS, D, T>;
+    type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
+
+    fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
+        let reshape = BlockListReshape {
+            source: self.source.accessor(),
+            rebase: self.rebase,
+            phantom: Phantom::default(),
+        };
+
+        DenseAccessor::Reshape(Box::new(reshape))
+    }
+
+    fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
+        self.source.block_stream(txn)
+    }
+
+    fn value_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Number>> {
+        self.source.value_stream(txn)
+    }
+
+    fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
+        Err(TCError::unsupported(
+            "cannot slice a reshaped Tensor; make a copy first",
+        ))
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!(
+            "BlockListReduce::transpose {} {:?}",
+            self.shape(),
+            permutation
+        );
+
+        BlockListTranspose::new(self, permutation)
+    }
+
+    async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
+        let source_coords = self.rebase.invert_coords(coords);
+        self.source.read_values(txn, source_coords).await
+    }
+}
+
+impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReshape<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    fn read_value_at<'a>(self, txn: Self::Txn, coord: Coord) -> Read<'a> {
+        self.source
+            .read_value_at(txn, self.rebase.invert_coord(coord))
+    }
+}
+
+impl<FD, FS, D, T, B> fmt::Display for BlockListReshape<FD, FS, D, T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("reshaped dense Tensor")
+    }
+}
+
+#[derive(Clone)]
 pub struct BlockListTranspose<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Transpose,
@@ -1673,7 +1646,7 @@ where
         let accessor = BlockListTranspose {
             source: self.source.accessor(),
             rebase: self.rebase,
-            phantom: Phantom::default(),
+            phantom: self.phantom,
         };
 
         DenseAccessor::Transpose(Box::new(accessor))

@@ -3,7 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import PORT, start_host, PersistenceTest
+from testutils import DEFAULT_PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(
@@ -143,7 +143,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
     def cluster(self, chain_type):
         class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{PORT}/test/table")
+            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/table")
 
             def _configure(self):
                 self.table = tc.chain.Block(tc.table.Table(SCHEMA))
