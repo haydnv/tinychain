@@ -943,6 +943,7 @@ where
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
         + TensorTransform
+        + TensorTrig
         + TensorUnary<fs::Dir, Txn = Txn>
         + Clone
         + Send
@@ -1066,6 +1067,22 @@ where
                 TensorCompare::ne,
                 TensorCompareConst::ne_const,
             ))),
+
+            // trigonometry
+            "asin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asin))),
+            "sin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sin))),
+            "asinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asinh))),
+            "sinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sinh))),
+
+            "acos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acos))),
+            "cos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cos))),
+            "acosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acosh))),
+            "cosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cosh))),
+
+            "atan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atan))),
+            "tan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tan))),
+            "atanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atanh))),
+            "tanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tanh))),
 
             // unary ops
             "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),

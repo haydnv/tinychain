@@ -15,19 +15,19 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
+use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
-    TensorCompare, TensorCompareConst, TensorDualIO, TensorIO, TensorInstance, TensorMath,
-    TensorMathConst, TensorReduce, TensorTransform, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
+    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
+    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
-use crate::stream::ReadValueAt;
-use crate::{TensorDiagonal, TensorPersist};
 use access::*;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
@@ -892,6 +892,44 @@ where
         let accessor = self.accessor.transpose(permutation)?;
         Ok(accessor.into())
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self::Unary> {
+            let dtype = trig_dtype(self.dtype());
+            let source = self.accessor.clone().accessor();
+            let accessor = SparseUnary::new(source, Number::$fun, dtype);
+            Ok(SparseTensor::from(accessor))
+        }
+    };
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorTrig for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
+    type Unary = SparseTensor<FD, FS, D, T, SparseUnary<FD, FS, D, T>>;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {sinh}
+    trig! {asinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {cosh}
+    trig! {acosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {tanh}
+    trig! {atanh}
 }
 
 #[async_trait]

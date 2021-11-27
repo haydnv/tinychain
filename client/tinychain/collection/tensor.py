@@ -112,6 +112,16 @@ class Tensor(Collection):
 
         return self._get("abs", rtype=self.__class__)
 
+    def acos(self):
+        """Return the element-wise arccosine of this `Tensor`."""
+
+        return self._get("acos", rtype=self.__class__)
+
+    def acosh(self):
+        """Return the element-wise hyperbolic arccosine of this `Tensor`."""
+
+        return self._get("acosh", rtype=self.__class__)
+
     def add(self, other):
         """Return the element-wise sum of this `Tensor` and another `Tensor` or `Number`."""
 
@@ -127,6 +137,26 @@ class Tensor(Collection):
 
         return self._get("any", rtype=Bool)
 
+    def asin(self):
+        """Return the element-wise arcsine of this `Tensor`."""
+
+        return self._get("asin", rtype=self.__class__)
+
+    def asinh(self):
+        """Return the element-wise hyperbolic arcsine of this `Tensor`."""
+
+        return self._get("asinh", rtype=self.__class__)
+
+    def atan(self):
+        """Return the element-wise arctangent of this `Tensor`."""
+
+        return self._get("atan", rtype=self.__class__)
+
+    def atanh(self):
+        """Return the element-wise hyperbolic arctangent of this `Tensor`."""
+
+        return self._get("atanh", rtype=self.__class__)
+
     def cast(self, number_type):
         """Cast the data type of `Tensor` into the given `number_type`."""
 
@@ -136,6 +166,16 @@ class Tensor(Collection):
         """Return a copy of this `Tensor`"""
 
         return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
+
+    def cos(self):
+        """Return the element-wise cosine of this `Tensor`."""
+
+        return self._get("cos", rtype=self.__class__)
+
+    def cosh(self):
+        """Return the element-wise hyperbolic cosine of this `Tensor`."""
+
+        return self._get("cosh", rtype=self.__class__)
 
     def div(self, other):
         """Divide this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
@@ -241,6 +281,16 @@ class Tensor(Collection):
 
         return self._get("shape", rtype=Tuple)
 
+    def sin(self):
+        """Return the element-wise sine of this `Tensor`."""
+
+        return self._get("sin", rtype=self.__class__)
+
+    def sinh(self):
+        """Return the element-wise hyperbolic sine of this `Tensor`."""
+
+        return self._get("sinh", rtype=self.__class__)
+
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
@@ -251,6 +301,16 @@ class Tensor(Collection):
 
         rtype = Number if axis is None else self.__class__
         return self._get("sum", axis, rtype)
+
+    def tan(self):
+        """Return the element-wise tangent of this `Tensor`."""
+
+        return self._get("tan", rtype=self.__class__)
+
+    def tanh(self):
+        """Return the element-wise hyperbolic tangent of this `Tensor`."""
+
+        return self._get("tanh", rtype=self.__class__)
 
     def transpose(self, permutation=None):
         """

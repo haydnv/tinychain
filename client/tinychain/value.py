@@ -140,6 +140,10 @@ class Number(Value):
 
     __uri__ = uri(Value) + "/number"
 
+    @classmethod
+    def _trig_rtype(cls):
+        return cls
+
     def __abs__(self):
         return self.abs()
 
@@ -184,10 +188,50 @@ class Number(Value):
 
         return self._get("abs", rtype=self.__class__)
 
+    def acos(self):
+        """Return the arccosine of this `Number`."""
+
+        return self._get("acos", rtype=self._trig_rtype())
+
+    def acosh(self):
+        """Return the hyperbolic arccosine of this `Number`."""
+
+        return self._get("acosh", rtype=self._trig_rtype())
+
     def add(self, other):
         """Return the sum of `self` and `other`."""
 
         return self._get("add", other, self.__class__)
+
+    def asin(self):
+        """Return the arcsine of this `Number`."""
+
+        return self._get("asin", rtype=self._trig_rtype())
+
+    def asinh(self):
+        """Return the hyperbolic arcsine of this `Number`."""
+
+        return self._get("asinh", rtype=self._trig_rtype())
+
+    def atan(self):
+        """Return the arctangent of this `Number`."""
+
+        return self._get("atan", rtype=self._trig_rtype())
+
+    def atanh(self):
+        """Return the hyperbolic arctangent of this `Number`."""
+
+        return self._get("atanh", rtype=self._trig_rtype())
+
+    def cos(self):
+        """Return the cosine of this `Number`."""
+
+        return self._get("cos", rtype=self._trig_rtype())
+
+    def cosh(self):
+        """Return the hyperbolic cosine of this `Number`."""
+
+        return self._get("cosh", rtype=self._trig_rtype())
 
     def div(self, other):
         """Return the quotient of `self` and `other`."""
@@ -204,16 +248,40 @@ class Number(Value):
 
         return self._get("pow", other, self.__class__)
 
+    def sin(self):
+        """Return the sine of this `Number`."""
+
+        return self._get("sin", rtype=self._trig_rtype())
+
+    def sinh(self):
+        """Return the hyperbolic sine of this `Number`."""
+
+        return self._get("sinh", rtype=self._trig_rtype())
+
     def sub(self, other):
         """Return the difference between `self` and `other`."""
 
         return self._get("sub", other, self.__class__)
+
+    def tan(self):
+        """Return the tangent of this `Number`."""
+
+        return self._get("tan", rtype=self._trig_rtype())
+
+    def tanh(self):
+        """Return the hyperbolic tangent of this `Number`."""
+
+        return self._get("tanh", rtype=self._trig_rtype())
 
 
 class Bool(Number):
     """A boolean :class:`Value`."""
 
     __uri__ = uri(Number) + "/bool"
+
+    @classmethod
+    def _trig_rtype(cls):
+        return F32
 
     def logical_and(self, other):
         """Boolean AND"""
@@ -288,6 +356,10 @@ class Int(Number):
     __uri__ = uri(Number) + "/int"
 
     @classmethod
+    def _trig_rtype(cls):
+        return F32
+
+    @classmethod
     def max_value(cls):
         return cls(2**(cls.size() - 1) - 1)
 
@@ -325,6 +397,10 @@ class I64(Int):
 
     __uri__ = uri(Int) + "/64"
 
+    @classmethod
+    def _trig_rtype(cls):
+        return F64
+
     @staticmethod
     def size():
         return 64
@@ -334,6 +410,10 @@ class UInt(Number):
     """An unsigned integer."""
 
     __uri__ = uri(Number) + "/uint"
+
+    @classmethod
+    def _trig_rtype(cls):
+        return F32
 
     @classmethod
     def max_value(cls):
@@ -383,6 +463,14 @@ class U64(UInt):
 
     __uri__ = uri(UInt) + "/64"
 
+    @classmethod
+    def _trig_rtype(cls):
+        return F64
+
+    @staticmethod
+    def size():
+        return 64
+
     def __json__(self):
         form = form_of(self)
         if isinstance(form, int):
@@ -390,7 +478,3 @@ class U64(UInt):
                 return {str(uri(U64)): form}
 
         return super().__json__()
-
-    @staticmethod
-    def size():
-        return 64

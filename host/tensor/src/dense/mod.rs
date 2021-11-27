@@ -15,16 +15,16 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean, TensorBooleanConst,
-    TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO, TensorInstance,
-    TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorType,
-    TensorUnary, ERR_COMPLEX_EXPONENT,
+    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
+    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
+    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -954,6 +954,43 @@ where
         let blocks = self.blocks.transpose(permutation)?;
         Ok(DenseTensor::from(blocks))
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self::Unary> {
+            let dtype = trig_dtype(self.dtype());
+            let blocks = BlockListUnary::new(self.blocks.clone(), Array::$fun, Number::$fun, dtype);
+            Ok(DenseTensor::from(blocks))
+        }
+    };
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> TensorTrig for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    B: DenseAccess<FD, FS, D, T>,
+{
+    type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {sinh}
+    trig! {asinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {cosh}
+    trig! {acosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {tanh}
+    trig! {atanh}
 }
 
 #[async_trait]

@@ -12,7 +12,7 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Number, NumberType, Value, ValueType};
+use tc_value::{FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, Tuple,
@@ -429,6 +429,63 @@ pub trait TensorUnary<D: Dir> {
 
     /// Element-wise logical not
     fn not(&self) -> TCResult<Self::Unary>;
+}
+
+/// Trigonometric [`Tensor`] operations
+#[async_trait]
+pub trait TensorTrig {
+    /// The return type of a unary operation
+    type Unary: TensorInstance;
+
+    /// Element-wise arcsine
+    fn asin(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise sine
+    fn sin(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arcsine
+    fn asinh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic sine
+    fn sinh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arccosine
+    fn acos(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise cosine
+    fn cos(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arccosine
+    fn acosh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic cosine
+    fn cosh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arctangent
+    fn atan(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise tangent
+    fn tan(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic tangent
+    fn tanh(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arctangent
+    fn atanh(&self) -> TCResult<Self::Unary>;
+}
+
+fn trig_dtype(dtype: NumberType) -> NumberType {
+    match dtype {
+        NumberType::Int(it) => match it {
+            IntType::I64 => FloatType::F64.into(),
+            _ => FloatType::F32.into(),
+        },
+        NumberType::UInt(ut) => match ut {
+            UIntType::U64 => FloatType::F64.into(),
+            _ => FloatType::F32.into(),
+        },
+        other => other,
+    }
 }
 
 /// The [`Class`] of [`Tensor`]
@@ -1042,6 +1099,44 @@ where
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
         }
     }
+}
+
+macro_rules! trig {
+    ($fun:ident) => {
+        fn $fun(&self) -> TCResult<Self> {
+            match self {
+                Self::Dense(dense) => dense.$fun().map(Self::from),
+                Self::Sparse(sparse) => sparse.$fun().map(Self::from),
+            }
+        }
+    };
+}
+
+impl<FD, FS, D, T> TensorTrig for Tensor<FD, FS, D, T>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
+{
+    type Unary = Self;
+
+    trig! {asin}
+    trig! {sin}
+    trig! {asinh}
+    trig! {sinh}
+
+    trig! {acos}
+    trig! {cos}
+    trig! {acosh}
+    trig! {cosh}
+
+    trig! {atan}
+    trig! {tan}
+    trig! {atanh}
+    trig! {tanh}
 }
 
 #[async_trait]
