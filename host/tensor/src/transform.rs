@@ -403,7 +403,6 @@ pub struct Reshape {
     bounds: Vec<u64>,
 }
 
-#[allow(dead_code)]
 impl Reshape {
     pub fn new(source_shape: Shape, shape: Shape) -> TCResult<Self> {
         if source_shape.size() != shape.size() {
@@ -422,6 +421,10 @@ impl Reshape {
             shape,
             bounds,
         })
+    }
+
+    pub fn shape(&self) -> &Shape {
+        &self.shape
     }
 
     pub fn invert_coord(&self, coord: Coord) -> Coord {
@@ -446,30 +449,6 @@ impl Reshape {
 
         let offsets = coords.to_offsets(&self.shape);
         Coords::from_offsets(offsets, &self.source_shape)
-    }
-
-    pub fn map_coord(&self, coord: Coord) -> Coord {
-        assert_eq!(coord.len(), self.source_shape.len());
-
-        let offset: u64 = coord
-            .into_iter()
-            .zip(&self.source_bounds)
-            .map(|(x, bound)| x * bound)
-            .sum();
-
-        self.bounds
-            .iter()
-            .map(|bound| offset / bound)
-            .zip(self.shape.iter())
-            .map(|(axis_offset, dim)| axis_offset % dim)
-            .collect()
-    }
-
-    pub fn map_coords(&self, coords: Coords) -> Coords {
-        assert_eq!(coords.ndim(), self.source_shape.len());
-
-        let offsets = coords.to_offsets(&self.source_shape);
-        Coords::from_offsets(offsets, &self.shape)
     }
 }
 
