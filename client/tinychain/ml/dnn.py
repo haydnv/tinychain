@@ -103,7 +103,6 @@ def layer(weights, bias, activation):
 
     return DNNLayer([weights, bias])
 
-#(self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number, epsilon :tc.Number , l_m:tc.Number,l_v:tc.Number,t:tc.Number])
 
 def optimizers():
     """Construct alternative optimizers for Gradient Descent."""
@@ -114,13 +113,13 @@ def optimizers():
        def create(cls):
             return tc.Map({"l_m":tc.Number(0) ," l_v":tc.Number(0) , "t":tc.Number(0)})
         
-       def optimize (self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number, epsilon :tc.Number , l_m,l_v,t):  
+       def optimize (self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number,
+                     epsilon :tc.Number , l_m,l_v,t):  
                              
             dZ = activation.backward(dA, Z).copy()          
             # Gradients for each layer
             g = einsum("kj,ki->ij", [dZ, A_prev])              
-            t=t+1
-            
+            t=t+1           
             # Computing 1st and 2nd moment for each layer
             l_m = l_m * decay_rate_1 + (1- decay_rate_1) * g            
             l_v = l_v * decay_rate_2 + (1- decay_rate_2) * (g ** 2)            
@@ -208,7 +207,7 @@ def neural_net(layers):
             for i in reversed(range(0, num_layers)):
                 
                 updated_values = optimizer.optimize(A[i],dA,Z[i+1],decay_rate_1=0.9,
-                                   decay_rate_2=0.99,epsilon=10e-8)
+                                   decay_rate_2=0.99,epsilon=10e-8 ,l_m ,l_v ,t)
                 l_m,l_v,t=updated_values['l_m'],updated_values['l_v'],updated_values['t']
                 d_weights,d_bias=updated_values['d_weights'],updated_values['d_bias']               
                 update= optimizer.update(d_weights,d_bias)
