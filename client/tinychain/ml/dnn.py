@@ -75,7 +75,7 @@ def layer(weights, bias, activation):
             
             '''
             dZ = activation.backward(dA, Z).copy()
-            dA_prev = einsum("kj,ij->ki", [dZ, self[0]])  # Recommend self.weights
+            dA_prev = einsum("kj,ij->ki", [dZ, self.weights])  
             d_weights = einsum("kj,ki->ij", [dZ, A_prev])
             d_bias = dZ.sum(0)
             return dA_prev, d_weights, d_bias
@@ -94,21 +94,31 @@ def layer(weights, bias, activation):
 
         def update(self, d_weights, d_bias):
             '''
-            update function is used to simply update weights and bias and return new weights and bias
+            update function is used to ensure that update operations are done
             New_Weight = Old Weight - Delta Weight
             New_Bias = Old Bias - Delta Bias
             '''
             return self.weights.write(self.weights - d_weights), self.bias.write(self.bias - d_bias)
+                
+
+    return DNNLayer([weights, bias])
+
+#(self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number, epsilon :tc.Number , l_m:tc.Number,l_v:tc.Number,t:tc.Number])
+
+def optimizers():
+    """Construct alternative optimizers for Gradient Descent."""
+    
+   class Adam_Optimizer(optimizers):
+       
+       @classmethod
+       def create(cls):
+            return tc.Map({"l_m":tc.Number(0) ," l_v":tc.Number(0) , "t":tc.Number(0)})
         
-        
-        
-        def adam(self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number, 
-                 epsilon :tc.Number , l_m:tc.Number,l_v:tc.Number,t:tc.Number]) :  
+       def optimize (self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number, epsilon :tc.Number , l_m,l_v,t):  
                              
             dZ = activation.backward(dA, Z).copy()          
             # Gradients for each layer
-            g = einsum("kj,ki->ij", [dZ, A_prev])  
-            
+            g = einsum("kj,ki->ij", [dZ, A_prev])              
             t=t+1
             
             # Computing 1st and 2nd moment for each layer
@@ -121,11 +131,16 @@ def layer(weights, bias, activation):
             d_weights = l_m_corrected / ((l_v_corrected)**(0.5) + epsilon)                       
             d_bias = dZ.sum(0)
             
-            return l_m,l_v,t,self.weights.write(self.weights - d_weights), self.bias.write(self.bias - d_bias)
+            return tc.Map({'l_m':l_m,
+                           'l_v':l_v,
+                           't':t,
+                           'd_weights': d_weights,
+                           'd_bias':d_bias})
+        
+        def update(self,d_weights ,d_bias)
+            
+            return self.weights.write(self.weights - d_weights), self.bias.write(self.bias - d_bias)
 
-                
-
-    return DNNLayer([weights, bias])
 
 
 def neural_net(layers):
@@ -150,11 +165,7 @@ def neural_net(layers):
 
             return state
        
-        def adam_init(self):
-            l_m=tc.Number(0)
-            l_v=tc.Number(0)
-            t=tc.Number(0)
-            return l_m , l_v , t
+
 
         def train(self, inputs, cost):
             '''
@@ -190,13 +201,24 @@ def neural_net(layers):
             dA = cost(A[-1]).sum() / m
 
             updates = []
-            l_m , l_v , t= self.adam_init()
+            
+            initials=optimizer.create()
+            l_m,l_v,t=initials['l_m'],initials['l_v'],initials['t']
+            
             for i in reversed(range(0, num_layers)):
+                
+                updated_values = optimizer.optimize(A[i],dA,Z[i+1],decay_rate_1=0.9,
+                                   decay_rate_2=0.99,epsilon=10e-8)
+                l_m,l_v,t=updated_values['l_m'],updated_values['l_v'],updated_values['t']
+                d_weights,d_bias=updated_values['d_weights'],updated_values['d_bias']               
+                update= optimizer.update(d_weights,d_bias)
+                updates.append(update)
+                
                 #dA, d_weights, d_bias = layers[i].gradients(A[i], dA, Z[i + 1])
                 #update = layers[i].update(d_weights, d_bias)               
-                update= layers[i].adam(A[i], dA, Z[i + 1] ,decay_rate_1=0.9,
-                                       decay_rate_2=0.99,epsilon=10e-8,l_m,l_v,t=t)
-                updates.append(update)
+                #update= layers[i].adam(A[i], dA, Z[i + 1] ,decay_rate_1=0.9,
+                #                      decay_rate_2=0.99,epsilon=10e-8,l_m,l_v,t=t)
+                
                
 
             return After(updates, A[-1])
