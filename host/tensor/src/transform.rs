@@ -395,6 +395,85 @@ impl Reduce {
 }
 
 #[derive(Clone)]
+pub struct Reshape {
+    source_shape: Shape,
+    source_bounds: Vec<u64>,
+
+    shape: Shape,
+    bounds: Vec<u64>,
+}
+
+#[allow(dead_code)]
+impl Reshape {
+    pub fn new(source_shape: Shape, shape: Shape) -> TCResult<Self> {
+        if source_shape.size() != shape.size() {
+            return Err(TCError::unsupported(format!(
+                "cannot reshape tensor with shape {} into {}",
+                source_shape, shape
+            )));
+        }
+
+        let source_bounds = coord_bounds(&source_shape);
+        let bounds = coord_bounds(&shape);
+
+        Ok(Self {
+            source_shape,
+            source_bounds,
+            shape,
+            bounds,
+        })
+    }
+
+    pub fn invert_coord(&self, coord: Coord) -> Coord {
+        assert_eq!(coord.len(), self.shape.len());
+
+        let offset: u64 = coord
+            .into_iter()
+            .zip(&self.bounds)
+            .map(|(x, bound)| x * bound)
+            .sum();
+
+        self.source_bounds
+            .iter()
+            .map(|bound| offset / bound)
+            .zip(self.source_shape.iter())
+            .map(|(axis_offset, dim)| axis_offset % dim)
+            .collect()
+    }
+
+    pub fn invert_coords(&self, coords: Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.shape.len());
+
+        let offsets = coords.to_offsets(&self.shape);
+        Coords::from_offsets(offsets, &self.source_shape)
+    }
+
+    pub fn map_coord(&self, coord: Coord) -> Coord {
+        assert_eq!(coord.len(), self.source_shape.len());
+
+        let offset: u64 = coord
+            .into_iter()
+            .zip(&self.source_bounds)
+            .map(|(x, bound)| x * bound)
+            .sum();
+
+        self.bounds
+            .iter()
+            .map(|bound| offset / bound)
+            .zip(self.shape.iter())
+            .map(|(axis_offset, dim)| axis_offset % dim)
+            .collect()
+    }
+
+    pub fn map_coords(&self, coords: Coords) -> Coords {
+        assert_eq!(coords.ndim(), self.source_shape.len());
+
+        let offsets = coords.to_offsets(&self.source_shape);
+        Coords::from_offsets(offsets, &self.shape)
+    }
+}
+
+#[derive(Clone)]
 pub struct Slice {
     source_shape: Shape,
     shape: Shape,
@@ -691,6 +770,13 @@ impl Transpose {
     }
 }
 
+#[inline]
+fn coord_bounds(shape: &[u64]) -> Vec<u64> {
+    (0..shape.len())
+        .map(|axis| shape[axis + 1..].iter().product())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,6 +789,16 @@ mod tests {
             rebase.invert_bounds(vec![AxisBounds::In(0..1)].into()),
             Bounds::all(&shape)
         )
+    }
+
+    #[test]
+    fn test_reshape() {
+        let source = Shape::from(vec![2, 3, 4, 1]);
+        let dest = Shape::from(vec![3, 8]);
+        let rebase = Reshape::new(source, dest).unwrap();
+
+        assert_eq!(rebase.map_coord(vec![0, 1, 2, 0]), vec![0, 6]);
+        assert_eq!(rebase.invert_coord(vec![0, 6]), vec![0, 1, 2, 0]);
     }
 
     #[test]
