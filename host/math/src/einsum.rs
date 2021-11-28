@@ -4,11 +4,10 @@ use std::ops::Deref;
 use log::debug;
 
 use tc_error::*;
+use tc_tensor::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tcgeneric::Tuple;
-
-use super::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
 
 type Label = Vec<char>;
 

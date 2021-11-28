@@ -1,4 +1,5 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -23,12 +24,10 @@ use stream::ReadValueAt;
 pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
 pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
-pub use einsum::einsum;
 pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor, SparseWrite};
 
 mod bounds;
 mod dense;
-mod einsum;
 mod sparse;
 mod stream;
 mod transform;

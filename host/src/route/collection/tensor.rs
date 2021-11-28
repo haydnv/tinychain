@@ -7,6 +7,7 @@ use safecast::*;
 
 use tc_btree::Node;
 use tc_error::*;
+use tc_math::*;
 use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;

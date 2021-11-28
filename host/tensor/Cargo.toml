@@ -1,6 +1,6 @@
 [package]
 name = "tc-tensor"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's Tensor collection type"
