@@ -1,0 +1,15 @@
+[package]
+name = "tc-math"
+version = "0.1.0"
+authors = ["haydn@tinychain.net"]
+edition = "2018"
+description = "Mathematical algorithms for TinyChain tensors. Unstable."
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "tensor", "math"]
+categories = ["algorithms", "concurrency", "mathematics", "science"]
+
+[dependencies]
+tc-tensor = { path = "../tensor" }

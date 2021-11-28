@@ -29,7 +29,7 @@ use super::{SparseRow, SparseStream, SparseTensor};
 /// Access methods for [`SparseTensor`] data
 #[async_trait]
 pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
-    Clone + fmt::Display + ReadValueAt<D, Txn = T> + TensorAccess + Send + Sync + 'static
+    ReadValueAt<D, Txn = T> + TensorAccess + Clone + fmt::Display + Send + Sync + 'static
 {
     /// The type of a slice of this accessor
     type Slice: SparseAccess<FD, FS, D, T>;

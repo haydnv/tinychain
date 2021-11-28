@@ -29,7 +29,7 @@ use super::{DenseTensor, PER_BLOCK};
 /// Common [`DenseTensor`] access methods
 #[async_trait]
 pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
-    Clone + ReadValueAt<D, Txn = T> + TensorAccess + fmt::Display + Send + Sync + Sized + 'static
+    ReadValueAt<D, Txn = T> + TensorAccess + Clone + fmt::Display + Send + Sync + Sized + 'static
 {
     /// The type returned by `slice`
     type Slice: DenseAccess<FD, FS, D, T>;
