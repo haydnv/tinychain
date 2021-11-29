@@ -19,6 +19,21 @@ class LinearAlgebraTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, {tc.uri(tc.tensor.Dense): [[[3], tc.uri(tc.I32)], expected.tolist()]})
 
+    def testSetDiagonal(self):
+        size = 3
+        shape = [size, size]
+        x = np.arange(0, size**2).reshape(shape)
+        diag = [2] * size
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
+        cxt.diag = tc.tensor.Dense.load([size], tc.I32, diag)
+        cxt.result = tc.After(tc.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
+
+        x[range(size), range(size)] = diag
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, {tc.uri(tc.tensor.Dense): [[shape, tc.uri(tc.I32)], x.flatten().tolist()]})
+
     def testMatmul(self):
         l = np.random.random([2, 3, 4])
         r = np.random.random([2, 4, 5])

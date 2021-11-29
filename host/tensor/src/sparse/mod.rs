@@ -39,7 +39,7 @@ mod table;
 pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
 
-const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
+const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse; \
 convert to a DenseTensor first.";
 
 /// A `Tensor` stored as a `Table` of [`Coord`]s and [`Number`] values

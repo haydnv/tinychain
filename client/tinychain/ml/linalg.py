@@ -24,6 +24,15 @@ def identity(size, dtype=Bool):
     return Sparse.copy_from(schema, elements)
 
 
+def set_diagonal(matrix, diag):
+    """Set the diagonal of the given `matrix` to `diag`."""
+
+    eye = identity(matrix.shape[0])
+    zero_diag = matrix - (matrix * eye)  # don't use eye.logical_not in case the matrix is sparse
+    new_diag = eye * diag.expand_dims()
+    return matrix.write(zero_diag + new_diag)
+
+
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
 def householder(cxt, x: Tensor) -> Tuple:
