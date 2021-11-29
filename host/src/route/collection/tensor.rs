@@ -588,6 +588,37 @@ impl<T> From<T> for ReshapeHandler<T> {
     }
 }
 
+struct SVDHandler<T> {
+    matrix: T,
+}
+
+    impl<'a, T> Handler<'a> for SVDHandler<T>
+where
+    T: TensorAccess + Send + 'a,
+    Tensor: From<T>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+                svd(self.matrix)
+                    .map_ok(Tensor::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for SVDHandler<T> {
+    fn from(matrix: T) -> Self {
+        Self { matrix }
+    }
+}
+
 struct TransposeHandler<T> {
     tensor: T,
 }
@@ -1072,17 +1103,26 @@ where
             // trigonometry
             "asin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asin))),
             "sin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sin))),
-            "asinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asinh))),
+            "asinh" => Some(Box::new(UnaryHandler::new(
+                tensor.into(),
+                TensorTrig::asinh,
+            ))),
             "sinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sinh))),
 
             "acos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acos))),
             "cos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cos))),
-            "acosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acosh))),
+            "acosh" => Some(Box::new(UnaryHandler::new(
+                tensor.into(),
+                TensorTrig::acosh,
+            ))),
             "cosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cosh))),
 
             "atan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atan))),
             "tan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tan))),
-            "atanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atanh))),
+            "atanh" => Some(Box::new(UnaryHandler::new(
+                tensor.into(),
+                TensorTrig::atanh,
+            ))),
             "tanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tanh))),
 
             // unary ops
@@ -1132,8 +1172,9 @@ where
             "reshape" => Some(Box::new(ReshapeHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
-            // other
+            // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
+            "svd" => Some(Box::new(SVDHandler::from(tensor))),
 
             _ => None,
         }

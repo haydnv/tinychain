@@ -98,11 +98,9 @@ class LinearAlgebraTests(ClientTest):
 
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
-        cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(x=cxt.matrix)
+        cxt.result = tc.linalg.svd(cxt.matrix)
 
-        response = self.host.post(ENDPOINT, cxt)
-        print(response)
+        self.assertRaises(tc.error.NotImplemented, lambda: self.host.post(ENDPOINT, cxt))
 
 
 if __name__ == "__main__":

@@ -165,22 +165,9 @@ def bidiagonalize(cxt, x: Tensor) -> Tuple:
     return Stream.range(cxt.n - 2).fold("k", Map(A=x.copy(), U=U, V=V), step)
 
 
-@post_op
-def svd(cxt, x: Tensor) -> Tuple:
-    cxt.bidiagonalize = bidiagonalize
-    cxt.bidiagonal = cxt.bidiagonalize(x=x)
-    cxt.n = UInt(x.shape[0])
+def svd(matrix: Tensor) -> Tuple:
+    """Return the singular value decomposition of the given `matrix`."""
 
-    outer_context = cxt
-
-    @closure
-    @post_op
-    def golub_reinsch(cxt, B: Tensor) -> Map:
-        # for i in range(0, n - 1):
-        #   if b[i][i + 1] <= EPS * (b[i][i] + b[i][i + 1]):
-        #       b[i][i] = 0
-
-        return {"B": B, "running": False}
-
-    U, B, V = [cxt.bidiagonal[k] for k in ["U", "A", "V"]]
-    return While(post_op(lambda running: running), golub_reinsch, Map(U=U, B=B, V=V, running=True))
+    rtype = type(matrix) if isinstance(matrix, Tensor) else Tensor
+    op = Get(MethodSubject(matrix, "svd"))
+    return rtype(op)
