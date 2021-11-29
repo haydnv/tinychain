@@ -586,6 +586,75 @@ impl<T> From<T> for ReshapeHandler<T> {
     }
 }
 
+struct SplitHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for SplitHandler<T>
+where
+    T: TensorAccess + TensorTransform + Clone + Send + 'a,
+    Tensor: From<T::Slice>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let (num_or_size_splits, axis): (Value, Value) =
+                    key.try_cast_into(|v| TCError::bad_request("invalid arguments for split", v))?;
+
+                let axis: usize =
+                    axis.try_cast_into(|x| TCError::bad_request("invalid split axis", x))?;
+
+                let dim = self.tensor.shape()[axis];
+                let sizes: Vec<u64> = match num_or_size_splits {
+                    Value::Number(n) if n > 0.into() && n % dim.into() == 0.into() => {
+                        let n = n.cast_into();
+                        Ok(vec![dim / n as u64; n])
+                    }
+                    Value::Tuple(sizes) => {
+                        sizes.try_cast_into(|t| TCError::bad_request("invalid split sizes", t))
+                    }
+                    other => Err(TCError::bad_request("invalid split size", other)),
+                }?;
+
+                if sizes.iter().sum::<u64>() != dim {
+                    return Err(TCError::bad_request(
+                        "invalid split sizes",
+                        sizes.into_iter().collect::<Tuple<u64>>(),
+                    ));
+                }
+
+                let mut split = Vec::with_capacity(sizes.len());
+                let mut i = 0;
+                for size in sizes.into_iter() {
+                    let mut bounds = Bounds::all(self.tensor.shape());
+                    bounds[axis] = AxisBounds::In(i..(i + size));
+
+                    let slice = self
+                        .tensor
+                        .clone()
+                        .slice(bounds)
+                        .map(Tensor::from)
+                        .map(State::from)?;
+
+                    split.push(slice);
+                    i += size;
+                }
+
+                Ok(State::Tuple(split.into()))
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for SplitHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct SVDHandler<T> {
     matrix: T,
 }
@@ -1223,6 +1292,9 @@ where
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
             "svd" => Some(Box::new(SVDHandler::from(tensor))),
+
+            // other
+            "split" => Some(Box::new(SplitHandler::from(tensor))),
 
             _ => None,
         }

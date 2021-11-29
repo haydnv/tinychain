@@ -291,6 +291,20 @@ class Tensor(Collection):
 
         return self._get("sinh", rtype=self.__class__)
 
+    def split(self, num_or_size_splits, axis=0):
+        """
+        Split this `Tensor` into multiple slices along the given `axis`.
+
+        If `num_or_size_splits` is a `Number`, the `tensor` will be sliced along `axis` `num_or_size_splits` times;
+        if `self.shape[axis] % num_or_size_splits != 0` then a `BadRequest` error will be raised.
+
+        If `num_or_size_splits` is a `Tuple` with length `n` then the `tensor` will be split into `n` new `Tensor` s
+        each with `shape[axis] == num_or_size_splits[axis]`; if the sum of `num_or_size_splits` is not equal to
+        `self.shape[axis]` then a `BadRequest` error will be raised.
+        """
+
+        return self._get("split", (num_or_size_splits, axis), self.__class__)
+
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
