@@ -1,4 +1,4 @@
-use std::array::IntoIter;
+use std::convert::TryInto;
 use std::fmt;
 use std::iter::Cloned;
 use std::ops::Deref;
@@ -10,7 +10,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, Value};
-use tcgeneric::{label, Id, Instance, Label, Map, PathSegment, TCPath, Tuple};
+use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, Tuple};
 
 use crate::closure::Closure;
 use crate::scalar::Scalar;
@@ -240,17 +240,18 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let mut state: State = params.require(&label("value").into())?;
+                let item_name: Id = params.require(&label("item_name").into())?;
                 let op: Closure = params.require(&label("op").into())?;
+                let mut state: State = params.require(&label("value").into())?;
+                params.expect_empty()?;
 
-                const ITEM: Label = label("item");
-                const STATE: Label = label("state");
                 for item in self.tuple.iter().cloned() {
-                    let args = IntoIter::new([(ITEM.into(), item.into()), (STATE.into(), state)]);
-                    state = op.clone().call(txn, State::Map(args.collect())).await?;
+                    let mut params: Map<State> = state.try_into()?;
+                    params.insert(item_name.clone(), item.into());
+                    state = op.clone().call(txn, params.into()).await?;
                 }
 
-                Ok(state)
+                Ok(state.into())
             })
         }))
     }

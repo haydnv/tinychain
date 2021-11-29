@@ -195,12 +195,11 @@ class Tuple(State):
         from .value import UInt
         return self._get("len", rtype=UInt)
 
-    # TODO: update this method signature to match `Stream.fold`
-    def fold(self, initial_state, op):
+    def fold(self, item_name, initial_state, op):
         """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results."""
 
-        rtype = type(initial_state) if issubclass(type(initial_state), State) else State
-        return self._post("fold", {"value": initial_state, "op": op}, rtype)
+        rtype = type(initial_state) if isinstance(initial_state, State) else State
+        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), rtype)
 
     def map(self, op):
         """Construct a new `Tuple` by mapping the elements in this `Tuple` with the given `op`."""
@@ -273,7 +272,8 @@ class Stream(State):
         `op` must be a POST Op. The stream item to handle will be passed with the given `item_key` as its name.
         """
 
-        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), type(initial_state))
+        rtype = type(initial_state) if isinstance(initial_state, State) else State
+        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), rtype)
 
     def map(self, op):
         """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream`."""
