@@ -1,11 +1,12 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-
 use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::future::TryFutureExt;
+use futures::stream::{StreamExt, TryStreamExt};
+use itertools::Itertools;
 use log::debug;
 use safecast::*;
 
@@ -1414,6 +1415,47 @@ impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
             txn: PhantomData,
         }
     }
+}
+
+async fn tile<D, T, I, O>(txn: T, input: I, output: O, multiples: Vec<u64>) -> TCResult<O>
+where
+    D: Dir,
+    T: Transaction<D>,
+    I: TensorAccess + Clone,
+    O: TensorAccess + TensorDualIO<D, I, Txn = T> + Clone,
+{
+    let max_usize = usize::MAX as u64;
+    let input_shape = input.shape();
+
+    if input_shape.iter().any(|dim| dim >= &max_usize) {
+        return Err(TCError::unsupported(format!(
+            "Tensor of shape {} is too large to tile",
+            input_shape
+        )));
+    }
+
+    let slices = input_shape
+        .iter()
+        .zip(&multiples)
+        .map(|(dim, m)| (0..(dim * m)).step_by(*dim as usize));
+
+    let mut writes = Vec::with_capacity((output.size() / input.size()) as usize);
+    for slice in Itertools::multi_cartesian_product(slices) {
+        let bounds = slice
+            .into_iter()
+            .zip(input_shape.iter())
+            .map(|(i, dim)| AxisBounds::In(i..(i + *dim)))
+            .collect();
+
+        writes.push(output.clone().write(txn.clone(), bounds, input.clone()));
+    }
+
+    futures::stream::iter(writes)
+        .buffer_unordered(num_cpus::get())
+        .try_fold((), |(), ()| futures::future::ready(Ok(())))
+        .await?;
+
+    Ok(output)
 }
 
 #[inline]

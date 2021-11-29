@@ -21,7 +21,7 @@ use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
     TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
     TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
     TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
@@ -109,6 +109,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
 {
     /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
@@ -151,11 +152,45 @@ where
             shape: shape.into(),
             dtype: Ord::max(start.class(), stop.class()),
         };
+
         schema.validate()?;
 
         BlockListFile::range(file, txn_id, schema.shape, start, stop)
             .map_ok(Self::from)
             .await
+    }
+
+    pub async fn tile<A>(
+        txn: T,
+        tensor: DenseTensor<FD, FS, D, T, A>,
+        multiples: Vec<u64>,
+    ) -> TCResult<Self>
+    where
+        A: DenseAccess<FD, FS, D, T>,
+    {
+        if multiples.len() != tensor.ndim() {
+            return Err(TCError::bad_request(
+                "wrong number of multiples to tile a Tensor with shape",
+                tensor.shape(),
+            ));
+        }
+
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        let shape: Shape = tensor
+            .shape()
+            .iter()
+            .zip(&multiples)
+            .map(|(dim, m)| dim * m)
+            .collect();
+
+        let dtype = tensor.dtype();
+        let output = Self::constant(file, txn_id, shape, dtype.zero()).await?;
+        tile(txn, tensor, output, multiples).await
     }
 }
 

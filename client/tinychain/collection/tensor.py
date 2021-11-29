@@ -431,18 +431,28 @@ class Sparse(Tensor):
         return self._get("dense", rtype=Dense)
 
 
-# TODO: allow eliding batch dimensions
 def einsum(format, tensors):
     """
     Return the Einstein summation of the given `tensors` according the the given `format` string.
 
-    Example: `einsum("ij,kj->ik", [a, b]) # compute the dot product of a and b`
+    Example: `einsum("ij,jk->ik", [a, b]) # multiply two matrices`
 
-    The tensor product is computed from left to right, so when using any `Sparse` tensors, it's important to put
-    the sparsest first in the list to avoid redundant broadcasting.
+    The tensor product is computed from left to right, so when using any `Sparse` tensors,
+    it's important to put the sparsest first in the list to avoid redundant broadcasting.
     """
 
     return Tensor(ref.Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
+
+
+def tile(tensor, multiples):
+    """Construct a new `Tensor` by tiling the given `tensor` `multiples` times.
+
+    The values of `tensor` are repeated `multiples[x]` times along the `x`th axis of the output.
+    `multiples` must be a positive integer or a `Tuple` of length `tensor.ndim`.
+    """
+
+    rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
+    return rtype(ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
 
 
 def _handle_bounds(bounds):

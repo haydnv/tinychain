@@ -22,7 +22,7 @@ use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
     TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
     TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
     TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
@@ -153,13 +153,43 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     /// Create a new `SparseTensor` with the given schema
     pub async fn create(dir: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
         SparseTable::create(dir, schema, txn_id)
             .map_ok(Self::from)
             .await
+    }
+
+    /// Tile the given `tensor` into a new `SparseTensor`
+    pub async fn tile<A>(
+        txn: T,
+        tensor: SparseTensor<FD, FS, D, T, A>,
+        multiples: Vec<u64>,
+    ) -> TCResult<Self>
+    where
+        A: SparseAccess<FD, FS, D, T>,
+    {
+        if multiples.len() != tensor.ndim() {
+            return Err(TCError::bad_request(
+                "wrong number of multiples to tile a Tensor with shape",
+                tensor.shape(),
+            ))?;
+        }
+
+        let txn_id = *txn.id();
+        let dir = txn.context().create_dir_unique(txn_id).await?;
+        let dtype = tensor.dtype();
+        let shape = tensor
+            .shape()
+            .iter()
+            .zip(&multiples)
+            .map(|(dim, m)| dim * m)
+            .collect();
+
+        let output = Self::create(&dir, Schema { shape, dtype }, txn_id).await?;
+        tile(txn, tensor, output, multiples).await
     }
 }
 

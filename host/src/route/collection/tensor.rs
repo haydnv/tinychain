@@ -16,7 +16,9 @@ use tc_value::{
 };
 use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
-use crate::collection::{Collection, DenseTensor, DenseTensorFile, SparseTensor, Tensor};
+use crate::collection::{
+    Collection, DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor,
+};
 use crate::fs;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
@@ -27,6 +29,7 @@ use crate::txn::Txn;
 use super::{Handler, Route};
 
 const AXIS: Label = label("axis");
+const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
 struct CastHandler<T> {
@@ -216,7 +219,7 @@ impl<'a> Handler<'a> for CopyFromHandler {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let source = params.require(&label("tensor").into())?;
+                let source = params.require(&TENSOR.into())?;
                 params.expect_empty()?;
 
                 let copy = match source {
@@ -300,9 +303,7 @@ impl<'a> Handler<'a> for CopySparseHandler {
 
                 let elements = source.into_stream(txn.clone()).await?;
 
-                let txn_id = *txn.id();
-                let dir = txn.context().create_dir_unique(txn_id).await?;
-                let tensor = SparseTensor::create(&dir, schema, txn_id).await?;
+                let tensor = create_sparse(txn, schema).await?;
 
                 let elements = elements
                     .map(|r| {
@@ -324,7 +325,7 @@ impl<'a> Handler<'a> for CopySparseHandler {
                     });
 
                 elements
-                    .map_ok(|(coord, value)| tensor.write_value_at(txn_id, coord, value))
+                    .map_ok(|(coord, value)| tensor.write_value_at(*txn.id(), coord, value))
                     .try_buffer_unordered(num_cpus::get())
                     .try_fold((), |(), ()| future::ready(Ok(())))
                     .await?;
@@ -358,10 +359,7 @@ impl<'a> Handler<'a> for CreateHandler {
                             .await
                     }
                     TensorType::Sparse => {
-                        let txn_id = *txn.id();
-                        let dir = txn.context().create_dir_unique(txn_id).await?;
-
-                        SparseTensor::create(&dir, schema, txn_id)
+                        create_sparse(txn, schema)
                             .map_ok(Tensor::from)
                             .map_ok(Collection::Tensor)
                             .map_ok(State::Collection)
@@ -592,7 +590,7 @@ struct SVDHandler<T> {
     matrix: T,
 }
 
-    impl<'a, T> Handler<'a> for SVDHandler<T>
+impl<'a, T> Handler<'a> for SVDHandler<T>
 where
     T: TensorAccess + Send + 'a,
     Tensor: From<T>,
@@ -616,6 +614,56 @@ where
 impl<T> From<T> for SVDHandler<T> {
     fn from(matrix: T) -> Self {
         Self { matrix }
+    }
+}
+
+struct TileHandler;
+
+impl<'a> Handler<'a> for TileHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let tensor: Tensor = params.require(&TENSOR.into())?;
+                let multiples: Value = params.require(&label("multiples").into())?;
+                params.expect_empty()?;
+
+                let multiples: Vec<u64> = match multiples {
+                    Value::Number(n) if n >= Number::from(1) => {
+                        assert!(tensor.ndim() > 0);
+                        let mut multiples = vec![1; tensor.ndim() - 1];
+                        multiples.push(n.cast_into());
+                        Ok(multiples)
+                    }
+                    Value::Number(n) => Err(TCError::unsupported(format!(
+                        "cannot tile a Tensor {} times",
+                        n
+                    )))?,
+                    Value::Tuple(multiples) if multiples.len() == tensor.ndim() => multiples
+                        .try_cast_into(|v| {
+                            TCError::bad_request("invalid list of multiples for tile", v)
+                        }),
+                    other => Err(TCError::bad_request("invalid multiples for tile", other)),
+                }?;
+
+                match tensor {
+                    Tensor::Dense(dense) => {
+                        DenseTensor::tile(txn.clone(), dense, multiples)
+                            .map_ok(Tensor::from)
+                            .map_ok(State::from)
+                            .await
+                    }
+                    Tensor::Sparse(sparse) => {
+                        SparseTensor::tile(txn.clone(), sparse, multiples)
+                            .map_ok(Tensor::from)
+                            .map_ok(State::from)
+                            .await
+                    }
+                }
+            })
+        }))
     }
 }
 
@@ -1196,6 +1244,7 @@ impl Route for Static {
             "sparse" => TensorType::Sparse.route(&path[1..]),
             "copy_from" if path.len() == 1 => Some(Box::new(CopyFromHandler)),
             "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
+            "tile" if path.len() == 1 => Some(Box::new(TileHandler)),
             _ => None,
         }
     }
@@ -1208,6 +1257,12 @@ async fn constant(
 ) -> TCResult<DenseTensor<DenseTensorFile>> {
     let file = create_file(txn).await?;
     DenseTensor::constant(file, *txn.id(), shape, value).await
+}
+
+async fn create_sparse(txn: &Txn, schema: Schema) -> TCResult<SparseTensor<SparseTable>> {
+    let txn_id = *txn.id();
+    let dir = txn.context().create_dir_unique(txn_id).await?;
+    SparseTensor::create(&dir, schema, txn_id).await
 }
 
 async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>

@@ -225,6 +225,22 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
 
+    def testTile(self):
+        shape = [2, 3]
+        multiples = 2
+
+        x = np.arange(0, np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(shape, tc.I32, x.flatten().tolist())
+        cxt.result = tc.tensor.tile(cxt.x, 2)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print(actual)
+
+        expected = np.tile(x, multiples)
+        self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
