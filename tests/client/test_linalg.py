@@ -8,31 +8,6 @@ ENDPOINT = "/transact/hypothetical"
 
 
 class LinearAlgebraTests(ClientTest):
-    def testBidiagonalization(self):
-        m = 5
-        n = 3
-
-        # TODO: figure out why this is so inaccurate
-        threshold = m * n * 2
-
-        matrix = np.arange(m * n).reshape(m, n)
-
-        cxt = tc.Context()
-        cxt.bidiagonalize = tc.linalg.bidiagonalize
-        cxt.matrix = tc.tensor.Dense.load([m, n], tc.F64, matrix.flatten().tolist())
-        cxt.result = cxt.bidiagonalize(x=cxt.matrix)
-
-        cxt.reconstruction = tc.tensor.einsum("ij,jk,kl->ik", [
-            tc.tensor.Dense(cxt.result["U"]),
-            cxt.result["A"],
-            tc.tensor.Dense(cxt.result["V"])
-        ])
-
-        cxt.threshold = ((cxt.matrix - cxt.reconstruction) < threshold).all()
-
-        response = self.host.post(ENDPOINT, cxt)
-        self.assertTrue(response)
-
     def testDiagonal(self):
         x = np.arange(0, 9).reshape(3, 3)
 

@@ -108,63 +108,6 @@ def qr(cxt, x: Tensor) -> Tuple:
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
 
 
-@post_op
-def bidiagonalize(cxt, x: Tensor) -> Tuple:
-    cxt.m = UInt(x.shape[0])
-    cxt.n = UInt(x.shape[1])
-
-    cxt.householder = householder
-
-    outer_cxt = cxt
-
-    @closure
-    @post_op
-    def left(cxt, k: UInt, A: Tensor, U: Tensor) -> Map:
-        cxt.v, cxt.tau = outer_cxt.householder(x=A[k:, k]).unpack(2)
-        cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
-
-        diagonal = identity(outer_cxt.m - k) - cxt.v_outer_tau
-        diagonal = matmul(diagonal, A[k:, k:])
-        A = After(A[k:, k:].write(diagonal), A)
-
-        cxt.I_m = identity(outer_cxt.m, F64).as_dense().copy()
-        Q_k = After(cxt.I_m[k:, k:].write(cxt.v_outer_tau), cxt.I_m)
-        U = matmul(Q_k, U)
-
-        return {"U": U, "A": A}
-
-    @closure
-    @post_op
-    def right(cxt, k: UInt, A: Tensor, U: Tensor, V: Tensor) -> Map:
-        cxt.v, cxt.tau = outer_cxt.householder(x=A[k, k + 1:]).unpack(2)
-        cxt.v_outer_tau = einsum("i,j->ij", [cxt.v, cxt.v]) * cxt.tau
-
-        diagonal = identity(outer_cxt.n - (k + 1)) - cxt.v_outer_tau
-        diagonal = matmul(A[k:, k + 1:], diagonal)
-        A = After(A[k:, k + 1:].write(diagonal), A)
-
-        cxt.I_n = identity(outer_cxt.n, F64).as_dense().copy()
-        P = After(cxt.I_n[k + 1:, k + 1:].write(cxt.v_outer_tau), cxt.I_n)
-        V = matmul(P, V)
-
-        return {"U": U, "A": A, "V": V}
-
-    cxt.left = left
-    cxt.right = right
-
-    @closure
-    @post_op
-    def step(A: Tensor, U: Tensor, V: Tensor, k: UInt) -> Map:
-        left = cxt.left(k=k, A=A, U=U)
-        right = cxt.right(k=k, A=left["A"], U=left["U"], V=V)
-        return If(k < cxt.n - 2, right, left)
-
-    U = identity(cxt.m, F64).as_dense()
-    V = identity(cxt.n, F64).as_dense()
-
-    return Stream.range(cxt.n - 2).fold("k", Map(A=x.copy(), U=U, V=V), step)
-
-
 def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
 
