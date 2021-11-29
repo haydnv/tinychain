@@ -84,14 +84,15 @@ class DNNTests(ClientTest):
         def while_cond(output: Dense, i: tc.UInt):
             fit = ((output > 0.5) != cxt.labels).any()
             return fit.logical_and(i < MAX_ITERATIONS)
-
+        
+        cxt.optimizer = tc.ml.Adam_Optimizer.create()
         @tc.closure
         @tc.post_op
-        def train(i: tc.UInt):
-            output = cxt.nn.train(cxt.inputs, lambda output: ((output - cxt.labels)**2) * LEARNING_RATE)
-            return {"output": output, "i": i + 1}
+        def train(i: tc.UInt):          
+            output,optimizer = cxt.nn.train(cxt.inputs, lambda output: ((output - cxt.labels)**2) * LEARNING_RATE , cxt.optimizer)
+            return {"output": output, "optimizer":optimizer,"i": i + 1}
 
-        cxt.result = tc.While(while_cond, train, {"output": cxt.nn.eval(cxt.inputs), "i": 0})
+        cxt.result = tc.While(while_cond, train, {"output": cxt.nn.eval(cxt.inputs),"optimizer":cxt.optimizer,"i": 0})
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")

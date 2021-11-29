@@ -101,42 +101,44 @@ def layer(weights, bias, activation):
 
     return DNNLayer([weights, bias])
 
-
-def optimizers():
-    """Construct alternative optimizers for Gradient Descent."""
     
-   class Adam_Optimizer(optimizers):
-       
-       @classmethod
-       def create(cls):
-            return tc.Map({"l_m":tc.Number(0) ," l_v":tc.Number(0) , "t":tc.Number(0)})
-        
-       def optimize (self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number,
-                     epsilon :tc.Number , l_m,l_v,t):  
-                             
-            dZ = activation.backward(dA, Z).copy()          
-            # Gradients for each layer
-            g = einsum("kj,ki->ij", [dZ, A_prev])              
-            t=t+1           
-            # Computing 1st and 2nd moment for each layer
-            l_m = l_m * decay_rate_1 + (1- decay_rate_1) * g            
-            l_v = l_v * decay_rate_2 + (1- decay_rate_2) * (g ** 2)            
-            l_m_corrected = l_m / (1-(decay_rate_1 ** t))
-            l_v_corrected = l_v / (1-(decay_rate_2 ** t))
-            
-            # Update Weights
-            d_weights = l_m_corrected / ((l_v_corrected)**(0.5) + epsilon)                       
-            d_bias = dZ.sum(0)
-            
-            return tc.Map({'l_m':l_m,
-                           'l_v':l_v,
-                           't':t,
-                           'd_weights': d_weights,
-                           'd_bias':d_bias})
-        
-        def update(self,d_weights ,d_bias)
-            
-            return self.weights.write(self.weights - d_weights), self.bias.write(self.bias - d_bias)
+    """
+    
+    To Build Adam Optimizer or w/e you need just follow these steps:-
+    1. Create Your Class with Your Optimizer Name.
+    2. Build `Create` method as a class method that would initialize everything you need to set before optimizing
+    3. Build `Optimize` method to be called on each layer so it can return delta weights and delta bias also if 
+       you need to update some iterative parameters you might need to map all of them in function return.
+    
+    """
+    
+class Adam_Optimizer():
+    @classmethod
+    def create(cls):
+        return tc.Map({"l_m":tc.Number(0) ," l_v":tc.Number(0) , "t":tc.Number(0)})
+    def optimize (self, A_prev, dA, Z ,decay_rate_1 : tc.Number, decay_rate_2 : tc.Number,
+                  epsilon :tc.Number , l_m,l_v,t):  
+                          
+         dZ = activation.backward(dA, Z).copy()          
+         # Gradients for each layer
+         g = einsum("kj,ki->ij", [dZ, A_prev])              
+         t=t+1           
+         # Computing 1st and 2nd moment for each layer
+         l_m = l_m * decay_rate_1 + (1- decay_rate_1) * g            
+         l_v = l_v * decay_rate_2 + (1- decay_rate_2) * (g ** 2)            
+         l_m_corrected = l_m / (1-(decay_rate_1 ** t))
+         l_v_corrected = l_v / (1-(decay_rate_2 ** t))
+         
+         # Update Weights
+         d_weights = l_m_corrected / ((l_v_corrected)**(0.5) + epsilon)                       
+         d_bias = dZ.sum(0)
+         return tc.Map({'l_m':l_m,
+                        'l_v':l_v,
+                        't':t,
+                        'd_weights': d_weights,
+                        'd_bias':d_bias})
+     
+
 
 
 
@@ -164,7 +166,7 @@ def neural_net(layers):
        
 
 
-        def train(self, inputs, cost):
+        def train(self, inputs, cost,optimizer):
             '''
             train function will take the inputs and cost function
             and give back last layer output after activation.
@@ -173,9 +175,11 @@ def neural_net(layers):
             Z : list of Output Tensors before getting applied with activation function.
             
             m : number of data rows
+            
             cost : is a cost function which takes the output and actual output as input
                  and calculate the difference (e.g. : lambda output:((output- actual_labels)**2)* learning_Rate)
-            
+                 
+           optimizer : is your selected optimizer to tune your Neural Network learning paramters.           
             
            updates : list of updated values for weights and biases.
            dA : Average Delta Error 
@@ -198,25 +202,21 @@ def neural_net(layers):
 
             updates = []
             
-            initials=optimizer.create()
-            l_m,l_v,t=initials['l_m'],initials['l_v'],initials['t']
+
+            l_m,l_v,t=optimizer['l_m'],optimizer['l_v'],optimizer['t']
             
             for i in reversed(range(0, num_layers)):
                 
                 updated_values = optimizer.optimize(A[i],dA,Z[i+1],decay_rate_1=0.9,
-                                   decay_rate_2=0.99,epsilon=10e-8 ,l_m ,l_v ,t)
+                                                    decay_rate_2=0.99,epsilon=(10e-8) ,l_m ,l_v ,t)
                 l_m,l_v,t=updated_values['l_m'],updated_values['l_v'],updated_values['t']
                 d_weights,d_bias=updated_values['d_weights'],updated_values['d_bias']               
-                update= optimizer.update(d_weights,d_bias)
+                update= layers[i].update(d_weights,d_bias)
                 updates.append(update)
                 
-                #dA, d_weights, d_bias = layers[i].gradients(A[i], dA, Z[i + 1])
-                #update = layers[i].update(d_weights, d_bias)               
-                #update= layers[i].adam(A[i], dA, Z[i + 1] ,decay_rate_1=0.9,
-                #                      decay_rate_2=0.99,epsilon=10e-8,l_m,l_v,t=t)
-                
+            optimizer_state = l_m,l_v,t
                
 
-            return After(updates, A[-1])
+            return After(updates, A[-1]) , optimizer_state
 
     return DNN(layers)
