@@ -9,8 +9,14 @@ from .collection import Collection
 from .bound import Range
 
 
-class Schema(Tuple):
+class Schema(object):
     """A :class:`BTree` schema which comprises a tuple of :class:`Column` s."""
+
+    def __init__(self, columns):
+        self.columns = columns
+
+    def __json__(self):
+        return to_json(self.columns)
 
 
 class BTree(Collection):

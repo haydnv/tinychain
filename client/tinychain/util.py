@@ -72,6 +72,9 @@ class Context(object):
         return f"execution context with data {data}"
 
     def is_defined(self, name):
+        if isinstance(name, URI):
+            name = name.id()
+
         return name in self.form
 
 

@@ -23,11 +23,20 @@ class Schema(object):
     def __json__(self):
         return to_json([self.shape, self.dtype])
 
+    def __repr__(self):
+        return f"tensor schema with shape {self.shape} and dtype {self.dtype}"
+
 
 class Tensor(Collection):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
+
+    @classmethod
+    def create(cls, shape, dtype=F32):
+        """Create a new, empty `Tensor`. Call this method to initialize a persistent `Tensor` in a `Chain`."""
+
+        return cls(ref.Get(cls, Schema(shape, dtype)))
 
     @classmethod
     def load(cls, shape, dtype, data):

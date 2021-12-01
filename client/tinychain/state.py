@@ -1,4 +1,4 @@
-"""TinyChain `State` s, such as `Map`, `Tuple`, and `Op`."""
+"""TinyChain `State` s, like `Map`, `Tuple`, and `Op`."""
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -130,6 +130,16 @@ class Map(State):
     def __ne__(self, other):
         return self.ne(other)
 
+    def __ref__(self, name):
+        form = form_of(self)
+        if hasattr(form, "__iter__"):
+            ref_form = {k: get_ref(form[k], f"{name}/{k}") for k in form}
+            return self.__class__(ref_form)
+        elif hasattr(form, "__ref__"):
+            return self.__class__(get_ref(form, name))
+        else:
+            return self.__class__(URI(name))
+
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
 
@@ -172,6 +182,16 @@ class Tuple(State):
 
     def __ne__(self, other):
         return self.ne(other)
+
+    def __ref__(self, name):
+        form = form_of(self)
+        if hasattr(form, "__iter__"):
+            ref_form = [get_ref(v, f"{name}/{i}") for i, v in enumerate(form)]
+            return self.__class__(ref_form)
+        if hasattr(form, "__ref__"):
+            return self.__class__(get_ref(form, name))
+        else:
+            return self.__class__(URI(name))
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
