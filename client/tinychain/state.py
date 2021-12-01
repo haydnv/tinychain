@@ -196,7 +196,10 @@ class Tuple(State):
         return self._get("len", rtype=UInt)
 
     def fold(self, item_name, initial_state, op):
-        """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results."""
+        """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results.
+
+        `op` must be a POST Op. The stream item to handle will be passed with the given `item_name` as its name.
+        """
 
         rtype = type(initial_state) if isinstance(initial_state, State) else State
         return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), rtype)
@@ -269,7 +272,7 @@ class Stream(State):
     def fold(self, item_name, initial_state, op):
         """Run the given `op` for each item in this `Stream` along with the previous result.
 
-        `op` must be a POST Op. The stream item to handle will be passed with the given `item_key` as its name.
+        `op` must be a POST Op. The stream item to handle will be passed with the given `item_name` as its name.
         """
 
         rtype = type(initial_state) if isinstance(initial_state, State) else State

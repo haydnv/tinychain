@@ -17,7 +17,7 @@ class LinearAlgebraTests(ClientTest):
 
         expected = np.diag(x)
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, {tc.uri(tc.tensor.Dense): [[[3], tc.uri(tc.I32)], expected.tolist()]})
+        self.assertEqual(actual, expect_dense(expected, tc.I32))
 
     def testSetDiagonal(self):
         size = 3
@@ -32,7 +32,7 @@ class LinearAlgebraTests(ClientTest):
 
         x[range(size), range(size)] = diag
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, {tc.uri(tc.tensor.Dense): [[shape, tc.uri(tc.I32)], x.flatten().tolist()]})
+        self.assertEqual(actual, expect_dense(x, tc.I32))
 
     def testMatmul(self):
         l = np.random.random([2, 3, 4])
@@ -81,6 +81,22 @@ class LinearAlgebraTests(ClientTest):
         response = self.host.post(ENDPOINT, cxt)
         self.assertTrue(response)
 
+    @unittest.skip
+    def testSlogdet(self):
+        x = np.arange(4)
+
+        cxt = tc.Context()  # initialize an Op context
+        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())  # load `x` as a TinyChain tensor
+        cxt.slogdet = tc.linalg.slogdet(cxt.x)
+
+        # the /transact/hypothetical endpoint will attempt to resolve whatever state you send it
+        # in this case it will return the last state set in `cxt`
+        actual_sign, actual_logdet = self.host.post(ENDPOINT, cxt)
+
+        expected_sign, expected_logdet = np.linalg.slogdet(x)
+        self.assertEqual(actual_sign, expected_sign)
+        self.assertEqual(actual_logdet, expect_dense(expected_logdet, tc.F32))
+
     def testSVD(self):
         m = 4
         n = 3
@@ -91,6 +107,10 @@ class LinearAlgebraTests(ClientTest):
         cxt.result = tc.linalg.svd(cxt.matrix)
 
         self.assertRaises(tc.error.NotImplemented, lambda: self.host.post(ENDPOINT, cxt))
+
+
+def expect_dense(x, dtype):
+    return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}
 
 
 if __name__ == "__main__":

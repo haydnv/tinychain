@@ -117,6 +117,14 @@ def qr(cxt, x: Tensor) -> Tuple:
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
 
 
+def slogdet(x):
+    """Compute the sign and log of the absolute value of the determinant of one or more square matrices."""
+
+    # TODO: implement slogdet, cf. https://www.tensorflow.org/api_docs/python/tf/linalg/slogdet
+
+    raise NotImplementedError(f"slogdet({x})")
+
+
 def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
 
