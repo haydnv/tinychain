@@ -38,7 +38,7 @@ class DNNTests(ClientTest):
         shape = (input_size, output_size)
         bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(output_size).tolist())
         weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(input_size * output_size).tolist())
-        return tc.ml.dnn.layer(weights, bias, activation)
+        return tc.ml.dnn.DNNLayer.load(weights, bias, activation)
 
     def testNot(self):
         cxt = tc.Context()
@@ -47,7 +47,7 @@ class DNNTests(ClientTest):
         cxt.labels = Dense.load([2, 1], tc.Bool, [False, True])
 
         cxt.input_layer = self.create_layer(1, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
 
@@ -58,7 +58,7 @@ class DNNTests(ClientTest):
         cxt.labels = Dense.load([2, 1], tc.Bool, [True, False])
 
         cxt.input_layer = self.create_layer(1, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
 
@@ -74,7 +74,7 @@ class DNNTests(ClientTest):
         cxt.labels = Dense.load([4, 1], tc.Bool, [True, True, True, False])
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
-        cxt.nn = tc.ml.dnn.neural_net([cxt.input_layer])
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
 
@@ -121,7 +121,7 @@ class CNNTests(ClientTest):
 
         weights, bias = cls.conv(1, input_shape, output_shape, kernel_shape)
 
-        return tc.ml.cnn.conv_1d(input_shape, weights, bias, stride, activation)
+        return tc.ml.cnn.Conv1D.load(input_shape, weights, bias, stride, activation)
 
     @classmethod
     def conv_2d(cls, input_shape, output_shape, kernel_shape, stride=1, activation=tc.ml.Sigmoid()):
@@ -130,7 +130,7 @@ class CNNTests(ClientTest):
 
         weights, bias = cls.conv(2, input_shape, output_shape, kernel_shape)
 
-        return tc.ml.cnn.conv_2d(input_shape, weights, bias, stride, activation)
+        return tc.ml.cnn.Conv2D.load(input_shape, weights, bias, stride, activation)
 
     def test1D(self):
         data = [

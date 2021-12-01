@@ -1,6 +1,6 @@
 from abc import abstractmethod, ABC
 
-from tinychain.state import Tuple
+from tinychain.state import Map, Tuple
 
 
 class Activation(ABC):
@@ -30,13 +30,23 @@ class ReLU(Activation):
         return (Z > 0) * dA
 
 
-class Layer(Tuple):
+class Layer(Map):
     @abstractmethod
     def eval(self, inputs):
         pass
 
 
 class NeuralNet(Tuple):
+    @classmethod
+    @abstractmethod
+    def create(cls, *args, **kwargs):
+        pass
+
+    @classmethod
+    @abstractmethod
+    def load(cls, *args, **kwargs):
+        pass
+
     @abstractmethod
     def eval(self, inputs):
         pass
