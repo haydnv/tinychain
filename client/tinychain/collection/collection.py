@@ -47,17 +47,7 @@ class Collection(State):
         if is_ref(data):
             raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
 
-        name = f"{cls.__name__}_load_{format(id(data), 'x')}"
-
-        class Load(cls):
-            def __ns__(self, cxt):
-                if not cxt.is_defined(name):
-                    setattr(cxt, name, Put(cls, schema, data))
-
-            def __ref__(self, name):
-                return cls(URI(name))
-
-        return Load(URI(name))
+        return cls(Put(cls, schema, data))
 
     def copy(self):
         """Return a copy of this `Collection`."""
