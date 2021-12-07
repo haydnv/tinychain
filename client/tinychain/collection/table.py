@@ -193,6 +193,6 @@ def _handle_bounds(bounds):
         return bounds
 
     return {
-        col: Range.from_slice(val) if isinstance(val, slice) else val
-        for col, val in dict(bounds).items()
+        col: Range.from_slice(bounds[col]) if isinstance(bounds[col], slice) else bounds[col]
+        for col in bounds
     }

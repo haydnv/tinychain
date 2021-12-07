@@ -18,6 +18,10 @@ class State(object):
 
         if isinstance(form, URI):
             self.__uri__ = form
+        elif isinstance(form, TypeForm) and form_of(form) is not None:
+            self.__uri__ = uri(form)
+        elif reflect.is_ref(form):
+            self.__uri__ = uri(form)
 
         reflect.meta.gen_headers(self)
 
@@ -107,25 +111,29 @@ class Map(State):
     __uri__ = uri(State) + "/map"
 
     def __init__(self, *args, **kwargs):
-        if args:
-            if kwargs:
-                raise ValueError(f"Map accepts a form or kwargs, not both (got {kwargs})")
-
+        if len(args) == 1:
             [form] = args
-            State.__init__(self, form)
+            if kwargs:
+                raise ValueError(f"Map accepts a form or kwargs, not both (got {args}, {kwargs})")
+
+            if isinstance(form, dict):
+                return State.__init__(self, TypeForm(None, form))
+            elif hasattr(form, "__form__") and isinstance(form_of(form), TypeForm):
+                return State.__init__(self, form_of(form))
+            else:
+                return State.__init__(self, form)
+        elif len(args) == 0:
+            return State.__init__(self, TypeForm(None, kwargs))
         else:
-            State.__init__(self, kwargs)
+            raise ValueError(f"Map accepts exactly one form argument (got {args})")
 
     def __eq__(self, other):
         return self.eq(other)
 
     def __getitem__(self, key):
         form = form_of(self)
-        if hasattr(form, "__getitem__"):
-            rtype = type(form[key]) if issubclass(type(form[key]), State) else State
-            return self._get("", key, rtype)
-        else:
-            return self._get("", key)
+        rtype = type(form[key]) if isinstance(form, TypeForm) else State
+        return self._get("", key, rtype)
 
     def __json__(self):
         return to_json(form_of(self))
@@ -135,11 +143,10 @@ class Map(State):
 
     def __ref__(self, name):
         form = form_of(self)
-        if hasattr(form, "__iter__"):
-            ref_form = {k: get_ref(form[k], f"{name}/{k}") for k in form}
+        if isinstance(form, TypeForm):
+            type_data = {k: get_ref(form[k], f"{name}/{k}") for k in form}
+            ref_form = TypeForm(URI(name), type_data)
             return self.__class__(ref_form)
-        elif hasattr(form, "__ref__"):
-            return self.__class__(get_ref(form, name))
         else:
             return self.__class__(URI(name))
 
@@ -166,6 +173,10 @@ class Tuple(State):
 
     __uri__ = uri(State) + "/tuple"
 
+    def __init__(self, form):
+        form = TypeForm(None, form) if hasattr(form, "__iter__") else form
+        State.__init__(self, form)
+
     def __add__(self, other):
         return self.extend(other)
 
@@ -190,7 +201,7 @@ class Tuple(State):
         form = form_of(self)
         if hasattr(form, "__iter__"):
             ref_form = [get_ref(v, f"{name}/{i}") for i, v in enumerate(form)]
-            return self.__class__(ref_form)
+            return self.__class__(TypeForm(name, ref_form))
         if hasattr(form, "__ref__"):
             return self.__class__(get_ref(form, name))
         else:
@@ -320,3 +331,37 @@ class Instance(State):
 
     __uri__ = uri(State) + "/object/instance"
 
+
+# Private helper classes
+
+class TypeForm(object):
+    def __init__(self, form, type_data):
+        if isinstance(form, URI):
+            self.__uri__ = form
+
+        self.__form__ = form
+        self.type_data = type_data
+
+    def __deps__(self):
+        deps = set() if self.__form__ is None else requires(self.__form__)
+        deps.update(requires(self.type_data))
+        return deps
+
+    def __getitem__(self, key):
+        return self.type_data[key]
+
+    def __iter__(self):
+        return iter(self.type_data)
+
+    def __ns__(self, cxt):
+        if form_of(self) is not None:
+            deanonymize(form_of(self), cxt)
+
+        deanonymize(self.type_data, cxt)
+
+    def __repr__(self):
+        return f"State form {self.__form__} with associated type data {self.type_data}"
+
+    def __json__(self):
+        form = form_of(self)
+        return to_json(self.type_data if form is None else form)
