@@ -32,6 +32,9 @@ class State(object):
         else:
             return {str(uri(self)): [to_json(form)]}
 
+    def __id__(self):
+        return hex_id(form_of(self))
+
     def __ns__(self, cxt):
         deanonymize(form_of(self), cxt)
 

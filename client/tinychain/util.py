@@ -106,6 +106,26 @@ def get_ref(subject, name):
         return subject
 
 
+def hex_id(state_or_ref):
+    """
+    Return a unique hexadecimal string identifying the given `state_or_ref` based on its memory address.
+
+    This is similar to Python's built-in `id` function but has the advantage that it will still produce the correct
+    unique ID even for wrapper types. For example:
+
+    ```python
+    x = 1
+    n = Number(x)
+    assert hex_id(n) == hex_id(x)  # this won't work with the built-in `id` function
+    ```
+    """
+
+    if hasattr(state_or_ref, "__id__"):
+        return state_or_ref.__id__()
+
+    return format(id(state_or_ref), 'x')
+
+
 class URI(object):
     """
     An absolute or relative link to a TinyChain state.

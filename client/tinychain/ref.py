@@ -4,7 +4,7 @@ Reference types.
 """
 
 from tinychain.reflect import is_conditional
-from tinychain.util import deanonymize, form_of, get_ref, requires, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, get_ref, hex_id, requires, to_json, uri, URI
 
 
 class Ref(object):
@@ -356,7 +356,7 @@ class MethodSubject(object):
 
         deanonymize(self.subject, cxt)
 
-        name = f"{self.subject.__class__.__name__}_{format(id(self.subject), 'x')}"
+        name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
         self.__uri__ = URI(name).append(self.method_name)
 
         if not cxt.is_defined(name):
