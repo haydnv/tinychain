@@ -1,13 +1,11 @@
-from tinychain.chain import Chain, Sync
-from tinychain.cluster import Cluster
 from tinychain.collection import Column
 from tinychain.collection.table import Table
-from tinychain.collection.tensor import einsum, Sparse
+from tinychain.collection.tensor import Sparse
 from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.ref import After, Get, If, MethodSubject, While, With
 from tinychain.state import Map, Tuple
-from tinychain.util import uri, Context, URI
+from tinychain.util import uri
 from tinychain.value import Bool, Nil, U64, String
 
 from .edge import DIM, Edge, ForeignKey
@@ -18,11 +16,7 @@ ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the 
 class Schema(object):
     """A :class:`Graph` schema which comprises a set of :class:`Table` s and edges between :class:`Table` columns."""
 
-    def __init__(self, chain):
-        if not issubclass(chain, Chain):
-            raise ValueError(f"default Chain type must be a subclass of Chain, not {chain}")
-
-        self.chain = chain
+    def __init__(self):
         self.tables = {}
         self.edges = {}
 
@@ -62,6 +56,7 @@ class Schema(object):
 
             if not has_index:
                 raise ValueError(f"there is no index on {edge.to_table} to support the foreign key on {edge.column}")
+
         elif to_table.key != [pk]:
             raise ValueError(f"Graph node {edge.to_table} self-reference must be to the primary key, not {edge.column}")
 
@@ -69,7 +64,7 @@ class Schema(object):
         return self
 
 
-class Graph(Cluster):
+class Graph(Map):
     """
     A graph database consisting of a set of :class:`Table` s with :class:`U64` primary keys which serve as node IDs.
 
@@ -80,41 +75,42 @@ class Graph(Cluster):
     with the `add_edge` and `remove_edge` methods.
     """
 
-    def _configure(self):
-        schema = self._schema()
+    def __init__(self, form):
+        if not isinstance(form, Schema):
+            return Map.__init__(self, form)
 
-        if schema.tables:
-            assert schema.chain is not None
+        schema = form
+        form = {}
 
         for (label, edge) in schema.edges.items():
             if edge.from_table == edge.to_table:
-                setattr(self, label, schema.chain(Edge.zeros([DIM, DIM], Bool)))
+                form[label] = Edge.zeros([DIM, DIM], Bool)
             else:
-                setattr(self, label, schema.chain(ForeignKey.zeros([DIM, DIM], Bool)))
+                form[label] = ForeignKey.zeros([DIM, DIM], Bool)
 
         for name in schema.tables:
             if hasattr(self, name):
                 raise ValueError(f"Graph already has an entry called {name}")
 
-            setattr(self, name, schema.chain(graph_table(self, schema, name)))
+            form[name] = graph_table(self, schema, name)
 
-    def _schema(self):
-        return Schema(Sync)
+        return Map.__init__(self, form)
 
     def add_edge(self, label, from_node, to_node):
         """Mark `from_node` -> `to_node` as `True` in the edge :class:`Tensor` with the given `label`."""
 
-        edge = Sparse(Get(uri(self), label))
-        return edge[from_node, to_node].write(True)
+        return self[label][from_node, to_node].write(True)
 
     def remove_edge(self, label, from_node, to_node):
         """Mark `from_node` -> `to_node` as `False` in the edge :class:`Tensor` with the given `label`."""
 
-        edge = Sparse(Get(uri(self), label))
-        return edge[from_node, to_node].write(False)
+        return self[label][from_node, to_node].write(False)
 
 
 def graph_table(graph, schema, table_name):
+    if uri(graph).startswith("/state"):
+        raise RuntimeError("Graph requires an absolute URI--set this using your subclass's __uri__ attribute")
+
     table_schema = schema.tables[table_name]
 
     if len(table_schema.key) != 1:
@@ -127,7 +123,7 @@ def graph_table(graph, schema, table_name):
     def delete_row(edge, adjacent, row):
         delete_from = adjacent[row[edge.column]].write(False)
 
-        to_table = Table(URI(f"$self/{edge.to_table}"))
+        to_table = graph[edge.to_table]
         if edge.cascade:
             delete_to = (
                 to_table.delete({edge.column: row[edge.column]}),
@@ -145,7 +141,7 @@ def graph_table(graph, schema, table_name):
             return delete_to
 
     def maybe_update_row(edge, adjacent, row, cond, new_id):
-        to_table = Table(URI(f"$self/{edge.to_table}"))
+        to_table = graph[edge.to_table]
 
         args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
 
@@ -163,7 +159,7 @@ def graph_table(graph, schema, table_name):
                 if table_name not in [edge.from_table, edge.to_table]:
                     continue
 
-                adjacent = Sparse(uri(graph).append(label))
+                adjacent = graph[label]
                 deletes.append(delete_row(edge, adjacent, row))
 
             return If(row.is_some(), After(deletes, Table.delete_row(self, key)))
@@ -182,7 +178,7 @@ def graph_table(graph, schema, table_name):
             def read_node(row: Tuple):
                 return self[row[0]]
 
-            return Sparse(uri(node_ids)).elements().map(read_node)
+            return Sparse(node_ids).elements().map(read_node)
 
         def update_row(self, key, values):
             row = self[key]
@@ -192,7 +188,7 @@ def graph_table(graph, schema, table_name):
                     continue
 
                 if any(col.name == edge.column for col in table_schema.values):
-                    adjacent = Sparse(uri(graph).append(label))
+                    adjacent = graph[label]
                     old_id = row[edge.column]
                     new_id = values[edge.column]
                     update = maybe_update_row(edge, adjacent, values.contains(edge.column), old_id, new_id)
@@ -210,7 +206,7 @@ def graph_table(graph, schema, table_name):
                 if table_name not in [edge.from_table, edge.to_table]:
                     continue
 
-                adjacent = Sparse(uri(graph).append(label))
+                adjacent = graph[label]
 
                 if any(col.name == edge.column for col in table_schema.values):
                     value_index = [col.name for col in table_schema.values].index(edge.column)

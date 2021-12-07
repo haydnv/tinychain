@@ -1,7 +1,7 @@
 import inspect
 
 from tinychain.state import State
-from tinychain.util import form_of, to_json, uri, URI
+from tinychain.util import form_of, get_ref, to_json, uri, URI
 
 
 def gen_headers(instance):
@@ -21,21 +21,19 @@ class Meta(type):
         if len(mro) < 2:
             raise ValueError("TinyChain class must extend a subclass of State")
 
-        parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
+        instance_uri = URI("self")
+
+        parent_members = dict(inspect.getmembers(mro[1](instance_uri)))
 
         class Header(cls):
             pass
 
-        instance_uri = URI("self")
         header = Header(instance_uri)
         instance = cls(instance_uri)
 
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or isinstance(attr, URI):
                 continue
-            elif hasattr(attr, "accessor"):
-                if attr.accessor:
-                    continue
             elif inspect.ismethod(attr) and attr.__self__ is cls:
                 # it's a @classmethod
                 continue
@@ -43,7 +41,14 @@ class Meta(type):
             if isinstance(attr, MethodStub):
                 setattr(header, name, attr.method(instance, name))
             elif isinstance(attr, State):
-                setattr(header, name, type(attr)(instance_uri.append(name)))
+                member_uri = instance_uri.append(name)
+                attr_ref = get_ref(attr, member_uri)
+
+                if not uri(attr_ref) == member_uri:
+                    raise RuntimeError(f"failed to assign URI {member_uri} to instance attribute {attr_ref} "
+                                       + f"(assigned URI is {uri(attr_ref)})")
+
+                setattr(header, name, attr_ref)
             else:
                 setattr(header, name, attr)
 
@@ -51,9 +56,6 @@ class Meta(type):
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or isinstance(attr, URI):
                 continue
-            elif hasattr(attr, "accessor"):
-                if attr.accessor:
-                    continue
             elif name in parent_members:
                 if attr is parent_members[name]:
                     continue

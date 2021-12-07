@@ -59,7 +59,7 @@ class Edge(Sparse):
         traversal = If(
             shape.eq([DIM]),
             While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
-            BadRequest(f"an edge input vector has shape [{DIM}], not {{{shape}}}", shape=shape))
+            BadRequest(String(f"an edge input vector has shape [{DIM}], not {{{shape}}}").render(shape=shape)))
 
         return Sparse.sub(Map(traversal)["neighbors"], node_ids)
 

@@ -356,11 +356,14 @@ class MethodSubject(object):
 
         deanonymize(self.subject, cxt)
 
-        name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
-        self.__uri__ = URI(name).append(self.method_name)
+        if uri(self.subject).startswith("/state"):
+            name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
+            self.__uri__ = URI(name).append(self.method_name)
 
-        if not cxt.is_defined(name):
-            setattr(cxt, name, self.subject)
+            if not cxt.is_defined(name):
+                setattr(cxt, name, self.subject)
+        else:
+            self.__uri__ = uri(self.subject).append(self.method_name)
 
     def __json__(self):
         if self.__uri__ is None:

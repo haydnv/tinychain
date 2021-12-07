@@ -318,10 +318,11 @@ def uri(subject):
 
     if hasattr(subject, "__uri__"):
         return subject.__uri__
-    elif hasattr(type(subject), "__uri__"):
+
+    if hasattr(type(subject), "__uri__"):
         return uri(type(subject))
-    else:
-        raise AttributeError(f"{subject} has no URI")
+
+    raise AttributeError(f"{subject} has no URI")
 
 
 def use(cls):

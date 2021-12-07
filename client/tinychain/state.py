@@ -186,13 +186,10 @@ class Tuple(State):
     def __json__(self):
         return to_json(form_of(self))
 
-    def __getitem__(self, i):
+    def __getitem__(self, key):
         form = form_of(self)
-        if hasattr(form, "__iter__"):
-            rtype = type(form[i]) if issubclass(type(form[i]), State) else State
-            return self._get("", i, rtype)
-        else:
-            return self._get("", i)
+        rtype = type(form[key]) if isinstance(form, TypeForm) else State
+        return self._get("", key, rtype)
 
     def __ne__(self, other):
         return self.ne(other)
