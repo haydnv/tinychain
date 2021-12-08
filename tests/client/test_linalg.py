@@ -97,6 +97,7 @@ class LinearAlgebraTests(ClientTest):
         self.assertEqual(actual_sign, expected_sign)
         self.assertEqual(actual_logdet, expect_dense(expected_logdet, tc.F32))
 
+    @unittest.skip
     def testSVD(self):
         m = 4
         n = 3

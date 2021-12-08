@@ -6,7 +6,6 @@ from tinychain.collection.tensor import einsum, Dense
 from tinychain.ml import Layer, NeuralNet, Sigmoid
 from tinychain.ref import After
 from tinychain.state import Map
-from tinychain.util import form_of
 
 
 class DNNLayer(Layer):

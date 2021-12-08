@@ -18,8 +18,6 @@ class State(object):
 
         if isinstance(form, URI):
             self.__uri__ = form
-        elif isinstance(form, TypeForm) and form_of(form) is not None:
-            self.__uri__ = uri(form)
         elif reflect.is_ref(form):
             self.__uri__ = uri(form)
 
@@ -176,8 +174,11 @@ class Tuple(State):
     __uri__ = uri(State) + "/tuple"
 
     def __init__(self, form):
-        form = TypeForm(None, form) if hasattr(form, "__iter__") else form
-        State.__init__(self, form)
+        if hasattr(form, "__form__") and isinstance(form_of(form), TypeForm):
+            return State.__init__(self, form_of(form))
+        else:
+            form = TypeForm(None, form) if hasattr(form, "__iter__") else form
+            return State.__init__(self, form)
 
     def __add__(self, other):
         return self.extend(other)
@@ -336,8 +337,14 @@ class Instance(State):
 
 class TypeForm(object):
     def __init__(self, form, type_data):
-        if isinstance(form, URI):
-            self.__uri__ = form
+        while isinstance(type_data, TypeForm):
+            if form is None:
+                form = type_data.__form__
+
+            type_data = type_data.type_data
+
+        if reflect.is_ref(form):
+            self.__uri__ = uri(form)
 
         self.__form__ = form
         self.type_data = type_data
