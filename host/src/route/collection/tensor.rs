@@ -655,37 +655,6 @@ impl<T> From<T> for SplitHandler<T> {
     }
 }
 
-struct SVDHandler<T> {
-    matrix: T,
-}
-
-impl<'a, T> Handler<'a> for SVDHandler<T>
-where
-    T: TensorAccess + Send + 'a,
-    Tensor: From<T>,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                key.expect_none()?;
-                svd(self.matrix)
-                    .map_ok(Tensor::from)
-                    .map_ok(State::from)
-                    .await
-            })
-        }))
-    }
-}
-
-impl<T> From<T> for SVDHandler<T> {
-    fn from(matrix: T) -> Self {
-        Self { matrix }
-    }
-}
-
 struct TileHandler;
 
 impl<'a> Handler<'a> for TileHandler {
@@ -1291,7 +1260,6 @@ where
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
-            "svd" => Some(Box::new(SVDHandler::from(tensor))),
 
             // other
             "split" => Some(Box::new(SplitHandler::from(tensor))),

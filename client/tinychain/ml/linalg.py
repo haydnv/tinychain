@@ -128,6 +128,4 @@ def slogdet(x):
 def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
 
-    rtype = type(matrix) if isinstance(matrix, Tensor) else Tensor
-    op = Get(MethodSubject(matrix, "svd"))
-    return rtype(op)
+    raise NotImplementedError("singular value decomposition")
