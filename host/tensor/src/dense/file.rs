@@ -21,8 +21,7 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
-use crate::transform;
-use crate::{coord_bounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
+use crate::{coord_bounds, transform, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
 
 use super::access::BlockListTranspose;
 use super::{DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
@@ -224,7 +223,7 @@ where
             let block_id = BlockId::from(0u64);
             let mut block = self.file.write_block(txn_id, block_id).await?;
 
-            block.sort(true)?;
+            block.sort(true).map_err(array_err)?;
             return Ok(());
         }
 
@@ -239,9 +238,10 @@ where
             let (mut left, mut right) = try_join!(left, right)?;
 
             let mut block = Array::concatenate(&left, &right);
-            block.sort(true)?;
+            block.sort(true).map_err(array_err)?;
 
-            let (left_sorted, right_sorted) = block.split(PER_BLOCK)?;
+            let (left_sorted, right_sorted) = block.split(PER_BLOCK).map_err(array_err)?;
+
             *left = left_sorted;
             *right = right_sorted;
         }
@@ -267,7 +267,7 @@ where
 
         (*block)
             .set_value(offset as usize, value)
-            .map_err(TCError::from)
+            .map_err(array_err)
     }
 
     async fn overwrite<B: DenseAccess<FD, FS, D, T>>(&self, txn: T, value: B) -> TCResult<()> {
@@ -460,11 +460,11 @@ where
                             af::sum_all(&af::eq(&block_offsets, af_block_id.deref(), true));
                         let end = start + len as usize;
                         let indices = indices.slice(start, end);
-                        let array = array.slice(start, end).map_err(TCError::from)?;
+                        let array = array.slice(start, end).map_err(array_err)?;
 
                         let mut block = self.file.write_block(txn_id, block_id.into()).await?;
 
-                        block.set(&indices, &array)?;
+                        block.set(&indices, &array).map_err(array_err)?;
 
                         start = end;
                     }
@@ -507,7 +507,10 @@ where
                         let mut block = file.write_block(txn_id, block_id).await?;
 
                         let value = Array::constant(value, (new_start - start) as usize);
-                        (*block).set(&block_offsets.into(), &value)?;
+                        (*block)
+                            .set(&block_offsets.into(), &value)
+                            .map_err(array_err)?;
+
                         start = new_start;
                     }
 
@@ -1078,6 +1081,11 @@ impl<FD, FS, D, T> fmt::Display for BlockListFileSlice<FD, FS, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("dense Tensor slice")
     }
+}
+
+#[inline]
+fn array_err(err: afarray::ArrayError) -> TCError {
+    TCError::new(ErrorType::BadRequest, err.to_string())
 }
 
 #[inline]

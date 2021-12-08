@@ -212,20 +212,6 @@ impl<'en> en::IntoStream<'en> for TCError {
     }
 }
 
-#[cfg(feature = "tensor")]
-impl From<afarray::ArrayError> for TCError {
-    fn from(cause: afarray::ArrayError) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("{}", cause);
-
-        #[cfg(not(debug_assertions))]
-        Self {
-            code: ErrorType::Internal,
-            message: format!("tensor error: {}", cause),
-        }
-    }
-}
-
 impl fmt::Debug for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
