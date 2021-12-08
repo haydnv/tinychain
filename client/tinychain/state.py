@@ -147,6 +147,8 @@ class Map(State):
             type_data = {k: get_ref(form[k], f"{name}/{k}") for k in form}
             ref_form = TypeForm(URI(name), type_data)
             return self.__class__(ref_form)
+        elif hasattr(form, "__ref__"):
+            return self.__class__(get_ref(form, name))
         else:
             return self.__class__(URI(name))
 
@@ -196,10 +198,11 @@ class Tuple(State):
 
     def __ref__(self, name):
         form = form_of(self)
-        if hasattr(form, "__iter__"):
-            ref_form = [get_ref(v, f"{name}/{i}") for i, v in enumerate(form)]
-            return self.__class__(TypeForm(name, ref_form))
-        if hasattr(form, "__ref__"):
+        if isinstance(form, TypeForm):
+            type_data = [get_ref(v, f"{name}/{i}") for i, v in enumerate(form)]
+            ref_form = TypeForm(URI(name), type_data)
+            return self.__class__(ref_form)
+        elif hasattr(form, "__ref__"):
             return self.__class__(get_ref(form, name))
         else:
             return self.__class__(URI(name))
