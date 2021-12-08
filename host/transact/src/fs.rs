@@ -19,6 +19,7 @@ use super::{Transaction, TxnId};
 /// An alias for [`Id`] used for code clarity.
 pub type BlockId = PathSegment;
 
+/// The data contained by a single block on the filesystem.
 pub trait BlockData: Clone + Send + Sync + 'static {
     fn ext() -> &'static str;
 }
@@ -72,7 +73,7 @@ pub trait File<B: Clone>: Store + Sized + 'static {
         size_hint: usize,
     ) -> TCResult<Self::Write>;
 
-    /// Create a new [`Self::Block`].
+    /// Create a new block.
     ///
     /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block_unique(

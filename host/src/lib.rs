@@ -20,6 +20,7 @@ pub use tc_value as value;
 pub use tcgeneric as generic;
 
 mod http;
+mod route;
 
 pub mod chain;
 pub mod closure;
@@ -29,7 +30,6 @@ pub mod fs;
 pub mod gateway;
 pub mod kernel;
 pub mod object;
-pub mod route;
 pub mod scalar;
 pub mod state;
 pub mod stream;

@@ -31,6 +31,7 @@ pub use view::StateView;
 
 mod view;
 
+/// Trait defining a `State` representation of a (possibly non-`State`) value.
 pub trait ToState {
     fn to_state(&self) -> State;
 }

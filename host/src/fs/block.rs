@@ -19,6 +19,7 @@ use crate::chain::ChainBlock;
 
 use super::file_ext;
 
+/// A cached filesystem block.
 #[derive(Clone)]
 pub enum CacheBlock {
     BTree(Node),

@@ -22,7 +22,7 @@ fn file_ext(path: &'_ Path) -> Option<&'_ str> {
     path.extension().and_then(|ext| ext.to_str())
 }
 
-pub fn io_err(err: io::Error) -> TCError {
+pub(crate) fn io_err(err: io::Error) -> TCError {
     match err.kind() {
         io::ErrorKind::NotFound => TCError::not_found(err),
         io::ErrorKind::PermissionDenied => TCError::internal(format!(

@@ -23,7 +23,10 @@ use tcgeneric::*;
 
 use super::{Link, TCString, Version};
 
-pub use number_general::*;
+pub use number_general::{
+    Boolean, BooleanType, Complex, ComplexType, Float, FloatInstance, FloatType, Int, IntType,
+    Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry, UInt, UIntType,
+};
 
 const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";

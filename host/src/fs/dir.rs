@@ -28,6 +28,7 @@ use crate::state::StateType;
 
 use super::{io_err, CacheBlock, File};
 
+/// A file in a directory
 #[derive(Clone)]
 pub enum FileEntry {
     BTree(File<Node>),
@@ -283,6 +284,7 @@ impl PartialEq for Contents {
 
 impl Eq for Contents {}
 
+/// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: DirLock<CacheBlock>,

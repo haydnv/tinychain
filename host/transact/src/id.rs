@@ -12,6 +12,7 @@ use tcgeneric::{Id, NetworkTime};
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
+/// A zero-values [`TxnId`].
 pub const MIN_ID: TxnId = TxnId {
     timestamp: 0,
     nonce: 0,
