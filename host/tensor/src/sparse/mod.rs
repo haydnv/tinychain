@@ -978,7 +978,7 @@ where
         let source = self.accessor.clone().accessor();
         let transform = <Number as NumberInstance>::abs;
 
-        let accessor = SparseUnary::new(source, transform, self.dtype());
+        let accessor = SparseUnary::new(source, transform, self.dtype().one().abs().class());
         Ok(SparseTensor::from(accessor))
     }
 

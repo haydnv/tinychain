@@ -45,8 +45,8 @@ structopt = "0.3"
 tbon = "~0.3.5"
 tc-btree = "0.3"
 tc-error = "0.4"
-tc-math = { version = "0.1", optional = true }
-tc-tensor = { version = "0.3", optional = true }
+tc-math = { path = "math", optional = true }
+tc-tensor = { path = "tensor", optional = true }
 tc-transact = { version = "0.10", features = ["tensor"] }
 tc-value = "0.3"
 tc-table = "0.2"

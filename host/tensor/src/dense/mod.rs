@@ -1047,7 +1047,7 @@ where
             self.blocks.clone(),
             Array::abs,
             <Number as NumberInstance>::abs,
-            NumberType::Bool,
+            self.dtype().one().abs().class(),
         );
 
         Ok(DenseTensor::from(blocks))
