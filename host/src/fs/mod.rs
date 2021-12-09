@@ -29,6 +29,6 @@ pub(crate) fn io_err(err: io::Error) -> TCError {
             "TinyChain does not have permission to access the host filesystem: {}",
             err
         )),
-        _ => TCError::internal(format!("host filesystem error: {}", err)),
+        kind => TCError::internal(format!("host filesystem error: {:?}: {}", kind, err)),
     }
 }

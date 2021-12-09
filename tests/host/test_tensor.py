@@ -236,7 +236,6 @@ class DenseTests(unittest.TestCase):
         cxt.result = tc.tensor.tile(cxt.x, 2)
 
         actual = self.host.post(ENDPOINT, cxt)
-        print(actual)
 
         expected = np.tile(x, multiples)
         self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))

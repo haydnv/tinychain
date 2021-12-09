@@ -185,7 +185,8 @@ where
         debug!("File::read_block_inner {} at {}", block_id, txn_id);
 
         let name = Self::file_name(&block_id);
-        if let Some(block) = self.version_read(&txn_id).await?.get_file(&name) {
+        let mut version_cache = self.version_write(&txn_id).await?;
+        if let Some(block) = version_cache.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             return Ok(block);
         }
@@ -214,9 +215,7 @@ where
             (size_hint, value)
         };
 
-        let block = self
-            .version_write(&txn_id)
-            .await?
+        let block = version_cache
             .create_file(name, value, size_hint)
             .map_err(io_err)?;
 
@@ -231,8 +230,8 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileLock<CacheBlock>> {
         let name = Self::file_name(&block_id);
-
-        if let Some(block) = self.version_read(&txn_id).await?.get_file(&name) {
+        let mut version_cache = self.version_write(&txn_id).await?;
+        if let Some(block) = version_cache.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             return Ok(block);
         }
@@ -253,9 +252,7 @@ where
             B::clone(&*value)
         };
 
-        let block = self
-            .version_write(&txn_id)
-            .await?
+        let block = version_cache
             .create_file(name, value, size_hint)
             .map_err(io_err)?;
 
