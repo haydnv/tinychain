@@ -3,9 +3,11 @@
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
 
 from tinychain.collection.tensor import einsum, Dense
+from tinychain.error import BadRequest
 from tinychain.ml import Layer, NeuralNet, Sigmoid
-from tinychain.ref import After
-from tinychain.state import Map
+from tinychain.ref import After, If
+from tinychain.state import Map, Tuple
+from tinychain.value import String
 
 
 class DNNLayer(Layer):
@@ -41,12 +43,16 @@ class DNNLayer(Layer):
                 return A, Z
 
             def update(self, d_weights, d_bias):
-                return self["weights"].write(self["weights"] - d_weights), self["bias"].write(self["bias"] - d_bias)
+                # TODO: why is the type information not preserved?
+                weights = Dense(self["weights"])
+                bias = Dense(self["bias"])
+                return weights.write(weights - d_weights), bias.write(bias - d_bias)
 
             def write(self, weights, bias):
-                return self["weights"].write(weights), self["bias"].write(bias)
+                # TODO: why is the type information not preserved?
+                return Dense(self["weights"]).write(weights), Dense(self["bias"]).write(bias)
 
-        return _DNNLayer(Map(weights=weights, bias=bias))
+        return _DNNLayer({"weights": weights, "bias": bias})
 
     def eval(self, inputs):
         raise NotImplementedError(self.ERR_BUILDER)
@@ -64,16 +70,18 @@ class DNN(NeuralNet):
             `shape` a list of tuples of the form `input_size, output_size` or `input_size, output_size, activation`
         """
 
-        layers = [Layer.create(*ioa) for ioa in shape]
+        layers = [DNNLayer.create(*ioa) for ioa in shape]
         return cls.load(layers)
 
     @classmethod
     def load(cls, layers):
+        n = len(layers)
+
         class DNN(cls):
             def eval(self, inputs):
-                state = layers[0].eval(inputs)
-                for i in range(1, len(layers)):
-                    state = layers[i].eval(state)
+                state = self[0].eval(inputs)
+                for i in range(1, n):
+                    state = self[i].eval(state)
 
                 return state
 
@@ -81,8 +89,8 @@ class DNN(NeuralNet):
                 A = [inputs]
                 Z = [None]
 
-                for layer in layers:
-                    A_l, Z_l = layer.train_eval(A[-1])
+                for i in range(n):
+                    A_l, Z_l = self[i].train_eval(A[-1])
                     A.append(A_l.copy())
                     Z.append(Z_l)
 
@@ -90,11 +98,22 @@ class DNN(NeuralNet):
                 dA = cost(A[-1]).sum() / m
 
                 updates = []
-                for i in reversed(range(0, len(layers))):
-                    dA, d_weights, d_bias = layers[i].gradients(A[i], dA, Z[i + 1])
-                    update = layers[i].update(d_weights, d_bias)
+                for i in reversed(range(0, n)):
+                    dA, d_weights, d_bias = self[i].gradients(A[i], dA, Z[i + 1])
+                    update = self[i].update(d_weights, d_bias)
                     updates.append(update)
 
                 return After(updates, A[-1])
+
+            def write(self, layers):
+                updates = []
+                for i in range(n):
+                    w, b = Tuple(layers[i]).unpack(2)
+                    updates.append(self[i].write(w, b))
+
+                err_msg = (String("DNN.write expected {{exp}} layers but found {{act}}")
+                           .render(exp=n, act=layers.len()))
+
+                return If(layers.len() == n, updates, BadRequest(err_msg))
 
         return DNN(layers)
