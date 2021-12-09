@@ -85,12 +85,10 @@ class LinearAlgebraTests(ClientTest):
     def testSlogdet(self):
         x = np.arange(4)
 
-        cxt = tc.Context()  # initialize an Op context
-        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())  # load `x` as a TinyChain tensor
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
         cxt.slogdet = tc.linalg.slogdet(cxt.x)
 
-        # the /transact/hypothetical endpoint will attempt to resolve whatever state you send it
-        # in this case it will return the last state set in `cxt`
         actual_sign, actual_logdet = self.host.post(ENDPOINT, cxt)
 
         expected_sign, expected_logdet = np.linalg.slogdet(x)
