@@ -185,7 +185,7 @@ where
         debug!("File::read_block_inner {} at {}", block_id, txn_id);
 
         let name = Self::file_name(&block_id);
-        let mut version_cache = self.version_write(&txn_id).await?;
+        let mut version_cache = self.version(&txn_id).await?;
         if let Some(block) = version_cache.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             return Ok(block);
@@ -230,7 +230,7 @@ where
         block_id: fs::BlockId,
     ) -> TCResult<FileLock<CacheBlock>> {
         let name = Self::file_name(&block_id);
-        let mut version_cache = self.version_write(&txn_id).await?;
+        let mut version_cache = self.version(&txn_id).await?;
         if let Some(block) = version_cache.get_file(&name) {
             debug!("read existing version of block {} at {}", block_id, txn_id);
             return Ok(block);
@@ -261,16 +261,7 @@ where
         Ok(block)
     }
 
-    async fn version_read(&self, txn_id: &TxnId) -> TCResult<DirReadGuard<CacheBlock>> {
-        let mut versions = self.versions.write().await;
-        let version = versions
-            .get_or_create_dir(txn_id.to_string())
-            .map_err(io_err)?;
-
-        version.read().map(Ok).await
-    }
-
-    async fn version_write(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
+    async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
         let mut versions = self.versions.write().await;
         let version = versions
             .get_or_create_dir(txn_id.to_string())
@@ -321,8 +312,8 @@ where
         let (mut this_present, that_present) =
             try_join!(self.present.write(txn_id), other.present.read(txn_id))?;
 
-        let (mut this_version, mut that_version) =
-            try_join!(self.version_write(&txn_id), other.version_write(&txn_id))?;
+        let (mut this_version, that_version) =
+            try_join!(self.version(&txn_id), other.version(&txn_id))?;
 
         let mut blocks = self.blocks.write().await;
         let canon = other.canon.read().await;
@@ -370,7 +361,7 @@ where
         }
 
         let blocks = self.blocks.write().await;
-        let version = self.version_write(&txn_id).await?;
+        let version = self.version(&txn_id).await?;
 
         let block = create_block_inner(
             present,
@@ -403,7 +394,7 @@ where
         };
 
         let blocks = self.blocks.write().await;
-        let version = self.version_write(&txn_id).await?;
+        let version = self.version(&txn_id).await?;
 
         let block = create_block_inner(
             present,
@@ -430,7 +421,7 @@ where
 
             // keep the version directory in sync in case create_block is called later
             // with the same block_id
-            let mut version = self.version_write(&txn_id).await?;
+            let mut version = self.version(&txn_id).await?;
             version.delete(Self::file_name(&block_id));
         }
 
@@ -475,7 +466,7 @@ where
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
         let mut contents = self.present.write(txn_id).await?;
-        let mut version = self.version_write(&txn_id).await?;
+        let mut version = self.version(&txn_id).await?;
         for block_id in contents.drain() {
             version.delete(Self::file_name(&block_id));
         }
@@ -506,10 +497,7 @@ where
 
         {
             let present = self.present.read(*txn_id).await.expect("file block list");
-            let version = self
-                .version_write(txn_id)
-                .await
-                .expect("file block versions");
+            let version = self.version(txn_id).await.expect("file block versions");
 
             let mut canon = self.canon.write().await;
             let mut deleted = Vec::with_capacity(blocks.len());

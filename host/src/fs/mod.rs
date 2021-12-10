@@ -12,7 +12,6 @@ pub use file::*;
 
 mod block;
 mod dir;
-#[allow(unused)]
 mod file;
 
 const VERSION: Label = label(".version");
