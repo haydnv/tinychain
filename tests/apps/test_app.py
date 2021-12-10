@@ -1,17 +1,19 @@
+import math
 import numpy as np
 import unittest
 import testutils
 import tinychain as tc
 
-LEARNING_RATE = 0.01
-SHAPE = [(2, 2), (2, 1)]
+LAYER_CONFIG = [(2, 1, tc.ml.ReLU())]
+LEARNING_RATE = 0.1
+BATCH_SIZE = 100
 
 
 class App(tc.Cluster):
     __uri__ = tc.URI("/test/app")
 
     def _configure(self):
-        dnn = tc.ml.dnn.DNN.create(SHAPE)
+        dnn = tc.ml.dnn.DNN.create(LAYER_CONFIG)
         self.net = tc.chain.Sync(dnn)
 
     @tc.get_method
@@ -24,7 +26,7 @@ class App(tc.Cluster):
 
     @tc.post_method
     def train(self, inputs: tc.tensor.Dense, labels: tc.tensor.Dense):
-        output = self.net.train(inputs, lambda output: ((output - labels) ** 2) * LEARNING_RATE)
+        output = self.net.train(inputs, lambda output: (output - labels).abs() * LEARNING_RATE)
         return (labels - output).abs().sum()
 
 
@@ -37,33 +39,21 @@ class AppTests(unittest.TestCase):
         self.assertTrue(self.host.get("/test/app/up"))
 
     def testTrain(self):
-        tc.write_cluster(App, "test_app.json", overwrite=True)
-
         new_layers = []
-        for i, o in SHAPE:
-            weights = tc.tensor.Dense.load([i, o], tc.F32, np.random.random(i * o).tolist())
-            bias = tc.tensor.Dense.load([o], tc.F32, np.random.random(o).tolist())
+        for i, o, a in LAYER_CONFIG:
+            weights = load(truncated_normal(i * o).reshape([i, o]))
+            bias = load(truncated_normal(o))
             new_layers.append((weights, bias))
-
-        inputs = tc.tensor.Dense.load([4, 2], tc.Bool, [
-            True, True,
-            True, False,
-            False, True,
-            False, False,
-        ])
-
-        labels = tc.tensor.Dense.load([4, 1], tc.Bool, [
-            False,
-            True,
-            True,
-            False,
-        ])
 
         self.host.post("/test/app/reset", {"new_layers": new_layers})
 
+        inputs = np.random.random(BATCH_SIZE * 2).reshape([BATCH_SIZE, 2])
+        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5)
+
         i = 0
         while True:
-            error = self.host.post("/test/app/train", {"inputs": inputs, "labels": labels})
+
+            error = self.host.post("/test/app/train", {"inputs": load(inputs), "labels": load(labels, tc.Bool)})
             print(f"error is {error} at iteration {i}")
 
             if error < 0.5:
@@ -71,6 +61,24 @@ class AppTests(unittest.TestCase):
                 return
             else:
                 i += 1
+
+
+def truncated_normal(size, mean=0., std=None):
+    std = std if std else math.sqrt(size)
+
+    while True:
+        dist = np.random.normal(mean, std, size)
+        truncate = np.abs(dist) > mean + (std * 2)
+        if truncate.any():
+            new_dist = np.random.normal(mean, std, size) * truncate
+            dist *= np.logical_not(truncate)
+            dist += new_dist
+        else:
+            return dist
+
+
+def load(nparray, dtype=tc.F64):
+    return tc.tensor.Dense.load(nparray.shape, dtype, nparray.flatten().tolist())
 
 
 if __name__ == "__main__":

@@ -12,8 +12,9 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = 0.01
-MAX_ITERATIONS = 1000
+LEARNING_RATE = 0.1
+MAX_ITERATIONS = 500
+NUM_EXAMPLES = 100
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -43,21 +44,23 @@ class DNNTests(ClientTest):
     def testNot(self):
         cxt = tc.Context()
 
-        cxt.inputs = Dense.load([2, 1], tc.Bool, [True, False])
-        cxt.labels = Dense.load([2, 1], tc.Bool, [False, True])
+        inputs = np.random.random(NUM_EXAMPLES).reshape([NUM_EXAMPLES, 1])
+        cxt.inputs = load(inputs)
+        cxt.labels = load(inputs < 0.5, tc.Bool)
 
         cxt.input_layer = self.create_layer(1, 1, tc.ml.Sigmoid())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
 
-    def testIdentity(self):
+    def testAnd(self):
         cxt = tc.Context()
 
-        cxt.inputs = Dense.load([2, 1], tc.Bool, [True, False])
-        cxt.labels = Dense.load([2, 1], tc.Bool, [True, False])
+        inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
+        cxt.inputs = load(inputs)
+        cxt.labels = load(np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
 
-        cxt.input_layer = self.create_layer(1, 1, tc.ml.Sigmoid())
+        cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
@@ -65,13 +68,9 @@ class DNNTests(ClientTest):
     def testOr(self):
         cxt = tc.Context()
 
-        cxt.inputs = Dense.load([4, 2], tc.Bool, [
-            True, True,
-            True, False,
-            False, True,
-            False, False,
-        ])
-        cxt.labels = Dense.load([4, 1], tc.Bool, [True, True, True, False])
+        inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
+        cxt.inputs = load(inputs)
+        cxt.labels = load(np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
@@ -184,6 +183,10 @@ class CNNTests(ClientTest):
 
         response = self.host.post(ENDPOINT, cxt)
         print(response)
+
+
+def load(ndarray, dtype=tc.F32):
+    return tc.tensor.Dense.load(ndarray.shape, dtype, ndarray.flatten().tolist())
 
 
 if __name__ == "__main__":
