@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::iter::Cloned;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use futures::future::TryFutureExt;
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
@@ -13,11 +15,10 @@ use tc_value::{Number, Value};
 use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::closure::Closure;
-use crate::route::COPY;
 use crate::scalar::Scalar;
 use crate::state::State;
 
-use super::{AttributeHandler, GetHandler, Handler, PostHandler, Public, Route};
+use super::{AttributeHandler, GetHandler, Handler, PostHandler, Public, Route, COPY};
 
 struct AppendHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
@@ -54,11 +55,54 @@ where
     }
 }
 
-struct EqMapHandler<T> {
+struct MapCopyHandler<'a, T> {
+    map: &'a Map<T>,
+}
+
+impl<'a, T> Handler<'a> for MapCopyHandler<'a, T>
+where
+    T: Route + Clone + Send + fmt::Display + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                let path = TCPathBuf::from(COPY);
+                let mut copies: FuturesOrdered<_> = self
+                    .map
+                    .iter()
+                    .map(|(key, item)| {
+                        let result = Public::get(item, txn, &path, Value::default());
+                        result.map_ok(move |state| (key, state))
+                    })
+                    .collect();
+
+                let mut copy = BTreeMap::new();
+                while let Some((key, item)) = copies.try_next().await? {
+                    copy.insert(key.clone(), item);
+                }
+
+                Ok(State::Map(copy.into()))
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a Map<T>> for MapCopyHandler<'a, T> {
+    fn from(map: &'a Map<T>) -> Self {
+        Self { map }
+    }
+}
+
+struct MapEqHandler<T> {
     map: Map<T>,
 }
 
-impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for EqMapHandler<T>
+impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for MapEqHandler<T>
 where
     State: From<T>,
 {
@@ -98,7 +142,7 @@ where
     }
 }
 
-impl<T> From<Map<T>> for EqMapHandler<T> {
+impl<T> From<Map<T>> for MapEqHandler<T> {
     fn from(map: Map<T>) -> Self {
         Self { map }
     }
@@ -214,7 +258,8 @@ where
             state.route(&path[1..])
         } else if path.len() == 1 {
             match path[0].as_str() {
-                "eq" => Some(Box::new(EqMapHandler::from(self.clone()))),
+                "copy" => Some(Box::new(MapCopyHandler::from(self))),
+                "eq" => Some(Box::new(MapEqHandler::from(self.clone()))),
                 "len" => Some(Box::new(AttributeHandler::from(Number::from(
                     self.len() as u64
                 )))),
