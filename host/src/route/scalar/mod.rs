@@ -1,7 +1,8 @@
 use tc_error::TCError;
 use tc_value::{Bound, Range, Value};
-use tcgeneric::PathSegment;
+use tcgeneric::{path_label, PathLabel, PathSegment};
 
+use crate::route::AttributeHandler;
 use crate::scalar::{Scalar, ScalarType};
 use crate::state::State;
 
@@ -9,6 +10,8 @@ use super::{EchoHandler, GetHandler, Handler, Route};
 
 mod cluster;
 mod value;
+
+const COPY: PathLabel = path_label(&["copy"]);
 
 struct CastHandler {
     class: ScalarType,
@@ -62,6 +65,10 @@ impl Route for Range {
 
 impl Route for Scalar {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path == &COPY[..] {
+            return Some(Box::new(AttributeHandler::from(self.clone())));
+        }
+
         match self {
             Self::Cluster(cluster) => cluster.route(path),
             Self::Map(map) => map.route(path),
