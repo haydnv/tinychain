@@ -4,19 +4,20 @@ use std::iter::Cloned;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, Value};
-use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, Tuple};
+use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::closure::Closure;
+use crate::route::COPY;
 use crate::scalar::Scalar;
 use crate::state::State;
 
-use super::{AttributeHandler, GetHandler, Handler, PostHandler, Route};
+use super::{AttributeHandler, GetHandler, Handler, PostHandler, Public, Route};
 
 struct AppendHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
@@ -225,6 +226,46 @@ where
     }
 }
 
+struct TupleCopyHandler<'a, T> {
+    tuple: &'a Tuple<T>,
+}
+
+impl<'a, T> Handler<'a> for TupleCopyHandler<'a, T>
+where
+    T: Route + Clone + Send + fmt::Display + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                let path = TCPathBuf::from(COPY);
+                let mut copies: FuturesOrdered<_> = self
+                    .tuple
+                    .iter()
+                    .map(|item| Public::get(item, txn, &path, Value::default()))
+                    .collect();
+
+                let mut copy = Vec::with_capacity(self.tuple.len());
+                while let Some(item) = copies.try_next().await? {
+                    copy.push(item);
+                }
+
+                Ok(State::Tuple(copy.into()))
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a Tuple<T>> for TupleCopyHandler<'a, T> {
+    fn from(tuple: &'a Tuple<T>) -> Self {
+        Self { tuple }
+    }
+}
+
 struct TupleFoldHandler<'a, T> {
     tuple: &'a Tuple<T>,
 }
@@ -400,7 +441,7 @@ where
         if path.is_empty() {
             Some(Box::new(TupleHandler { tuple: self }))
         } else if let Ok(i) = usize::from_str(path[0].as_str()) {
-            if let Some(state) = self.get(i) {
+            if let Some(state) = self.deref().get(i) {
                 state.route(&path[1..])
             } else {
                 None
@@ -408,6 +449,7 @@ where
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "append" => Some(Box::new(AppendHandler::from(self))),
+                "copy" => Some(Box::new(TupleCopyHandler::from(self))),
                 "fold" => Some(Box::new(TupleFoldHandler::from(self))),
                 "len" => Some(Box::new(AttributeHandler::from(Number::from(
                     self.len() as u64
