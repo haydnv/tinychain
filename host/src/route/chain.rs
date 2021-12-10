@@ -6,7 +6,7 @@ use tcgeneric::{PathSegment, TCPath};
 
 use crate::chain::{Chain, ChainInstance, ChainType, Subject};
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
+use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, COPY};
 
 impl Route for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -116,12 +116,6 @@ struct ChainHandler<'a> {
     chain: &'a Chain,
 }
 
-impl<'a> From<&'a Chain> for ChainHandler<'a> {
-    fn from(chain: &'a Chain) -> Self {
-        Self { chain }
-    }
-}
-
 impl<'a> Handler<'a> for ChainHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -132,10 +126,41 @@ impl<'a> Handler<'a> for ChainHandler<'a> {
                 if key.is_none() {
                     Ok(self.chain.clone().into())
                 } else {
-                    Err(TCError::bad_request("invalid key for Chain", key))
+                    Err(TCError::not_implemented("chain slicing"))
                 }
             })
         }))
+    }
+}
+
+impl<'a> From<&'a Chain> for ChainHandler<'a> {
+    fn from(chain: &'a Chain) -> Self {
+        Self { chain }
+    }
+}
+
+#[allow(unused)]
+struct CopyHandler<'a> {
+    chain: &'a Chain,
+}
+
+impl<'a> Handler<'a> for CopyHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+                Err(TCError::not_implemented("copy a Chain"))
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Chain> for CopyHandler<'a> {
+    fn from(chain: &'a Chain) -> Self {
+        Self { chain }
     }
 }
 
@@ -145,6 +170,8 @@ impl Route for Chain {
 
         if path.len() == 1 && path[0].as_str() == "chain" {
             Some(Box::new(ChainHandler::from(self)))
+        } else if path == &COPY[..] {
+            Some(Box::new(CopyHandler::from(self)))
         } else {
             Some(Box::new(AppendHandler::new(self, path)))
         }
