@@ -7,7 +7,7 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_value::{TCString, Value};
-use tcgeneric::{Id, Map, PathSegment, TCPath};
+use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment, TCPath};
 
 use crate::scalar::OpRefType as ORT;
 use crate::state::State;
@@ -21,6 +21,8 @@ mod object;
 mod scalar;
 mod state;
 mod stream;
+
+const COPY: PathLabel = path_label(&["copy"]);
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b> = Box<dyn FnOnce(&'b Txn, Value) -> GetFuture<'a> + Send + 'a>;

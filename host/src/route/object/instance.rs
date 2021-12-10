@@ -1,16 +1,44 @@
 use std::fmt;
 
-use log::debug;
+use futures::future;
+use log::{debug, info};
 
 use tc_error::*;
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, COPY};
 use crate::scalar::*;
 use crate::state::{State, ToState};
 use crate::txn::Txn;
+
+struct CopyHandler<'a, T> {
+    instance: &'a T,
+}
+
+impl<'a, T> Handler<'a> for CopyHandler<'a, T>
+where
+    T: Instance + fmt::Display + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |_txn, _key| {
+            Box::pin(future::ready(Err(TCError::not_implemented(format!(
+                "{} has no /copy method",
+                self.instance
+            )))))
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
+    fn from(instance: &'a T) -> Self {
+        Self { instance }
+    }
+}
 
 struct GetMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,
@@ -157,7 +185,20 @@ where
 
         if path.is_empty() {
             debug!("routing to parent: {}", self.parent());
-            self.parent().route(path)
+
+            if let Some(handler) = self.parent().route(path) {
+                Some(handler)
+            } else if path == &COPY[..] {
+                info!("tried to copy an object with no /copy method implemented");
+                Some(Box::new(CopyHandler::from(self)))
+            } else {
+                debug!(
+                    "instance {} has no handler for {}",
+                    self,
+                    TCPath::from(path)
+                );
+                None
+            }
         } else if let Some(attr) = self.proto().get(&path[0]) {
             debug!("{} found in instance proto", &path[0]);
 

@@ -3,7 +3,7 @@ use tcgeneric::PathSegment;
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
 use crate::state::State;
 
-use super::{GetHandler, Handler, Route};
+use super::{AttributeHandler, GetHandler, Handler, Route, COPY};
 
 mod instance;
 
@@ -35,6 +35,12 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
 
 impl Route for InstanceClass {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path == &COPY[..] {
+            return Some(Box::new(AttributeHandler::from(Object::Class(
+                self.clone(),
+            ))));
+        }
+
         if path.is_empty() {
             Some(Box::new(ClassHandler { class: self }))
         } else if let Some(attribute) = self.proto().get(&path[0]) {

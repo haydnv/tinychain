@@ -1,17 +1,14 @@
 use tc_error::TCError;
 use tc_value::{Bound, Range, Value};
-use tcgeneric::{path_label, PathLabel, PathSegment};
+use tcgeneric::PathSegment;
 
-use crate::route::AttributeHandler;
 use crate::scalar::{Scalar, ScalarType};
 use crate::state::State;
 
-use super::{EchoHandler, GetHandler, Handler, Route};
+use super::{AttributeHandler, EchoHandler, GetHandler, Handler, Route, COPY};
 
 mod cluster;
 mod value;
-
-const COPY: PathLabel = path_label(&["copy"]);
 
 struct CastHandler {
     class: ScalarType,
