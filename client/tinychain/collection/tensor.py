@@ -387,6 +387,21 @@ class Dense(Tensor):
         return cls(ref.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
+    def load(cls, shape, dtype, data):
+        """
+        Load a `Dense` tensor from an existing data set.
+
+        Example: `tc.tensor.Dense.load([2, 2], tc.i32, [1, 2, 3, 4])`
+        """
+
+        if hasattr(data, "__iter__"):
+            for n in data:
+                if hasattr(n, "__iter__"):
+                    raise ValueError(f"Dense.load requires a flat list of numbers, not {n}")
+
+        return super().load(shape, dtype, data)
+
+    @classmethod
     def ones(cls, shape, dtype=F32):
         """
         Return a `Dense` tensor filled with ones.
