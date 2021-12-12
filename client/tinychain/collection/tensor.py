@@ -1,7 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.state import Map, State, Stream, Tuple
+from tinychain.state import State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
 from tinychain.value import Bool, I16, F32, Number, UInt
 
@@ -134,7 +134,7 @@ class Tensor(Collection):
     def add(self, other):
         """Return the element-wise sum of this `Tensor` and another `Tensor` or `Number`."""
 
-        return self._post("add", Map(r=other), Tensor)
+        return self._post("add", {"r": other}, Tensor)
 
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""
@@ -189,7 +189,7 @@ class Tensor(Collection):
     def div(self, other):
         """Divide this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
-        return self._post("div", Map(r=other), Tensor)
+        return self._post("div", {"r": other}, Tensor)
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
@@ -199,7 +199,7 @@ class Tensor(Collection):
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
 
-        return self._post("eq", Map(r=other), Tensor)
+        return self._post("eq", {"r": other}, Tensor)
 
     def exp(self):
         """Raise `e` to the power of this `Tensor`."""
@@ -214,27 +214,27 @@ class Tensor(Collection):
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
-        return self._post("gt", Map(r=other), self.__class__)
+        return self._post("gt", {"r": other}, self.__class__)
 
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
-        return self._post("gte", Map(r=other), Tensor)
+        return self._post("gte", {"r": other}, Tensor)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
 
-        return self._post("lt", Map(r=other), self.__class__)
+        return self._post("lt", {"r": other}, self.__class__)
 
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
 
-        return self._post("lte", Map(r=other), Tensor)
+        return self._post("lte", {"r": other}, Tensor)
 
     def logical_and(self, other):
         """Return a boolean `Tensor` with element-wise logical and values."""
 
-        return self._post("and", Map(r=other), self.__class__)
+        return self._post("and", {"r": other}, self.__class__)
 
     def logical_not(self):
         """Return a boolean `Tensor` with element-wise logical not values."""
@@ -244,12 +244,12 @@ class Tensor(Collection):
     def logical_or(self, other):
         """Return a boolean `Tensor` with element-wise logical or values."""
 
-        return self._post("or", Map(r=other), Tensor)
+        return self._post("or", {"r": other}, Tensor)
 
     def logical_xor(self, other):
         """Return a boolean `Tensor` with element-wise logical xor values."""
 
-        return self._post("xor", Map(r=other), Tensor)
+        return self._post("xor", {"r": other}, Tensor)
 
     @property
     def ndim(self):
@@ -260,17 +260,17 @@ class Tensor(Collection):
     def mul(self, other):
         """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
-        return self._post("mul", Map(r=other), self.__class__)
+        return self._post("mul", {"r": other}, self.__class__)
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
 
-        return self._post("ne", Map(r=other), self.__class__)
+        return self._post("ne", {"r": other}, self.__class__)
 
     def pow(self, other):
         """Raise this `Tensor` to the given power."""
 
-        return self._post("pow", Map(r=other), self.__class__)
+        return self._post("pow", {"r": other}, self.__class__)
 
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
@@ -317,7 +317,7 @@ class Tensor(Collection):
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
-        return self._post("sub", Map(r=other), Tensor)
+        return self._post("sub", {"r": other}, Tensor)
 
     def sum(self, axis=None):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""

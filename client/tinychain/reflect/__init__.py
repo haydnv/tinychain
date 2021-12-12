@@ -65,7 +65,16 @@ def is_op(fn):
     from .method import Method
     from .op import Op
 
-    return isinstance(fn, Method) or isinstance(fn, Op)
+    if isinstance(fn, Method) or isinstance(fn, Op):
+        return True
+    elif hasattr(fn, "__form__"):
+        return is_op(form_of(fn))
+    elif isinstance(fn, list) or isinstance(fn, tuple):
+        return any(is_op(item) for item in fn)
+    elif isinstance(fn, dict):
+        return any(is_op(fn[k]) for k in fn)
+    else:
+        return False
 
 
 def is_ref(state):
@@ -75,6 +84,10 @@ def is_ref(state):
         return True
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))
+    elif isinstance(state, list) or isinstance(state, tuple):
+        return any(is_op(item) for item in state)
+    elif isinstance(state, dict):
+        return any(is_op(state[k]) for k in state)
     else:
         return False
 

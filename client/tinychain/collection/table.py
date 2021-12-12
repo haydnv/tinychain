@@ -181,7 +181,7 @@ class Table(Collection):
         """
 
         bounds = _handle_bounds(bounds)
-        return self._post("", Map(bounds=bounds), Table)
+        return self._post("", {"bounds": bounds}, Table)
 
 
 def _handle_bounds(bounds):

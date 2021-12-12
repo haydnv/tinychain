@@ -26,7 +26,7 @@ class Collection(State):
                 table = tc.table.Table.copy_from(table_schema, btree.keys())
         """
 
-        return cls(Post(uri(cls) + "/copy_from", Map(schema=schema, source=source)))
+        return cls(Post(uri(cls) + "/copy_from", {"schema": schema, "source": source}))
 
     @classmethod
     def load(cls, schema, data):

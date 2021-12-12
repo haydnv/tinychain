@@ -237,7 +237,7 @@ class Tuple(State):
         """
 
         rtype = type(initial_state) if isinstance(initial_state, State) else State
-        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), rtype)
+        return self._post("fold", {"item_name": item_name, "value": initial_state, "op": op}, rtype)
 
     def map(self, op):
         """Construct a new `Tuple` by mapping the elements in this `Tuple` with the given `op`."""
@@ -302,7 +302,7 @@ class Stream(State):
         """
 
         rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("for_each", Map(op=op), rtype)
+        return self._post("for_each", {"op": op}, rtype)
 
     def fold(self, item_name, initial_state, op):
         """Run the given `op` for each item in this `Stream` along with the previous result.
@@ -311,12 +311,12 @@ class Stream(State):
         """
 
         rtype = type(initial_state) if isinstance(initial_state, State) else State
-        return self._post("fold", Map(item_name=item_name, value=initial_state, op=op), rtype)
+        return self._post("fold", {"item_name": item_name, "value": initial_state, "op": op}, rtype)
 
     def map(self, op):
         """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream`."""
 
-        return self._post("map", Map(op=op), Stream)
+        return self._post("map", {"op": op}, Stream)
 
 
 # User-defined object types
