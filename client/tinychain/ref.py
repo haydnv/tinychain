@@ -257,7 +257,7 @@ class Get(Op):
     def __json__(self):
         if isinstance(self.subject, Ref):
             subject = self.subject
-            is_scalar = True
+            is_scalar = False
         else:
             subject = uri(self.subject)
             if subject is None:
@@ -273,6 +273,13 @@ class Get(Op):
 
     def __repr__(self):
         return f"GET Op ref {self.subject} {self.args}"
+
+    def __ns__(self, cxt):
+        super().__ns__(cxt)
+
+        if is_op_ref(self.args):
+            (key,) = self.args
+            self.args = (reference(cxt, key),)
 
 
 class Put(Op):
@@ -296,8 +303,7 @@ class Put(Op):
         return f"PUT Op ref {self.subject} {self.args}"
 
     def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
+        super().__ns__(cxt)
 
         if is_op_ref(self.args):
             key, value = self.args
@@ -328,8 +334,7 @@ class Post(Op):
         return f"POST Op ref {self.subject} {self.args}"
 
     def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
+        super().__ns__(cxt)
 
         self.args = {
             name: reference(cxt, arg) if is_op_ref(arg) else arg
@@ -358,8 +363,7 @@ class Delete(Op):
         return f"DELETE Op ref {self.subject} {self.args}"
 
     def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
+        super().__ns__(cxt)
 
         if is_op_ref(self.args):
             self.args = reference(cxt, self.args)
