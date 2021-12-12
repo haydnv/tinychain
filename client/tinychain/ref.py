@@ -339,6 +339,13 @@ class Delete(Op):
     def __repr__(self):
         return f"DELETE Op ref {self.subject} {self.args}"
 
+    def __ns__(self, cxt):
+        deanonymize(self.subject, cxt)
+        deanonymize(self.args, cxt)
+
+        if is_op_ref(self.args):
+            self.args = reference(cxt, self.args)
+
 
 class MethodSubject(object):
     def __init__(self, subject, method_name):
