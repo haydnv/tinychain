@@ -162,8 +162,10 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                 }
 
                 let shape_in = tensors[0].shape().clone();
-                for i in 0..tensors.len() {
-                    if tensors[i].shape() != &shape_in {
+                for tensor in &tensors {
+                    tensor.shape().validate()?;
+
+                    if tensor.shape() != &shape_in {
                         return Err(TCError::unsupported(
                             "can only concatenate Tensors with the same shape",
                         ));
@@ -200,7 +202,9 @@ impl<'a> Handler<'a> for ConstantHandler {
                 let (shape, value): (Vec<u64>, Number) =
                     key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
-                constant(&txn, shape.into(), value)
+                let shape = Shape::from(shape);
+                shape.validate()?;
+                constant(&txn, shape, value)
                     .map_ok(Tensor::from)
                     .map_ok(Collection::from)
                     .map_ok(State::from)
@@ -219,8 +223,10 @@ impl<'a> Handler<'a> for CopyFromHandler {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let source = params.require(&TENSOR.into())?;
+                let source: Tensor = params.require(&TENSOR.into())?;
                 params.expect_empty()?;
+
+                source.shape().validate()?;
 
                 let copy = match source {
                     Tensor::Dense(source) => {
@@ -260,6 +266,8 @@ impl<'a> Handler<'a> for CopyDenseHandler {
                 let Schema { dtype, shape } =
                     schema.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
+                shape.validate()?;
+
                 let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
 
@@ -297,6 +305,8 @@ impl<'a> Handler<'a> for CopySparseHandler {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema: Schema =
                     schema.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+
+                schema.validate()?;
 
                 let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
@@ -349,6 +359,8 @@ impl<'a> Handler<'a> for CreateHandler {
             Box::pin(async move {
                 let schema: Schema =
                     key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+
+                schema.validate()?;
 
                 match self.class {
                     TensorType::Dense => {
@@ -475,7 +487,13 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let axis = cast_axis(key, self.tensor.ndim())?;
+                self.tensor.shape().validate()?;
+
+                let axis = if key.is_none() {
+                    self.tensor.ndim()
+                } else {
+                    cast_axis(key, self.tensor.ndim())?
+                };
 
                 self.tensor
                     .expand_dims(axis)
@@ -508,6 +526,7 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
+                self.tensor.shape().validate()?;
                 let axis = cast_axis(key, self.tensor.ndim())?;
                 self.tensor
                     .flip(axis)
@@ -803,6 +822,8 @@ impl<'a> Handler<'a> for DualHandler {
                     TCError::bad_request("expected a Number, not", r)
                 })?;
 
+                self.tensor.shape().validate()?;
+
                 (self.op_const)(self.tensor, r)
                     .map(Collection::from)
                     .map(State::from)
@@ -823,8 +844,12 @@ impl<'a> Handler<'a> for DualHandler {
 
                 params.expect_empty()?;
 
+                l.shape().validate()?;
+
                 match r {
                     State::Collection(Collection::Tensor(r)) => {
+                        r.shape().validate()?;
+
                         if l.shape() == r.shape() {
                             (self.op)(l, r).map(Collection::from).map(State::from)
                         } else {
@@ -877,18 +902,27 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    (self.reduce_all)(self.tensor, txn.clone())
-                        .map_ok(Value::from)
-                        .map_ok(State::from)
-                        .await
+                let axis = if key.is_none() {
+                    None
                 } else {
                     let axis = cast_axis(key, self.tensor.ndim())?;
+                    if axis == 0 && self.tensor.ndim() == 1 {
+                        None
+                    } else {
+                        Some(axis)
+                    }
+                };
 
+                if let Some(axis) = axis {
                     (self.reduce)(self.tensor.clone(), axis)
                         .map(Tensor::from)
                         .map(Collection::from)
                         .map(State::from)
+                } else {
+                    (self.reduce_all)(self.tensor, txn.clone())
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await
                 }
             })
         }))
@@ -983,6 +1017,8 @@ impl<'a> Handler<'a> for UnaryHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
+                self.tensor.shape().validate()?;
+
                 let tensor = if key.is_none() {
                     self.tensor
                 } else {
@@ -1017,6 +1053,8 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                self.tensor.shape().validate()?;
+
                 let txn = txn.clone();
 
                 if key.is_none() {
@@ -1359,22 +1397,17 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
 fn cast_axis(axis: Value, ndim: usize) -> TCResult<usize> {
     debug!("cast axis {} with ndim {}", axis, ndim);
 
-    if axis.is_none() {
-        Ok(ndim)
-    } else {
-        let axis: Number =
-            axis.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
+    let axis: Number = axis.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
 
-        if axis >= (ndim as u64).into() {
-            Err(TCError::unsupported(format!(
-                "axis {} is out of bounds for Tensor with {} dimensions",
-                axis, ndim
-            )))
-        } else if axis >= 0.into() {
-            Ok(axis.cast_into())
-        } else {
-            Ok(ndim - usize::cast_from(axis.abs()))
-        }
+    if axis >= (ndim as u64).into() {
+        Err(TCError::unsupported(format!(
+            "axis {} is out of bounds for Tensor with {} dimensions",
+            axis, ndim
+        )))
+    } else if axis >= 0.into() {
+        Ok(axis.cast_into())
+    } else {
+        Ok(ndim - usize::cast_from(axis.abs()))
     }
 }
 
@@ -1466,6 +1499,10 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
 }
 
 fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
+    if value.is_empty() {
+        return Err(TCError::bad_request("invalid tensor shape", value));
+    }
+
     let mut shape = vec![1; value.len()];
     if value.iter().filter(|dim| *dim == &Value::None).count() > 1 {
         return Err(TCError::unsupported(

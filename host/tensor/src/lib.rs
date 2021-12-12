@@ -51,23 +51,7 @@ pub struct Schema {
 
 impl Schema {
     pub fn validate(&self) -> TCResult<()> {
-        let mut size = 1u64;
-        for dim in &*self.shape {
-            if dim == &0 {
-                return Err(TCError::unsupported(
-                    "cannot construct a tensor with a zero-dimensional axis",
-                ));
-            } else if let Some(m) = size.checked_mul(*dim) {
-                size = m;
-            } else {
-                return Err(TCError::bad_request(
-                    "the given shape exceeds the maximum allowed tensor size of 2^64",
-                    &self.shape,
-                ));
-            }
-        }
-
-        Ok(())
+        self.shape.validate()
     }
 }
 

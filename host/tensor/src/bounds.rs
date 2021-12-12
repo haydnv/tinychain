@@ -471,6 +471,29 @@ impl Shape {
         self.0.iter().product()
     }
 
+    /// Return a `TCError` if this `Shape` is empty.
+    pub fn validate(&self) -> TCResult<()> {
+        if self.0.is_empty() {
+            return Err(TCError::bad_request("invalid tensor shape", self));
+        }
+
+        let mut size = 1u64;
+        for dim in &self.0 {
+            if dim == &0 {
+                return Err(TCError::bad_request("invalid tensor dimension", dim));
+            } else if let Some(m) = size.checked_mul(*dim) {
+                size = m;
+            } else {
+                return Err(TCError::bad_request(
+                    "tensor shape exceeds the maximum allowed size of 2^64",
+                    self,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Return a `TCError` if any of the given axes is out of bounds.
     pub fn validate_axes(&self, axes: &[usize]) -> TCResult<()> {
         match axes.iter().max() {
