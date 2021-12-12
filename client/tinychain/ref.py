@@ -295,6 +295,16 @@ class Put(Op):
     def __repr__(self):
         return f"PUT Op ref {self.subject} {self.args}"
 
+    def __ns__(self, cxt):
+        deanonymize(self.subject, cxt)
+        deanonymize(self.args, cxt)
+
+        if is_op_ref(self.args):
+            key, value = self.args
+            key = reference(cxt, key)
+            value = reference(cxt, value)
+            self.args = (key, value)
+
 
 class Post(Op):
     """
