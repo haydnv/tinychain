@@ -231,6 +231,10 @@ class Op(Ref):
 
         return {str(uri(subject)): to_json(self.args)}
 
+    def __ns__(self, cxt):
+        deanonymize(self.subject, cxt)
+        deanonymize(self.args, cxt)
+
 
 class Get(Op):
     """
@@ -270,13 +274,6 @@ class Get(Op):
     def __repr__(self):
         return f"GET Op ref {self.subject} {self.args}"
 
-    def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
-
-        if is_op(self.args):
-            self.args = reference(cxt, self.args)
-
 
 class Put(Op):
     """
@@ -297,20 +294,6 @@ class Put(Op):
 
     def __repr__(self):
         return f"PUT Op ref {self.subject} {self.args}"
-
-    def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-
-        (key, value) = self.args
-        deanonymize(key, cxt)
-        deanonymize(value, cxt)
-
-        if is_op(key):
-            key = reference(cxt, key)
-        if is_op(value):
-            value = reference(cxt, key)
-
-        self.args = (key, value)
 
 
 class Post(Op):
@@ -334,19 +317,6 @@ class Post(Op):
     def __repr__(self):
         return f"POST Op ref {self.subject} {self.args}"
 
-    def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-
-        args = {}
-        for name, arg in self.args.items():
-            deanonymize(self.args[name], cxt)
-            if is_op(self.args[name]):
-                args[name] = reference(cxt, arg)
-            else:
-                args[name] = arg
-
-        self.args = args
-
 
 class Delete(Op):
     """
@@ -368,13 +338,6 @@ class Delete(Op):
 
     def __repr__(self):
         return f"DELETE Op ref {self.subject} {self.args}"
-
-    def __ns__(self, cxt):
-        deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
-
-        if is_op(self.args):
-            self.args = reference(cxt, self.args)
 
 
 class MethodSubject(object):
@@ -418,7 +381,22 @@ class MethodSubject(object):
             return str(uri(self))
 
 
+def is_op_ref(fn):
+    if isinstance(fn, Op):
+        return True
+    elif hasattr(fn, "__form__"):
+        return is_op_ref(form_of(fn))
+    elif isinstance(fn, list) or isinstance(fn, tuple):
+        return any(is_op_ref(item) for item in fn)
+    elif isinstance(fn, dict):
+        return any(is_op_ref(fn[k]) for k in fn)
+    else:
+        return False
+
+
 def reference(cxt, state):
-    name = f"{state.__class__.__name__}_{id(state)}"
-    setattr(cxt, name, state)
+    name = f"{state.__class__.__name__}_{hex_id(state)}"
+    if not cxt.is_defined(name):
+        setattr(cxt, name, state)
+
     return URI(name)
