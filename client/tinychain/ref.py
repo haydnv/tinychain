@@ -327,6 +327,14 @@ class Post(Op):
     def __repr__(self):
         return f"POST Op ref {self.subject} {self.args}"
 
+    def __ns__(self, cxt):
+        deanonymize(self.subject, cxt)
+        deanonymize(self.args, cxt)
+
+        self.args = {
+            name: reference(cxt, arg) if is_op_ref(arg) else arg
+            for name, arg in self.args.items()}
+
 
 class Delete(Op):
     """
