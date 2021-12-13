@@ -4,9 +4,9 @@ import unittest
 import testutils
 import tinychain as tc
 
-LAYER_CONFIG = [(2, 1, tc.ml.ReLU())]
+LAYER_CONFIG = [(2, 2, tc.ml.ReLU()), (2, 1, tc.ml.Sigmoid())]
 LEARNING_RATE = 0.1
-BATCH_SIZE = 100
+BATCH_SIZE = 25
 
 
 class App(tc.Cluster):
@@ -33,27 +33,29 @@ class App(tc.Cluster):
 class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_host("test_app", [App], wait_time=2.)
+        cls.host = testutils.start_host("test_app", [App])
 
     def testApp(self):
         self.assertTrue(self.host.get("/test/app/up"))
 
     def testTrain(self):
+        np.random.seed()
+
         new_layers = []
-        for i, o, a in LAYER_CONFIG:
+        for i, o, _ in LAYER_CONFIG:
             weights = load(truncated_normal(i * o).reshape([i, o]))
             bias = load(truncated_normal(o))
             new_layers.append((weights, bias))
 
         self.host.post("/test/app/reset", {"new_layers": new_layers})
 
-        inputs = np.random.random(BATCH_SIZE * 2).reshape([BATCH_SIZE, 2])
-        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5)
-
         i = 0
         while True:
+            inputs = np.random.random(BATCH_SIZE * 2).reshape([BATCH_SIZE, 2])
+            labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5)
 
             error = self.host.post("/test/app/train", {"inputs": load(inputs), "labels": load(labels, tc.Bool)})
+
             print(f"error is {error} at iteration {i}")
 
             if error < 0.5:

@@ -1,5 +1,4 @@
 import math
-
 import numpy as np
 import operator
 import tinychain as tc
@@ -34,6 +33,11 @@ def truncated_normal(size, mean=0., std=None):
 # TODO: implement AdamOptimizer
 @unittest.skip
 class DNNTests(ClientTest):
+    @classmethod
+    def setUpClass(cls):
+        np.random.seed()
+        super().setUpClass()
+
     @staticmethod
     def create_layer(input_size, output_size, activation):
         shape = (input_size, output_size)

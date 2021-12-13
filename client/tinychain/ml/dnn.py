@@ -7,12 +7,12 @@ from tinychain.error import BadRequest
 from tinychain.ml import Layer, NeuralNet, Sigmoid
 from tinychain.ref import After, If
 from tinychain.state import Map, Tuple
-from tinychain.value import String
+from tinychain.value import Bool, String
+
+EPS = 10**-6
 
 
 class DNNLayer(Layer):
-    ERR_BUILDER = "Use DNNLayer.create to construct a new DNNLayer"
-
     @classmethod
     def create(cls, input_size, output_size, activation=Sigmoid()):
         """Create a new, empty `DNNLayer` with the given shape and activation function."""
@@ -45,7 +45,7 @@ class DNNLayer(Layer):
         dA_prev = einsum("kj,ij->ki", [dZ, self["weights"]])
         d_weights = einsum("kj,ki->ij", [dZ, A_prev])
         d_bias = dZ.sum(0)
-        return dA_prev, d_weights, d_bias
+        return dA_prev, d_weights * (d_weights.abs() > EPS), d_bias * (d_bias.abs() > EPS)
 
     def train_eval(self, inputs):
         Z = einsum("ij,ki->kj", [self["weights"], inputs])
@@ -53,7 +53,9 @@ class DNNLayer(Layer):
         return A, Z
 
     def update(self, d_weights, d_bias):
-        return self["weights"].write(self["weights"] - d_weights), self["bias"].write(self["bias"] - d_bias)
+        new_weights = self["weights"] - d_weights
+        new_bias = self["bias"] - d_bias
+        return self["weights"].write(new_weights), self["bias"].write(new_bias)
 
     def write(self, weights, bias):
         return self["weights"].write(weights), self["bias"].write(bias)
@@ -96,12 +98,14 @@ class DNN(NeuralNet):
                 dA = cost(A[-1]).sum() / m
 
                 updates = []
+                needs_update = Bool(False)
                 for i in reversed(range(0, n)):
                     dA, d_weights, d_bias = self[i].gradients(A[i], dA, Z[i + 1])
+                    needs_update = needs_update.logical_or(d_weights.any().logical_or(d_bias.any()))
                     update = self[i].update(d_weights, d_bias)
                     updates.append(update)
 
-                return After(updates, A[-1])
+                return If(needs_update, After(updates, A[-1]), A[-1])
 
             def write(self, layers):
                 updates = []
