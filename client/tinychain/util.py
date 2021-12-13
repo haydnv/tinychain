@@ -11,7 +11,7 @@ class Context(object):
     """A transaction context."""
 
     def __init__(self, context=None):
-        object.__setattr__(self, "form", OrderedDict())
+        object.__setattr__(self, "_form", OrderedDict())
 
         if context:
             if isinstance(context, self.__class__):
@@ -71,11 +71,15 @@ class Context(object):
         data = list(self.form.keys())
         return f"execution context with data {data}"
 
+    @property
+    def form(self):
+        return self._form
+
     def is_defined(self, name):
         if isinstance(name, URI):
             name = name.id()
 
-        return name in self.form
+        return name in self._form
 
 
 def form_of(state):
