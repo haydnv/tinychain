@@ -27,38 +27,36 @@ class DNNLayer(Layer):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
 
         class _DNNLayer(cls):
-            def eval(self, inputs):
-                return activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
-
-            def gradients(self, A_prev, dA, Z):
-                dZ = activation.backward(dA, Z).copy()
-                dA_prev = einsum("kj,ij->ki", [dZ, self["weights"]])
-                d_weights = einsum("kj,ki->ij", [dZ, A_prev])
-                d_bias = dZ.sum(0)
-                return dA_prev, d_weights, d_bias
-
-            def train_eval(self, inputs):
-                Z = einsum("ij,ki->kj", [self["weights"], inputs])
-                A = activation.forward(Z) + self["bias"]
-                return A, Z
-
-            def update(self, d_weights, d_bias):
-                # TODO: why is the type information not preserved?
-                weights = Dense(self["weights"])
-                bias = Dense(self["bias"])
-                return weights.write(weights - d_weights), bias.write(bias - d_bias)
-
-            def write(self, weights, bias):
-                # TODO: why is the type information not preserved?
-                return Dense(self["weights"]).write(weights), Dense(self["bias"]).write(bias)
+            @property
+            def activation(self):
+                return activation
 
         return _DNNLayer({"weights": weights, "bias": bias})
 
+    @property
+    def activation(self):
+        return Sigmoid()
+
     def eval(self, inputs):
-        raise NotImplementedError(self.ERR_BUILDER)
+        return self.activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
+
+    def gradients(self, A_prev, dA, Z):
+        dZ = self.activation.backward(dA, Z).copy()
+        dA_prev = einsum("kj,ij->ki", [dZ, self["weights"]])
+        d_weights = einsum("kj,ki->ij", [dZ, A_prev])
+        d_bias = dZ.sum(0)
+        return dA_prev, d_weights, d_bias
 
     def train_eval(self, inputs):
-        raise NotImplementedError(self.ERR_BUILDER)
+        Z = einsum("ij,ki->kj", [self["weights"], inputs])
+        A = self.activation.forward(Z) + self["bias"]
+        return A, Z
+
+    def update(self, d_weights, d_bias):
+        return self["weights"].write(self["weights"] - d_weights), self["bias"].write(self["bias"] - d_bias)
+
+    def write(self, weights, bias):
+        return self["weights"].write(weights), self["bias"].write(bias)
 
 
 class DNN(NeuralNet):

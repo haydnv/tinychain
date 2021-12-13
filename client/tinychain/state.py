@@ -138,7 +138,13 @@ class Map(State):
 
     def __getitem__(self, key):
         form = form_of(self)
-        rtype = type(form[key]) if isinstance(form, TypeForm) else State
+        if isinstance(form, TypeForm):
+            rtype = type(form[key])
+            if hasattr(form[key], "__ref__"):
+                return rtype(get_ref(form[key], f"{uri(self)}/{key}"))
+        else:
+            rtype = State
+
         return self._get("", key, rtype)
 
     def __json__(self):
@@ -199,7 +205,13 @@ class Tuple(State):
 
     def __getitem__(self, key):
         form = form_of(self)
-        rtype = type(form[key]) if isinstance(form, TypeForm) else State
+        if isinstance(form, TypeForm):
+            rtype = type(form[key])
+            if hasattr(form[key], "__ref__"):
+                return rtype(get_ref(form[key], f"{uri(self)}/{key}"))
+        else:
+            rtype = State
+
         return self._get("", key, rtype)
 
     def __ne__(self, other):
