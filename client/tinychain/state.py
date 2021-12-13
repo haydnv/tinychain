@@ -26,6 +26,9 @@ class State(object):
     def __deps__(self):
         return requires(form_of(self))
 
+    def __eq__(self):
+        raise NotImplementedError("State does not support equality; use a more specific type")
+
     def __json__(self):
         form = form_of(self)
 
@@ -82,6 +85,11 @@ class State(object):
         """Attempt to cast this `State` into the given `dtype`."""
 
         return dtype(ref.Get(uri(dtype), self))
+
+    def copy(self):
+        """Create a new `State` by copying this one."""
+
+        return self._get("copy", rtype=self.__class__)
 
     def dtype(self):
         """Return the native base :class:`Class` of this `State`."""
@@ -331,6 +339,9 @@ class Instance(State):
     """An instance of a user-defined :class:`Class`."""
 
     __uri__ = uri(State) + "/object/instance"
+
+    def copy(self):
+        raise NotImplementedError("abstract method")
 
 
 # Private helper classes

@@ -49,11 +49,6 @@ class Collection(State):
 
         return cls(Put(cls, schema, data))
 
-    def copy(self):
-        """Return a copy of this `Collection`."""
-
-        return self.__class__.copy_from(self.schema(), self)
-
     def schema(self):
         """Return the schema of this `Collection`."""
 
