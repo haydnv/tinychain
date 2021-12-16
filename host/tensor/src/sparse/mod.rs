@@ -30,8 +30,8 @@ use super::{
 };
 
 use access::*;
-use combine::coord_to_offset;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
+use combine::coord_to_offset;
 pub use table::SparseTable;
 
 mod access;
@@ -652,8 +652,23 @@ where
     D: Dir,
     T: Transaction<D>,
     A: SparseWrite<FD, FS, D, T>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
+    type Index = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
+
+    async fn argmax(self, _txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
+        if axis >= self.ndim() {
+            return Err(TCError::unsupported(format!(
+                "invalid argmax axis for tensor with {} dimensions: {}",
+                self.ndim(),
+                axis
+            )));
+        }
+
+        Err(TCError::not_implemented("SparseTensor::argmax"))
+    }
 
     async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
         let coord_bounds = coord_bounds(self.shape());

@@ -275,6 +275,12 @@ pub trait TensorIndex<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
+    /// The type of [`Tensor`] returned by `argmax`.
+    type Index: TensorInstance;
+
+    /// Return the indices of the maximum values in this [`Tensor`] along the given `axis`.
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index>;
+
     /// Return the offset of the maximum value in this [`Tensor`].
     async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64>;
 }
@@ -882,9 +888,17 @@ where
     D: Dir,
     T: Transaction<D>,
     D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
+    type Index = Self;
+
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
+        match self {
+            Self::Dense(dense) => dense.argmax(txn, axis).map_ok(Self::from).await,
+            Self::Sparse(sparse) => sparse.argmax(txn, axis).map_ok(Self::from).await,
+        }
+    }
 
     async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
         match self {

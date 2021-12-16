@@ -248,9 +248,14 @@ class DenseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.x = load_dense(x)
         cxt.am = cxt.x.argmax()
+        cxt.am0 = cxt.x.argmax(0)
+        cxt.am1 = cxt.x.argmax(1)
+        cxt.result = cxt.am, cxt.am0, cxt.am1
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, np.argmax(x))
+        actual_am, actual_am0, actual_am1 = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual_am, np.argmax(x))
+        self.assertEqual(actual_am0, expect_dense(tc.U64, [3, 4], np.argmax(x, 0).flatten().tolist()))
+        self.assertEqual(actual_am1, expect_dense(tc.U64, [2, 4], np.argmax(x, 1).flatten().tolist()))
 
     @classmethod
     def tearDownClass(cls):

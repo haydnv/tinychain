@@ -39,6 +39,7 @@ struct ArgmaxHandler<T> {
 impl<'a, T> Handler<'a> for ArgmaxHandler<T>
 where
     T: TensorAccess + TensorIndex<fs::Dir, Txn = Txn> + Send + Sync + 'a,
+    Tensor: From<T::Index>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -46,17 +47,23 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                let txn = txn.clone();
+
                 if key.is_none() {
-                    return self
-                        .tensor
-                        .argmax_all(txn.clone())
+                    self.tensor
+                        .argmax_all(txn)
                         .map_ok(Value::from)
                         .map_ok(State::from)
-                        .await;
+                        .await
+                } else {
+                    let axis = cast_axis(key, self.tensor.ndim())?;
+                    self.tensor
+                        .argmax(txn, axis)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::Tensor)
+                        .map_ok(State::Collection)
+                        .await
                 }
-
-                let _axis = cast_axis(key, self.tensor.ndim())?;
-                Err(TCError::not_implemented("argmax with axis"))
             })
         }))
     }
@@ -1144,6 +1151,7 @@ where
     Collection: From<T>,
     Tensor: From<T>,
     Tensor: From<<T as TensorDiagonal<fs::Dir>>::Diagonal>,
+    Tensor: From<<T as TensorIndex<fs::Dir>>::Index>,
     Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
