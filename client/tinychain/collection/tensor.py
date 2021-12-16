@@ -146,6 +146,14 @@ class Tensor(Collection):
 
         return self._get("any", rtype=Bool)
 
+    def argmax(self, axis=None):
+        """Return the indices of the maximum values along the given `axis` of this `Tensor`.
+
+        If no `axis` is given, the total offset will be returned.
+        """
+
+        return self._get("argmax", axis, self.__class__)
+
     def asin(self):
         """Return the element-wise arcsine of this `Tensor`."""
 

@@ -22,13 +22,15 @@ use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
-    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
-    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
-    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    coord_bounds, tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess,
+    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
+    TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath, TensorMathConst,
+    TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
+    ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
+use combine::coord_to_offset;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
 
@@ -639,6 +641,34 @@ where
             Tensor::Dense(other) => self.write(txn, bounds, other.into_sparse()).await,
             Tensor::Sparse(other) => self.write(txn, bounds, other).await,
         }
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, A> TensorIndex<D> for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseWrite<FD, FS, D, T>,
+{
+    type Txn = T;
+
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
+        let coord_bounds = coord_bounds(self.shape());
+        let mut i = 0;
+        let mut max = self.dtype().zero();
+
+        let mut filled = self.accessor.filled(txn).await?;
+        while let Some((coord, value)) = filled.try_next().await? {
+            if value > max {
+                max = value;
+                i = coord_to_offset(&coord, &coord_bounds);
+            }
+        }
+
+        Ok(i)
     }
 }
 

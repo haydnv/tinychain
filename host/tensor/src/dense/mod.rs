@@ -23,8 +23,8 @@ use super::stream::{Read, ReadValueAt};
 use super::{
     tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
     TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
-    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
-    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    TensorIndex, TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce,
+    TensorTransform, TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -655,6 +655,39 @@ where
     ) -> TCResult<()> {
         debug!("write {} to dense {}", other, bounds);
         self.blocks.write(txn, bounds, other.blocks).await
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> TensorIndex<D> for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    B: DenseWrite<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
+        let mut offset = 0;
+        let mut max_value = self.dtype().zero();
+        let mut argmax = 0;
+
+        let mut blocks = self.blocks.block_stream(txn).await?;
+        while let Some(block) = blocks.try_next().await? {
+            let (i, max) = block.argmax();
+            if max > max_value {
+                argmax = offset + (i as u64);
+                max_value = max;
+            }
+
+            offset += block.len() as u64;
+        }
+
+        Ok(argmax)
     }
 }
 

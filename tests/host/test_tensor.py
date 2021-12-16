@@ -240,6 +240,18 @@ class DenseTests(unittest.TestCase):
         expected = np.tile(x, multiples)
         self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))
 
+    def testArgmax(self):
+        shape = [2, 3, 4]
+
+        x = np.arange(0, np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x)
+        cxt.am = cxt.x.argmax()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, np.argmax(x))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

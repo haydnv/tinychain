@@ -32,6 +32,42 @@ const AXIS: Label = label("axis");
 const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
+struct ArgmaxHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for ArgmaxHandler<T>
+where
+    T: TensorAccess + TensorIndex<fs::Dir, Txn = Txn> + Send + Sync + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    return self
+                        .tensor
+                        .argmax_all(txn.clone())
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await;
+                }
+
+                let _axis = cast_axis(key, self.tensor.ndim())?;
+                Err(TCError::not_implemented("argmax with axis"))
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ArgmaxHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct CastHandler<T> {
     tensor: T,
 }
@@ -1095,6 +1131,7 @@ where
         + TensorDiagonal<fs::Dir, Txn = Txn>
         + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorIndex<fs::Dir, Txn = Txn>
         + TensorIO<fs::Dir, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
@@ -1295,6 +1332,9 @@ where
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "reshape" => Some(Box::new(ReshapeHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
+
+            // indexing
+            "argmax" => Some(Box::new(ArgmaxHandler::from(tensor))),
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
