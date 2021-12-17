@@ -1192,6 +1192,12 @@ where
                 )))
             }
 
+            "size" => {
+                return Some(Box::new(AttributeHandler::from(Value::Number(
+                    tensor.size().into(),
+                ))))
+            }
+
             // reduce ops (which require borrowing)
             "product" => {
                 return Some(Box::new(ReduceHandler::new(

@@ -308,6 +308,12 @@ class Tensor(Collection):
 
         return self._get("sinh", rtype=self.__class__)
 
+    @property
+    def size(self):
+        """Return the size of this `Tensor` (the product of its `shape`)."""
+
+        return self._get("size", rtype=UInt)
+
     def split(self, num_or_size_splits, axis=0):
         """
         Split this `Tensor` into multiple slices along the given `axis`.
