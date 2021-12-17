@@ -136,14 +136,11 @@ class While(Ref):
     A flow control operator to execute a closure repeatedly until a condition is met.
 
     Args:
-        cond (Bool or Ref): The condition which determines which branch to execute.
+        cond (Post): The condition which determines whether to terminate the loop.
 
-        then (State or Ref): The State to resolve if `cond` resolves to `True`.
+        step (Post): One cycle of this `While` loop.
 
-        or_else (State or Ref): The State to resolve if `cond` resolves to `False`.
-
-    Raises:
-        `BadRequestError` if `cond` does not resolve to a :class:`Bool` or in case of a nested conditional
+        state (State): The initial state of the loop.
     """
 
     __uri__ = uri(Ref) + "/while"

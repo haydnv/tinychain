@@ -7,7 +7,7 @@ from testutils import start_host
 
 
 ENDPOINT = "/transact/hypothetical"
-LINK = "http://127.0.0.1:8702/app/area"
+AREA_SERVICE = "http://127.0.0.1:8702/app/area"
 
 
 @tc.get_op
@@ -37,7 +37,7 @@ def to_feet(_txn, meters: tc.Number) -> tc.Number:
 # Specifying `metaclass=tc.Meta` provides JSON encoding functionality for user-defined classes.
 # It's only required when subclassing a native class--subclasses of `Distance` automatically inherit its metaclass.
 class Distance(tc.Number, metaclass=tc.Meta):
-    __uri__ = tc.URI(LINK) + "/Distance"
+    __uri__ = tc.URI(AREA_SERVICE) + "/Distance"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -49,7 +49,7 @@ class Distance(tc.Number, metaclass=tc.Meta):
 
 
 class Feet(Distance):
-    __uri__ = tc.URI(LINK) + "/Feet"
+    __uri__ = tc.URI(AREA_SERVICE) + "/Feet"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -61,7 +61,7 @@ class Feet(Distance):
 
 
 class Meters(Distance):
-    __uri__ = tc.URI(LINK) + "/Meters"
+    __uri__ = tc.URI(AREA_SERVICE) + "/Meters"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -73,7 +73,7 @@ class Meters(Distance):
 
 
 class AreaService(tc.Cluster):
-    __uri__ = tc.URI(LINK)
+    __uri__ = tc.URI(AREA_SERVICE)
 
     def _configure(self):
         # make sure to include your app's classes here so your clients can find them!
