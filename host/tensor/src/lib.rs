@@ -269,6 +269,22 @@ pub trait TensorDualIO<D: Dir, O> {
     async fn write(self, txn: Self::Txn, bounds: Bounds, value: O) -> TCResult<()>;
 }
 
+/// [`Tensor`] indexing operations
+#[async_trait]
+pub trait TensorIndex<D: Dir> {
+    /// The type of [`Transaction`] to expect
+    type Txn: Transaction<D>;
+
+    /// The type of [`Tensor`] returned by `argmax`.
+    type Index: TensorInstance;
+
+    /// Return the indices of the maximum values in this [`Tensor`] along the given `axis`.
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index>;
+
+    /// Return the offset of the maximum value in this [`Tensor`].
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64>;
+}
+
 /// [`Tensor`] math operations
 pub trait TensorMath<D: Dir, O> {
     /// The result type of a math operation
@@ -402,7 +418,7 @@ pub trait TensorUnary<D: Dir> {
     /// Element-wise absolute value
     fn abs(&self) -> TCResult<Self::Unary>;
 
-    /// Raise `e` to the power of `self`
+    /// Raise `e` to the power of `self`.
     fn exp(&self) -> TCResult<Self::Unary>;
 
     /// Return `true` if all elements in this [`Tensor`] are nonzero.
@@ -860,6 +876,34 @@ where
         match self {
             Self::Dense(this) => this.write(txn, bounds, value).await,
             Self::Sparse(this) => this.write(txn, bounds, value).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T> TensorIndex<D> for Tensor<FD, FS, D, T>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
+{
+    type Txn = T;
+    type Index = Self;
+
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
+        match self {
+            Self::Dense(dense) => dense.argmax(txn, axis).map_ok(Self::from).await,
+            Self::Sparse(sparse) => sparse.argmax(txn, axis).map_ok(Self::from).await,
+        }
+    }
+
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
+        match self {
+            Self::Dense(dense) => dense.argmax_all(txn).await,
+            Self::Sparse(sparse) => sparse.argmax_all(txn).await,
         }
     }
 }

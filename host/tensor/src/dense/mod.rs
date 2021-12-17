@@ -15,7 +15,9 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
+use tc_value::{
+    FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::sparse::{DenseToSparse, SparseTensor};
@@ -23,8 +25,8 @@ use super::stream::{Read, ReadValueAt};
 use super::{
     tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
     TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
-    TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce, TensorTransform,
-    TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    TensorIndex, TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce,
+    TensorTransform, TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -655,6 +657,81 @@ where
     ) -> TCResult<()> {
         debug!("write {} to dense {}", other, bounds);
         self.blocks.write(txn, bounds, other.blocks).await
+    }
+}
+
+#[async_trait]
+impl<FD, FS, D, T, B> TensorIndex<D> for DenseTensor<FD, FS, D, T, B>
+where
+    D: Dir,
+    T: Transaction<D>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D::File: AsType<FD> + AsType<FS>,
+    B: DenseWrite<FD, FS, D, T>,
+    D::FileClass: From<TensorType>,
+{
+    type Txn = T;
+    type Index = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
+
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
+        if axis >= self.ndim() {
+            return Err(TCError::unsupported(format!(
+                "invalid argmax axis for tensor with {} dimensions: {}",
+                self.ndim(),
+                axis
+            )));
+        }
+
+        let dtype = NumberType::UInt(UIntType::U64);
+        let shape = {
+            let mut shape = self.shape().clone();
+            shape.remove(axis);
+            shape
+        };
+
+        let txn_id = *txn.id();
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        let per_block = self.size() / shape.size();
+        debug_assert_eq!(self.size() / per_block, shape.size());
+
+        let blocks = self.blocks.value_stream(txn).await?; // TODO: just use self.block_stream directly
+        let values = blocks
+            .chunks(per_block as usize)
+            .map(|values| values.into_iter().collect::<TCResult<Vec<Number>>>())
+            .map_ok(Array::from)
+            .map_ok(|array| {
+                debug_assert!(array.len() as u64 == per_block);
+                let (i, _max) = array.argmax();
+                Number::from(i as u64)
+            });
+
+        BlockListFile::from_values(file, txn_id, shape, dtype, values)
+            .map_ok(DenseTensor::from)
+            .await
+    }
+
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
+        let mut offset = 0;
+        let mut max_value = self.dtype().zero();
+        let mut argmax = 0;
+
+        let mut blocks = self.blocks.block_stream(txn).await?;
+        while let Some(block) = blocks.try_next().await? {
+            let (i, max) = block.argmax();
+            if max > max_value {
+                argmax = offset + (i as u64);
+                max_value = max;
+            }
+
+            offset += block.len() as u64;
+        }
+
+        Ok(argmax)
     }
 }
 

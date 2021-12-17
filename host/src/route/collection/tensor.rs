@@ -32,6 +32,58 @@ const AXIS: Label = label("axis");
 const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
+struct ArgmaxHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for ArgmaxHandler<T>
+where
+    T: TensorAccess + TensorIndex<fs::Dir, Txn = Txn> + Send + Sync + 'a,
+    Tensor: From<T::Index>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let txn = txn.clone();
+
+                let axis = if key.is_none() {
+                    None
+                } else {
+                    let ndim = self.tensor.ndim();
+                    match cast_axis(key, ndim)? {
+                        axis if ndim == 1 && axis == 0 => None,
+                        axis => Some(axis),
+                    }
+                };
+
+                if let Some(axis) = axis {
+                    self.tensor
+                        .argmax(txn, axis)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::Tensor)
+                        .map_ok(State::Collection)
+                        .await
+                } else {
+                    self.tensor
+                        .argmax_all(txn)
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
+                        .await
+                }
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for ArgmaxHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct CastHandler<T> {
     tensor: T,
 }
@@ -1095,6 +1147,7 @@ where
         + TensorDiagonal<fs::Dir, Txn = Txn>
         + TensorCompare<Tensor, Compare = Tensor, Dense = Tensor>
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
+        + TensorIndex<fs::Dir, Txn = Txn>
         + TensorIO<fs::Dir, Txn = Txn>
         + TensorMath<fs::Dir, Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
@@ -1107,6 +1160,7 @@ where
     Collection: From<T>,
     Tensor: From<T>,
     Tensor: From<<T as TensorDiagonal<fs::Dir>>::Diagonal>,
+    Tensor: From<<T as TensorIndex<fs::Dir>>::Index>,
     Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
     Tensor: From<<T as TensorTransform>::Cast>,
@@ -1295,6 +1349,9 @@ where
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
             "reshape" => Some(Box::new(ReshapeHandler::from(tensor))),
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
+
+            // indexing
+            "argmax" => Some(Box::new(ArgmaxHandler::from(tensor))),
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),

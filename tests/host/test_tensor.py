@@ -22,7 +22,7 @@ class DenseTests(unittest.TestCase):
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
         cxt.result = tc.After(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
-        expected = expect_dense(tc.F64, shape, [0] + [c] * (product(shape) - 1))
+        expected = expect_dense(tc.F64, shape, [0] + [c] * (np.product(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(expected, actual)
 
@@ -98,8 +98,8 @@ class DenseTests(unittest.TestCase):
         v = np.array([[1], [0.618]])
 
         cxt = tc.Context()
-        cxt.tau = tc.tensor.Dense.load([1, 1], tc.F32, tau.flatten().tolist())
-        cxt.v = tc.tensor.Dense.load([2, 1], tc.F32, v.flatten().tolist())
+        cxt.tau = load_dense(tau)
+        cxt.v = load_dense(v)
         cxt.result = cxt.tau * tc.tensor.einsum("ij,kj->ik", [cxt.v, cxt.v])
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -159,7 +159,7 @@ class DenseTests(unittest.TestCase):
         cxt.result = cxt.big.product()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, product(range(1, 7)))
+        self.assertEqual(actual, np.product(range(1, 7)))
 
     def testSum(self):
         shape = [4, 2, 3, 5]
@@ -232,13 +232,30 @@ class DenseTests(unittest.TestCase):
         x = np.arange(0, np.product(shape)).reshape(shape)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(shape, tc.I32, x.flatten().tolist())
+        cxt.x = load_dense(x, tc.I32)
         cxt.result = tc.tensor.tile(cxt.x, 2)
 
         actual = self.host.post(ENDPOINT, cxt)
 
         expected = np.tile(x, multiples)
         self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))
+
+    def testArgmax(self):
+        shape = [2, 3, 4]
+
+        x = np.arange(0, np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x)
+        cxt.am = cxt.x.argmax()
+        cxt.am0 = cxt.x.argmax(0)
+        cxt.am1 = cxt.x.argmax(1)
+        cxt.result = cxt.am, cxt.am0, cxt.am1
+
+        actual_am, actual_am0, actual_am1 = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual_am, np.argmax(x))
+        self.assertEqual(actual_am0, expect_dense(tc.U64, [3, 4], np.argmax(x, 0).flatten().tolist()))
+        self.assertEqual(actual_am1, expect_dense(tc.U64, [2, 4], np.argmax(x, 1).flatten().tolist()))
 
     @classmethod
     def tearDownClass(cls):
@@ -419,6 +436,24 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.F64, expected.shape, expected)
         self.assertEqual(actual, expected)
 
+    def testArgmax(self):
+        shape = [2, 3]
+
+        x = (np.random.random(np.product(shape)) * 2) - 1
+        x = (x * (np.abs(x) > 0.5)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Sparse.load(
+            shape, tc.F32, [(list(coord), x[coord]) for coord in np.ndindex(x.shape) if x[coord] != 0])
+
+        cxt.am = cxt.x.argmax()
+        cxt.am0 = cxt.x.argmax(0)
+        cxt.result = cxt.am, cxt.am0
+
+        actual_am, actual_am0 = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual_am, np.argmax(x))
+        self.assertEqual(actual_am0, expect_sparse(tc.U64, [3], np.argmax(x, 0)))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
@@ -497,7 +532,7 @@ class TensorTests(unittest.TestCase):
         matrix = np.eye(3).astype(np.int)
 
         cxt = tc.Context()
-        cxt.dense = tc.tensor.Dense.load([3, 3], tc.I32, matrix.flatten().tolist())
+        cxt.dense = load_dense(matrix, tc.I32)
         cxt.sparse = cxt.dense.as_sparse()
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -594,12 +629,8 @@ def expect_sparse(dtype, shape, values):
     }
 
 
-def product(seq):
-    p = 1
-    for n in seq:
-        p *= n
-
-    return p
+def load_dense(x, dtype=tc.F32):
+    return tc.tensor.Dense.load(x.shape, dtype, x.flatten().tolist())
 
 
 def nparray_to_sparse(arr, dtype):
