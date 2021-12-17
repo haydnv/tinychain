@@ -436,6 +436,24 @@ class SparseTests(unittest.TestCase):
         expected = expect_sparse(tc.F64, expected.shape, expected)
         self.assertEqual(actual, expected)
 
+    def testArgmax(self):
+        shape = [2, 3]
+
+        x = (np.random.random(np.product(shape)) * 2) - 1
+        x = (x * (np.abs(x) > 0.5)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Sparse.load(
+            shape, tc.F32, [(list(coord), x[coord]) for coord in np.ndindex(x.shape) if x[coord] != 0])
+
+        cxt.am = cxt.x.argmax()
+        cxt.am0 = cxt.x.argmax(0)
+        cxt.result = cxt.am, cxt.am0
+
+        actual_am, actual_am0 = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual_am, np.argmax(x))
+        self.assertEqual(actual_am0, expect_sparse(tc.U64, [3], np.argmax(x, 0)))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()

@@ -49,19 +49,28 @@ where
             Box::pin(async move {
                 let txn = txn.clone();
 
-                if key.is_none() {
-                    self.tensor
-                        .argmax_all(txn)
-                        .map_ok(Value::from)
-                        .map_ok(State::from)
-                        .await
+                let axis = if key.is_none() {
+                    None
                 } else {
-                    let axis = cast_axis(key, self.tensor.ndim())?;
+                    let ndim = self.tensor.ndim();
+                    match cast_axis(key, ndim)? {
+                        axis if ndim == 1 && axis == 0 => None,
+                        axis => Some(axis),
+                    }
+                };
+
+                if let Some(axis) = axis {
                     self.tensor
                         .argmax(txn, axis)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)
                         .map_ok(State::Collection)
+                        .await
+                } else {
+                    self.tensor
+                        .argmax_all(txn)
+                        .map_ok(Value::from)
+                        .map_ok(State::from)
                         .await
                 }
             })

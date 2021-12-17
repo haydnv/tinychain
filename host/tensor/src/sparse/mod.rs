@@ -15,18 +15,20 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry};
+use tc_value::{
+    FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    coord_bounds, tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess,
-    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath, TensorMathConst,
-    TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
-    ERR_COMPLEX_EXPONENT,
+    coord_bounds, tile, trig_dtype, AxisBounds, Bounds, Coord, Phantom, Schema, Shape, Tensor,
+    TensorAccess, TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst,
+    TensorDiagonal, TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath,
+    TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType,
+    TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -658,7 +660,7 @@ where
     type Txn = T;
     type Index = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
 
-    async fn argmax(self, _txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
+    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
         if axis >= self.ndim() {
             return Err(TCError::unsupported(format!(
                 "invalid argmax axis for tensor with {} dimensions: {}",
@@ -667,23 +669,105 @@ where
             )));
         }
 
-        Err(TCError::not_implemented("SparseTensor::argmax"))
-    }
+        let shape = {
+            let mut shape = self.shape().clone();
+            shape.remove(axis);
+            shape
+        };
 
-    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
-        let coord_bounds = coord_bounds(self.shape());
-        let mut i = 0;
-        let mut max = self.dtype().zero();
+        let schema = Schema {
+            shape,
+            dtype: NumberType::UInt(UIntType::U64),
+        };
 
-        let mut filled = self.accessor.filled(txn).await?;
-        while let Some((coord, value)) = filled.try_next().await? {
-            if value > max {
-                max = value;
-                i = coord_to_offset(&coord, &coord_bounds);
+        let txn_id = *txn.id();
+        let dir = txn.context().create_dir_unique(txn_id).await?;
+        let table = SparseTable::create(&dir, schema, txn_id).await?;
+
+        let dim = self.shape()[axis];
+        let zero = self.dtype().zero();
+        let axes = (0..self.ndim())
+            .into_iter()
+            .filter(|x| x != &axis)
+            .collect();
+
+        let mut filled = self.accessor.clone().filled_at(txn.clone(), axes).await?;
+        while let Some(coords) = filled.try_next().await? {
+            for coord in coords.to_vec() {
+                let mut bounds: Bounds = coord.iter().cloned().map(AxisBounds::At).collect();
+                bounds.insert(axis, AxisBounds::all(dim));
+
+                let slice = self.accessor.clone().slice(bounds)?;
+                debug_assert_eq!(slice.ndim(), 1);
+
+                let filled = slice.filled(txn.clone()).await?;
+                let filled = filled.map_ok(|(offset, value)| (offset[0], value));
+                let imax = imax(filled, zero, dim).await?;
+                table.write_value(txn_id, coord, imax.0.into()).await?;
             }
         }
 
-        Ok(i)
+        Ok(table.into())
+    }
+
+    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64> {
+        let zero = self.dtype().zero();
+        let size = self.size();
+        let coord_bounds = coord_bounds(self.shape());
+        let filled = self.accessor.filled(txn).await?;
+        let filled =
+            filled.map_ok(move |(coord, value)| (coord_to_offset(&coord, &coord_bounds), value));
+        let imax = imax(filled, zero, size).await?;
+        Ok(imax.0)
+    }
+}
+
+async fn imax<F>(mut filled: F, zero: Number, size: u64) -> TCResult<(u64, Number)>
+where
+    F: Stream<Item = TCResult<(u64, Number)>> + Unpin,
+{
+    let mut first_empty = Some(0);
+    let mut last = 0u64;
+    let mut imax = None;
+    while let Some((offset, value)) = filled.try_next().await? {
+        if offset == 0 {
+            first_empty = None;
+        } else if first_empty.is_none() {
+            if offset > (last + 1) {
+                first_empty = Some(last + 1)
+            }
+        }
+
+        if let Some((ref mut i, ref mut max)) = &mut imax {
+            if value > *max {
+                *i = offset;
+                *max = value;
+            }
+        } else {
+            imax = Some((offset, value));
+        }
+
+        last = offset;
+    }
+
+    if first_empty.is_none() && last < (size - 1) {
+        if last == 0 && imax.is_none() {
+            first_empty = Some(0);
+        } else {
+            first_empty = Some(last + 1);
+        }
+    }
+
+    if let Some((i, max)) = imax {
+        if max > zero {
+            Ok((i, max))
+        } else if let Some(first_empty) = first_empty {
+            Ok((first_empty, zero))
+        } else {
+            Ok((i, max))
+        }
+    } else {
+        Ok((0, zero))
     }
 }
 
