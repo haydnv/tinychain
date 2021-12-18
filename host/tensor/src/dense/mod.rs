@@ -1202,7 +1202,7 @@ where
 }
 
 #[async_trait]
-impl<'en, FD, FS, D, T, B> HashCollection<'en, D> for DenseTensor<FD, FS, D, T, B>
+impl<FD, FS, D, T, B> HashCollection<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
@@ -1215,7 +1215,7 @@ where
     type Item = Array;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
+    async fn hashable(&self, txn: &T) -> TCResult<TCBoxTryStream<Self::Item>> {
         self.blocks.clone().block_stream(txn.clone()).await
     }
 }

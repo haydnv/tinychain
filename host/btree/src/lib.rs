@@ -97,11 +97,11 @@ pub trait BTreeWrite: BTreeInstance {
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> HashCollection<'en, D> for BTree<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> HashCollection<D> for BTree<F, D, T> {
     type Item = Key;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en T) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
+    async fn hashable(&self, txn: &T) -> TCResult<TCBoxTryStream<Self::Item>> {
         self.clone().keys(*txn.id()).await
     }
 }

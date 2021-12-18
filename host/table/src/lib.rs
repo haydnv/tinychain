@@ -443,11 +443,11 @@ where
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> HashCollection<'en, D> for Table<F, D, Txn> {
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> HashCollection<D> for Table<F, D, Txn> {
     type Item = Vec<Value>;
     type Txn = Txn;
 
-    async fn hashable(&'en self, txn: &'en Txn) -> TCResult<TCBoxTryStream<'en, Self::Item>> {
+    async fn hashable(&self, txn: &Txn) -> TCResult<TCBoxTryStream<Self::Item>> {
         self.clone().rows(*txn.id()).await
     }
 }

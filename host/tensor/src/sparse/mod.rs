@@ -1175,7 +1175,7 @@ where
 }
 
 #[async_trait]
-impl<'en, FD, FS, D, T, A> HashCollection<'en, D> for SparseTensor<FD, FS, D, T, A>
+impl<FD, FS, D, T, A> HashCollection<D> for SparseTensor<FD, FS, D, T, A>
 where
     FD: File<Array>,
     FS: File<Node>,
@@ -1186,7 +1186,7 @@ where
     type Item = SparseRow;
     type Txn = T;
 
-    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCBoxTryStream<'en, SparseRow>> {
+    async fn hashable(&self, txn: &Self::Txn) -> TCResult<TCBoxTryStream<SparseRow>> {
         self.accessor.clone().filled(txn.clone()).await
     }
 }
