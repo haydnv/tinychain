@@ -23,9 +23,9 @@ num_cpus = "1.13"
 pin-project = "1.0"
 safecast = "~0.1.2"
 strided = "~0.2.9"
-tc-btree = "0.3"
+tc-btree = { path = "../btree" }
 tc-error = "0.4"
-tc-transact = { version = "0.10", features = ["tensor"] }
+tc-transact = { path = "../transact", features = ["tensor"] }
 tc-value = "0.3"
-tc-table = "0.2"
+tc-table = { path = "../table" }
 tcgeneric = "0.2.5"
