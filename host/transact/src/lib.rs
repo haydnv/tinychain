@@ -14,7 +14,7 @@ mod id;
 pub mod fs;
 pub mod lock;
 
-pub use hash::HashCollection;
+pub use hash::{Hash, HashCollection};
 pub use id::{TxnId, MIN_ID};
 
 /// Trait to define a view which can be encoded with [`en::IntoStream`].
