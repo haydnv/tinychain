@@ -5,14 +5,10 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use destream::en;
-use futures::{TryFutureExt, TryStreamExt};
 use safecast::AsType;
-use sha2::{Digest, Sha256};
 
 use tc_error::*;
-use tcgeneric::{Id, PathSegment, TCBoxTryStream};
+use tcgeneric::{Id, PathSegment};
 
 use super::{Transaction, TxnId};
 
@@ -179,44 +175,4 @@ pub trait CopyFrom<D: Dir, I>: Persist<D> {
 pub trait Restore<D: Dir>: Persist<D> {
     /// Restore this persistent state from a backup.
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
-}
-
-/// Defines a standard hash for a persistent state.
-#[async_trait]
-pub trait Hash<'en, D: Dir> {
-    type Item: en::IntoStream<'en> + Send + 'en;
-    type Txn: Transaction<D>;
-
-    /// Return the SHA256 hash of this state as a hexadecimal string.
-    async fn hash_hex(&'en self, txn: &'en Self::Txn) -> TCResult<String> {
-        self.hash(txn).map_ok(|hash| hex::encode(hash)).await
-    }
-
-    /// Compute the SHA256 hash of this state.
-    async fn hash(&'en self, txn: &'en Self::Txn) -> TCResult<Bytes> {
-        let mut data = self.hashable(txn).await?;
-
-        let mut hasher = Sha256::default();
-        while let Some(item) = data.try_next().await? {
-            hash_chunks(&mut hasher, item).await?;
-        }
-
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
-    }
-
-    /// Return a stream of hashable items which this state comprises, in a consistent order.
-    async fn hashable(&'en self, txn: &'en Self::Txn) -> TCResult<TCBoxTryStream<'en, Self::Item>>;
-}
-
-async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
-    hasher: &mut Sha256,
-    data: T,
-) -> TCResult<()> {
-    let mut data = tbon::en::encode(data).map_err(TCError::internal)?;
-    while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-        hasher.update(&chunk);
-    }
-
-    Ok(())
 }

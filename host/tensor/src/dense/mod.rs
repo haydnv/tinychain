@@ -13,8 +13,8 @@ use safecast::{AsType, CastFrom};
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
@@ -1202,7 +1202,7 @@ where
 }
 
 #[async_trait]
-impl<'en, FD, FS, D, T, B> Hash<'en, D> for DenseTensor<FD, FS, D, T, B>
+impl<'en, FD, FS, D, T, B> HashCollection<'en, D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,

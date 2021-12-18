@@ -11,8 +11,8 @@ use safecast::AsType;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Hash};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::fs::{Dir, File};
+use tc_transact::{HashCollection, IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
     path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryStream, TCPathBuf,
@@ -443,7 +443,7 @@ where
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> Hash<'en, D> for Table<F, D, Txn> {
+impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> HashCollection<'en, D> for Table<F, D, Txn> {
     type Item = Vec<Value>;
     type Txn = Txn;
 

@@ -11,8 +11,8 @@ use log::debug;
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Hash};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::fs::{Dir, File};
+use tc_transact::{HashCollection, IntoView, Transaction, TxnId};
 use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
@@ -97,7 +97,7 @@ pub trait BTreeWrite: BTreeInstance {
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> Hash<'en, D> for BTree<F, D, T> {
+impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> HashCollection<'en, D> for BTree<F, D, T> {
     type Item = Key;
     type Txn = T;
 

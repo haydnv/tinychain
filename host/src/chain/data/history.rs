@@ -17,7 +17,7 @@ use tc_table::TableInstance;
 use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
     label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,

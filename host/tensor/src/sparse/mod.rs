@@ -13,8 +13,8 @@ use safecast::{AsType, CastFrom};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Hash, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
@@ -32,8 +32,8 @@ use super::{
 };
 
 use access::*;
-pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 use combine::coord_to_offset;
+pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
 pub use table::SparseTable;
 
 mod access;
@@ -1175,7 +1175,7 @@ where
 }
 
 #[async_trait]
-impl<'en, FD, FS, D, T, A> Hash<'en, D> for SparseTensor<FD, FS, D, T, A>
+impl<'en, FD, FS, D, T, A> HashCollection<'en, D> for SparseTensor<FD, FS, D, T, A>
 where
     FD: File<Array>,
     FS: File<Node>,
