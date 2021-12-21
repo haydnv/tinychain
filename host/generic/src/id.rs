@@ -6,6 +6,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
@@ -13,6 +14,7 @@ use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 
@@ -111,6 +113,12 @@ impl PartialEq<Label> for Id {
 impl PartialEq<Id> for &str {
     fn eq(&self, other: &Id) -> bool {
         self == &other.id
+    }
+}
+
+impl<D: Digest> Hash<D> for Id {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.as_str())
     }
 }
 
