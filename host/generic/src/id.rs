@@ -15,6 +15,7 @@ use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use sha2::digest::{Digest, Output};
+use sha2::digest::generic_array::{ArrayLength, GenericArray};
 
 use tc_error::*;
 
@@ -80,6 +81,11 @@ pub struct Id {
 }
 
 impl Id {
+    /// Construct an `Id` from a hexadecimal string representation of a SHA-2 hash.
+    pub fn from_hash<T, U>(hash: GenericArray<T, U>) -> Self where U: ArrayLength<T>, GenericArray<T, U>: AsRef<[u8]> {
+        hex::encode(hash).parse().expect("hash")
+    }
+
     /// Borrows the String underlying this `Id`.
     #[inline]
     pub fn as_str(&self) -> &str {
@@ -124,13 +130,13 @@ impl<'a, D: Digest> Hash<D> for &'a Id {
 
 impl From<usize> for Id {
     fn from(u: usize) -> Id {
-        u.to_string().parse().unwrap()
+        u.to_string().parse().expect("usize")
     }
 }
 
 impl From<u64> for Id {
     fn from(i: u64) -> Id {
-        i.to_string().parse().unwrap()
+        i.to_string().parse().expect("64-bit unsigned int")
     }
 }
 

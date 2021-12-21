@@ -9,6 +9,9 @@ use destream::{de, en};
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
+use sha2::digest::generic_array::GenericArray;
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_btree::{BTreeType, Column};
 use tc_error::*;
@@ -42,7 +45,6 @@ mod sync;
 
 const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
-const NULL_HASH: Vec<u8> = vec![];
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 const SUBJECT: Label = label("subject");
@@ -940,4 +942,9 @@ impl de::Visitor for ChainVisitor {
 
         self.visit_map_value(class, &mut map).await
     }
+}
+
+#[inline]
+fn null_hash() -> Output<Sha256> {
+    GenericArray::default()
 }

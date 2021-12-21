@@ -15,7 +15,6 @@ use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{hash_encode, Hash};
 use tc_value::{Link, Number, Range, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -501,8 +500,6 @@ impl Refer for Scalar {
         }
     }
 }
-
-hash_encode!(Scalar);
 
 impl From<IdRef> for Scalar {
     fn from(id_ref: IdRef) -> Self {

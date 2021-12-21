@@ -12,6 +12,8 @@ use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom};
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -189,6 +191,11 @@ pub enum State {
 }
 
 impl State {
+    /// Compute the SHA256 hash of this `State`.
+    pub async fn hash(&self, _txn: &Txn) -> TCResult<Output<Sha256>> {
+        unimplemented!()
+    }
+
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
