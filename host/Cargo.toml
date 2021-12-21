@@ -23,6 +23,7 @@ path = "src/main.rs"
 tensor = ["tc-math", "tc-tensor", "tc-transact/tensor"]
 
 [dependencies]
+async-hash = "0.2"
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.5"
@@ -48,9 +49,9 @@ tc-error = "0.4"
 tc-math = { path = "math", optional = true }
 tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact", features = ["tensor"] }
-tc-value = "0.3"
+tc-value = { path = "value" }
 tc-table = { path = "table" }
-tcgeneric = "0.2.5"
+tcgeneric = { path = "generic" }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uuid = "0.8"

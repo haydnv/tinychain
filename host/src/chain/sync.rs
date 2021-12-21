@@ -17,7 +17,7 @@ use crate::state::{State, StateView};
 use crate::txn::Txn;
 
 use super::data::History;
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, NULL_HASH};
+use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -68,8 +68,7 @@ impl ChainInstance for SyncChain {
         self.subject.restore(txn, subject).await?;
 
         let mut block = self.history.write_latest(*txn.id()).await?;
-
-        *block = ChainBlock::with_txn(NULL_HASH, *txn.id());
+        *block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
 
         Ok(())
     }
