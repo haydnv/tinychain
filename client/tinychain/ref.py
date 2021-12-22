@@ -377,7 +377,10 @@ class MethodSubject(object):
         self.method_name = method_name
 
     def __deps__(self):
-        return requires(self.subject)
+        if uri(self).is_id():
+            return set([uri(self)])
+        else:
+            return requires(self.subject)
 
     def __ns__(self, cxt):
         if uri(self):
