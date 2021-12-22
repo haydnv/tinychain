@@ -1,3 +1,5 @@
+import typing as t
+
 import numpy as np
 import tinychain as tc
 import unittest
@@ -5,6 +7,11 @@ import unittest
 from testutils import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
+
+
+def _load_dense_tensor_from_json_to_numpy(jsn: t.Dict[str, t.Any]) -> np.ndarray:
+    return np.array(jsn['/state/collection/tensor/dense'][1], dtype=np.float32)\
+        .reshape(jsn['/state/collection/tensor/dense'][0][0])
 
 
 class LinearAlgebraTests(ClientTest):
@@ -80,6 +87,26 @@ class LinearAlgebraTests(ClientTest):
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertTrue(response)
+    
+    def testPLU(self):
+        x = np.array([1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 12.0, 6.0, 7.0], dtype=np.float32).reshape((3, 3))
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load([3, 3], tc.F32, x.flatten().tolist())
+        cxt.plu = tc.linalg.plu
+        cxt.plu_factorization = cxt.plu(x=cxt.x)
+        plu = self.host.post(ENDPOINT, cxt)
+
+        p = _load_dense_tensor_from_json_to_numpy(plu['p'])
+        l = _load_dense_tensor_from_json_to_numpy(plu['l'])
+        u = _load_dense_tensor_from_json_to_numpy(plu['u'])
+
+        self.assertTrue((p @ l @ u == x).all())
+        self.assertTrue([
+            np.allclose(l, np.tril(l)),
+            np.allclose(u, np.triu(u)),
+            all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
+        ])
 
     @unittest.skip
     def testSlogdet(self):
