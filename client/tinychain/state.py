@@ -310,10 +310,20 @@ class Stream(State):
     def aggregate(self):
         return self._get("aggregate", rtype=Stream)
 
+    def filter(self, op):
+        """Return a new `Stream` containing only those elements of this `Stream` where the given `op` returns `True`."""
+
+        return self._post("filter", {"op": op}, Stream)
+
     def first(self):
         """Return the first item in this `Stream`, or `Nil` if the `Stream` is empty."""
 
         return self._get("first", rtype=Scalar)
+
+    def flatten(self):
+        """Flatten a `Stream` of `Stream` s into a single `Stream` of their component elements."""
+
+        return self._get("flatten", rtype=Stream)
 
     def for_each(self, op):
         """Run the given `op` for each item in this `Stream`, then return the last result.
