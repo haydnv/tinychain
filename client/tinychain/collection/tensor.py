@@ -1,7 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.state import State, Stream, Tuple
+from tinychain.state import Class, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
 from tinychain.value import Bool, I16, F32, Number, UInt
 
@@ -198,6 +198,12 @@ class Tensor(Collection):
         """Divide this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
         return self._post("div", {"r": other}, Tensor)
+
+    @property
+    def dtype(self):
+        """Return the shape of this `Tensor`."""
+
+        return self._get("dtype", rtype=Class)
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""

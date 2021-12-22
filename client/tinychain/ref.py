@@ -367,7 +367,7 @@ class Delete(Op):
 
 
 class MethodSubject(object):
-    def __init__(self, subject, method_name):
+    def __init__(self, subject, method_name=""):
         if uri(subject).startswith('$'):
             self.__uri__ = uri(subject).append(method_name)
         else:

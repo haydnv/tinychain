@@ -342,9 +342,19 @@ class Stream(State):
 # User-defined object types
 
 class Class(State):
-    """A user-defined TinyChain class."""
+    """A TinyChain class (possibly a user-defined class)."""
 
     __uri__ = uri(State) + "/object/class"
+
+    def __call__(self, *args, **kwargs):
+        if args and kwargs:
+            raise ValueError("Class.__call__ accepts args or kwargs but not both")
+
+        subject = ref.MethodSubject(self)
+        if args:
+            return ref.Get(subject, args)
+        else:
+            return ref.Get(subject, kwargs)
 
 
 class Instance(State):

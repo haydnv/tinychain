@@ -20,9 +20,10 @@ use crate::collection::{
     Collection, DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor,
 };
 use crate::fs;
+use crate::object::Object;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
-use crate::state::State;
+use crate::state::{State, StateType};
 use crate::stream::TCStream;
 use crate::txn::Txn;
 
@@ -1176,6 +1177,12 @@ where
     } else if path.len() == 1 {
         match path[0].as_str() {
             // attributes
+            "dtype" => {
+                return Some(Box::new(AttributeHandler::from(State::Object(
+                    Object::Class(StateType::from(tensor.dtype()).into()),
+                ))))
+            }
+
             "ndim" => {
                 return Some(Box::new(AttributeHandler::from(Value::Number(
                     (tensor.ndim() as u64).into(),

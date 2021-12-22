@@ -4,12 +4,13 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use safecast::CastFrom;
+use safecast::{CastFrom, TryCastFrom};
 
 use tc_value::{Link, Value};
-use tcgeneric::{path_label, Id, Map, PathLabel, TCPathBuf};
+use tcgeneric::{path_label, Id, Map, NativeClass, PathLabel, TCPathBuf};
 
 use crate::scalar::*;
+use crate::state::StateType;
 
 use super::ObjectType;
 
@@ -55,6 +56,41 @@ impl tcgeneric::Instance for InstanceClass {
 
     fn class(&self) -> ObjectType {
         ObjectType::Class
+    }
+}
+
+impl From<StateType> for InstanceClass {
+    fn from(st: StateType) -> Self {
+        Self {
+            extends: Some(st.path().into()),
+            proto: Map::default(),
+        }
+    }
+}
+
+impl TryCastFrom<InstanceClass> for StateType {
+    fn can_cast_from(class: &InstanceClass) -> bool {
+        if class.proto.is_empty() {
+            if let Some(classpath) = &class.extends {
+                if classpath.host().is_none() {
+                    return StateType::from_path(classpath.path()).is_some();
+                }
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(class: InstanceClass) -> Option<Self> {
+        if class.proto.is_empty() {
+            if let Some(classpath) = &class.extends {
+                if classpath.host().is_none() {
+                    return StateType::from_path(classpath.path());
+                }
+            }
+        }
+
+        None
     }
 }
 
