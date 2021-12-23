@@ -151,24 +151,13 @@ def plu(x: Tensor) -> PLUFactorization:
         `x`: a matrix with shape `[N, N]`
 
     Returns:
-        A `PLUFactorization` instance.
+        A `[p, l, u]` list of `Tensor`s where
+        `p`: a permutation matrix,
+        `l`: lower triangular with unit diagonal elements,
+        `u`: upper triangular.
     """
 
-    class Permutation(Map):
-
-        @property
-        def p(self) -> Tensor:
-            return Tensor(self['p'])
-
-        @property
-        def x(self) -> Tensor:
-            return Tensor(self['x'])
-
-        @property
-        def k(self) -> UInt:
-            return UInt(self['k'])
-
-    def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Permutation:
+    def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
 
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
@@ -189,37 +178,36 @@ def plu(x: Tensor) -> PLUFactorization:
         def cond(x: Tensor, k: UInt):
             return (k < UInt(Tuple(x.shape)[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
 
-        result = Map(While(cond, step, Map(
+        return Map(While(cond, step, Map(
             p=p.copy(),
             x=x.copy(),
             k=start_from,
         )))
 
-        return Permutation(result)
-
     @post_op
     def step(p: Tensor, l: Tensor, u: Tensor, i: UInt) -> Map:
-        pu = Permutation(permute_rows(p=p, x=u, start_from=i))
-        factor = Tensor(pu.x[i + 1:, i] / pu.x[i, i])
+        pu = permute_rows(p=p, x=u, start_from=i)
+        u = Tensor(pu['x'])
+        p = Tensor(pu['p'])
+        factor = Tensor(u[i + 1:, i] / u[i, i])
+        print(factor.expand_dims(axis=0).transpose())
         return Map(After(
             when=[
                 l[i + 1:, i].write(factor),
-                pu.x[i + 1:].write(pu.x[i + 1:] - factor.expand_dims(axis=0).transpose((1, 0)).copy() * pu.x[i]),
+                u[i + 1:].write(u[i + 1:] - factor.expand_dims() * u[i]),
             ],
-            then=Map(p=pu.p, l=l, u=pu.x, i=i + 1)))
+            then=Map(p=p, l=l, u=u, i=i + 1)))
 
     @post_op
     def cond(p: Tensor, l: Tensor, u: Tensor, i: UInt):
         return i < UInt(u.shape[0]) - 1
 
-    result = Map(While(cond, step, Map(
-        p=Sparse(identity(x.shape[0], F32)).as_dense().copy(),
-        l=Sparse(identity(x.shape[0], F32)).as_dense().copy(),
+    return PLUFactorization(Map(While(cond, step, Map(
+        p=identity(x.shape[0], F32).as_dense().copy(),
+        l=identity(x.shape[0], F32).as_dense().copy(),
         u=x.copy(),
         i=UInt(0),
-    )))
-
-    return PLUFactorization(p=result['p'], l=result['l'], u=result['u'])
+        ))))
 
 
 def slogdet(x):

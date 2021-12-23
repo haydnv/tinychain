@@ -7,11 +7,11 @@ import unittest
 from testutils import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
-
+TENSOR_URI = str(tc.uri(tc.tensor.Dense))
 
 def _load_dense_tensor_from_json_to_numpy(jsn: t.Dict[str, t.Any]) -> np.ndarray:
-    return np.array(jsn['/state/collection/tensor/dense'][1], dtype=np.float32)\
-        .reshape(jsn['/state/collection/tensor/dense'][0][0])
+    return np.array(jsn[TENSOR_URI][1], dtype=np.float32)\
+        .reshape(jsn[TENSOR_URI][0][0])
 
 
 class LinearAlgebraTests(ClientTest):
