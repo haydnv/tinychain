@@ -41,6 +41,7 @@ impl<'a> Handler<'a> for Filter {
             Box::pin(async move {
                 let op = params.require(&label("op").into())?;
                 params.expect_empty()?;
+
                 Ok(State::from(self.source.filter(op)))
             })
         }))
@@ -79,8 +80,7 @@ impl<'a> Handler<'a> for Flatten {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 key.expect_none()?;
-
-                Err(TCError::not_implemented("Stream::flatten"))
+                Ok(State::Stream(self.source.flatten()))
             })
         }))
     }

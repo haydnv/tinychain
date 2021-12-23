@@ -34,6 +34,7 @@ pub enum TCStream {
     Aggregate(Box<TCStream>),
     Collection(Collection),
     Filter(Box<TCStream>, Closure),
+    Flatten(Box<TCStream>),
     Map(Box<TCStream>, Closure),
     Range(Number, Number, Number),
 }
@@ -50,6 +51,11 @@ impl TCStream {
     /// Return a new stream with only the elements in this stream which match the given `filter`.
     pub fn filter(self, filter: Closure) -> Self {
         Self::Filter(Box::new(self), filter)
+    }
+
+    /// Flatten a stream of streams into a stream of `State`s.
+    pub fn flatten(self) -> Self {
+        Self::Flatten(Box::new(self))
     }
 
     /// Fold this stream with the given initial `State` and `Closure`.
@@ -110,6 +116,12 @@ impl TCStream {
                     source
                         .into_stream(txn.clone())
                         .map_ok(|source| Self::execute_filter(source, txn, op))
+                        .await
+                }
+                Self::Flatten(source) => {
+                    source
+                        .into_stream(txn.clone())
+                        .map_ok(|source| Self::execute_flatten(source, txn))
                         .await
                 }
                 Self::Map(source, op) => {
@@ -176,6 +188,25 @@ impl TCStream {
             });
 
         Box::pin(filtered)
+    }
+
+    fn execute_flatten(
+        source: TCBoxTryStream<'static, State>,
+        txn: Txn,
+    ) -> TCBoxTryStream<'static, State> {
+        let flat = source
+            .map(|result| {
+                result.and_then(|state| {
+                    TCStream::try_cast_from(state, |s| {
+                        TCError::bad_request("Stream::flatten expects a Stream, not ", s)
+                    })
+                })
+            })
+            .map_ok(move |stream| stream.into_stream(txn.clone()))
+            .try_buffered(num_cpus::get())
+            .try_flatten();
+
+        Box::pin(flat)
     }
 
     fn execute_map(
