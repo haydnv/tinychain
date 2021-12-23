@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use safecast::{CastInto, TryCastFrom};
 
@@ -9,6 +10,7 @@ use tc_transact::Transaction;
 use tc_value::{Number, Value};
 use tcgeneric::TCBoxTryStream;
 
+use crate::closure::Closure;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -111,7 +113,7 @@ impl Source for Collection {
 
                     Ok(Box::pin(filled))
                 }
-            }
+            },
         }
     }
 }
@@ -125,5 +127,58 @@ impl From<crate::collection::Collection> for Collection {
 impl From<Collection> for TCStream {
     fn from(collection: Collection) -> Self {
         TCStream::Collection(collection)
+    }
+}
+
+#[derive(Clone)]
+pub struct Filter {
+    source: TCStream,
+    op: Closure,
+}
+
+impl Filter {
+    pub fn new(source: TCStream, op: Closure) -> Self {
+        Self { source, op }
+    }
+}
+
+#[async_trait]
+impl Source for Filter {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        let source = self.source.into_stream(txn.clone()).await?;
+        let op = self.op;
+
+        let filtered = source
+            .map_ok(move |state| {
+                op.clone()
+                    .call_owned(txn.clone(), state.clone())
+                    .map_ok(|filter| (filter, state))
+            })
+            .try_buffered(num_cpus::get())
+            .map(|result| {
+                result.and_then(|(filter, state)| {
+                    bool::try_cast_from(filter, |s| {
+                        TCError::bad_request("Stream::filter expects a boolean condition, not", s)
+                    })
+                    .map(|filter| (filter, state))
+                })
+            })
+            .try_filter_map(|(filter, state)| {
+                future::ready({
+                    if filter {
+                        Ok(Some(state))
+                    } else {
+                        Ok(None)
+                    }
+                })
+            });
+
+        Ok(Box::pin(filtered))
+    }
+}
+
+impl From<Filter> for TCStream {
+    fn from(filter: Filter) -> Self {
+        Self::Filter(Box::new(filter))
     }
 }

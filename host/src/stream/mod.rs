@@ -32,7 +32,7 @@ mod source;
 pub enum TCStream {
     Aggregate(Box<Aggregate>),
     Collection(Collection),
-    Filter(Box<TCStream>, Closure),
+    Filter(Box<Filter>),
     Flatten(Box<TCStream>),
     Map(Box<TCStream>, Closure),
     Range(Number, Number, Number),
@@ -49,7 +49,7 @@ impl TCStream {
 
     /// Return a new stream with only the elements in this stream which match the given `filter`.
     pub fn filter(self, filter: Closure) -> Self {
-        Self::Filter(Box::new(self), filter)
+        Filter::new(self, filter).into()
     }
 
     /// Flatten a stream of streams into a stream of `State`s.
@@ -106,12 +106,7 @@ impl TCStream {
             match self {
                 Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
                 Self::Collection(collection) => collection.into_stream(txn).await,
-                Self::Filter(source, op) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_filter(source, txn, op))
-                        .await
-                }
+                Self::Filter(filter) => filter.into_stream(txn).await,
                 Self::Flatten(source) => {
                     source
                         .into_stream(txn.clone())
@@ -134,39 +129,6 @@ impl TCStream {
                 }
             }
         })
-    }
-
-    fn execute_filter(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-        op: Closure,
-    ) -> TCBoxTryStream<'static, State> {
-        let filtered = source
-            .map_ok(move |state| {
-                op.clone()
-                    .call_owned(txn.clone(), state.clone())
-                    .map_ok(|filter| (filter, state))
-            })
-            .try_buffered(num_cpus::get())
-            .map(|result| {
-                result.and_then(|(filter, state)| {
-                    bool::try_cast_from(filter, |s| {
-                        TCError::bad_request("Stream::filter expects a boolean condition, not", s)
-                    })
-                    .map(|filter| (filter, state))
-                })
-            })
-            .try_filter_map(|(filter, state)| {
-                future::ready({
-                    if filter {
-                        Ok(Some(state))
-                    } else {
-                        Ok(None)
-                    }
-                })
-            });
-
-        Box::pin(filtered)
     }
 
     fn execute_flatten(
