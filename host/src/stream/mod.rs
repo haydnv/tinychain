@@ -19,7 +19,6 @@ use tcgeneric::{Id, Map, TCBoxTryFuture, TCBoxTryStream};
 use crate::closure::Closure;
 use crate::fs;
 use crate::state::{State, StateView};
-use crate::stream::group::GroupStream;
 use crate::txn::Txn;
 use crate::value::Value;
 
@@ -31,7 +30,7 @@ mod source;
 /// A stream generator such as a `Collection` or a mapping or aggregation of its items
 #[derive(Clone)]
 pub enum TCStream {
-    Aggregate(Box<TCStream>),
+    Aggregate(Box<Aggregate>),
     Collection(Collection),
     Filter(Box<TCStream>, Closure),
     Flatten(Box<TCStream>),
@@ -45,7 +44,7 @@ impl TCStream {
     /// For example, aggregating the stream `['b', 'b', 'a', 'a', 'b']`
     /// will produce `['b', 'a', 'b']`.
     pub fn aggregate(self) -> Self {
-        Self::Aggregate(Box::new(self))
+        Aggregate::new(self).into()
     }
 
     /// Return a new stream with only the elements in this stream which match the given `filter`.
@@ -105,13 +104,8 @@ impl TCStream {
     pub fn into_stream<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'static, State>> {
         Box::pin(async move {
             match self {
-                Self::Aggregate(source) => {
-                    source
-                        .into_stream(txn)
-                        .map_ok(Self::execute_aggregate)
-                        .await
-                }
-                Self::Collection(collection) => Source::into_stream(collection, txn).await,
+                Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
+                Self::Collection(collection) => collection.into_stream(txn).await,
                 Self::Filter(source, op) => {
                     source
                         .into_stream(txn.clone())
@@ -140,21 +134,6 @@ impl TCStream {
                 }
             }
         })
-    }
-
-    fn execute_aggregate(source: TCBoxTryStream<'static, State>) -> TCBoxTryStream<'static, State> {
-        let values = source.map(|r| {
-            r.and_then(|state| {
-                Value::try_cast_from(state, |s| {
-                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
-                })
-            })
-        });
-
-        let aggregate: TCBoxTryStream<'static, State> =
-            Box::pin(GroupStream::from(values).map_ok(State::from));
-
-        aggregate
     }
 
     fn execute_filter(

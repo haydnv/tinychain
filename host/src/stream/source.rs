@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use futures::stream::TryStreamExt;
-use safecast::CastInto;
+use futures::stream::{StreamExt, TryStreamExt};
+use safecast::{CastInto, TryCastFrom};
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
@@ -12,14 +12,52 @@ use tcgeneric::TCBoxTryStream;
 use crate::state::State;
 use crate::txn::Txn;
 
+use super::group::GroupStream;
 use super::TCStream;
 
 #[async_trait]
-pub trait Source: Sized
+pub trait Source: Clone + Sized
 where
     TCStream: From<Self>,
 {
     async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>>;
+}
+
+#[derive(Clone)]
+pub struct Aggregate {
+    source: TCStream,
+}
+
+impl Aggregate {
+    pub fn new(source: TCStream) -> Self {
+        Self { source }
+    }
+}
+
+#[async_trait]
+impl Source for Aggregate {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        let source = self.source.into_stream(txn).await?;
+
+        let values = source.map(|r| {
+            r.and_then(|state| {
+                Value::try_cast_from(state, |s| {
+                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
+                })
+            })
+        });
+
+        let aggregate: TCBoxTryStream<'static, State> =
+            Box::pin(GroupStream::from(values).map_ok(State::from));
+
+        Ok(aggregate)
+    }
+}
+
+impl From<Aggregate> for TCStream {
+    fn from(aggregate: Aggregate) -> Self {
+        TCStream::Aggregate(Box::new(aggregate))
+    }
 }
 
 #[derive(Clone)]
