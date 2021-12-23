@@ -9,14 +9,14 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::{AsType, CastFrom};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
 use tc_value::{
-    FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+    Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
@@ -804,6 +804,15 @@ where
         self.combine(other, div_array, Div::div, dtype)
     }
 
+    fn log(self, base: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::LeftCombine> {
+        fn log(n: Number, base: Number) -> Number {
+            n.log(Float::cast_from(base))
+        }
+
+        let dtype = self.dtype().one().ln().class();
+        self.combine(base, Array::log, log, dtype)
+    }
+
     fn mul(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         fn mul_array(l: &Array, r: &Array) -> Array {
             debug_assert_eq!(l.len(), r.len());
@@ -866,6 +875,13 @@ where
         }
     }
 
+    fn log(self, base: Tensor<FD, FS, D, T>) -> TCResult<Self::LeftCombine> {
+        match base {
+            Tensor::Dense(dense) => self.log(dense).map(Tensor::from),
+            Tensor::Sparse(sparse) => self.into_sparse().log(sparse).map(Tensor::from),
+        }
+    }
+
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Dense(dense) => self.mul(dense).map(Tensor::from),
@@ -912,6 +928,28 @@ where
         }
 
         Ok(BlockListConst::new(self.blocks, other, div_array, Number::div).into())
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        if base.class().is_complex() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
+        let base = Number::Float(base.cast_into());
+
+        fn log(n: Number, base: Number) -> Number {
+            if let Number::Float(base) = base {
+                n.log(base)
+            } else {
+                unreachable!("log with non-floating point base")
+            }
+        }
+
+        fn log_array(l: Array, r: Number) -> Array {
+            l.log_const(r)
+        }
+
+        Ok(BlockListConst::new(self.blocks, base, log_array, log).into())
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -1143,6 +1181,12 @@ where
             NumberType::Float(FloatType::F64),
         );
 
+        Ok(DenseTensor::from(blocks))
+    }
+
+    fn ln(&self) -> TCResult<Self::Unary> {
+        let dtype = self.dtype().one().ln().class();
+        let blocks = BlockListUnary::new(self.blocks.clone(), Array::ln, Number::ln, dtype);
         Ok(DenseTensor::from(blocks))
     }
 

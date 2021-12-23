@@ -9,14 +9,14 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{AsType, CastFrom};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
 use tc_value::{
-    FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+    Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
@@ -32,8 +32,8 @@ use super::{
 };
 
 use access::*;
-use combine::coord_to_offset;
 pub use access::{DenseToSparse, SparseAccess, SparseAccessor, SparseWrite};
+use combine::coord_to_offset;
 pub use table::SparseTable;
 
 mod access;
@@ -840,13 +840,25 @@ where
         self.left_combine(other, div)
     }
 
+    fn log(self, base: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
+        if base.dtype().is_complex() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
+        fn log(n: Number, base: Number) -> Number {
+            n.log(Float::cast_from(base))
+        }
+
+        self.left_combine(base, log)
+    }
+
     fn mul(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
         debug!("SparseTensor::mul");
         self.left_combine(other, Number::mul)
     }
 
     fn pow(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
-        if !other.dtype().is_real() {
+        if other.dtype().is_complex() {
             return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
         }
 
@@ -887,6 +899,13 @@ where
         }
     }
 
+    fn log(self, base: Tensor<FD, FS, D, T>) -> TCResult<Self::LeftCombine> {
+        match base {
+            Tensor::Sparse(sparse) => self.log(sparse).map(Tensor::from),
+            Tensor::Dense(dense) => self.log(dense.into_sparse()).map(Tensor::from),
+        }
+    }
+
     fn mul(self, other: Tensor<FD, FS, D, T>) -> TCResult<Self::Combine> {
         match other {
             Tensor::Sparse(sparse) => self.mul(sparse).map(Tensor::from),
@@ -918,6 +937,23 @@ impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A> {
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         Ok(SparseConstCombinator::new(self.accessor, other, Number::div).into())
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        if base.class().is_complex() {
+            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+        }
+
+        fn log(n: Number, base: Number) -> Number {
+            if let Number::Float(base) = base {
+                n.log(base)
+            } else {
+                unreachable!("log with non-floating point base")
+            }
+        }
+
+        let base = Number::Float(base.cast_into());
+        Ok(SparseConstCombinator::new(self.accessor, base, log).into())
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -1120,6 +1156,13 @@ where
         let dtype = NumberType::Float(FloatType::F64);
         let source = self.accessor.clone().accessor();
         let accessor = SparseUnary::new(source, exp, dtype);
+        Ok(SparseTensor::from(accessor))
+    }
+
+    fn ln(&self) -> TCResult<Self::Unary> {
+        let dtype = self.dtype().one().ln().class();
+        let source = self.accessor.clone().accessor();
+        let accessor = SparseUnary::new(source, Number::ln, dtype);
         Ok(SparseTensor::from(accessor))
     }
 

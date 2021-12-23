@@ -1,5 +1,7 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
+import math
+
 from tinychain.ref import If, Ref
 from tinychain.state import Scalar
 from tinychain.util import form_of, to_json, uri, URI
@@ -237,6 +239,15 @@ class Number(Value):
         """Return the quotient of `self` and `other`."""
 
         return self._get("div", other, self.__class__)
+
+    def log(self, base=None):
+        """
+        Return the logarithm of this `Number`.
+
+        If no `base` is specified, this will be the natural logarithm (base e).
+        """
+
+        return self._post("log", {"r": base}, F64)
 
     def mul(self, other):
         """Return the product of `self` and `other`."""
