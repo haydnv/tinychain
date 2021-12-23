@@ -25,9 +25,8 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let parent = State::from(key);
-                Ok(State::Object(
-                    InstanceExt::new(parent, self.class.clone()).into(),
-                ))
+                let instance = InstanceExt::new(parent, self.class.clone());
+                Ok(State::Object(instance.into()))
             })
         }))
     }

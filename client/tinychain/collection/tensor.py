@@ -1,7 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
-from tinychain.state import State, Stream, Tuple
+from tinychain.state import Class, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
 from tinychain.value import Bool, I16, F32, Number, UInt
 
@@ -199,6 +199,12 @@ class Tensor(Collection):
 
         return self._post("div", {"r": other}, Tensor)
 
+    @property
+    def dtype(self):
+        """Return the shape of this `Tensor`."""
+
+        return self._get("dtype", rtype=Class)
+
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
@@ -228,6 +234,15 @@ class Tensor(Collection):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
         return self._post("gte", {"r": other}, Tensor)
+
+    def log(self, base=None):
+        """
+        Return the logarithm of this `Tensor`.
+
+        If no `base` is specified, this will return the natural logarithm (base e).
+        """
+
+        return self._get("log", base, self.__class__)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""

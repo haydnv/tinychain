@@ -7,12 +7,14 @@ use std::iter;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, en};
 use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
@@ -327,6 +329,12 @@ impl Ord for Link {
 impl PartialOrd for Link {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.to_string().partial_cmp(&other.to_string())
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Link {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.to_string().as_str())
     }
 }
 

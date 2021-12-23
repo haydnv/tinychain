@@ -4,8 +4,10 @@ use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
+use std::ops::Deref;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
@@ -16,6 +18,8 @@ use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use sha2::digest::generic_array::GenericArray;
+use sha2::digest::{Digest, Output};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -500,6 +504,21 @@ impl Instance for Value {
     }
 }
 
+impl<'a, D: Digest> Hash<D> for &'a Value {
+    fn hash(self) -> Output<D> {
+        match self {
+            Value::Bytes(bytes) => D::digest(bytes),
+            Value::Id(id) => Hash::<D>::hash(id),
+            Value::Link(link) => Hash::<D>::hash(link),
+            Value::None => GenericArray::default(),
+            Value::Number(n) => Hash::<D>::hash(*n),
+            Value::String(s) => Hash::<D>::hash(s.as_str()),
+            Value::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
+            Value::Version(v) => Hash::<D>::hash(*v),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_any(ValueVisitor)
@@ -793,10 +812,16 @@ impl TryCastFrom<Value> for Number {
                 let im = Self::opt_cast_from(t.pop().unwrap());
                 let re = Self::opt_cast_from(t.pop().unwrap());
                 match (re, im) {
-                    (Some(re), Some(im)) => {
-                        let c = Complex::cast_from((re, im));
-                        Some(Self::Complex(c))
-                    }
+                    (Some(Number::Float(re)), Some(Number::Float(im))) => match (re, im) {
+                        (Float::F32(re), Float::F32(im)) => {
+                            let c = Complex::from([re, im]);
+                            Some(Self::Complex(c))
+                        }
+                        (re, im) => {
+                            let c = Complex::from([f64::cast_from(re), f64::cast_from(im)]);
+                            Some(Self::Complex(c))
+                        }
+                    },
                     _ => None,
                 }
             }

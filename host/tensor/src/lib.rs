@@ -299,10 +299,13 @@ pub trait TensorMath<D: Dir, O> {
     /// Divide `self` by `other`.
     fn div(self, other: O) -> TCResult<Self::LeftCombine>;
 
+    /// Element-wise logarithm of `self` with respect to the given `base`.
+    fn log(self, base: O) -> TCResult<Self::LeftCombine>;
+
     /// Multiply two tensors together.
     fn mul(self, other: O) -> TCResult<Self::LeftCombine>;
 
-    /// Raise `self` to the power `other`.
+    /// Raise `self` to the power of `other`.
     fn pow(self, other: O) -> TCResult<Self::LeftCombine>;
 
     /// Subtract `other` from `self`.
@@ -319,6 +322,9 @@ pub trait TensorMathConst {
 
     /// Divide `self` by `other`.
     fn div_const(self, other: Number) -> TCResult<Self::Combine>;
+
+    /// Element-wise logarithm
+    fn log_const(self, base: Number) -> TCResult<Self::Combine>;
 
     /// Multiply `self` by `other`.
     fn mul_const(self, other: Number) -> TCResult<Self::Combine>;
@@ -418,8 +424,11 @@ pub trait TensorUnary<D: Dir> {
     /// Element-wise absolute value
     fn abs(&self) -> TCResult<Self::Unary>;
 
-    /// Raise `e` to the power of `self`.
+    /// Element-wise exponentiation
     fn exp(&self) -> TCResult<Self::Unary>;
+
+    /// Element-wise natural logarithm
+    fn ln(&self) -> TCResult<Self::Unary>;
 
     /// Return `true` if all elements in this [`Tensor`] are nonzero.
     async fn all(self, txn: Self::Txn) -> TCResult<bool>;
@@ -934,6 +943,13 @@ where
         }
     }
 
+    fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
+        match self {
+            Self::Dense(this) => this.log(base),
+            Self::Sparse(this) => this.log(base),
+        }
+    }
+
     fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => this.mul(other),
@@ -978,6 +994,13 @@ where
         match self {
             Self::Dense(dense) => dense.div_const(other).map(Self::from),
             Self::Sparse(sparse) => sparse.div_const(other).map(Self::from),
+        }
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(dense) => dense.log_const(base).map(Self::from),
+            Self::Sparse(sparse) => sparse.log_const(base).map(Self::from),
         }
     }
 
@@ -1180,7 +1203,7 @@ where
     type Txn = T;
     type Unary = Self;
 
-    fn abs(&self) -> TCResult<Self> {
+    fn abs(&self) -> TCResult<Self::Unary> {
         match self {
             Self::Dense(dense) => dense.abs().map(Self::from),
             Self::Sparse(sparse) => sparse.abs().map(Self::from),
@@ -1191,6 +1214,13 @@ where
         match self {
             Self::Dense(dense) => dense.exp().map(Self::from),
             Self::Sparse(sparse) => sparse.exp().map(Self::from),
+        }
+    }
+
+    fn ln(&self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.ln().map(Self::from),
+            Self::Sparse(sparse) => sparse.ln().map(Self::from),
         }
     }
 

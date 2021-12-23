@@ -1,7 +1,7 @@
-use safecast::TryCastInto;
+use safecast::{CastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_value::{Number, NumberClass, NumberInstance, Trigonometry, Value};
+use tc_value::{Float, Number, NumberClass, NumberInstance, Trigonometry, Value};
 use tcgeneric::{label, PathSegment};
 
 use crate::route::{GetHandler, Handler, PostHandler, Route};
@@ -43,6 +43,77 @@ where
                 params.expect_empty()?;
 
                 (self.op)(value).map(Value::Number).map(State::from)
+            })
+        }))
+    }
+}
+
+// TODO: should this be more general, like `DualWithDefaultArg`?
+struct Log {
+    n: Number,
+}
+
+impl Log {
+    fn new(n: Number) -> Self {
+        Self { n }
+    }
+}
+
+impl<'a> Handler<'a> for Log {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, value| {
+            Box::pin(async move {
+                if self.n == Number::from(0) {
+                    return Err(TCError::unsupported("the logarithm of zero is undefined"));
+                }
+
+                let log = if value.is_none() {
+                    Ok(self.n.ln())
+                } else {
+                    let base: Number =
+                        value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
+                    if base.class().is_complex() {
+                        Err(TCError::bad_request("invalid base for log", base))
+                    } else {
+                        let base = Float::cast_from(base);
+                        Ok(self.n.log(base))
+                    }
+                }?;
+
+                Ok(Value::Number(log).into())
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let base: Value = params.or_default(&label("r").into())?;
+                params.expect_empty()?;
+
+                let log = if base.is_none() {
+                    self.n.ln()
+                } else {
+                    let base: Number =
+                        base.try_cast_into(|v| TCError::bad_request("invalid base for log", v))?;
+                    if base.class().is_complex() {
+                        return Err(TCError::bad_request(
+                            "log does not support a complex base",
+                            base,
+                        ));
+                    }
+
+                    let base = Float::cast_from(base);
+                    self.n.log(base)
+                };
+
+                Ok(Value::Number(log).into())
             })
         }))
     }
@@ -100,6 +171,8 @@ impl Route for Number {
                     Ok(*self / other)
                 }
             })),
+            "ln" => Box::new(Unary::new("ln", move || self.ln())),
+            "log" => Box::new(Log::new(*self)),
             "mul" => Box::new(Dual::new(move |other| Ok(*self * other))),
             "sub" => Box::new(Dual::new(move |other| Ok(*self - other))),
             "pow" => Box::new(Dual::new(move |other| Ok(self.pow(other)))),

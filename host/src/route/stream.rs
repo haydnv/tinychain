@@ -28,6 +28,22 @@ impl<'a> Handler<'a> for Aggregate {
     }
 }
 
+#[allow(unused)]
+struct Filter {
+    source: TCStream,
+}
+
+impl<'a> Handler<'a> for Filter {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, _params| {
+            Box::pin(async move { Err(TCError::not_implemented("Stream::filter")) })
+        }))
+    }
+}
+
 struct First {
     source: TCStream,
 }
@@ -42,6 +58,26 @@ impl<'a> Handler<'a> for First {
                 let mut stream = self.source.into_stream(txn.clone()).await?;
                 let first = stream.try_next().map_ok(State::from).await?;
                 first.get(txn, &TCPathBuf::default(), key).await
+            })
+        }))
+    }
+}
+
+#[allow(unused)]
+struct Flatten {
+    source: TCStream,
+}
+
+impl<'a> Handler<'a> for Flatten {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                Err(TCError::not_implemented("Stream::flatten"))
             })
         }))
     }
@@ -121,7 +157,9 @@ impl Route for TCStream {
         let source = self.clone();
         match path[0].as_str() {
             "aggregate" => Some(Box::new(Aggregate { source })),
+            "filter" => Some(Box::new(Filter { source })),
             "first" => Some(Box::new(First { source })),
+            "flatten" => Some(Box::new(Flatten { source })),
             "fold" => Some(Box::new(Fold { source })),
             "for_each" => Some(Box::new(ForEach { source })),
             "map" => Some(Box::new(Map { source })),

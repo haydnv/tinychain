@@ -15,7 +15,7 @@ use safecast::{CastFrom, CastInto, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, Number, TCString, Value, ValueType};
+use tc_value::{Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::chain::{self, Chain, ChainType, ChainVisitor};
@@ -112,6 +112,12 @@ impl From<BTreeType> for StateType {
 impl From<CollectionType> for StateType {
     fn from(ct: CollectionType) -> Self {
         Self::Collection(ct)
+    }
+}
+
+impl From<NumberType> for StateType {
+    fn from(nt: NumberType) -> Self {
+        ValueType::from(nt).into()
     }
 }
 

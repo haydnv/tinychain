@@ -1,4 +1,5 @@
 import itertools
+import math
 import numpy as np
 import tinychain as tc
 import unittest
@@ -118,6 +119,18 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_dense(tc.I64, shape, np.arange(-2, 4, 2))
         self.assertEqual(actual, expected)
+
+    def testLogarithm(self):
+        size = 1_000_000
+        shape = [10, size / 10]
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.arange(shape, 2, size + 2)
+        cxt.ln = cxt.x.log()
+        cxt.log = cxt.x.log(math.e)
+        cxt.test = (cxt.ln == cxt.log).all()
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testLogic(self):
         big = [20, 20, 10]

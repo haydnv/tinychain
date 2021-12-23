@@ -20,9 +20,10 @@ use crate::collection::{
     Collection, DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor,
 };
 use crate::fs;
+use crate::object::Object;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
-use crate::state::State;
+use crate::state::{State, StateType};
 use crate::stream::TCStream;
 use crate::txn::Txn;
 
@@ -923,6 +924,91 @@ impl<'a> Handler<'a> for DualHandler {
     }
 }
 
+// TODO: should this be more general, like `DualHandlerWithDefaultArgument`?
+struct LogHandler {
+    tensor: Tensor,
+}
+
+impl LogHandler {
+    fn new<T>(tensor: T) -> Self
+    where
+        Tensor: From<T>,
+    {
+        Self {
+            tensor: tensor.into(),
+        }
+    }
+}
+
+impl<'a> Handler<'a> for LogHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, r| {
+            Box::pin(async move {
+                self.tensor.shape().validate()?;
+
+                // TODO: perform this check while computing the logarithm itself
+                if !self.tensor.clone().all(txn.clone()).await? {
+                    return Err(TCError::unsupported("the logarithm of zero is undefined"));
+                }
+
+                let log = if r.is_none() {
+                    self.tensor.ln()?
+                } else {
+                    let base = Number::try_cast_from(r, |r| {
+                        TCError::bad_request("invalid base for log", r)
+                    })?;
+
+                    self.tensor.log_const(base)?
+                };
+
+                Ok(State::Collection(Collection::Tensor(log)))
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let r = params.or_default(&label("r").into())?;
+                params.expect_empty()?;
+
+                let l = self.tensor;
+                l.shape().validate()?;
+
+                let log = match r {
+                    State::Collection(Collection::Tensor(base)) => {
+                        base.shape().validate()?;
+
+                        if l.shape() == base.shape() {
+                            l.log(base)
+                        } else {
+                            let (l, base) = broadcast(l, base)?;
+                            l.log(base)
+                        }
+                    }
+                    State::Scalar(Scalar::Value(base)) if base.matches::<Number>() => {
+                        let base = base.opt_cast_into().expect("numeric constant");
+                        l.log_const(base)
+                    }
+                    base if base.is_none() => l.ln(),
+                    other => Err(TCError::bad_request(
+                        "expected a Tensor or Number, found",
+                        other,
+                    )),
+                }?;
+
+                Ok(State::Collection(Collection::Tensor(log)))
+            })
+        }))
+    }
+}
+
 struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
     tensor: &'a T,
     reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
@@ -1176,6 +1262,12 @@ where
     } else if path.len() == 1 {
         match path[0].as_str() {
             // attributes
+            "dtype" => {
+                return Some(Box::new(AttributeHandler::from(State::Object(
+                    Object::Class(StateType::from(tensor.dtype()).into()),
+                ))))
+            }
+
             "ndim" => {
                 return Some(Box::new(AttributeHandler::from(Value::Number(
                     (tensor.ndim() as u64).into(),
@@ -1333,6 +1425,7 @@ where
                 TensorMath::div,
                 TensorMathConst::div_const,
             ))),
+            "log" => Some(Box::new(LogHandler::new(tensor))),
             "mul" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::mul,

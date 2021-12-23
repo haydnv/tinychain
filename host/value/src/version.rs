@@ -2,10 +2,12 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, en};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::Id;
@@ -33,6 +35,12 @@ impl Ord for Version {
             },
             ordering => ordering,
         }
+    }
+}
+
+impl<D: Digest> Hash<D> for Version {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash([self.major, self.minor, self.rev])
     }
 }
 
