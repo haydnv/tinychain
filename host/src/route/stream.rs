@@ -28,7 +28,6 @@ impl<'a> Handler<'a> for Aggregate {
     }
 }
 
-#[allow(unused)]
 struct Filter {
     source: TCStream,
 }
@@ -38,8 +37,12 @@ impl<'a> Handler<'a> for Filter {
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, _params| {
-            Box::pin(async move { Err(TCError::not_implemented("Stream::filter")) })
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let op = params.require(&label("op").into())?;
+                params.expect_empty()?;
+                Ok(State::from(self.source.filter(op)))
+            })
         }))
     }
 }
