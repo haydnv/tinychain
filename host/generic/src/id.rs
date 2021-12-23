@@ -116,7 +116,7 @@ impl PartialEq<Id> for &str {
     }
 }
 
-impl<D: Digest> Hash<D> for Id {
+impl<'a, D: Digest> Hash<D> for &'a Id {
     fn hash(self) -> Output<D> {
         Hash::<D>::hash(self.as_str())
     }

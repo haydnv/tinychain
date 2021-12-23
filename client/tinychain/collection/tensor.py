@@ -235,6 +235,15 @@ class Tensor(Collection):
 
         return self._post("gte", {"r": other}, Tensor)
 
+    def log(self, base=None):
+        """
+        Return the logarithm of this `Tensor`.
+
+        If no `base` is specified, this will return the natural logarithm (base e).
+        """
+
+        return self._get("log", base, self.__class__)
+
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
 
