@@ -11,22 +11,22 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom};
 
-use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableStream;
-use tc_transact::{IntoView, Transaction};
+use tc_transact::IntoView;
 use tc_value::{Number, UInt};
 use tcgeneric::{Id, Map, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::closure::Closure;
-use crate::collection::Collection;
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::stream::group::GroupStream;
 use crate::txn::Txn;
 use crate::value::Value;
 
+use source::*;
+
 mod group;
+mod source;
 
 /// A stream generator such as a `Collection` or a mapping or aggregation of its items
 #[derive(Clone)]
@@ -111,7 +111,7 @@ impl TCStream {
                         .map_ok(Self::execute_aggregate)
                         .await
                 }
-                Self::Collection(collection) => Self::execute_stream(collection, txn).await,
+                Self::Collection(collection) => Source::into_stream(collection, txn).await,
                 Self::Filter(source, op) => {
                     source
                         .into_stream(txn.clone())
@@ -214,56 +214,11 @@ impl TCStream {
         txn: Txn,
         op: Closure,
     ) -> TCBoxTryStream<'static, State> {
-        Box::pin(source.and_then(move |state| Box::pin(op.clone().call_owned(txn.clone(), state))))
-    }
+        let map = source
+            .map_ok(move |state| op.clone().call_owned(txn.clone(), state))
+            .try_buffered(num_cpus::get());
 
-    async fn execute_stream(
-        collection: Collection,
-        txn: Txn,
-    ) -> TCResult<TCBoxTryStream<'static, State>> {
-        match collection {
-            Collection::BTree(btree) => {
-                let keys = btree.keys(*txn.id()).await?;
-                let keys: TCBoxTryStream<'static, State> =
-                    Box::pin(keys.map_ok(Value::from).map_ok(State::from));
-
-                Ok(keys)
-            }
-            Collection::Table(table) => {
-                let rows = table.rows(*txn.id()).await?;
-                let rows: TCBoxTryStream<'static, State> =
-                    Box::pin(rows.map_ok(Value::from).map_ok(State::from));
-
-                Ok(rows)
-            }
-
-            #[cfg(feature = "tensor")]
-            Collection::Tensor(tensor) => match tensor {
-                tc_tensor::Tensor::Dense(dense) => {
-                    use tc_tensor::DenseAccess;
-                    let elements = dense.into_inner().value_stream(txn).await?;
-                    Ok(Box::pin(elements.map_ok(State::from)))
-                }
-                tc_tensor::Tensor::Sparse(sparse) => {
-                    use tc_tensor::SparseAccess;
-                    use tcgeneric::Tuple;
-
-                    let filled = sparse.into_inner().filled(txn).await?;
-                    let filled = filled
-                        .map_ok(|(coord, value)| {
-                            let coord = coord
-                                .into_iter()
-                                .map(Number::from)
-                                .collect::<Tuple<Value>>();
-
-                            Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
-                        })
-                        .map_ok(State::from);
-
-                    Ok(Box::pin(filled))
-                }
-            },
-        }
+        Box::pin(map)
     }
 }
 
@@ -286,10 +241,10 @@ impl<'en> IntoView<'en, fs::Dir> for TCStream {
 
 impl<T> From<T> for TCStream
 where
-    Collection: From<T>,
+    crate::collection::Collection: From<T>,
 {
     fn from(collection: T) -> Self {
-        Self::Collection(collection.into())
+        Self::Collection(crate::collection::Collection::from(collection).into())
     }
 }
 
