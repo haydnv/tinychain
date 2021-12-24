@@ -2,7 +2,7 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, Float, UInt
+from tinychain.value import Bool, F64, Float, UInt, F32
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -115,6 +115,98 @@ def qr(cxt, x: Tensor) -> Tuple:
     state = Map(Q=identity(cxt.m, F64).as_dense(), R=x)
     QR = Stream.range(cxt.n - 1).fold("k", state, qr_step)
     return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
+
+
+class PLUFactorization(Map):
+    """
+    PLU factorization of a given `[N, N]` matrix.
+    """
+    
+    @property
+    def p(self) -> Tensor:
+        """
+        Permutation matrix as an `[N, N]` `Tensor`.
+        """
+        return Tensor(self['p'])
+
+    @property
+    def l(self) -> Tensor:
+        """
+        Lower-triangular matrix as an `[N, N]` `Tensor`.
+        """
+        return Tensor(self['l'])
+
+    @property
+    def u(self) -> Tensor:
+        """
+        Upper-triangular matrix as an `[N, N]` `Tensor`.
+        """
+        return Tensor(self['u'])
+
+@post_op
+def plu(x: Tensor) -> PLUFactorization:
+    """Compute the PLU factorization of the given `matrix`.
+    
+    Args:
+        `x`: a matrix with shape `[N, N]`
+
+    Returns:
+        A `[p, l, u]` list of `Tensor`s where
+        `p`: a permutation matrix,
+        `l`: lower triangular with unit diagonal elements,
+        `u`: upper triangular.
+    """
+
+    def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
+
+        @post_op
+        def step(p: Tensor, x: Tensor, k: UInt) -> Map:
+            p_k, p_kp1 = p[k].copy(), p[k + 1].copy()
+            x_k, x_kp1 = x[k].copy(), x[k + 1].copy()
+
+            return Map(After(
+                [
+                    p[k].write(p_kp1),
+                    p[k + 1].write(p_k),
+                    x[k].write(x_kp1),
+                    x[k + 1].write(x_k),
+                ],
+                Map(p=p, x=x, k=k + 1)
+            ))
+
+        @post_op
+        def cond(x: Tensor, k: UInt):
+            return (k < UInt(Tuple(x.shape)[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
+
+        return Map(While(cond, step, Map(
+            p=p.copy(),
+            x=x.copy(),
+            k=start_from,
+        )))
+
+    @post_op
+    def step(p: Tensor, l: Tensor, u: Tensor, i: UInt) -> Map:
+        pu = permute_rows(p=p, x=u, start_from=i)
+        u = Tensor(pu['x'])
+        p = Tensor(pu['p'])
+        factor = Tensor(u[i + 1:, i] / u[i, i])
+        return Map(After(
+            when=[
+                l[i + 1:, i].write(factor),
+                u[i + 1:].write(u[i + 1:] - factor.expand_dims() * u[i]),
+            ],
+            then=Map(p=p, l=l, u=u, i=i + 1)))
+
+    @post_op
+    def cond(p: Tensor, l: Tensor, u: Tensor, i: UInt):
+        return i < UInt(u.shape[0]) - 1
+
+    return PLUFactorization(Map(While(cond, step, Map(
+        p=identity(x.shape[0], F32).as_dense().copy(),
+        l=identity(x.shape[0], F32).as_dense().copy(),
+        u=x.copy(),
+        i=UInt(0),
+        ))))
 
 
 def slogdet(x):
