@@ -1,30 +1,28 @@
 //! A stream generator such as a `Collection` or a mapping or aggregation of its items
 
 use std::convert::TryInto;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use destream::en;
 use futures::future;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::TryStreamExt;
 use log::debug;
-use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tc_value::{Number, UInt};
+use tc_value::Number;
 use tcgeneric::{Id, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::closure::Closure;
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
-use crate::value::Value;
 
+use range::Range;
 use source::*;
 
 mod group;
+mod range;
 mod source;
 
 /// A stream generator such as a `Collection` or a mapping or aggregation of its items
@@ -35,7 +33,7 @@ pub enum TCStream {
     Filter(Box<Filter>),
     Flatten(Box<Flatten>),
     Map(Box<Map>),
-    Range(Number, Number, Number),
+    Range(Range),
 }
 
 impl TCStream {
@@ -72,6 +70,7 @@ impl TCStream {
         while let Some(item) = source.try_next().await? {
             let mut args = state.clone();
             args.insert(item_name.clone(), item);
+
             let result = op.clone().call(&txn, args.into()).await?;
             state = result.try_into()?;
         }
@@ -109,16 +108,14 @@ impl TCStream {
                 Self::Filter(filter) => filter.into_stream(txn).await,
                 Self::Flatten(source) => source.into_stream(txn).await,
                 Self::Map(map) => map.into_stream(txn).await,
-                Self::Range(start, stop, step) => {
-                    let range = RangeStream::new(start, stop, step)
-                        .map(Value::Number)
-                        .map(State::from)
-                        .map(Ok);
-                    let range: TCBoxTryStream<_> = Box::pin(range);
-                    Ok(range)
-                }
+                Self::Range(range) => range.into_stream(txn).await,
             }
         })
+    }
+
+    /// Return a `TCStream` of numbers at the given `step` within the given range.
+    pub fn range(start: Number, stop: Number, step: Number) -> Self {
+        Range::new(start, stop, step).into()
     }
 }
 
@@ -145,58 +142,5 @@ where
 {
     fn from(collection: T) -> Self {
         Self::Collection(crate::collection::Collection::from(collection).into())
-    }
-}
-
-struct RangeStream {
-    current: Number,
-    step: Number,
-    stop: Number,
-}
-
-impl RangeStream {
-    fn new(start: Number, stop: Number, step: Number) -> Self {
-        Self {
-            current: start,
-            stop,
-            step,
-        }
-    }
-}
-
-impl Stream for RangeStream {
-    type Item = Number;
-
-    fn poll_next(mut self: Pin<&mut Self>, _cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.current >= self.stop {
-            Poll::Ready(None)
-        } else {
-            let next = self.current;
-            self.current = next + self.step;
-            Poll::Ready(Some(next))
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = (self.stop - self.current) / self.step;
-        match size {
-            Number::Bool(_) => (0, Some(1)),
-            Number::Complex(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size + 1))
-            }
-            Number::Float(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size + 1))
-            }
-            Number::Int(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size))
-            }
-            Number::UInt(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size))
-            }
-        }
     }
 }
