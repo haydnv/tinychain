@@ -184,6 +184,44 @@ impl From<Filter> for TCStream {
 }
 
 #[derive(Clone)]
+pub struct Flatten {
+    source: TCStream,
+}
+
+impl Flatten {
+    pub fn new(source: TCStream) -> Self {
+        Self { source }
+    }
+}
+
+#[async_trait]
+impl Source for Flatten {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        let source = self.source.into_stream(txn.clone()).await?;
+
+        let flat = source
+            .map(|result| {
+                result.and_then(|state| {
+                    TCStream::try_cast_from(state, |s| {
+                        TCError::bad_request("Stream::flatten expects a Stream, not ", s)
+                    })
+                })
+            })
+            .map_ok(move |stream| stream.into_stream(txn.clone()))
+            .try_buffered(num_cpus::get())
+            .try_flatten();
+
+        Ok(Box::pin(flat))
+    }
+}
+
+impl From<Flatten> for TCStream {
+    fn from(flatten: Flatten) -> TCStream {
+        TCStream::Flatten(Box::new(flatten))
+    }
+}
+
+#[derive(Clone)]
 pub struct Map {
     source: TCStream,
     op: Closure,

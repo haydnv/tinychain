@@ -6,10 +6,10 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use destream::en;
-use futures::future::{self, TryFutureExt};
+use futures::future;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom};
+use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -33,7 +33,7 @@ pub enum TCStream {
     Aggregate(Box<Aggregate>),
     Collection(Collection),
     Filter(Box<Filter>),
-    Flatten(Box<TCStream>),
+    Flatten(Box<Flatten>),
     Map(Box<Map>),
     Range(Number, Number, Number),
 }
@@ -54,7 +54,7 @@ impl TCStream {
 
     /// Flatten a stream of streams into a stream of `State`s.
     pub fn flatten(self) -> Self {
-        Self::Flatten(Box::new(self))
+        Flatten::new(self).into()
     }
 
     /// Fold this stream with the given initial `State` and `Closure`.
@@ -107,12 +107,7 @@ impl TCStream {
                 Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
                 Self::Collection(collection) => collection.into_stream(txn).await,
                 Self::Filter(filter) => filter.into_stream(txn).await,
-                Self::Flatten(source) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_flatten(source, txn))
-                        .await
-                }
+                Self::Flatten(source) => source.into_stream(txn).await,
                 Self::Map(map) => map.into_stream(txn).await,
                 Self::Range(start, stop, step) => {
                     let range = RangeStream::new(start, stop, step)
@@ -124,25 +119,6 @@ impl TCStream {
                 }
             }
         })
-    }
-
-    fn execute_flatten(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-    ) -> TCBoxTryStream<'static, State> {
-        let flat = source
-            .map(|result| {
-                result.and_then(|state| {
-                    TCStream::try_cast_from(state, |s| {
-                        TCError::bad_request("Stream::flatten expects a Stream, not ", s)
-                    })
-                })
-            })
-            .map_ok(move |stream| stream.into_stream(txn.clone()))
-            .try_buffered(num_cpus::get())
-            .try_flatten();
-
-        Box::pin(flat)
     }
 }
 
