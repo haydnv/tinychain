@@ -8,7 +8,7 @@ use tcgeneric::TCPathBuf;
 use crate::generic::{label, PathSegment};
 use crate::route::{GetHandler, Handler, PostHandler, Public, Route};
 use crate::state::State;
-use crate::stream::TCStream;
+use crate::stream::{Source, TCStream};
 
 struct Aggregate {
     source: TCStream,
@@ -182,13 +182,13 @@ impl<'a> Handler<'a> for RangeHandler {
             Box::pin(async move {
                 if key.matches::<(Number, Number, Number)>() {
                     let (start, stop, step) = key.opt_cast_into().expect("range");
-                    Ok(State::Stream(TCStream::Range(start, stop, step)))
+                    Ok(State::Stream(TCStream::range(start, stop, step)))
                 } else if key.matches::<(Number, Number)>() {
                     let (start, stop) = key.opt_cast_into().expect("range");
-                    Ok(State::Stream(TCStream::Range(start, stop, 1.into())))
+                    Ok(State::Stream(TCStream::range(start, stop, 1.into())))
                 } else if key.matches::<Number>() {
                     let stop = key.opt_cast_into().expect("range stop");
-                    Ok(State::Stream(TCStream::Range(0.into(), stop, 1.into())))
+                    Ok(State::Stream(TCStream::range(0.into(), stop, 1.into())))
                 } else {
                     Err(TCError::bad_request("invalid range", key))
                 }

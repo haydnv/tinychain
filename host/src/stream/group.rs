@@ -4,12 +4,58 @@ use std::fmt;
 use std::mem;
 use std::pin::Pin;
 
+use async_trait::async_trait;
 use futures::ready;
-use futures::stream::{Fuse, Stream, StreamExt};
+use futures::stream::{Fuse, Stream, StreamExt, TryStreamExt};
 use futures::task::{Context, Poll};
 use pin_project::pin_project;
+use safecast::TryCastFrom;
 
-use tc_error::TCResult;
+use tc_error::*;
+use tc_value::Value;
+use tcgeneric::TCBoxTryStream;
+
+use crate::state::State;
+use crate::txn::Txn;
+
+use super::{Source, TCStream};
+
+#[derive(Clone)]
+pub struct Aggregate {
+    source: TCStream,
+}
+
+impl Aggregate {
+    pub fn new(source: TCStream) -> Self {
+        Self { source }
+    }
+}
+
+#[async_trait]
+impl Source for Aggregate {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        let source = self.source.into_stream(txn).await?;
+
+        let values = source.map(|r| {
+            r.and_then(|state| {
+                Value::try_cast_from(state, |s| {
+                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
+                })
+            })
+        });
+
+        let aggregate: TCBoxTryStream<'static, State> =
+            Box::pin(GroupStream::from(values).map_ok(State::from));
+
+        Ok(aggregate)
+    }
+}
+
+impl From<Aggregate> for TCStream {
+    fn from(aggregate: Aggregate) -> Self {
+        TCStream::Aggregate(Box::new(aggregate))
+    }
+}
 
 /// A [`Stream`] which groups an ordered input stream into only its unique entries using [`Eq`]
 #[pin_project]

@@ -24,7 +24,7 @@ use crate::object::Object;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
 use crate::state::{State, StateType};
-use crate::stream::TCStream;
+use crate::stream::{Source, TCStream};
 use crate::txn::Txn;
 
 use super::{Handler, Route};

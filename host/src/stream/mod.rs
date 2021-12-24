@@ -1,42 +1,42 @@
 //! A stream generator such as a `Collection` or a mapping or aggregation of its items
 
 use std::convert::TryInto;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use destream::en;
-use futures::future::{self, TryFutureExt};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::future;
+use futures::stream::TryStreamExt;
 use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom};
 
-use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableStream;
-use tc_transact::{IntoView, Transaction};
-use tc_value::{Number, UInt};
-use tcgeneric::{Id, Map, TCBoxTryFuture, TCBoxTryStream};
+use tc_transact::IntoView;
+use tc_value::Number;
+use tcgeneric::{Id, TCBoxTryStream};
 
 use crate::closure::Closure;
-use crate::collection::Collection;
 use crate::fs;
 use crate::state::{State, StateView};
-use crate::stream::group::GroupStream;
 use crate::txn::Txn;
-use crate::value::Value;
+
+use group::Aggregate;
+use range::Range;
+use source::*;
+
+pub use source::Source;
 
 mod group;
+mod range;
+mod source;
 
 /// A stream generator such as a `Collection` or a mapping or aggregation of its items
 #[derive(Clone)]
 pub enum TCStream {
-    Aggregate(Box<TCStream>),
+    Aggregate(Box<Aggregate>),
     Collection(Collection),
-    Filter(Box<TCStream>, Closure),
-    Flatten(Box<TCStream>),
-    Map(Box<TCStream>, Closure),
-    Range(Number, Number, Number),
+    Filter(Box<Filter>),
+    Flatten(Box<Flatten>),
+    Map(Box<Map>),
+    Range(Range),
 }
 
 impl TCStream {
@@ -45,17 +45,17 @@ impl TCStream {
     /// For example, aggregating the stream `['b', 'b', 'a', 'a', 'b']`
     /// will produce `['b', 'a', 'b']`.
     pub fn aggregate(self) -> Self {
-        Self::Aggregate(Box::new(self))
+        Aggregate::new(self).into()
     }
 
     /// Return a new stream with only the elements in this stream which match the given `filter`.
     pub fn filter(self, filter: Closure) -> Self {
-        Self::Filter(Box::new(self), filter)
+        Filter::new(self, filter).into()
     }
 
     /// Flatten a stream of streams into a stream of `State`s.
     pub fn flatten(self) -> Self {
-        Self::Flatten(Box::new(self))
+        Flatten::new(self).into()
     }
 
     /// Fold this stream with the given initial `State` and `Closure`.
@@ -65,7 +65,7 @@ impl TCStream {
         self,
         txn: Txn,
         item_name: Id,
-        mut state: Map<State>,
+        mut state: tcgeneric::Map<State>,
         op: Closure,
     ) -> TCResult<State> {
         let mut source = self.into_stream(txn.clone()).await?;
@@ -73,6 +73,7 @@ impl TCStream {
         while let Some(item) = source.try_next().await? {
             let mut args = state.clone();
             args.insert(item_name.clone(), item);
+
             let result = op.clone().call(&txn, args.into()).await?;
             state = result.try_into()?;
         }
@@ -98,171 +99,25 @@ impl TCStream {
 
     /// Return a `TCStream` produced by calling the given [`Closure`] on each item in this stream.
     pub fn map(self, op: Closure) -> Self {
-        Self::Map(Box::new(self), op)
+        Map::new(self, op).into()
     }
 
-    /// Return a Rust `Stream` of the items in this `TCStream`.
-    pub fn into_stream<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'static, State>> {
-        Box::pin(async move {
-            match self {
-                Self::Aggregate(source) => {
-                    source
-                        .into_stream(txn)
-                        .map_ok(Self::execute_aggregate)
-                        .await
-                }
-                Self::Collection(collection) => Self::execute_stream(collection, txn).await,
-                Self::Filter(source, op) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_filter(source, txn, op))
-                        .await
-                }
-                Self::Flatten(source) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_flatten(source, txn))
-                        .await
-                }
-                Self::Map(source, op) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_map(source, txn, op))
-                        .await
-                }
-                Self::Range(start, stop, step) => {
-                    let range = RangeStream::new(start, stop, step)
-                        .map(Value::Number)
-                        .map(State::from)
-                        .map(Ok);
-                    let range: TCBoxTryStream<_> = Box::pin(range);
-                    Ok(range)
-                }
-            }
-        })
+    /// Return a `TCStream` of numbers at the given `step` within the given range.
+    pub fn range(start: Number, stop: Number, step: Number) -> Self {
+        Range::new(start, stop, step).into()
     }
+}
 
-    fn execute_aggregate(source: TCBoxTryStream<'static, State>) -> TCBoxTryStream<'static, State> {
-        let values = source.map(|r| {
-            r.and_then(|state| {
-                Value::try_cast_from(state, |s| {
-                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
-                })
-            })
-        });
-
-        let aggregate: TCBoxTryStream<'static, State> =
-            Box::pin(GroupStream::from(values).map_ok(State::from));
-
-        aggregate
-    }
-
-    fn execute_filter(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-        op: Closure,
-    ) -> TCBoxTryStream<'static, State> {
-        let filtered = source
-            .map_ok(move |state| {
-                op.clone()
-                    .call_owned(txn.clone(), state.clone())
-                    .map_ok(|filter| (filter, state))
-            })
-            .try_buffered(num_cpus::get())
-            .map(|result| {
-                result.and_then(|(filter, state)| {
-                    bool::try_cast_from(filter, |s| {
-                        TCError::bad_request("Stream::filter expects a boolean condition, not", s)
-                    })
-                    .map(|filter| (filter, state))
-                })
-            })
-            .try_filter_map(|(filter, state)| {
-                future::ready({
-                    if filter {
-                        Ok(Some(state))
-                    } else {
-                        Ok(None)
-                    }
-                })
-            });
-
-        Box::pin(filtered)
-    }
-
-    fn execute_flatten(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-    ) -> TCBoxTryStream<'static, State> {
-        let flat = source
-            .map(|result| {
-                result.and_then(|state| {
-                    TCStream::try_cast_from(state, |s| {
-                        TCError::bad_request("Stream::flatten expects a Stream, not ", s)
-                    })
-                })
-            })
-            .map_ok(move |stream| stream.into_stream(txn.clone()))
-            .try_buffered(num_cpus::get())
-            .try_flatten();
-
-        Box::pin(flat)
-    }
-
-    fn execute_map(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-        op: Closure,
-    ) -> TCBoxTryStream<'static, State> {
-        Box::pin(source.and_then(move |state| Box::pin(op.clone().call_owned(txn.clone(), state))))
-    }
-
-    async fn execute_stream(
-        collection: Collection,
-        txn: Txn,
-    ) -> TCResult<TCBoxTryStream<'static, State>> {
-        match collection {
-            Collection::BTree(btree) => {
-                let keys = btree.keys(*txn.id()).await?;
-                let keys: TCBoxTryStream<'static, State> =
-                    Box::pin(keys.map_ok(Value::from).map_ok(State::from));
-
-                Ok(keys)
-            }
-            Collection::Table(table) => {
-                let rows = table.rows(*txn.id()).await?;
-                let rows: TCBoxTryStream<'static, State> =
-                    Box::pin(rows.map_ok(Value::from).map_ok(State::from));
-
-                Ok(rows)
-            }
-
-            #[cfg(feature = "tensor")]
-            Collection::Tensor(tensor) => match tensor {
-                tc_tensor::Tensor::Dense(dense) => {
-                    use tc_tensor::DenseAccess;
-                    let elements = dense.into_inner().value_stream(txn).await?;
-                    Ok(Box::pin(elements.map_ok(State::from)))
-                }
-                tc_tensor::Tensor::Sparse(sparse) => {
-                    use tc_tensor::SparseAccess;
-                    use tcgeneric::Tuple;
-
-                    let filled = sparse.into_inner().filled(txn).await?;
-                    let filled = filled
-                        .map_ok(|(coord, value)| {
-                            let coord = coord
-                                .into_iter()
-                                .map(Number::from)
-                                .collect::<Tuple<Value>>();
-
-                            Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
-                        })
-                        .map_ok(State::from);
-
-                    Ok(Box::pin(filled))
-                }
-            },
+#[async_trait]
+impl Source for TCStream {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
+            Self::Collection(collection) => collection.into_stream(txn).await,
+            Self::Filter(filter) => filter.into_stream(txn).await,
+            Self::Flatten(source) => source.into_stream(txn).await,
+            Self::Map(map) => map.into_stream(txn).await,
+            Self::Range(range) => range.into_stream(txn).await,
         }
     }
 }
@@ -286,62 +141,9 @@ impl<'en> IntoView<'en, fs::Dir> for TCStream {
 
 impl<T> From<T> for TCStream
 where
-    Collection: From<T>,
+    crate::collection::Collection: From<T>,
 {
     fn from(collection: T) -> Self {
-        Self::Collection(collection.into())
-    }
-}
-
-struct RangeStream {
-    current: Number,
-    step: Number,
-    stop: Number,
-}
-
-impl RangeStream {
-    fn new(start: Number, stop: Number, step: Number) -> Self {
-        Self {
-            current: start,
-            stop,
-            step,
-        }
-    }
-}
-
-impl Stream for RangeStream {
-    type Item = Number;
-
-    fn poll_next(mut self: Pin<&mut Self>, _cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.current >= self.stop {
-            Poll::Ready(None)
-        } else {
-            let next = self.current;
-            self.current = next + self.step;
-            Poll::Ready(Some(next))
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = (self.stop - self.current) / self.step;
-        match size {
-            Number::Bool(_) => (0, Some(1)),
-            Number::Complex(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size + 1))
-            }
-            Number::Float(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size + 1))
-            }
-            Number::Int(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size))
-            }
-            Number::UInt(size) => {
-                let size = UInt::cast_from(size).cast_into();
-                (size, Some(size))
-            }
-        }
+        Self::Collection(crate::collection::Collection::from(collection).into())
     }
 }
