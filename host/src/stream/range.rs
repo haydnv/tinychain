@@ -6,7 +6,7 @@ use futures::stream::{Stream, StreamExt};
 use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
-use tc_value::{Number, UInt, Value};
+use tc_value::{Number, NumberInstance, UInt, Value};
 use tcgeneric::TCBoxTryStream;
 
 use crate::state::State;
@@ -58,7 +58,11 @@ impl RangeStream {
         Self {
             current: start,
             stop,
-            step,
+            step: if start < stop {
+                step.abs()
+            } else {
+                Number::from(0) - step.abs()
+            },
         }
     }
 }
