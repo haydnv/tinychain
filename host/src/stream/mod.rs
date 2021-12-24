@@ -11,13 +11,14 @@ use log::debug;
 use tc_error::*;
 use tc_transact::IntoView;
 use tc_value::Number;
-use tcgeneric::{Id, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Id, TCBoxTryStream};
 
 use crate::closure::Closure;
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
+use group::Aggregate;
 use range::Range;
 use source::*;
 
