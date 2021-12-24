@@ -190,7 +190,6 @@ def plu(x: Tensor) -> PLUFactorization:
         u = Tensor(pu['x'])
         p = Tensor(pu['p'])
         factor = Tensor(u[i + 1:, i] / u[i, i])
-        print(factor.expand_dims(axis=0).transpose())
         return Map(After(
             when=[
                 l[i + 1:, i].write(factor),
