@@ -8,7 +8,7 @@ use tcgeneric::TCPathBuf;
 use crate::generic::{label, PathSegment};
 use crate::route::{GetHandler, Handler, PostHandler, Public, Route};
 use crate::state::State;
-use crate::stream::TCStream;
+use crate::stream::{Source, TCStream};
 
 struct Aggregate {
     source: TCStream,

@@ -21,6 +21,8 @@ use crate::txn::Txn;
 use range::Range;
 use source::*;
 
+pub use source::Source;
+
 mod group;
 mod range;
 mod source;
@@ -99,23 +101,23 @@ impl TCStream {
         Map::new(self, op).into()
     }
 
-    /// Return a Rust `Stream` of the items in this `TCStream`.
-    pub fn into_stream<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'static, State>> {
-        Box::pin(async move {
-            match self {
-                Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
-                Self::Collection(collection) => collection.into_stream(txn).await,
-                Self::Filter(filter) => filter.into_stream(txn).await,
-                Self::Flatten(source) => source.into_stream(txn).await,
-                Self::Map(map) => map.into_stream(txn).await,
-                Self::Range(range) => range.into_stream(txn).await,
-            }
-        })
-    }
-
     /// Return a `TCStream` of numbers at the given `step` within the given range.
     pub fn range(start: Number, stop: Number, step: Number) -> Self {
         Range::new(start, stop, step).into()
+    }
+}
+
+#[async_trait]
+impl Source for TCStream {
+    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.into_stream(txn).await,
+            Self::Collection(collection) => collection.into_stream(txn).await,
+            Self::Filter(filter) => filter.into_stream(txn).await,
+            Self::Flatten(source) => source.into_stream(txn).await,
+            Self::Map(map) => map.into_stream(txn).await,
+            Self::Range(range) => range.into_stream(txn).await,
+        }
     }
 }
 

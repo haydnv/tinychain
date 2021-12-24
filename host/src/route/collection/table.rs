@@ -16,7 +16,7 @@ use crate::collection::{Collection, Table, TableIndex};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
-use crate::stream::TCStream;
+use crate::stream::{Source, TCStream};
 
 impl Route for TableType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
