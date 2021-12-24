@@ -14,7 +14,7 @@ use safecast::{CastFrom, CastInto, TryCastFrom};
 use tc_error::*;
 use tc_transact::IntoView;
 use tc_value::{Number, UInt};
-use tcgeneric::{Id, Map, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Id, TCBoxTryFuture, TCBoxTryStream};
 
 use crate::closure::Closure;
 use crate::fs;
@@ -34,7 +34,7 @@ pub enum TCStream {
     Collection(Collection),
     Filter(Box<Filter>),
     Flatten(Box<TCStream>),
-    Map(Box<TCStream>, Closure),
+    Map(Box<Map>),
     Range(Number, Number, Number),
 }
 
@@ -64,7 +64,7 @@ impl TCStream {
         self,
         txn: Txn,
         item_name: Id,
-        mut state: Map<State>,
+        mut state: tcgeneric::Map<State>,
         op: Closure,
     ) -> TCResult<State> {
         let mut source = self.into_stream(txn.clone()).await?;
@@ -97,7 +97,7 @@ impl TCStream {
 
     /// Return a `TCStream` produced by calling the given [`Closure`] on each item in this stream.
     pub fn map(self, op: Closure) -> Self {
-        Self::Map(Box::new(self), op)
+        Map::new(self, op).into()
     }
 
     /// Return a Rust `Stream` of the items in this `TCStream`.
@@ -113,12 +113,7 @@ impl TCStream {
                         .map_ok(|source| Self::execute_flatten(source, txn))
                         .await
                 }
-                Self::Map(source, op) => {
-                    source
-                        .into_stream(txn.clone())
-                        .map_ok(|source| Self::execute_map(source, txn, op))
-                        .await
-                }
+                Self::Map(map) => map.into_stream(txn).await,
                 Self::Range(start, stop, step) => {
                     let range = RangeStream::new(start, stop, step)
                         .map(Value::Number)
@@ -148,18 +143,6 @@ impl TCStream {
             .try_flatten();
 
         Box::pin(flat)
-    }
-
-    fn execute_map(
-        source: TCBoxTryStream<'static, State>,
-        txn: Txn,
-        op: Closure,
-    ) -> TCBoxTryStream<'static, State> {
-        let map = source
-            .map_ok(move |state| op.clone().call_owned(txn.clone(), state))
-            .try_buffered(num_cpus::get());
-
-        Box::pin(map)
     }
 }
 
