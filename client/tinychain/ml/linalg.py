@@ -2,7 +2,7 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, Float, UInt, F32
+from tinychain.value import Bool, F64, Float, UInt, F32, Int
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -142,6 +142,14 @@ class PLUFactorization(Map):
         Upper-triangular matrix as an `[N, N]` `Tensor`.
         """
         return Tensor(self['u'])
+    
+    @property
+    def num_permutations(self) -> Tensor:
+        """
+        Upper-triangular matrix as an `[N, N]` `Tensor`.
+        """
+        return Tensor(self['num_permutations'])
+    
 
 @post_op
 def plu(x: Tensor) -> PLUFactorization:
@@ -159,16 +167,17 @@ def plu(x: Tensor) -> PLUFactorization:
 
     def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
 
+        @closure
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
-            p_k, p_kp1 = p[k].copy(), p[k + 1].copy()
-            x_k, x_kp1 = x[k].copy(), x[k + 1].copy()
+            p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
+            x_k, x_kp1 = x[start_from].copy(), x[k + 1].copy()
 
             return Map(After(
                 [
-                    p[k].write(p_kp1),
+                    p[start_from].write(p_kp1),
                     p[k + 1].write(p_k),
-                    x[k].write(x_kp1),
+                    x[start_from].write(x_kp1),
                     x[k + 1].write(x_k),
                 ],
                 Map(p=p, x=x, k=k + 1)
@@ -185,17 +194,18 @@ def plu(x: Tensor) -> PLUFactorization:
         )))
 
     @post_op
-    def step(p: Tensor, l: Tensor, u: Tensor, i: UInt) -> Map:
+    def step(p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
         pu = permute_rows(p=p, x=u, start_from=i)
         u = Tensor(pu['x'])
         p = Tensor(pu['p'])
+        n = UInt(pu['k']) - i
         factor = Tensor(u[i + 1:, i] / u[i, i])
         return Map(After(
             when=[
                 l[i + 1:, i].write(factor),
                 u[i + 1:].write(u[i + 1:] - factor.expand_dims() * u[i]),
             ],
-            then=Map(p=p, l=l, u=u, i=i + 1)))
+            then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n)))
 
     @post_op
     def cond(p: Tensor, l: Tensor, u: Tensor, i: UInt):
@@ -206,16 +216,55 @@ def plu(x: Tensor) -> PLUFactorization:
         l=identity(x.shape[0], F32).as_dense().copy(),
         u=x.copy(),
         i=UInt(0),
+        num_permutations=UInt(0),
         ))))
 
+@post_op
+def det(cxt, x: Tensor) -> F32:
+    """Computes the determinant of square `matrix`.
 
-def slogdet(x):
-    """Compute the sign and log of the absolute value of the determinant of one or more square matrices."""
+    Args:
+        `x`: a matrix with shape `[N, N]`
 
-    # TODO: implement slogdet, cf. https://www.tensorflow.org/api_docs/python/tf/linalg/slogdet
+    Returns:
+        The determinant for `x`
+    """
 
-    raise NotImplementedError(f"slogdet({x})")
+    cxt.plu = plu
+    plu_result = cxt.plu(x=x)
+    sign = Int(-1).pow(plu_result.num_permutations)
+    return diagonal(plu_result.u).product()*sign
 
+@post_op
+def slogdet(cxt, x: Dense) -> Tuple:
+    """Compute the sign and log of the absolute value of the determinant of one or more square matrices.
+
+    Args:
+        `x`: a `Tensor` of square `matrix`es with shape `[N, M, M]`
+
+    Returns:
+        The `Tuple` of `Tensor`s `(sign, logdet)` where:
+        `sign`: a `Tensor` of signs of determinants `{-1, +1}` with shape `[N,]`
+        `logdet`: a `Tensor` of the natural log of the absolute values of determinants with shape `[N,]`
+    """
+
+    n = x.shape[0]
+    cxt.result = Dense.create([n, 2])
+    cxt.det = det
+
+    @closure
+    @get_op
+    def step(i: UInt):
+        d = F32(cxt.det(x = x[i]))
+        logdet = F32(d.abs().log())
+        sign = Int(If(d > 0, 1, -1))*1
+        return After(when=[
+            cxt.result[i, 0].write(sign),
+            cxt.result[i, 1].write(logdet),
+            ],
+            then=cxt.result)
+
+    return After(Stream.range((0, n)).for_each(step), Tuple([cxt.result[:, 0], cxt.result[:, 1]]))
 
 def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""

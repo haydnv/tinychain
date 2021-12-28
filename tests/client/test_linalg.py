@@ -108,19 +108,21 @@ class LinearAlgebraTests(ClientTest):
             all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
         ])
 
-    @unittest.skip
+    #@unittest.skip
     def testSlogdet(self):
-        x = np.arange(4)
+        x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
-        cxt.slogdet = tc.linalg.slogdet(cxt.x)
+        cxt.x = tc.tensor.Dense.load(x.shape, tc.F32, x.flatten().tolist())
+        cxt.slogdet = tc.linalg.slogdet
+        cxt.result_slogdet = cxt.slogdet(x = cxt.x)
 
         actual_sign, actual_logdet = self.host.post(ENDPOINT, cxt)
-
+        actual_sign = _load_dense_tensor_from_json_to_numpy(actual_sign)
+        actual_logdet = _load_dense_tensor_from_json_to_numpy(actual_logdet)
         expected_sign, expected_logdet = np.linalg.slogdet(x)
-        self.assertEqual(actual_sign, expected_sign)
-        self.assertEqual(actual_logdet, expect_dense(expected_logdet, tc.F32))
+        self.assertTrue((actual_sign == expected_sign).all())
+        self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
     @unittest.skip
     def testSVD(self):
