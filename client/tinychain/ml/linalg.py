@@ -233,6 +233,7 @@ def det(cxt, x: Tensor) -> F32:
     cxt.plu = plu
     plu_result = cxt.plu(x=x)
     sign = Int(-1).pow(plu_result.num_permutations)
+    
     return diagonal(plu_result.u).product()*sign
 
 @post_op
