@@ -108,14 +108,13 @@ class LinearAlgebraTests(ClientTest):
             all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
         ])
 
-    #@unittest.skip
     def testSlogdet(self):
         x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(x.shape, tc.F32, x.flatten().tolist())
         cxt.slogdet = tc.linalg.slogdet
-        cxt.result_slogdet = cxt.slogdet(x = cxt.x)
+        cxt.result_slogdet = cxt.slogdet(x=cxt.x)
 
         actual_sign, actual_logdet = self.host.post(ENDPOINT, cxt)
         actual_sign = _load_dense_tensor_from_json_to_numpy(actual_sign)

@@ -219,6 +219,7 @@ def plu(x: Tensor) -> PLUFactorization:
         num_permutations=UInt(0),
         ))))
 
+
 @post_op
 def det(cxt, x: Tensor) -> F32:
     """Computes the determinant of square `matrix`.
@@ -235,6 +236,7 @@ def det(cxt, x: Tensor) -> F32:
     sign = Int(-1).pow(plu_result.num_permutations)
     
     return diagonal(plu_result.u).product()*sign
+
 
 @post_op
 def slogdet(cxt, x: Dense) -> Tuple:
@@ -256,7 +258,7 @@ def slogdet(cxt, x: Dense) -> Tuple:
     @closure
     @get_op
     def step(i: UInt):
-        d = F32(cxt.det(x = x[i]))
+        d = cxt.det(x = x[i])
         logdet = F32(d.abs().log())
         sign = Int(If(d > 0, 1, -1))*1
         return After(when=[
