@@ -2,7 +2,7 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, Float, UInt, F32, Int
+from tinychain.value import Bool, F64, UInt, F32, Int
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -121,7 +121,7 @@ class PLUFactorization(Map):
     """
     PLU factorization of a given `[N, N]` matrix.
     """
-    
+
     @property
     def p(self) -> Tensor:
         """
@@ -142,19 +142,19 @@ class PLUFactorization(Map):
         Upper-triangular matrix as an `[N, N]` `Tensor`.
         """
         return Tensor(self['u'])
-    
+
     @property
     def num_permutations(self) -> Tensor:
         """
         Upper-triangular matrix as an `[N, N]` `Tensor`.
         """
         return Tensor(self['num_permutations'])
-    
+
 
 @post_op
 def plu(x: Tensor) -> PLUFactorization:
     """Compute the PLU factorization of the given `matrix`.
-    
+
     Args:
         `x`: a matrix with shape `[N, N]`
 
@@ -215,8 +215,8 @@ def plu(x: Tensor) -> PLUFactorization:
         p=identity(x.shape[0], F32).as_dense().copy(),
         l=identity(x.shape[0], F32).as_dense().copy(),
         u=x.copy(),
-        i=UInt(0),
-        num_permutations=UInt(0),
+        i=0,
+        num_permutations=0,
         ))))
 
 
@@ -234,7 +234,7 @@ def det(cxt, x: Tensor) -> F32:
     cxt.plu = plu
     plu_result = cxt.plu(x=x)
     sign = Int(-1).pow(plu_result.num_permutations)
-    
+
     return diagonal(plu_result.u).product()*sign
 
 
@@ -252,22 +252,23 @@ def slogdet(cxt, x: Dense) -> Tuple:
     """
 
     n = x.shape[0]
-    cxt.result = Dense.create([n, 2])
+    cxt.sign_result = Dense.create([n])
+    cxt.logdet_result = Dense.create([n])
     cxt.det = det
 
     @closure
     @get_op
     def step(i: UInt):
-        d = cxt.det(x = x[i])
+        d = cxt.det(x=x[i])
         logdet = F32(d.abs().log())
         sign = Int(If(d > 0, 1, -1))*1
         return After(when=[
-            cxt.result[i, 0].write(sign),
-            cxt.result[i, 1].write(logdet),
-            ],
-            then=cxt.result)
+            cxt.sign_result[i].write(sign),
+            cxt.logdet_result[i].write(logdet),
+        ], then=[cxt.sign_result, cxt.logdet_result])
 
-    return After(Stream.range((0, n)).for_each(step), Tuple([cxt.result[:, 0], cxt.result[:, 1]]))
+    return After(Stream.range((0, n)).for_each(step), Tuple([cxt.sign_result, cxt.logdet_result]))
+
 
 def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
