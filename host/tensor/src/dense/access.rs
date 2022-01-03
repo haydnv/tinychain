@@ -540,7 +540,7 @@ where
 {
     fn dtype(&self) -> NumberType {
         let combinator = self.value_combinator;
-        combinator(self.source.dtype().zero(), self.other.class().zero()).class()
+        combinator(self.source.dtype().one(), self.other.class().one()).class()
     }
 
     fn ndim(&self) -> usize {
