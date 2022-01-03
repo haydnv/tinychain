@@ -11,7 +11,7 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = 0.1
+LEARNING_RATE = tc.F32(1.0)
 MAX_ITERATIONS = 500
 NUM_EXAMPLES = 100
 
@@ -31,7 +31,6 @@ def truncated_normal(size, mean=0., std=None):
 
 
 # TODO: implement AdamOptimizer
-@unittest.skip
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
@@ -82,19 +81,9 @@ class DNNTests(ClientTest):
         self.execute(cxt)
 
     def execute(self, cxt):
-        @tc.closure
-        @tc.post_op
-        def while_cond(output: Dense, i: tc.UInt):
-            fit = ((output > 0.5) != cxt.labels).any()
-            return fit.logical_and(i < MAX_ITERATIONS)
-
-        @tc.closure
-        @tc.post_op
-        def train(i: tc.UInt):
-            output = cxt.nn.train(cxt.inputs, lambda output: ((output - cxt.labels)**2) * LEARNING_RATE)
-            return {"output": output, "i": i + 1}
-
-        cxt.result = tc.While(while_cond, train, {"output": cxt.nn.eval(cxt.inputs), "i": 0})
+        cxt.cost = tc.closure(tc.post_op(lambda output: ((output - cxt.labels)**2).abs()))
+        cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.cost, MAX_ITERATIONS)
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")

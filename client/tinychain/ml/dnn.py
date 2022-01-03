@@ -4,12 +4,10 @@
 
 from tinychain.collection.tensor import einsum, Dense
 from tinychain.error import BadRequest
-from tinychain.ml import Layer, NeuralNet, Sigmoid
+from tinychain.ml import Gradient, Layer, NeuralNet, Sigmoid
 from tinychain.ref import After, If
 from tinychain.state import Map, Tuple
 from tinychain.value import Bool, String
-
-EPS = 10**-6
 
 
 class DNNLayer(Layer):
@@ -27,6 +25,10 @@ class DNNLayer(Layer):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
 
         class _DNNLayer(cls):
+            @classmethod
+            def shape(cls):
+                return {"weights": weights.shape(), "bias": bias.shape()}
+
             @property
             def activation(self):
                 return activation
@@ -40,24 +42,19 @@ class DNNLayer(Layer):
     def eval(self, inputs):
         return self.activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
 
-    def gradients(self, A_prev, dA, Z):
-        dZ = self.activation.backward(dA, Z).copy()
-        dA_prev = einsum("kj,ij->ki", [dZ, self["weights"]])
-        d_weights = einsum("kj,ki->ij", [dZ, A_prev])
-        d_bias = dZ.sum(0)
-        return dA_prev, d_weights * (d_weights.abs() > EPS), d_bias * (d_bias.abs() > EPS)
+    def train(self, i, inputs, loss, optimizer):
+        dZ = self.activation.backward(loss, einsum("ij,ki->kj", [self["weights"], inputs]))
 
-    def train_eval(self, inputs):
-        Z = einsum("ij,ki->kj", [self["weights"], inputs])
-        A = self.activation.forward(Z) + self["bias"]
-        return A, Z
+        weight_gradients = einsum("kj,ki->ij", [dZ, inputs])
+        bias_gradients = dZ.sum(0)
 
-    def update(self, d_weights, d_bias):
-        new_weights = self["weights"] - d_weights
-        new_bias = self["bias"] - d_bias
-        return self["weights"].write(new_weights), self["bias"].write(new_bias)
+        delta = optimizer.optimize(i, {"weights": weight_gradients, "bias": bias_gradients})
+        update = self.write((self["weights"] - delta["weights"]), (self["bias"] - delta["bias"]))
+        return After(update, dZ)
 
     def write(self, weights, bias):
+        """Overwrite the weights and bias of this layer."""
+
         return self["weights"].write(weights), self["bias"].write(bias)
 
 
@@ -75,9 +72,16 @@ class DNN(NeuralNet):
 
     @classmethod
     def load(cls, layers):
+        if not layers:
+            raise ValueError("cannot initialize a neural net with no layers")
+
         n = len(layers)
 
         class DNN(cls):
+            @classmethod
+            def shape(cls):
+                return [layer.shape() for layer in layers]
+
             def eval(self, inputs):
                 state = self[0].eval(inputs)
                 for i in range(1, n):
@@ -85,27 +89,15 @@ class DNN(NeuralNet):
 
                 return state
 
-            def train(self, inputs, cost):
-                A = [inputs]
-                Z = [None]
+            def train(self, i, inputs, loss, optimizer):
+                layer_inputs = [inputs]
+                for l in range(n):
+                    layer_inputs.append(self[l].eval(layer_inputs[-1]))
 
-                for i in range(n):
-                    A_l, Z_l = self[i].train_eval(A[-1])
-                    A.append(A_l.copy())
-                    Z.append(Z_l)
+                for l in reversed(range(n)):
+                    loss = self[l].train(i, layer_inputs[l], loss, optimizer)
 
-                m = inputs.shape[0]
-                dA = cost(A[-1]).sum() / m
-
-                updates = []
-                needs_update = Bool(False)
-                for i in reversed(range(0, n)):
-                    dA, d_weights, d_bias = self[i].gradients(A[i], dA, Z[i + 1])
-                    needs_update = needs_update.logical_or(d_weights.any().logical_or(d_bias.any()))
-                    update = self[i].update(d_weights, d_bias)
-                    updates.append(update)
-
-                return If(needs_update, After(updates, A[-1]), A[-1])
+                return loss
 
             def write(self, layers):
                 updates = []
@@ -119,3 +111,8 @@ class DNN(NeuralNet):
                 return If(layers.len() == n, updates, BadRequest(err_msg))
 
         return DNN(layers)
+
+    def write(self, layers):
+        """Overwrite the weights and biases of the layers of this neural net."""
+
+        raise NotImplementedError("use DNN.create or DNN.load to initialize a new deep neural net")
