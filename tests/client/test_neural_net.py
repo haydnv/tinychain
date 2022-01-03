@@ -11,9 +11,9 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = tc.F32(1.0)
-MAX_ITERATIONS = 500
-NUM_EXAMPLES = 100
+LEARNING_RATE = tc.F32(0.05)
+MAX_ITERATIONS = 250
+NUM_EXAMPLES = 20
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -81,9 +81,11 @@ class DNNTests(ClientTest):
         self.execute(cxt)
 
     def execute(self, cxt):
-        cxt.cost = tc.closure(tc.post_op(lambda output: ((output - cxt.labels)**2).abs()))
+        def cost(output):
+            return (output - cxt.labels)**2
+
         cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.cost, MAX_ITERATIONS)
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, MAX_ITERATIONS)
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
@@ -172,7 +174,7 @@ class CNNTests(ClientTest):
         cxt.inputs = tc.tensor.Dense.load(inputs.shape, tc.F32, inputs.flatten().tolist())
         cxt.labels = tc.tensor.Dense.load(labels.shape, tc.F32, labels.flatten().tolist())
         cxt.layer = conv(inputs.shape[1:], labels.shape[1:], [2], 2)
-        cxt.result = cxt.layer.eval(cxt.inputs)
+        cxt.result = cxt.layer.forward(cxt.inputs)
 
         response = self.host.post(ENDPOINT, cxt)
         print(response)

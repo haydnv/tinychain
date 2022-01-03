@@ -36,6 +36,7 @@ class ReLU(Activation):
 
 class Gradient(object):
     @classmethod
+    @property
     @abstractmethod
     def shape(cls):
         """
@@ -46,12 +47,33 @@ class Gradient(object):
         """
 
     @abstractmethod
-    def eval(self, inputs):
+    def forward(self, inputs):
         """Evaluate this `Gradient` with respect to the given `inputs`."""
 
     @abstractmethod
-    def train(self, i, inputs, loss, optimizer):
-        """Update this `Gradient` with respect to the given `inputs` and `loss` using the given `optimizer`."""
+    def backward(self, inputs, loss):
+        """
+        Compute the differential of this `Gradient` with respect to the given `inputs` and `loss`.
+
+        Returns a tuple `(loss, delta)` where `loss` is the loss to propagate further backwards and `delta` is
+        the total delta for an `Optimizer` to use in order to calculate an update to this `Gradient`.
+        """
+
+    @abstractmethod
+    def write(self, new_values):
+        """
+        Overwrite the values of this `Gradient` with the given `new_values`.
+
+        `new_values` must have the same shape as this `Gradient`.
+        """
+
+        shape = self.shape
+        if isinstance(shape, dict):
+            return {name: self[name].write(new_values[name]) for name in shape}
+        elif isinstance(shape, list) or isinstance(shape, tuple):
+            return [self[i].write(new_values[i]) for i in range(len(shape))]
+        else:
+            raise NotImplementedError(f"{self.__class__} needs a `write` method")
 
 
 class Layer(Map, Gradient):

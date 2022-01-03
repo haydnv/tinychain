@@ -1,23 +1,17 @@
-import collections
-
 from abc import abstractmethod
 
 from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
 from tinychain.ml import EPS
-from tinychain.ref import While
+from tinychain.ref import After, While
 from tinychain.state import Map
 from tinychain.value import F32, UInt
 
 
 class Optimizer(Map):
     @abstractmethod
-    def optimize(self, i, gradients):
-        """
-        Compute deltas for the given `gradients` using this `Optimizer`.
-
-        `gradients` can be a `Tensor` or a Python `Mapping` or `Iterable`.
-        """
+    def optimize(self, i, gradient, inputs, loss):
+        """Update the given `gradient` by computing deltas for the given `loss`."""
 
 
 class GradientDescent(Optimizer):
@@ -27,13 +21,21 @@ class GradientDescent(Optimizer):
 
         return cls({"lr": learning_rate})
 
-    def optimize(self, i, gradients):
-        if isinstance(gradients, collections.abc.Mapping):
-            return {name: self.optimize(i, gradients[name]) for name in gradients}
-        elif isinstance(gradients, collections.abc.Iterable):
-            return [self.optimize(i, gradient) for gradient in gradients]
-        else:
-            return gradients * self["lr"]
+    def optimize(self, i, gradient, inputs, loss):
+        lr = self["lr"]
+
+        def update(gradient, deltas):
+            shape = gradient.shape
+
+            if isinstance(shape, dict):
+                return {name: update(gradient[name], deltas[name]) for name in shape}
+            elif isinstance(shape, list) or isinstance(shape, tuple):
+                return [update(gradient[n], deltas[n]) for n in range(len(shape))]
+            else:
+                return gradient.write(deltas * lr)
+
+        loss, deltas = gradient.backward(inputs, loss)
+        return After(update(gradient, deltas), loss)
 
 
 def train(model, optimizer, inputs, cost, max_iterations):
@@ -48,8 +50,7 @@ def train(model, optimizer, inputs, cost, max_iterations):
     @closure
     @post_op
     def step(i: UInt, loss: Dense):
-        loss = model.train(i, inputs, loss, optimizer)
+        loss = optimizer.optimize(i, model, inputs, loss)
         return {"i": i + 1, "loss": loss}
 
-    loss = cost(output=model.eval(inputs))
-    return While(while_cond, step, {"i": 1, "loss": model.train(0, inputs, loss, optimizer)})
+    return While(while_cond, step, {"i": 0, "loss": cost(model.forward(inputs))})
