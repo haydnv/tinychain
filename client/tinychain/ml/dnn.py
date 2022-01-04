@@ -84,11 +84,12 @@ class DNN(NeuralNet):
                 layer_inputs = [inputs]
 
                 for l in range(n):
-                    layer_inputs.append(self[l].forward(layer_inputs[-1]))
+                    layer_inputs.append(self[l].forward(layer_inputs[-1]).copy())
 
                 layer_gradients = []
                 for l in reversed(range(n)):
                     loss, layer_gradient = self[l].backward(layer_inputs[l], loss)
+                    loss = loss.copy()
                     layer_gradients.insert(0, layer_gradient)
 
                 return loss, layer_gradients

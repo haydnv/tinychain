@@ -12,7 +12,7 @@ Dense = tc.tensor.Dense
 
 ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = tc.F32(0.05)
-MAX_ITERATIONS = 250
+MAX_ITERATIONS = 500
 NUM_EXAMPLES = 20
 
 
