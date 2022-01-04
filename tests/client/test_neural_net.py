@@ -11,7 +11,7 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = tc.F32(0.05)
+LEARNING_RATE = tc.F32(1.0)
 MAX_ITERATIONS = 500
 NUM_EXAMPLES = 20
 
@@ -77,6 +77,20 @@ class DNNTests(ClientTest):
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
+
+        self.execute(cxt)
+
+    def testXor(self):
+        cxt = tc.Context()
+
+        inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
+        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        cxt.inputs = load(inputs)
+        cxt.labels = load(labels, tc.Bool)
+
+        cxt.input_layer = self.create_layer(2, 2, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer, cxt.output_layer])
 
         self.execute(cxt)
 

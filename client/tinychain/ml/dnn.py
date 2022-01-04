@@ -3,7 +3,7 @@
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
 
 from tinychain.collection.tensor import einsum, Dense
-from tinychain.ml import Gradient, Layer, NeuralNet, Sigmoid
+from tinychain.ml import Layer, NeuralNet, Sigmoid
 
 
 class DNNLayer(Layer):
@@ -84,7 +84,8 @@ class DNN(NeuralNet):
                 layer_inputs = [inputs]
 
                 for l in range(n):
-                    layer_inputs.append(self[l].forward(layer_inputs[-1]).copy())
+                    layer_output = self[l].forward(layer_inputs[-1]).copy()
+                    layer_inputs.append(layer_output)
 
                 layer_gradients = []
                 for l in reversed(range(n)):

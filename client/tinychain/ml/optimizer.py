@@ -32,14 +32,14 @@ class GradientDescent(Optimizer):
             elif isinstance(shape, list) or isinstance(shape, tuple):
                 return [update(gradient[n], deltas[n]) for n in range(len(shape))]
             else:
-                return gradient.write(deltas * lr)
+                return gradient.write(gradient - (deltas * lr))
 
         loss, deltas = gradient.backward(inputs, loss)
         return After(update(gradient, deltas), loss)
 
 
 def train(model, optimizer, inputs, cost, max_iterations):
-    """Train a :class:`Gradient` such as a neural network in up to `max_iterations` steps."""
+    """Train a :class:`Differentiable` such as a neural network in up to `max_iterations` steps."""
 
     @closure
     @post_op

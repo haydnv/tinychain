@@ -34,7 +34,7 @@ class ReLU(Activation):
         return (Z > 0) * dA
 
 
-class Gradient(object):
+class Differentiable(object):
     @classmethod
     @property
     @abstractmethod
@@ -48,15 +48,15 @@ class Gradient(object):
 
     @abstractmethod
     def forward(self, inputs):
-        """Evaluate this `Gradient` with respect to the given `inputs`."""
+        """Evaluate this `Differentiable` with respect to the given `inputs`."""
 
     @abstractmethod
     def backward(self, inputs, loss):
         """
-        Compute the differential of this `Gradient` with respect to the given `inputs` and `loss`.
+        Compute the gradient of this `Differential` with respect to the given `inputs` and `loss`.
 
-        Returns a tuple `(loss, delta)` where `loss` is the loss to propagate further backwards and `delta` is
-        the total delta for an `Optimizer` to use in order to calculate an update to this `Gradient`.
+        Returns a tuple `(loss, gradient)` where `loss` is the loss to propagate further backwards and `gradient` is
+        the total gradient for an `Optimizer` to use in order to calculate an update to this `Differentiable`.
         """
 
     @abstractmethod
@@ -76,7 +76,7 @@ class Gradient(object):
             raise NotImplementedError(f"{self.__class__} needs a `write` method")
 
 
-class Layer(Map, Gradient):
+class Layer(Map, Differentiable):
     @classmethod
     @abstractmethod
     def create(cls, *args, **kwargs):
@@ -88,7 +88,7 @@ class Layer(Map, Gradient):
         pass
 
 
-class NeuralNet(Tuple, Gradient):
+class NeuralNet(Tuple, Differentiable):
     @classmethod
     @abstractmethod
     def create(cls, *args, **kwargs):
