@@ -26,8 +26,8 @@ class App(tc.Cluster):
 
     @tc.post_method
     def train(self, inputs: tc.tensor.Dense, labels: tc.tensor.Dense):
-        output = self.net.train(inputs, lambda output: (output - labels).abs() * LEARNING_RATE)
-        return (labels - output).abs().sum()
+        # TODO: implement this using a background task
+        pass
 
 
 class AppTests(unittest.TestCase):
@@ -49,20 +49,7 @@ class AppTests(unittest.TestCase):
 
         self.host.post("/test/app/reset", {"new_layers": new_layers})
 
-        i = 0
-        while True:
-            inputs = np.random.random(BATCH_SIZE * 2).reshape([BATCH_SIZE, 2])
-            labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5)
-
-            error = self.host.post("/test/app/train", {"inputs": load(inputs), "labels": load(labels, tc.Bool)})
-
-            print(f"error is {error} at iteration {i}")
-
-            if error < 0.5:
-                print(f"converged in {i} iterations")
-                return
-            else:
-                i += 1
+        # TODO
 
 
 def truncated_normal(size, mean=0., std=None):

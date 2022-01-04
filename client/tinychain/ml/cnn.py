@@ -26,9 +26,6 @@ class Conv(Layer):
     def load(cls, input_shape, weights, bias=0, stride=1, activation=Sigmoid()):
         raise NotImplementedError(cls.ERR_ABSTRACT)
 
-    def eval(self):
-        raise NotImplementedError(self.ERR_ABSTRACT)
-
 
 class Conv1D(Conv):
     @classmethod
@@ -41,7 +38,7 @@ class Conv1D(Conv):
         padding = stride - 1
 
         class _Conv1D(cls):
-            def eval(self, inputs):
+            def forward(self, inputs):
                 padded = Dense.zeros([inputs.shape[0], length + padding, input_channels])
                 l, r = padding // 2, padding // 2 if length % 2 == 0 else math.ceil(padding / 2)
 
@@ -64,7 +61,7 @@ class Conv1D(Conv):
 
         return _Conv1D(Map(filters=filters, bias=bias))
 
-    def eval(self, inputs):
+    def forward(self, inputs):
         raise NotImplementedError("use Conv1D.create or Conv1D.load to construct a 1D convolutional layer")
 
 
@@ -79,7 +76,7 @@ class Conv2D(Conv):
         padding = stride - 1
 
         class _Conv2D(cls):
-            def eval(self, inputs):
+            def forward(self, inputs):
                 padded = Dense.zeros([inputs.shape[0], width + padding, height + padding, input_channels])
 
                 l, r = padding // 2, padding // 2 if width % 2 == 0 else math.ceil(padding / 2)
