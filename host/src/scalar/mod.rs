@@ -1,5 +1,6 @@
 //! Immutable values which always reside entirely in memory
 
+use async_hash::Hash;
 use std::collections::{BTreeMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,6 +14,8 @@ use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
+use sha2::digest::Output;
+use sha2::Digest;
 
 use tc_error::*;
 use tc_value::{Link, Number, Range, TCString, Value, ValueType};
@@ -498,6 +501,12 @@ impl Refer for Scalar {
             }
             other => Ok(State::Scalar(other)),
         }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Scalar {
+    fn hash(self) -> Output<D> {
+        todo!()
     }
 }
 

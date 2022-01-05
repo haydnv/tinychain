@@ -16,6 +16,7 @@ tensor = ["afarray"]
 
 [dependencies]
 afarray = { version = "~0.11.1", optional = true }
+async-hash = "0.3"
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.5"

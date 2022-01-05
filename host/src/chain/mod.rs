@@ -4,17 +4,19 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 
+use async_hash::{hash_try_stream, Hash};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use sha2::digest::generic_array::GenericArray;
-use sha2::digest::Output;
+use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
-use tc_btree::{BTreeType, Column};
+use tc_btree::{BTreeInstance, BTreeType, Column};
 use tc_error::*;
+use tc_table::TableStream;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
 use tc_transact::fs::{Dir, Persist, Restore, Store};
@@ -27,7 +29,8 @@ use crate::collection::{
 };
 #[cfg(feature = "tensor")]
 use crate::collection::{
-    DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType,
+    DenseAccess, DenseTensor, DenseTensorFile, SparseAccess, SparseTable, SparseTensor, Tensor,
+    TensorType,
 };
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
@@ -450,6 +453,53 @@ impl Subject {
             }
         })
     }
+
+    pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
+        Box::pin(async move {
+            // TODO: should this be consolidated with Collection::hash?
+            match self {
+                Self::BTree(btree) => {
+                    let keys = btree.keys(*txn.id()).await?;
+                    hash_try_stream::<Sha256, _, _, _>(keys).await
+                }
+                Self::Map(map) => {
+                    let mut hasher = Sha256::default();
+                    for (id, subject) in map {
+                        let subject = subject.hash(txn.clone()).await?;
+
+                        let mut inner_hasher = Sha256::default();
+                        inner_hasher.update(&Hash::<Sha256>::hash(id));
+                        inner_hasher.update(&subject);
+                        hasher.update(&inner_hasher.finalize());
+                    }
+
+                    Ok(hasher.finalize())
+                }
+                Self::Table(table) => {
+                    let rows = table.rows(*txn.id()).await?;
+                    hash_try_stream::<Sha256, _, _, _>(rows).await
+                }
+                Self::Tuple(tuple) => {
+                    let mut hasher = Sha256::default();
+                    for subject in tuple {
+                        let subject = subject.hash(txn.clone()).await?;
+                        hasher.update(&subject);
+                    }
+                    Ok(hasher.finalize())
+                }
+                #[cfg(feature = "tensor")]
+                Self::Dense(dense) => {
+                    let elements = dense.into_inner().value_stream(txn).await?;
+                    hash_try_stream::<Sha256, _, _, _>(elements).await
+                }
+                #[cfg(feature = "tensor")]
+                Self::Sparse(sparse) => {
+                    let filled = sparse.into_inner().filled(txn).await?;
+                    hash_try_stream::<Sha256, _, _, _>(filled).await
+                }
+            }
+        })
+    }
 }
 
 impl Instance for Subject {
@@ -662,6 +712,10 @@ pub trait ChainInstance {
         value: State,
     ) -> TCResult<()>;
 
+    /// Return the latest hash of this `Chain`.
+    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>>;
+
+    /// Return the `TxnId` of the last commit to this `Chain`, if there is one.
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
@@ -670,6 +724,7 @@ pub trait ChainInstance {
     /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 
+    /// Write the mutation ops in the current transaction to the write-ahead log.
     async fn write_ahead(&self, txn_id: &TxnId);
 }
 
@@ -763,6 +818,13 @@ impl ChainInstance for Chain {
         match self {
             Self::Block(chain) => chain.append_put(txn, path, key, value).await,
             Self::Sync(chain) => chain.append_put(txn, path, key, value).await,
+        }
+    }
+
+    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Block(chain) => chain.hash(txn).await,
+            Self::Sync(chain) => chain.hash(txn).await,
         }
     }
 

@@ -14,8 +14,8 @@ use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use sha2::digest::{Digest, Output};
 use sha2::digest::generic_array::{ArrayLength, GenericArray};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 
@@ -82,7 +82,11 @@ pub struct Id {
 
 impl Id {
     /// Construct an `Id` from a hexadecimal string representation of a SHA-2 hash.
-    pub fn from_hash<T, U>(hash: GenericArray<T, U>) -> Self where U: ArrayLength<T>, GenericArray<T, U>: AsRef<[u8]> {
+    pub fn from_hash<T, U>(hash: GenericArray<T, U>) -> Self
+    where
+        U: ArrayLength<T>,
+        GenericArray<T, U>: AsRef<[u8]>,
+    {
         hex::encode(hash).parse().expect("hash")
     }
 
@@ -119,6 +123,12 @@ impl PartialEq<Label> for Id {
 impl PartialEq<Id> for &str {
     fn eq(&self, other: &Id) -> bool {
         self == &other.id
+    }
+}
+
+impl<D: Digest> Hash<D> for Id {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.as_str())
     }
 }
 
@@ -377,6 +387,18 @@ impl DerefMut for TCPathBuf {
 impl PartialEq<[PathSegment]> for TCPathBuf {
     fn eq(&self, other: &[PathSegment]) -> bool {
         &self.segments == other
+    }
+}
+
+impl<D: Digest> Hash<D> for TCPathBuf {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.to_string())
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a TCPathBuf {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.to_string())
     }
 }
 

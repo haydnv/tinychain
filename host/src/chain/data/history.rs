@@ -200,8 +200,8 @@ impl History {
         let mut latest = self.latest.write(txn_id).await?;
         let last_block = self.read_block(txn_id, (*latest).into()).await?;
 
-        let hash = last_block.hash().await?;
-        let block = ChainBlock::new(hash);
+        let hash = last_block.hash();
+        let block = ChainBlock::new(hash.to_vec());
 
         (*latest) += 1;
         debug!("creating next chain block {}", *latest);
@@ -350,8 +350,7 @@ impl History {
                 }
             }
 
-            let (source_hash, dest_hash) = try_join!(source.hash(), dest.hash())?;
-            if source_hash != dest_hash {
+            if source.hash() != dest.hash() {
                 return Err(TCError::bad_request(
                     "error replicating chain",
                     format!("hashes diverge at block {}", i),
