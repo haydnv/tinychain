@@ -66,6 +66,17 @@ class DenseTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def testCast(self):
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.ones([3, 3])
+        cxt.y1 = cxt.x / tc.Float(3.)
+        cxt.y2 = cxt.x / tc.Int(3).cast(tc.Float)
+        cxt.y3 = cxt.x.cast(tc.F64) / 3
+        cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, [{tc.uri(tc.Class): {tc.uri(tc.F64): {}}}] * 3)
+
     def testDiv(self):
         shape = [3]
 
@@ -119,6 +130,18 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_dense(tc.I64, shape, np.arange(-2, 4, 2))
         self.assertEqual(actual, expected)
+
+    def testSplit(self):
+        splits = 3
+        shape = (6, 30)
+        x = np.ones(shape, dtype=np.int64)
+
+        cxt = tc.Context()
+        cxt.x1 = tc.tensor.Dense.load(x.shape, tc.I64, x.flatten().tolist())
+        cxt.x2 = cxt.x1.split(3, axis=0)
+        cxt.result = [cxt.x2[i].shape for i in range(3)]
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, [[shape[0] // splits, 30]] * splits)
 
     def testLogarithm(self):
         size = 1_000_000
