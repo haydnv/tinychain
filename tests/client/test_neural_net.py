@@ -11,7 +11,7 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = tc.F32(1.0)
+LEARNING_RATE = tc.F32(0.1)
 MAX_ITERATIONS = 500
 NUM_EXAMPLES = 20
 
@@ -38,11 +38,11 @@ class DNNTests(ClientTest):
         super().setUpClass()
 
     @staticmethod
-    def create_layer(input_size, output_size, activation):
+    def create_layer(name, input_size, output_size, activation):
         shape = (input_size, output_size)
         bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(output_size).tolist())
         weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(input_size * output_size).tolist())
-        return tc.ml.dnn.DNNLayer.load(weights, bias, activation)
+        return tc.ml.dnn.DNNLayer.load(name, weights, bias, activation)
 
     def testNot(self):
         cxt = tc.Context()
@@ -51,7 +51,7 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(inputs < 0.5, tc.Bool)
 
-        cxt.input_layer = self.create_layer(1, 1, tc.ml.Sigmoid())
+        cxt.input_layer = self.create_layer(tc.String('layer0{{nv}}'), 1, 1, tc.ml.Sigmoid())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
@@ -63,7 +63,7 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
 
-        cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.input_layer = self.create_layer(tc.String('layer0{{nv}}'), 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
@@ -75,7 +75,7 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
 
-        cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.input_layer = self.create_layer(tc.String('layer0{{nv}}'), 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
         self.execute(cxt)
@@ -88,8 +88,8 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(labels, tc.Bool)
 
-        cxt.input_layer = self.create_layer(2, 2, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.input_layer = self.create_layer(tc.String('layer0{{nv}}'), 2, 2, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer(tc.String('layer1{{nv}}'), 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer, cxt.output_layer])
 
         self.execute(cxt)
