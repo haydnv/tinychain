@@ -12,7 +12,7 @@ keywords = ["tinychain"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "~0.2.1"
+async-hash = "0.3"
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
@@ -22,7 +22,7 @@ futures = "0.3"
 handlebars = "4.1"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { version = "~0.5.2", features=["hash", "serde", "stream"] }
+number-general = { version = "~0.5.3", features=["hash", "serde", "stream"] }
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }

@@ -23,7 +23,7 @@ path = "src/main.rs"
 tensor = ["tc-math", "tc-tensor", "tc-transact/tensor"]
 
 [dependencies]
-async-hash = "0.2"
+async-hash = "0.3"
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.5"
