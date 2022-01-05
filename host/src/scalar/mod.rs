@@ -131,6 +131,12 @@ impl ClusterRef {
     }
 }
 
+impl<'a, D: Digest> Hash<D> for &'a ClusterRef {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self.0)
+    }
+}
+
 impl From<TCPathBuf> for ClusterRef {
     fn from(path: TCPathBuf) -> Self {
         Self(path)
@@ -504,9 +510,23 @@ impl Refer for Scalar {
     }
 }
 
+impl<D: Digest> Hash<D> for Scalar {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
 impl<'a, D: Digest> Hash<D> for &'a Scalar {
     fn hash(self) -> Output<D> {
-        todo!()
+        match self {
+            Scalar::Cluster(cluster_ref) => Hash::<D>::hash(cluster_ref),
+            Scalar::Map(map) => Hash::<D>::hash(map.deref()),
+            Scalar::Op(op) => Hash::<D>::hash(op),
+            Scalar::Range(range) => Hash::<D>::hash(range),
+            Scalar::Ref(tc_ref) => Hash::<D>::hash(tc_ref.deref()),
+            Scalar::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
+            Scalar::Value(value) => Hash::<D>::hash(value),
+        }
     }
 }
 

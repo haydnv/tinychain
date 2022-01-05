@@ -1,5 +1,6 @@
 //! Reference another [`State`] in the same [`Txn`] context.
 
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
@@ -9,6 +10,7 @@ use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
 use safecast::TryCastFrom;
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, Label, PathSegment, TCPathBuf};
@@ -79,6 +81,12 @@ impl Refer for IdRef {
 impl PartialEq<Id> for IdRef {
     fn eq(&self, other: &Id) -> bool {
         self.id() == other
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a IdRef {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self.to)
     }
 }
 

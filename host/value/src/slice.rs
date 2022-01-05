@@ -1,3 +1,4 @@
+use async_hash::Hash;
 use std::fmt;
 use std::ops;
 
@@ -6,6 +7,7 @@ use collate::Collate;
 use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{Match, TryCastFrom, TryCastInto};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{label, Id, Label, Tuple};
@@ -24,6 +26,16 @@ pub enum Bound {
     In(Value),
     Ex(Value),
     Un,
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Bound {
+    fn hash(self) -> Output<D> {
+        match self {
+            Bound::In(value) => Hash::<D>::hash((Id::from(IN), value)),
+            Bound::Ex(value) => Hash::<D>::hash((Id::from(EX), value)),
+            Bound::Un => Hash::<D>::hash(Value::None),
+        }
+    }
 }
 
 impl<'en> en::IntoStream<'en> for Bound {
@@ -227,6 +239,12 @@ impl Default for Range {
             start: Bound::Un,
             end: Bound::Un,
         }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Range {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((&self.start, &self.end))
     }
 }
 

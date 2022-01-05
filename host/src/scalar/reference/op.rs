@@ -1,5 +1,6 @@
 //! Resolve a reference to an op.
 
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -12,6 +13,7 @@ use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -106,6 +108,15 @@ impl Subject {
         match self {
             Self::Ref(id_ref, _) if id_ref.id() != &SELF => id_ref.requires(deps),
             _ => {}
+        }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Subject {
+    fn hash(self) -> Output<D> {
+        match self {
+            Subject::Link(link) => Hash::<D>::hash(link),
+            Subject::Ref(id, path) => Hash::<D>::hash((id, path)),
         }
     }
 }
@@ -487,6 +498,17 @@ impl Refer for OpRef {
                         .await
                 }
             },
+        }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a OpRef {
+    fn hash(self) -> Output<D> {
+        match self {
+            OpRef::Get(get) => Hash::<D>::hash(get),
+            OpRef::Put(put) => Hash::<D>::hash(put),
+            OpRef::Post((subject, params)) => Hash::<D>::hash((subject, params.deref())),
+            OpRef::Delete(delete) => Hash::<D>::hash(delete),
         }
     }
 }

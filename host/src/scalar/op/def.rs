@@ -4,10 +4,12 @@ use std::fmt;
 use std::iter;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
+use sha2::digest::{Digest, Output};
 
 use tcgeneric::*;
 
@@ -299,6 +301,17 @@ impl Instance for OpDef {
             Self::Put(_) => OpDefType::Put,
             Self::Post(_) => OpDefType::Post,
             Self::Delete(_) => OpDefType::Delete,
+        }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a OpDef {
+    fn hash(self) -> Output<D> {
+        match self {
+            OpDef::Get(get) => Hash::<D>::hash(get),
+            OpDef::Put(put) => Hash::<D>::hash(put),
+            OpDef::Post(post) => Hash::<D>::hash(post),
+            OpDef::Delete(delete) => Hash::<D>::hash(delete),
         }
     }
 }
