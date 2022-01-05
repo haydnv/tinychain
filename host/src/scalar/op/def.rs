@@ -305,6 +305,12 @@ impl Instance for OpDef {
     }
 }
 
+impl<D: Digest> Hash<D> for OpDef {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
 impl<'a, D: Digest> Hash<D> for &'a OpDef {
     fn hash(self) -> Output<D> {
         match self {

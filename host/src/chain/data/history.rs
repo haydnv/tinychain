@@ -95,7 +95,11 @@ impl History {
             ));
         }
 
-        let hash = state.hash(txn).map_ok(Id::from_hash).await?;
+        let hash = state
+            .clone()
+            .hash(txn.clone())
+            .map_ok(Id::from_hash)
+            .await?;
 
         let txn_id = *txn.id();
         match state {
