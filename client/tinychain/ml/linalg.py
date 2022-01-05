@@ -28,7 +28,8 @@ def set_diagonal(matrix, diag):
     """Set the diagonal of the given `matrix` to `diag`."""
 
     eye = identity(matrix.shape[0])
-    zero_diag = matrix - (matrix * eye)  # don't use eye.logical_not in case the matrix is sparse
+    # don't use eye.logical_not in case the matrix is sparse
+    zero_diag = matrix - (matrix * eye)
     new_diag = eye * diag.expand_dims()
     return matrix.write(zero_diag + new_diag)
 
@@ -43,8 +44,10 @@ def householder(cxt, x: Tensor) -> Tuple:
     cxt.t = (cxt.alpha**2 + cxt.s)**0.5
 
     cxt.v = x.copy()  # make a copy in case X is updated before the return values are evaluated
-    cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
-    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero ** 2))
+    cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha -
+                     cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
+    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero **
+             2 / (cxt.s + cxt.v_zero ** 2))
     v = After(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero)
 
     return v, tau
@@ -121,7 +124,7 @@ class PLUFactorization(Map):
     """
     PLU factorization of a given `[N, N]` matrix.
     """
-    
+
     @property
     def p(self) -> Tensor:
         """
@@ -143,10 +146,11 @@ class PLUFactorization(Map):
         """
         return Tensor(self['u'])
 
+
 @post_op
 def plu(x: Tensor) -> PLUFactorization:
     """Compute the PLU factorization of the given `matrix`.
-    
+
     Args:
         `x`: a matrix with shape `[N, N]`
 
@@ -206,7 +210,7 @@ def plu(x: Tensor) -> PLUFactorization:
         l=identity(x.shape[0], F32).as_dense().copy(),
         u=x.copy(),
         i=UInt(0),
-        ))))
+    ))))
 
 
 def slogdet(x):
@@ -221,3 +225,81 @@ def svd(matrix: Tensor) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
 
     raise NotImplementedError("singular value decomposition")
+
+
+def householder_bidiag(U: Tensor, W: Tensor, e: Tensor):
+    """Householder's reduction to bidiagonal form"""
+    @post_op
+    def check_rows_num(cxt, U: Tensor, scale: F32, i: UInt, m: UInt, n: UInt, l: UInt):
+        scale = F32(tc.linalg.norm(U[i:, i]))**2
+
+        # @post_op
+        def change_rows(cxt, U: Tensor, scale: F32, i: UInt, l: UInt, n: UInt):
+            s = F32(After(U[i:, i].write(U[i:, i] / scale),
+                    F32(tc.linalg.norm(U[i:, i]))))
+            f = F32(U[i, i])
+            g = F32(If(f >= F32(0), -s, s))*1
+            h = F32(f * g - s)
+            U[i, i].write(f - g)
+            cxt.h = h
+
+            @closure
+            @post_op
+            def step(j: UInt, U: Tensor) -> Map:
+                return Map(After(
+                    U[i:, j].write(U[i:, j] + U[i:, i] *
+                                   F32(F32(U[i:, i].mul(U[i:, j]).sum()) / cxt.h)),
+                    Map(U=U, j=j + 1)))
+
+            @closure
+            @post_op
+            def cond(j: UInt, U: Tensor):
+                return j < n
+
+            result = Map(While(cond, step, Map(
+                U=U.copy(),
+                j=l
+            )))
+
+            U = Tensor(result['U'])
+            U[i:, i].write(U[i:, i] * scale)
+
+            return Tuple([U, scale, g])
+
+        return If((i >= m).logical_or(scale <= EPS), Tuple([U, scale, 0.0]), change_rows(cxt, U=U, scale=scale, i=i, l=l, n=n))
+
+    @post_op
+    def check_cols_num(cxt, U:Tensor, scale: F32, i: UInt, m: UInt, n:UInt, l: UInt, e: Tensor):
+        scale = F32(tc.linalg.norm(U[i, l:]))**2
+    
+        # @post_op
+        def change_cols(cxt, U: Tensor, scale: F32, i: UInt, l: UInt, n: UInt, e: Tensor):
+            s = F32(After(U[i, l:].write(U[i, l:] / scale), F32(tc.linalg.norm(U[i, l:]))))
+            f = F32(U[i, l])
+            g = F32(If(f >= F32(0), -s, s))*1
+            h = F32(f * g - s)
+            U[i,l].write(f - g)
+            e[l:].write(U[i,l:] / h)
+
+            @closure
+            @post_op
+            def step(j: UInt, U: Tensor) -> Map:
+                return Map(After(
+                    U[j, l:].write(U[j, l:] + e[l:] * F32(U[j, l:].mul(U[i, l:]).sum())),
+                    Map(U=U, j=j + 1)))
+            @closure
+            @post_op
+            def cond(j: UInt, U: Tensor):
+                return j < m
+
+            result = Map(While(cond, step, Map(
+                U=U.copy(),
+                j=l
+            )))
+
+            U = Tensor(result['U'])
+            U[i,l:].write(U[i,l] * scale)
+
+            return Tuple([U, scale, g])
+
+        return If(((i >= m).logical_or(i == n-1)).logical_or(scale <= EPS), Tuple([U, scale, 0.0]), change_cols(cxt, U=U, scale=scale, i=i, l=l, n=n, e = e))
