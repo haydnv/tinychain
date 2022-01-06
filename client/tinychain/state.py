@@ -95,6 +95,12 @@ class State(object):
         """Return the native base :class:`Class` of this `State`."""
         return self._get("class", rtype=Class)
 
+    def hash(self):
+        """Return the SHA256 hash of this `State` as an :class:`Id`."""
+
+        from .value import Id
+        return self._get("hash", rtype=Id)
+
     def is_none(self):
         """Return `Bool(true)` if this `State` is :class:`Nil`."""
 
