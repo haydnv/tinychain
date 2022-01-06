@@ -9,12 +9,12 @@ from tinychain.value import String
 
 class DNNLayer(Layer):
     @classmethod
-    def create(cls, name: String, input_size, output_size, activation=Sigmoid()):
+    def create(cls, name: str, input_size, output_size, activation=Sigmoid()):
         """Create a new, empty `DNNLayer` with the given shape and activation function."""
 
         weights = Dense.create((input_size, output_size))
         bias = Dense.create((output_size,))
-
+        name = String(name + '.{{nv}}')
         return cls.load(name, weights, bias, activation)
 
     @classmethod
@@ -31,7 +31,7 @@ class DNNLayer(Layer):
             def activation(self):
                 return activation
 
-        return _DNNLayer({ 'name': name, "weights": weights, "bias": bias})
+        return _DNNLayer({'name': name, "weights": weights, "bias": bias})
 
     @property
     def activation(self):
@@ -44,8 +44,8 @@ class DNNLayer(Layer):
         dZ = self.activation.backward(loss, einsum("ij,ki->kj", [self["weights"], inputs]))
 
         return dZ, [
-            Parameter(name=self['name'].render(nv='.weight'), value=self["weights"], grad=einsum("kj,ki->ij", [dZ, inputs])),
-            Parameter(name=self['name'].render(nv='.bias'), value=self["bias"], grad=dZ.sum(0))
+            Parameter(name=self['name'].render(nv='weight'), value=self["weights"], grad=einsum("kj,ki->ij", [dZ, inputs])),
+            Parameter(name=self['name'].render(nv='bias'), value=self["bias"], grad=dZ.sum(0))
             ]
 
 
