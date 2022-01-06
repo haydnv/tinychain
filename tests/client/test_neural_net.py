@@ -61,7 +61,9 @@ class DNNTests(ClientTest):
 
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
-        cxt.labels = load(np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
+
+        labels = np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels, tc.Bool)
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
@@ -73,7 +75,9 @@ class DNNTests(ClientTest):
 
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
-        cxt.labels = load(np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
+
+        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels, tc.Bool)
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
@@ -88,8 +92,8 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(labels, tc.Bool)
 
-        cxt.input_layer = self.create_layer(2, 2, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.input_layer = self.create_layer(2, 3, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer(3, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer, cxt.output_layer])
 
         self.execute(cxt)

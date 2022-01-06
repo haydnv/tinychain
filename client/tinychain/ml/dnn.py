@@ -40,12 +40,10 @@ class DNNLayer(Layer):
         return self.activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
 
     def backward(self, inputs, loss):
-        dZ = self.activation.backward(loss, einsum("ij,ki->kj", [self["weights"], inputs]))
-
-        return dZ, {
-            "weights": einsum("kj,ki->ij", [dZ, inputs]),
-            "bias": dZ.sum(0),
-        }
+        Z = einsum("ij,ki->kj", [self["weights"], inputs])  # TODO: eliminate this redundant computation
+        dZ = (loss * self.activation.backward(Z)).copy()
+        loss = einsum("ij,kj->ki", [self["weights"], dZ])
+        return loss, {"weights": einsum("kj,ki->ij", [dZ, inputs]), "bias": dZ.sum(0)}
 
 
 class DNN(NeuralNet):
