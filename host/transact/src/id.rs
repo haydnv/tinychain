@@ -3,10 +3,12 @@
 use std::fmt;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use rand::Rng;
 
 use destream::IntoStream;
+use sha2::digest::{Digest, Output};
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};
 
@@ -120,6 +122,21 @@ impl<'en> destream::en::IntoStream<'en> for TxnId {
 impl<'en> destream::en::ToStream<'en> for TxnId {
     fn to_stream<E: destream::en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         self.to_string().into_stream(e)
+    }
+}
+
+impl<D: Digest> Hash<D> for TxnId {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a TxnId {
+    fn hash(self) -> Output<D> {
+        let mut bytes = [0u8; 10];
+        bytes[..8].copy_from_slice(&self.timestamp.to_be_bytes());
+        bytes[8..].copy_from_slice(&self.nonce.to_be_bytes());
+        D::digest(&bytes)
     }
 }
 

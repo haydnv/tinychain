@@ -1,16 +1,18 @@
 //! A [`Collection`] such as a [`BTree`] or [`Table`].
 
-/// The `Collection` enum used in `State::Collection`.
 use std::fmt;
 
+use async_hash::hash_try_stream;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use log::debug;
+use sha2::digest::Output;
+use sha2::Sha256;
 
-use tc_btree::BTreeView;
+use tc_btree::{BTreeInstance, BTreeView};
 use tc_error::*;
-use tc_table::TableView;
+use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorView};
 use tc_transact::fs::Dir;
@@ -143,6 +145,32 @@ impl Instance for Collection {
             Self::Table(table) => CollectionType::Table(table.class()),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => CollectionType::Tensor(tensor.class()),
+        }
+    }
+}
+
+impl Collection {
+    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::BTree(btree) => {
+                let keys = btree.keys(*txn.id()).await?;
+                hash_try_stream::<Sha256, _, _, _>(keys).await
+            }
+            Self::Table(table) => {
+                let rows = table.rows(*txn.id()).await?;
+                hash_try_stream::<Sha256, _, _, _>(rows).await
+            }
+            #[cfg(feature = "tensor")]
+            Self::Tensor(tensor) => match tensor {
+                tc_tensor::Tensor::Dense(dense) => {
+                    let elements = dense.into_inner().value_stream(txn).await?;
+                    hash_try_stream::<Sha256, _, _, _>(elements).await
+                }
+                tc_tensor::Tensor::Sparse(sparse) => {
+                    let filled = sparse.into_inner().filled(txn).await?;
+                    hash_try_stream::<Sha256, _, _, _>(filled).await
+                }
+            },
         }
     }
 }

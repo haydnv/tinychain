@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
-use safecast::{CastInto, TryCastFrom};
+use safecast::TryCastFrom;
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
 use tc_table::TableStream;
 use tc_transact::Transaction;
-use tc_value::{Number, Value};
+use tc_value::Value;
 use tcgeneric::TCBoxTryStream;
 
 use crate::closure::Closure;
@@ -58,6 +58,7 @@ impl Source for Collection {
                     Ok(Box::pin(elements.map_ok(State::from)))
                 }
                 tc_tensor::Tensor::Sparse(sparse) => {
+                    use safecast::CastInto;
                     use tc_tensor::SparseAccess;
                     use tcgeneric::Tuple;
 
@@ -66,7 +67,7 @@ impl Source for Collection {
                         .map_ok(|(coord, value)| {
                             let coord = coord
                                 .into_iter()
-                                .map(Number::from)
+                                .map(tc_value::Number::from)
                                 .collect::<Tuple<Value>>();
 
                             Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
