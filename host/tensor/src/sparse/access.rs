@@ -788,7 +788,7 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        (self.combinator)(self.left.dtype().zero(), self.right.dtype().zero()).class()
+        (self.combinator)(self.left.dtype().one(), self.right.dtype().one()).class()
     }
 
     fn ndim(&self) -> usize {
@@ -1118,7 +1118,7 @@ where
     R: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
-        (self.combinator)(self.left.dtype().zero(), self.right.dtype().zero()).class()
+        (self.combinator)(self.left.dtype().one(), self.right.dtype().one()).class()
     }
 
     fn ndim(&self) -> usize {

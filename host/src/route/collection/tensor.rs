@@ -679,16 +679,28 @@ where
                 let axis: usize =
                     axis.try_cast_into(|x| TCError::bad_request("invalid split axis", x))?;
 
-                let dim = self.tensor.shape()[axis];
+                let dim = if axis < self.tensor.ndim() {
+                    Ok(self.tensor.shape()[axis])
+                } else {
+                    Err(TCError::unsupported(format!(
+                        "axis {} is out of bounds for tensor with shape {}",
+                        axis,
+                        self.tensor.shape()
+                    )))
+                }?;
+
                 let sizes: Vec<u64> = match num_or_size_splits {
-                    Value::Number(n) if n > 0.into() && n % dim.into() == 0.into() => {
+                    Value::Number(n) if n > 0.into() => {
                         let n = n.cast_into();
                         Ok(vec![dim / n as u64; n])
                     }
                     Value::Tuple(sizes) => {
                         sizes.try_cast_into(|t| TCError::bad_request("invalid split sizes", t))
                     }
-                    other => Err(TCError::bad_request("invalid split size", other)),
+                    other => Err(TCError::unsupported(format!(
+                        "invalid split size {:?} for axis {} with dimension {}",
+                        other, axis, dim
+                    ))),
                 }?;
 
                 if sizes.iter().sum::<u64>() != dim {

@@ -3,6 +3,8 @@ Reference types.
 :class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
 """
 
+import logging
+
 from tinychain.reflect import is_conditional, is_op
 from tinychain.util import deanonymize, form_of, get_ref, hex_id, requires, to_json, uri, URI
 
@@ -393,6 +395,7 @@ class MethodSubject(object):
             self.__uri__ = URI(name).append(self.method_name)
 
             if not cxt.is_defined(name):
+                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
         else:
             self.__uri__ = uri(self.subject).append(self.method_name)
@@ -426,6 +429,7 @@ def is_op_ref(fn):
 def reference(cxt, state):
     name = f"{state.__class__.__name__}_{hex_id(state)}"
     if not cxt.is_defined(name):
+        logging.debug(f"auto-assigning name {name} to {state} in {cxt}")
         setattr(cxt, name, state)
 
     return URI(name)
