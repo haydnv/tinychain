@@ -3,12 +3,15 @@
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::Deref;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::TryCastFrom;
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -258,13 +261,27 @@ impl Refer for TCRef {
         debug!("TCRef::resolve {}", self);
 
         match self {
-            Self::If(if_ref) => if_ref.resolve(context, txn).await,
-            Self::Case(case) => case.resolve(context, txn).await,
             Self::After(after) => after.resolve(context, txn).await,
+            Self::Case(case) => case.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
+            Self::If(if_ref) => if_ref.resolve(context, txn).await,
             Self::Op(op_ref) => op_ref.resolve(context, txn).await,
             Self::While(while_ref) => while_ref.resolve(context, txn).await,
             Self::With(with) => with.resolve(context, txn).await,
+        }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a TCRef {
+    fn hash(self) -> Output<D> {
+        match self {
+            TCRef::After(after) => Hash::<D>::hash(after.deref()),
+            TCRef::Case(case) => Hash::<D>::hash(case.deref()),
+            TCRef::Id(id) => Hash::<D>::hash(id),
+            TCRef::If(if_ref) => Hash::<D>::hash(if_ref.deref()),
+            TCRef::Op(op) => Hash::<D>::hash(op),
+            TCRef::While(while_ref) => Hash::<D>::hash(while_ref.deref()),
+            TCRef::With(with) => Hash::<D>::hash(with.deref()),
         }
     }
 }

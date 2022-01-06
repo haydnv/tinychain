@@ -1,10 +1,14 @@
 //! User-defined class implementation.
 
+use async_hash::Hash;
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, TryCastFrom};
+use sha2::digest::Output;
+use sha2::Digest;
 
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, NativeClass, PathLabel, TCPathBuf};
@@ -46,6 +50,22 @@ impl InstanceClass {
     /// Return the instance data of this class.
     pub fn proto(&'_ self) -> &'_ Map<Scalar> {
         &self.proto
+    }
+}
+
+impl<D: Digest> Hash<D> for InstanceClass {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a InstanceClass {
+    fn hash(self) -> Output<D> {
+        if let Some(link) = &self.extends {
+            Hash::<D>::hash((link, self.proto.deref()))
+        } else {
+            Hash::<D>::hash(self.proto.deref())
+        }
     }
 }
 

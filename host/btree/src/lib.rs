@@ -12,7 +12,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
-use tc_transact::{HashCollection, IntoView, Transaction, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
 
@@ -93,16 +93,6 @@ pub trait BTreeWrite: BTreeInstance {
             .try_buffer_unordered(num_cpus::get())
             .try_fold((), |(), ()| future::ready(Ok(())))
             .await
-    }
-}
-
-#[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> HashCollection<D> for BTree<F, D, T> {
-    type Item = Key;
-    type Txn = T;
-
-    async fn hashable(&self, txn: &T) -> TCResult<TCBoxTryStream<Self::Item>> {
-        self.clone().keys(*txn.id()).await
     }
 }
 

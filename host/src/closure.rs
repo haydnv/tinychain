@@ -1,5 +1,6 @@
 //! An [`OpDef`] which closes over zero or more [`State`]s
 
+use async_hash::Hash;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
@@ -9,6 +10,8 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use safecast::{CastInto, TryCastInto};
+use sha2::digest::{Digest, Output};
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -31,6 +34,16 @@ impl Closure {
     /// Construct a new `Closure`.
     pub fn new(context: Map<State>, op: OpDef) -> Self {
         Self { context, op }
+    }
+
+    /// Compute the SHA256 hash of this `Closure`.
+    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
+        let context = State::Map(self.context).hash(txn).await?;
+
+        let mut hasher = Sha256::default();
+        hasher.update(&context);
+        hasher.update(&Hash::<Sha256>::hash(self.op));
+        Ok(hasher.finalize())
     }
 
     /// Return the context and [`OpDef`] which define this `Closure`.

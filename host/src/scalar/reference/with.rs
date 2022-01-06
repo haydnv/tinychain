@@ -1,13 +1,16 @@
 //! Limits the execution scope of an inline `Op`.
 
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
@@ -80,6 +83,12 @@ impl Refer for With {
             .collect::<TCResult<Map<State>>>()?;
 
         Ok(Closure::new(closed_over, self.op).into())
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a With {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((self.capture.deref(), &self.op))
     }
 }
 

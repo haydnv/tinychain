@@ -14,11 +14,11 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
-use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
-use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Instance, TCBoxTryFuture};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
@@ -1214,23 +1214,6 @@ where
         SparseTable::copy_from(instance, store, txn)
             .map_ok(Self::from)
             .await
-    }
-}
-
-#[async_trait]
-impl<FD, FS, D, T, A> HashCollection<D> for SparseTensor<FD, FS, D, T, A>
-where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
-    T: Transaction<D>,
-    A: SparseAccess<FD, FS, D, T>,
-{
-    type Item = SparseRow;
-    type Txn = T;
-
-    async fn hashable(&self, txn: &Self::Txn) -> TCResult<TCBoxTryStream<SparseRow>> {
-        self.accessor.clone().filled(txn.clone()).await
     }
 }
 

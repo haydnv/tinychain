@@ -17,13 +17,13 @@ use tc_table::TableInstance;
 use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
-use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
     label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
 };
 
-use crate::chain::{ChainType, Subject, BLOCK_SIZE, CHAIN, NULL_HASH};
+use crate::chain::{null_hash, ChainType, Subject, BLOCK_SIZE, CHAIN};
 use crate::collection::*;
 use crate::fs;
 use crate::route::Public;
@@ -49,7 +49,7 @@ impl History {
     }
 
     pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
-        let block = ChainBlock::new(NULL_HASH);
+        let block = ChainBlock::new(null_hash().to_vec());
         let file: fs::File<ChainBlock> = dir.create_file(txn_id, CHAIN.into(), class).await?;
         file.create_block(txn_id, 0u64.into(), block, BLOCK_SIZE)
             .await?;
@@ -95,11 +95,16 @@ impl History {
             ));
         }
 
+        let hash = state
+            .clone()
+            .hash(txn.clone())
+            .map_ok(Id::from_hash)
+            .await?;
+
         let txn_id = *txn.id();
         match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
-                    let hash: Id = btree.hash_hex(&txn).await?.parse()?;
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
@@ -122,7 +127,6 @@ impl History {
                     .into())
                 }
                 Collection::Table(table) => {
-                    let hash: Id = table.hash_hex(&txn).await?.parse()?;
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
@@ -148,13 +152,9 @@ impl History {
                     let schema = tc_tensor::Schema { shape, dtype };
                     let classpath = tensor.class().path();
 
-                    let hash = match tensor {
-                        Tensor::Dense(dense) => {
-                            let hash = dense.hash_hex(&txn).await?.parse()?;
-
-                            if self.dir.contains(txn_id, &hash).await? {
-                                debug!("Tensor with hash {} is already saved", hash);
-                            } else {
+                    if !self.dir.contains(txn_id, &hash).await? {
+                        match tensor {
+                            Tensor::Dense(dense) => {
                                 let file = self
                                     .dir
                                     .create_file(txn_id, hash.clone(), TensorType::Dense)
@@ -163,23 +163,13 @@ impl History {
                                 DenseTensor::copy_from(dense, file, txn).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
-
-                            hash
-                        }
-                        Tensor::Sparse(sparse) => {
-                            let hash = sparse.hash_hex(&txn).await?.parse()?;
-
-                            if self.dir.contains(txn_id, &hash).await? {
-                                debug!("Tensor with hash {} is already saved", hash);
-                            } else {
+                            Tensor::Sparse(sparse) => {
                                 let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
                                 SparseTensor::copy_from(sparse, dir, txn).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
-
-                            hash
-                        }
-                    };
+                        };
+                    }
 
                     let schema: Value = schema.cast_into();
                     Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
@@ -214,8 +204,8 @@ impl History {
         let mut latest = self.latest.write(txn_id).await?;
         let last_block = self.read_block(txn_id, (*latest).into()).await?;
 
-        let hash = last_block.hash().await?;
-        let block = ChainBlock::new(hash);
+        let hash = last_block.hash();
+        let block = ChainBlock::new(hash.to_vec());
 
         (*latest) += 1;
         debug!("creating next chain block {}", *latest);
@@ -364,8 +354,7 @@ impl History {
                 }
             }
 
-            let (source_hash, dest_hash) = try_join!(source.hash(), dest.hash())?;
-            if source_hash != dest_hash {
+            if source.hash() != dest.hash() {
                 return Err(TCError::bad_request(
                     "error replicating chain",
                     format!("hashes diverge at block {}", i),
@@ -517,7 +506,7 @@ impl Persist<fs::Dir> for History {
         // so just create a new one in memory
         let dir = dir.get_or_create_dir(*txn_id, DATA.into()).await?;
 
-        let mut last_hash = Bytes::from(NULL_HASH);
+        let mut last_hash = Bytes::from(null_hash().to_vec());
         let mut latest = 0;
 
         loop {
@@ -576,6 +565,7 @@ impl de::Visitor for HistoryVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let null_hash = null_hash();
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
 
@@ -589,7 +579,7 @@ impl de::Visitor for HistoryVisitor {
             .map_err(de::Error::custom)
             .await?;
 
-        let first_block = ChainBlock::new(NULL_HASH);
+        let first_block = ChainBlock::new(null_hash.to_vec());
         file.create_block(txn_id, 0u64.into(), first_block, BLOCK_SIZE)
             .map_err(de::Error::custom)
             .await?;
@@ -606,9 +596,9 @@ impl de::Visitor for HistoryVisitor {
                 .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
                 .map_err(de::Error::custom)?;
 
-            if hash != NULL_HASH {
+            if &hash != &null_hash.to_vec() {
                 let hash = hex::encode(hash);
-                let null_hash = hex::encode(NULL_HASH);
+                let null_hash = hex::encode(null_hash);
                 return Err(de::Error::invalid_value(
                     format!("initial block hash {}", hash),
                     format!("null hash {}", null_hash),

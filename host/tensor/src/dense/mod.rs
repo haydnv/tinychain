@@ -14,7 +14,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
-use tc_transact::{HashCollection, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
 };
@@ -1242,25 +1242,6 @@ where
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.blocks.finalize(txn_id).await
-    }
-}
-
-#[async_trait]
-impl<FD, FS, D, T, B> HashCollection<D> for DenseTensor<FD, FS, D, T, B>
-where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    B: DenseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
-{
-    type Item = Array;
-    type Txn = T;
-
-    async fn hashable(&self, txn: &T) -> TCResult<TCBoxTryStream<Self::Item>> {
-        self.blocks.clone().block_stream(txn.clone()).await
     }
 }
 
