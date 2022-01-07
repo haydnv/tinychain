@@ -18,11 +18,11 @@ class Activation(ABC):
 
 
 class Sigmoid(Activation):
-    def forward(self, Z):
-        return 1 / (1 + (-Z).exp())
+    def forward(self, x):
+        return 1 / (1 + (-x).exp())
 
-    def backward(self, Z):
-        sig = self.forward(Z=Z)
+    def backward(self, x):
+        sig = self.forward(x)
         return sig * (1 - sig)
 
 

@@ -36,14 +36,16 @@ class DNNLayer(Layer):
     def activation(self):
         return Sigmoid()
 
-    def forward(self, inputs):
-        return self.activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
+    def forward(self, x):
+        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+        return self.activation.forward(inputs)
 
-    def backward(self, inputs, loss):
-        Z = einsum("ij,ki->kj", [self["weights"], inputs])  # TODO: eliminate this redundant computation
-        dZ = (loss * self.activation.backward(Z)).copy()
-        loss = einsum("ij,kj->ki", [self["weights"], dZ])
-        return loss, {"weights": einsum("kj,ki->ij", [dZ, inputs]), "bias": dZ.sum(0)}
+    def backward(self, x, loss):
+        m = x.shape[0]
+        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+        delta = loss * self.activation.backward(inputs)
+        update = einsum("ki,kj->ij", [x, delta]).copy()
+        return delta, {"weights": update / m, "bias": update.sum(0) / m}
 
 
 class DNN(NeuralNet):

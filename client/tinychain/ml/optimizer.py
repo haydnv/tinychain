@@ -1,8 +1,7 @@
 from abc import abstractmethod
 
-from tinychain.collection.tensor import Dense
+from tinychain.collection.tensor import Tensor
 from tinychain.decorators import closure, post_op
-from tinychain.ml import EPS
 from tinychain.ref import After, While
 from tinychain.state import Map
 from tinychain.value import F32, UInt
@@ -34,23 +33,26 @@ class GradientDescent(Optimizer):
             else:
                 return gradient.write(gradient - (deltas * lr))
 
-        loss, deltas = gradient.backward(inputs, loss)
-        return After(update(gradient, deltas), loss)
+        # discard the loss here since there's nowhere to propagate it to
+        _loss, deltas = gradient.backward(inputs, loss)
+        return update(gradient, deltas)
 
 
-def train(model, optimizer, inputs, cost, max_iterations):
-    """Train a :class:`Differentiable` such as a neural network in up to `max_iterations` steps."""
+def train(model, optimizer, inputs, cost, train_while):
+    """
+    Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
+
+    Two named states are provided to `train_while`:
+        `i`: the iteration number, a one-indexed `UInt`
+        `output`: a `Tensor`, the last output of the model.
+    """
 
     @closure
     @post_op
-    def while_cond(i: UInt, loss: Dense):
-        fit = (loss > EPS).any()
-        return fit.logical_and(i < max_iterations)
+    def step(i: UInt, output: Tensor):
+        loss = cost(output)
+        update = optimizer.optimize(i, model, inputs, loss)
+        return After(update, {"i": i + 1, "output": model.forward(inputs).copy()})
 
-    @closure
-    @post_op
-    def step(i: UInt, loss: Dense):
-        loss = optimizer.optimize(i, model, inputs, loss)
-        return {"i": i + 1, "loss": loss}
-
-    return While(while_cond, step, {"i": 0, "loss": cost(model.forward(inputs))})
+    output = model.forward(inputs).copy()
+    return While(train_while, step, {"i": 1, "output": output})
