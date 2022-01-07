@@ -11,9 +11,9 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = tc.F32(1.0)
+LEARNING_RATE = tc.F32(0.1)
 MAX_ITERATIONS = 500
-NUM_EXAMPLES = 20
+NUM_EXAMPLES = 100
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -31,6 +31,7 @@ def truncated_normal(size, mean=0., std=None):
 
 
 # TODO: implement AdamOptimizer
+@unittest.skip
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
@@ -102,8 +103,14 @@ class DNNTests(ClientTest):
         def cost(output):
             return (output - cxt.labels)**2
 
+        @tc.closure
+        @tc.post_op
+        def train_while(i: tc.UInt, output: tc.tensor.Tensor):
+            fit = ((output > 0.5) == cxt.labels).all()
+            return fit.logical_not().logical_and(i <= MAX_ITERATIONS)
+
         cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, MAX_ITERATIONS)
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
@@ -195,7 +202,7 @@ class CNNTests(ClientTest):
         cxt.result = cxt.layer.forward(cxt.inputs)
 
         response = self.host.post(ENDPOINT, cxt)
-        print(response)
+        # TODO: test backpropagation
 
 
 def load(ndarray, dtype=tc.F32):

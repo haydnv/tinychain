@@ -3,7 +3,7 @@
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
 
 from tinychain.collection.tensor import einsum, Dense
-from tinychain.ml import Layer, NeuralNet, Sigmoid
+from tinychain.ml import Layer, NeuralNet, Sigmoid, Parameter
 
 
 class DNNLayer(Layer):
@@ -36,14 +36,19 @@ class DNNLayer(Layer):
     def activation(self):
         return Sigmoid()
 
-    def forward(self, inputs):
-        return self.activation.forward(einsum("ij,ki->kj", [self["weights"], inputs])) + self["bias"]
+    def forward(self, x):
+        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+        return self.activation.forward(inputs)
 
-    def backward(self, inputs, loss):
-        Z = einsum("ij,ki->kj", [self["weights"], inputs])  # TODO: eliminate this redundant computation
-        dZ = (loss * self.activation.backward(Z)).copy()
-        loss = einsum("ij,kj->ki", [self["weights"], dZ])
-        return loss, {"weights": einsum("kj,ki->ij", [dZ, inputs]), "bias": dZ.sum(0)}
+    def backward(self, x, loss):
+        m = x.shape[0]
+        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+        delta = loss * self.activation.backward(inputs)
+        gradients = einsum("ki,kj->ij", [x, delta]).copy()
+        return delta, [
+            Parameter(name=self['name'].render(nv='weight'), value=self["weights"], grad=gradients / m),
+            Parameter(name=self['name'].render(nv='bias'), value=self["bias"], grad=delta.sum(0) / m)
+            ]
 
 
 class DNN(NeuralNet):
@@ -85,12 +90,12 @@ class DNN(NeuralNet):
                     layer_output = self[l].forward(layer_inputs[-1]).copy()
                     layer_inputs.append(layer_output)
 
-                layer_gradients = []
+                param_list = []
                 for l in reversed(range(n)):
-                    loss, layer_gradient = self[l].backward(layer_inputs[l], loss)
+                    loss, layer_param_list = self[l].backward(layer_inputs[l], loss)
                     loss = loss.copy()
-                    layer_gradients.insert(0, layer_gradient)
+                    param_list.extend(layer_param_list)
 
-                return loss, layer_gradients
+                return loss, param_list
 
         return DNN(layers)

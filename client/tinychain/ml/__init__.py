@@ -1,6 +1,7 @@
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
+from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
 
@@ -18,11 +19,11 @@ class Activation(ABC):
 
 
 class Sigmoid(Activation):
-    def forward(self, Z):
-        return 1 / (1 + (-Z).exp())
+    def forward(self, x):
+        return 1 / (1 + (-x).exp())
 
-    def backward(self, Z):
-        sig = self.forward(Z=Z)
+    def backward(self, x):
+        sig = self.forward(x)
         return sig * (1 - sig)
 
 
@@ -98,3 +99,10 @@ class NeuralNet(Tuple, Differentiable):
     @abstractmethod
     def load(cls, *args, **kwargs):
         pass
+
+class Parameter:
+
+    def __init__(self, name: str, value: Tensor, grad: Tensor):
+        self.name = name
+        self.value = value
+        self.grad = grad
