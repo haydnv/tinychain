@@ -26,7 +26,7 @@ class State(object):
     def __deps__(self):
         return requires(form_of(self))
 
-    def __eq__(self):
+    def __eq__(self, _other):
         raise NotImplementedError("State does not support equality; use a more specific type")
 
     def __json__(self):
