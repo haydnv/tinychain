@@ -5,7 +5,7 @@ Reference types.
 
 import logging
 
-from tinychain.reflect import is_conditional, is_op
+from tinychain.reflect import is_conditional, is_op, is_ref
 from tinychain.util import deanonymize, form_of, get_ref, hex_id, requires, to_json, uri, URI
 
 
@@ -264,7 +264,7 @@ class Get(Op):
 
             is_scalar = subject.startswith("/state/scalar")
 
-        if is_scalar:
+        if is_scalar and not is_ref(self.args):
             (value,) = self.args
             return {str(subject): to_json(value)}
         else:
