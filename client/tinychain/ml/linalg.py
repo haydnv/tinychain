@@ -278,76 +278,133 @@ def svd(matrix: Tensor) -> Tuple:
 
     raise NotImplementedError("singular value decomposition")
 
+def sign(a: F32, b: F32) -> F32:
+    return If(b >= 0.0, a.abs(), - F32(a.abs()))
 
-def householder_bidiag(U: Tensor, W: Tensor, e: Tensor):
+
+def dot(x1: Tensor, x2: Tensor) -> F32:
+    return (x1 * x2).sum()
+
+@post_op
+def householder_bidiag(U: Tensor, W: Tensor, e: Tensor, eps: F32) -> Map:
     """Householder's reduction to bidiagonal form"""
+
     @post_op
-    def check_rows_num(cxt, U: Tensor, scale: F32, i: UInt, m: UInt, n: UInt, l: UInt):
-        scale = F32(norm(U[i:, i]))**2
+    def step(
+            cxt,
+            i: UInt,
+            n: UInt,
+            m: UInt,
+            U: Tensor,
+            W: Tensor,
+            e: Tensor,
+            scale: F32,
+            g: F32,
+            eps: F32) -> Map:
 
-        # @post_op
-        def change_rows(cxt, U: Tensor, scale: F32, i: UInt, l: UInt, n: UInt):
-            s = F32(After(U[i:, i].write(U[i:, i] / scale),
-                    F32(norm(U[i:, i]))))
-            g = F32(If(F32(U[i, i]) >= F32(0), -s, s))*1
-            h = After(U[i, i].write(F32(U[i, i]) - g), F32(F32(U[i, i]) * g - s**2))
-            cxt.h = h
+        @post_op
+        def update_cols(i: UInt, l: UInt, n: UInt, U: Tensor, scale: F32) -> F32:
 
-            @closure
             @post_op
-            def step(j: UInt, U: Tensor) -> Map:
+            def step(j: UInt, n: UInt, i: UInt, U: Tensor, h: F32) -> Map:
                 return After(
-                    U[i:, j].write(U[i:, j] + U[i:, i] *
-                                   F32(F32(U[i:, i].mul(U[i:, j]).sum()) / cxt.h)),
-                    Map(U=U, j=j + 1))
+                    U[i:, j].write(U[i:, j] + U[i:, i] * dot(U[i:, i], U[i:, j]) / h),
+                    Map(j=j + 1, n=n, i=i, U=U, h=h)
+                )
 
-            @closure
             @post_op
-            def cond(j: UInt):
+            def cond(j: UInt, n: UInt, i: UInt, U: Tensor, h: F32) -> Bool:
                 return j < n
 
-            result = Map(While(cond, step, Map(
-                U=U.copy(),
-                j=l
-            )))
+            tup = Tuple(After(
+                U[i:, i].write(U[i:, i] / scale),
+                Tuple([dot(U[i:, i], U[i:, i]), U[i, i]])))
+            s = F32(tup[0])
+            f = F32(tup[1])
+            g = F32(-sign(F32(s.pow(0.5)), f))
+            h = After(
+                U[i, i].write(f - g),
+                F32(f * g) - s)
 
-            U = Tensor(result['U'])
+            g = F32(After(
+                While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)),
+                g * 1))
+            g = F32(After(
+                U[i:, i].write(U[i:, i] * scale),
+                g * 1))
+            return g
 
-            return After(U[i:, i].write(U[i:, i] * scale),Tuple([U, scale, g]))
+        @post_op
+        def update_rows(i: UInt, l: UInt, m: UInt, U: Tensor, e: Tensor, scale: F32) -> F32:
 
-        return If((i >= m).logical_or(scale <= EPS), Tuple([U, scale, 0.0]), change_rows(cxt, U=U, scale=scale, i=i, l=l, n=n))
-
-    @post_op
-    def check_cols_num(cxt, U:Tensor, scale: F32, i: UInt, m: UInt, n:UInt, l: UInt, e: Tensor):
-        scale = F32(norm(U[i, l:]))**2
-    
-        # @post_op
-        def change_cols(cxt, U: Tensor, scale: F32, i: UInt, l: UInt, n: UInt, e: Tensor):
-            s = F32(After(U[i, l:].write(U[i, l:] / scale), F32(norm(U[i, l:]))))
-            f = F32(U[i, l])
-            g = F32(If(f >= F32(0), -s, s))*1
-            h = F32(f * g - s)
-
-            @closure
             @post_op
-            def step(j: UInt, U: Tensor) -> Map:
+            def step(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Map:
                 return After(
-                    U[j, l:].write(U[j, l:] + e[l:] * F32(U[j, l:].mul(U[i, l:]).sum())),
-                    Map(U=U, j=j + 1))
-            @closure
+                    U[j, l:].write(U[j, l:] + e[l:] * dot(U[j, l:], U[i, l:])),
+                    Map(j=j + 1, m=m, l=l, i=i, U=U, e=e)
+                )
+
             @post_op
-            def cond(j: UInt):
+            def cond(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Bool:
                 return j < m
 
-            result = After(
-                [U[i,l].write(f - g), e[l:].write(U[i,l:] / h)],
-                Map(While(cond, step, Map(
-                U=U.copy(),
-                j=l
-            ))))
+            tup = Tuple(After(U[i, l:].write(U[i, l:] / scale), Tuple([dot(U[i, l:], U[i, l:]), U[i, l]])))
+            s = F32(tup[0])
+            f = F32(tup[1])
+            g = F32(-sign(F32(s.pow(0.5)), f))
+            h = After(U[i, l].write(f - g), F32(f * g) - s)
+            s = After(e[l:].write(U[i, l:] / h), s * 1)
 
-            U = Tensor(result['U'])
+            g = F32(After(
+                While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)),
+                g * 1
+            ))
+            g = F32(After(
+                U[i, l:].write(U[i, l:] * scale),
+                g * 1
+            ))
+            return g
 
-            return After(U[i,l:].write(U[i,l:] * scale), Tuple([U, scale, g]))
+        cxt.update_cols = update_cols
+        cxt.update_rows = update_rows
 
-        return If(((i >= m).logical_or(i == n-1)).logical_or(scale <= EPS), Tuple([U, scale, 0.0]), change_cols(cxt, U=U, scale=scale, i=i, l=l, n=n, e = e))
+        # # e[i], l = scale * g, i + 1
+        l = UInt(After(e[i].write(scale * g), i + 1))
+        scale = F32(If(i < m, dot(U[i:, i], U[i:, i]), scale * 1))
+        g = F32(If(
+            Bool(i < m).logical_and(scale > eps),
+            F32(cxt.update_cols(i=i, l=l, n=n, U=U, scale=scale)),
+            F32(0.0)))
+
+        g = F32(After(
+            W[i].write(scale * g),
+            g * 1))
+        scale = F32(If(
+            Bool(i < m).logical_and(i != n - 1),
+            F32(dot(U[i, l:], U[i, l:])),
+            scale * 1))
+        g = F32(If(
+            Bool(i < m).logical_and(i != n - 1).logical_and(scale > eps),
+            F32(cxt.update_rows(i=i, l=l, m=m, U=U, e=e, scale=scale)),
+            F32(0.0)))
+
+        return Map(i=i + 1, n=n, m=m, U=U, W=W, e=e, scale=scale, g=g, eps=eps)
+
+    @post_op
+    def cond(
+            i: UInt,
+            n: UInt,
+            m: UInt,
+            U: Tensor,
+            W: Tensor,
+            e: Tensor,
+            scale: F32,
+            g: F32,
+            eps: F32) -> Bool:
+        return i < n
+
+    m, n = UInt(U.shape[0]), UInt(U.shape[1])
+    g = F32(0.0)
+    scale = F32(0.0)
+
+    return While(cond, step, Map(i=UInt(0), n=n, m=m, U=U, W=W, e=e, scale=scale, g=g, eps=eps))
