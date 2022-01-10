@@ -31,7 +31,6 @@ def truncated_normal(size, mean=0., std=None):
 
 
 # TODO: implement AdamOptimizer
-@unittest.skip
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
@@ -100,7 +99,9 @@ class DNNTests(ClientTest):
         self.execute(cxt)
 
     def execute(self, cxt):
-        def cost(output):
+        def cost(output, dL=False):
+            if dL:
+                return (output - cxt.labels)*2
             return (output - cxt.labels)**2
 
         @tc.closure

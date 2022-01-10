@@ -1,6 +1,7 @@
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
+from tinychain.collection.tensor import Dense, Tensor
 
 EPS = 10**-6
 
@@ -98,3 +99,10 @@ class NeuralNet(Tuple, Differentiable):
     @abstractmethod
     def load(cls, *args, **kwargs):
         pass
+
+class Parameter:
+
+    def __init__(self, name: str, value: Tensor, grad: Tensor):
+        self.name = name
+        self.value = value
+        self.grad = grad

@@ -3,21 +3,22 @@
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
 
 from tinychain.collection.tensor import einsum, Dense
-from tinychain.ml import Layer, NeuralNet, Sigmoid
-
+from tinychain.ml import Layer, NeuralNet, Sigmoid, Parameter
+from tinychain.value import String
 
 class DNNLayer(Layer):
     @classmethod
-    def create(cls, input_size, output_size, activation=Sigmoid()):
+    def create(cls, name: str, input_size, output_size, activation=Sigmoid()):
         """Create a new, empty `DNNLayer` with the given shape and activation function."""
 
         weights = Dense.create((input_size, output_size))
         bias = Dense.create((output_size,))
+        name = String(name + '.{{nv}}')
 
-        return cls.load(weights, bias, activation)
+        return cls.load(name, weights, bias, activation)
 
     @classmethod
-    def load(cls, weights, bias, activation=Sigmoid()):
+    def load(cls, name, weights, bias, activation=Sigmoid()):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
 
         class _DNNLayer(cls):
@@ -30,7 +31,7 @@ class DNNLayer(Layer):
             def activation(self):
                 return activation
 
-        return _DNNLayer({"weights": weights, "bias": bias})
+        return _DNNLayer({'name': name, "weights": weights, "bias": bias})
 
     @property
     def activation(self):
@@ -45,7 +46,10 @@ class DNNLayer(Layer):
         inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
         delta = loss * self.activation.backward(inputs)
         update = einsum("ki,kj->ij", [x, delta]).copy()
-        return delta, {"weights": update / m, "bias": update.sum(0) / m}
+        return delta, [
+            Parameter(name=self['name'].render(nv='weight'), value=self["weights"], grad=update / m),
+            Parameter(name=self['name'].render(nv='bias'), value=self["bias"], grad=delta.sum(0) / m)
+            ]
 
 
 class DNN(NeuralNet):
@@ -87,12 +91,12 @@ class DNN(NeuralNet):
                     layer_output = self[l].forward(layer_inputs[-1]).copy()
                     layer_inputs.append(layer_output)
 
-                layer_gradients = []
+                param_list = []
                 for l in reversed(range(n)):
-                    loss, layer_gradient = self[l].backward(layer_inputs[l], loss)
+                    loss, layer_param_list = self[l].backward(layer_inputs[l], loss)
                     loss = loss.copy()
-                    layer_gradients.insert(0, layer_gradient)
+                    param_list.extend(layer_param_list)
 
-                return loss, layer_gradients
+                return param_list
 
         return DNN(layers)
