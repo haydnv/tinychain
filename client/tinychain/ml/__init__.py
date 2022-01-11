@@ -5,7 +5,6 @@ from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
 
-
 class Activation(ABC):
     """A differentiable activation function for a neural network."""
 
@@ -59,6 +58,13 @@ class Differentiable(object):
         Returns a tuple `(loss, gradient)` where `loss` is the loss to propagate further backwards and `gradient` is
         the total gradient for an `Optimizer` to use in order to calculate an update to this `Differentiable`.
         """
+    
+    @abstractmethod
+    def get_param_list(self):
+        """
+        Returns a parameters as List[Parameter] of `Layer`
+        """
+        return []
 
     @abstractmethod
     def write(self, new_values):
@@ -102,7 +108,12 @@ class NeuralNet(Tuple, Differentiable):
 
 class Parameter:
 
-    def __init__(self, name: str, value: Tensor, grad: Tensor):
+    def __init__(self, name: str, value: Tensor):
         self.name = name
         self.value = value
+
+class DiffedParameter(Parameter):
+
+    def __init__(self, name: str, value: Tensor, grad: Tensor):
+        super().__init__(name, value)
         self.grad = grad
