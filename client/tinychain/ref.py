@@ -5,7 +5,7 @@ Reference types.
 
 import logging
 
-from tinychain.reflect import is_conditional, is_op
+from tinychain.reflect import is_conditional, is_op, is_ref
 from tinychain.util import deanonymize, form_of, get_ref, hex_id, requires, to_json, uri, URI
 
 
@@ -33,6 +33,9 @@ class After(Ref):
     def __init__(self, when, then):
         self.when = when
         self.then = then
+
+    def __dbg__(self):
+        return [self.when, self.then]
 
     def __deps__(self):
         deps = set()
@@ -76,6 +79,9 @@ class Case(Ref):
         self.switch = switch
         self.case = case
 
+    def __dbg__(self):
+        return [self.cond, self.switch, self.case]
+
     def __deps__(self):
         deps = set()
         deps.update(requires(self.cond))
@@ -114,6 +120,9 @@ class If(Ref):
         self.then = then
         self.or_else = or_else
 
+    def __dbg__(self):
+        return [self.cond, self.then, self.or_else]
+
     def __deps__(self):
         deps = set()
         deps.update(requires(self.cond))
@@ -151,6 +160,9 @@ class While(Ref):
         self.cond = cond
         self.op = op
         self.state = state
+
+    def __dbg__(self):
+        return [self.cond, self.op, self.state]
 
     def __deps__(self):
         deps = set()
@@ -193,6 +205,9 @@ class With(Ref):
 
         self.op = op
 
+    def __dbg__(self):
+        return [self.capture, self.op]
+
     def __deps__(self):
         return set(self.capture)
 
@@ -215,6 +230,10 @@ class Op(Ref):
     def __init__(self, subject, args):
         self.subject = subject
         self.args = args
+
+    def __dbg__(self):
+        subject = [self.subject] if is_ref(self.subject) else []
+        return subject + list(self.args)
 
     def __deps__(self):
         deps = set()
@@ -264,7 +283,7 @@ class Get(Op):
 
             is_scalar = subject.startswith("/state/scalar")
 
-        if is_scalar:
+        if is_scalar and not is_ref(self.args):
             (value,) = self.args
             return {str(subject): to_json(value)}
         else:
@@ -378,6 +397,13 @@ class MethodSubject(object):
         self.subject = subject
         self.method_name = method_name
 
+    def __dbg__(self):
+        subject = [self.subject] if is_ref(self.subject) else []
+        return subject + self.args
+
+    def __dbg__(self):
+        return [self.subject]
+
     def __deps__(self):
         if uri(self).is_id():
             return set([uri(self)])
@@ -411,6 +437,9 @@ class MethodSubject(object):
             return str(uri(self.subject).append(self.method_name))
         else:
             return str(uri(self))
+
+    def __repr__(self):
+        return f"MethodSubject {repr(self.subject)}"
 
 
 def is_op_ref(fn):

@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 
+use futures::TryFutureExt;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
@@ -46,6 +47,36 @@ impl<'a> Handler<'a> for ClassHandler {
                 Ok(Object::Class(class).into())
             })
         }))
+    }
+}
+
+struct HashHandler {
+    state: State,
+}
+
+impl<'a> Handler<'a> for HashHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                self.state
+                    .hash(txn.clone())
+                    .map_ok(Id::from_hash)
+                    .map_ok(Value::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl From<State> for HashHandler {
+    fn from(state: State) -> HashHandler {
+        Self { state }
     }
 }
 
@@ -143,6 +174,7 @@ impl Route for State {
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "class" => Some(Box::new(ClassHandler::from(self.class()))),
+                "hash" => Some(Box::new(HashHandler::from(self.clone()))),
                 "is_none" => Some(Box::new(AttributeHandler::from(Number::Bool(
                     self.is_none().into(),
                 )))),

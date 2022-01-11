@@ -1,3 +1,4 @@
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
@@ -6,6 +7,7 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{Match, TryCastFrom};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, Tuple};
@@ -122,6 +124,12 @@ impl Refer for Case {
         }
 
         Ok(self.case.pop().unwrap().into())
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Case {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((&self.cond, self.switch.deref(), self.case.deref()))
     }
 }
 

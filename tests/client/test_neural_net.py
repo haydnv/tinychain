@@ -11,9 +11,9 @@ Dense = tc.tensor.Dense
 
 
 ENDPOINT = "/transact/hypothetical"
-LEARNING_RATE = tc.F32(1.0)
+LEARNING_RATE = tc.F32(0.1)
 MAX_ITERATIONS = 500
-NUM_EXAMPLES = 20
+NUM_EXAMPLES = 100
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -31,6 +31,7 @@ def truncated_normal(size, mean=0., std=None):
 
 
 # TODO: implement AdamOptimizer
+@unittest.skip
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
@@ -61,7 +62,9 @@ class DNNTests(ClientTest):
 
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
-        cxt.labels = load(np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
+
+        labels = np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels, tc.Bool)
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
@@ -73,7 +76,9 @@ class DNNTests(ClientTest):
 
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
-        cxt.labels = load(np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5), tc.Bool)
+
+        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels, tc.Bool)
 
         cxt.input_layer = self.create_layer(2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
@@ -88,8 +93,8 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load(labels, tc.Bool)
 
-        cxt.input_layer = self.create_layer(2, 2, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer(2, 1, tc.ml.ReLU())
+        cxt.input_layer = self.create_layer(2, 3, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer(3, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer, cxt.output_layer])
 
         self.execute(cxt)
@@ -98,8 +103,14 @@ class DNNTests(ClientTest):
         def cost(output):
             return (output - cxt.labels)**2
 
+        @tc.closure
+        @tc.post_op
+        def train_while(i: tc.UInt, output: tc.tensor.Tensor):
+            fit = ((output > 0.5) == cxt.labels).all()
+            return fit.logical_not().logical_and(i <= MAX_ITERATIONS)
+
         cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, MAX_ITERATIONS)
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
@@ -191,7 +202,7 @@ class CNNTests(ClientTest):
         cxt.result = cxt.layer.forward(cxt.inputs)
 
         response = self.host.post(ENDPOINT, cxt)
-        print(response)
+        # TODO: test backpropagation
 
 
 def load(ndarray, dtype=tc.F32):

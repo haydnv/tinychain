@@ -85,9 +85,9 @@ def is_ref(state):
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))
     elif isinstance(state, list) or isinstance(state, tuple):
-        return any(is_op(item) for item in state)
+        return any(is_ref(item) for item in state)
     elif isinstance(state, dict):
-        return any(is_op(state[k]) for k in state)
+        return any(is_ref(state[k]) for k in state)
     else:
         return False
 

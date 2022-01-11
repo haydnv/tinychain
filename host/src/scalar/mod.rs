@@ -1,5 +1,6 @@
 //! Immutable values which always reside entirely in memory
 
+use async_hash::Hash;
 use std::collections::{BTreeMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,9 +14,10 @@ use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
+use sha2::digest::Output;
+use sha2::Digest;
 
 use tc_error::*;
-use tc_transact::{hash_encode, Hash};
 use tc_value::{Link, Number, Range, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -126,6 +128,12 @@ impl ClusterRef {
     /// Borrow this reference's `TCPathBuf`
     pub fn path(&self) -> &TCPathBuf {
         &self.0
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a ClusterRef {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self.0)
     }
 }
 
@@ -502,7 +510,25 @@ impl Refer for Scalar {
     }
 }
 
-hash_encode!(Scalar);
+impl<D: Digest> Hash<D> for Scalar {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Scalar {
+    fn hash(self) -> Output<D> {
+        match self {
+            Scalar::Cluster(cluster_ref) => Hash::<D>::hash(cluster_ref),
+            Scalar::Map(map) => Hash::<D>::hash(map.deref()),
+            Scalar::Op(op) => Hash::<D>::hash(op),
+            Scalar::Range(range) => Hash::<D>::hash(range),
+            Scalar::Ref(tc_ref) => Hash::<D>::hash(tc_ref.deref()),
+            Scalar::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
+            Scalar::Value(value) => Hash::<D>::hash(value),
+        }
+    }
+}
 
 impl From<IdRef> for Scalar {
     fn from(id_ref: IdRef) -> Self {

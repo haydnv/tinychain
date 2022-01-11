@@ -1,5 +1,6 @@
 //! Delay resolving a `TCRef` until a given dependency is resolved.
 
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -7,6 +8,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
@@ -70,6 +72,12 @@ impl Refer for After {
 
         self.when.resolve(context, txn).await?;
         self.then.resolve(context, txn).await
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a After {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((&self.when, &self.then))
     }
 }
 

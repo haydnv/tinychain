@@ -23,10 +23,13 @@ class State(object):
 
         reflect.meta.gen_headers(self)
 
+    def __dbg__(self):
+        return [form_of(self)]
+
     def __deps__(self):
         return requires(form_of(self))
 
-    def __eq__(self):
+    def __eq__(self, _other):
         raise NotImplementedError("State does not support equality; use a more specific type")
 
     def __json__(self):
@@ -94,6 +97,12 @@ class State(object):
     def dtype(self):
         """Return the native base :class:`Class` of this `State`."""
         return self._get("class", rtype=Class)
+
+    def hash(self):
+        """Return the SHA256 hash of this `State` as an :class:`Id`."""
+
+        from .value import Id
+        return self._get("hash", rtype=Id)
 
     def is_none(self):
         """Return `Bool(true)` if this `State` is :class:`Nil`."""

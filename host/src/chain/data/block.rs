@@ -2,12 +2,14 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
 use std::iter::FromIterator;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
 use log::debug;
-use sha2::{Digest, Sha256};
+use sha2::digest::{Digest, Output};
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::BlockData;
@@ -21,6 +23,15 @@ use crate::scalar::Scalar;
 pub enum Mutation {
     Delete(TCPathBuf, Value),
     Put(TCPathBuf, Value, Scalar),
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Mutation {
+    fn hash(self) -> Output<D> {
+        match self {
+            Mutation::Delete(path, key) => Hash::<D>::hash((path, key)),
+            Mutation::Put(path, key, value) => Hash::<D>::hash((path, key, value)),
+        }
+    }
 }
 
 #[async_trait]
@@ -126,7 +137,7 @@ impl ChainBlock {
         }
     }
 
-    /// Return a new, empty block with an empty mutation list for the given `TxnId`.
+    /// Return a new, empty block with an the given mutation list for the given `TxnId`.
     pub fn with_mutations(hash: Bytes, contents: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
         Self {
             last_hash: hash,
@@ -181,11 +192,11 @@ impl ChainBlock {
     }
 
     /// The current hash of this block.
-    pub async fn hash(&self) -> TCResult<Bytes> {
-        let mut hasher = Sha256::default();
-        hash_chunks(&mut hasher, self).await?;
-        let digest = hasher.finalize();
-        Ok(Bytes::from(digest.to_vec()))
+    pub fn hash(&self) -> Output<Sha256> {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.last_hash);
+        hasher.update(Hash::<Sha256>::hash(&self.contents));
+        hasher.finalize()
     }
 
     /// The current size of this block.
@@ -258,16 +269,4 @@ impl fmt::Display for ChainBlock {
             self.contents.len()
         )
     }
-}
-
-async fn hash_chunks<'en, T: en::IntoStream<'en> + 'en>(
-    hasher: &mut Sha256,
-    data: T,
-) -> TCResult<()> {
-    let mut data = tbon::en::encode(data).map_err(TCError::internal)?;
-    while let Some(chunk) = data.try_next().map_err(TCError::internal).await? {
-        hasher.update(&chunk);
-    }
-
-    Ok(())
 }

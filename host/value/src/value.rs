@@ -504,6 +504,12 @@ impl Instance for Value {
     }
 }
 
+impl<D: Digest> Hash<D> for Value {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
 impl<'a, D: Digest> Hash<D> for &'a Value {
     fn hash(self) -> Output<D> {
         match self {

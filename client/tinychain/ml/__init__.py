@@ -13,25 +13,25 @@ class Activation(ABC):
         """Compute the activation of the given `Tensor`"""
 
     @abstractmethod
-    def backward(self, dA, Z):
-        """Compute the partial differential of this function with respect to the given loss"""
+    def backward(self, Z):
+        """Compute the partial differential of this function"""
 
 
 class Sigmoid(Activation):
-    def forward(self, Z):
-        return 1 / (1 + (-Z).exp())
+    def forward(self, x):
+        return 1 / (1 + (-x).exp())
 
-    def backward(self, dA, Z):
-        sig = self.forward(Z=Z)
-        return sig * (1 - sig) * dA
+    def backward(self, x):
+        sig = self.forward(x)
+        return sig * (1 - sig)
 
 
 class ReLU(Activation):
     def forward(self, Z):
         return Z * (Z > 0)
 
-    def backward(self, dA, Z):
-        return (Z > 0) * dA
+    def backward(self, Z):
+        return Z > 0
 
 
 class Differentiable(object):
