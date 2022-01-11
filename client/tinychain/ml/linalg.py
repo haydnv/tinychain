@@ -2,7 +2,7 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, UInt, F32, Int
+from tinychain.value import Bool, F64, Float, UInt, F32, Int, Number
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -278,15 +278,15 @@ def svd(matrix: Tensor) -> Tuple:
 
     raise NotImplementedError("singular value decomposition")
 
-def sign(a: F32, b: F32) -> F32:
-    return If(b >= 0.0, a.abs(), - F32(a.abs()))
+def sign_like(a, b):
+    return Number(If(b >= 0, a.abs(), -a.abs()))
 
 
-def dot(x1: Tensor, x2: Tensor) -> F32:
+def dot(x1, x2):
     return (x1 * x2).sum()
 
 @post_op
-def householder_bidiag(U: Tensor, W: Tensor, e: Tensor, eps: F32) -> Map:
+def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
     """Householder's reduction to bidiagonal form"""
 
     @post_op
@@ -299,8 +299,7 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor, eps: F32) -> Map:
             W: Tensor,
             e: Tensor,
             scale: F32,
-            g: F32,
-            eps: F32) -> Map:
+            g: F32) -> Map:
 
         @post_op
         def update_cols(i: UInt, l: UInt, n: UInt, U: Tensor, scale: F32) -> F32:
@@ -313,98 +312,78 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor, eps: F32) -> Map:
                 )
 
             @post_op
-            def cond(j: UInt, n: UInt, i: UInt, U: Tensor, h: F32) -> Bool:
+            def cond(j: UInt, n: UInt) -> Bool:
                 return j < n
 
             tup = Tuple(After(
                 U[i:, i].write(U[i:, i] / scale),
                 Tuple([dot(U[i:, i], U[i:, i]), U[i, i]])))
-            s = F32(tup[0])
-            f = F32(tup[1])
-            g = F32(-sign(F32(s.pow(0.5)), f))
+            s = Float(tup[0])
+            f = Float(tup[1])
+            g = -sign_like(s.pow(0.5), f)
             h = After(
                 U[i, i].write(f - g),
                 F32(f * g) - s)
 
-            g = F32(After(
-                While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)),
-                g * 1))
-            g = F32(After(
-                U[i:, i].write(U[i:, i] * scale),
-                g * 1))
-            return g
+            h = Float(After(U[i, i].write(f - g), (f * g) - s))
+
+            g = After(While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)), g)
+            return After(U[i:, i].write(U[i:, i] * scale), g)
 
         @post_op
         def update_rows(i: UInt, l: UInt, m: UInt, U: Tensor, e: Tensor, scale: F32) -> F32:
 
             @post_op
             def step(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Map:
-                return After(
+                return Map(After(
                     U[j, l:].write(U[j, l:] + e[l:] * dot(U[j, l:], U[i, l:])),
                     Map(j=j + 1, m=m, l=l, i=i, U=U, e=e)
-                )
+                ))
 
             @post_op
-            def cond(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Bool:
+            def cond(j: UInt, m: UInt) -> Bool:
                 return j < m
 
-            tup = Tuple(After(U[i, l:].write(U[i, l:] / scale), Tuple([dot(U[i, l:], U[i, l:]), U[i, l]])))
-            s = F32(tup[0])
-            f = F32(tup[1])
-            g = F32(-sign(F32(s.pow(0.5)), f))
-            h = After(U[i, l].write(f - g), F32(f * g) - s)
-            s = After(e[l:].write(U[i, l:] / h), s * 1)
+            s, f = Tuple(After(U[i, l:].write(U[i, l:] / scale), [dot(U[i, l:], U[i, l:]), U[i, l]])).unpack(2)
+            s = Float(s)
+            f = Float(f)
+            g = -sign_like(s**0.5, f)
+            h = After(U[i, l].write(f - g), (f * g) - s)
+            s = After(e[l:].write(U[i, l:] / h), s)  # <-- this is not used
 
-            g = F32(After(
-                While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)),
-                g * 1
-            ))
-            g = F32(After(
-                U[i, l:].write(U[i, l:] * scale),
-                g * 1
-            ))
-            return g
+            g = After(While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)), g)
+            return After(U[i, l:].write(U[i, l:] * scale), g)
 
         cxt.update_cols = update_cols
         cxt.update_rows = update_rows
 
-        # # e[i], l = scale * g, i + 1
         l = UInt(After(e[i].write(scale * g), i + 1))
-        scale = F32(If(i < m, dot(U[i:, i], U[i:, i]), scale * 1))
-        g = F32(If(
-            Bool(i < m).logical_and(scale > eps),
-            F32(cxt.update_cols(i=i, l=l, n=n, U=U, scale=scale)),
-            F32(0.0)))
+        scale = Float(If(i < m, dot(U[i:, i], U[i:, i]), scale))
+        g = Float(If(
+            Bool(i < m).logical_and(scale > EPS),
+            cxt.update_cols(i=i, l=l, n=n, U=U, scale=scale),
+            0.0))
 
-        g = F32(After(
-            W[i].write(scale * g),
-            g * 1))
-        scale = F32(If(
+        g = Float(After(W[i].write(scale * g), g))  # <-- this is not used
+
+        scale = Float(If(
             Bool(i < m).logical_and(i != n - 1),
-            F32(dot(U[i, l:], U[i, l:])),
-            scale * 1))
-        g = F32(If(
-            Bool(i < m).logical_and(i != n - 1).logical_and(scale > eps),
-            F32(cxt.update_rows(i=i, l=l, m=m, U=U, e=e, scale=scale)),
-            F32(0.0)))
+            dot(U[i, l:], U[i, l:]),
+            scale))
 
-        return Map(i=i + 1, n=n, m=m, U=U, W=W, e=e, scale=scale, g=g, eps=eps)
+        g = If(
+            Bool(i < m).logical_and(i != n - 1).logical_and(scale > EPS),
+            cxt.update_rows(i=i, l=l, m=m, U=U, e=e, scale=scale),
+            0.0)
+
+        return Map(i=i + 1, n=n, m=m, U=U, W=W, e=e, scale=scale, g=g)
 
     @post_op
-    def cond(
-            i: UInt,
-            n: UInt,
-            m: UInt,
-            U: Tensor,
-            W: Tensor,
-            e: Tensor,
-            scale: F32,
-            g: F32,
-            eps: F32) -> Bool:
+    def cond(i: UInt, n: UInt) -> Bool:
         return i < n
 
-    m, n = UInt(U.shape[0]), UInt(U.shape[1])
-    g = F32(0.0)
-    scale = F32(0.0)
+    m, n = U.shape.unpack(2)
+    g = 0.0
+    scale = 0.0
 
-    return While(cond, step, Map(i=UInt(0), n=n, m=m, U=U, W=W, e=e, scale=scale, g=g, eps=eps))
+    return Map(While(cond, step, Map(i=UInt(0), n=n, m=m, U=U, W=W, e=e, scale=scale, g=g)))
