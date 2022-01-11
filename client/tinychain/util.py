@@ -33,6 +33,9 @@ class Context(object):
 
         return concat
 
+    def __dbg__(self):
+        return [self.form[next(reversed(self.form))]] if self.form else []
+
     def __deps__(self):
         provided = set(URI(name) for name in self.form.keys())
 
@@ -69,7 +72,7 @@ class Context(object):
 
     def __repr__(self):
         data = list(self.form.keys())
-        return f"execution context with data {data}"
+        return f"Op context with data {data}"
 
     @property
     def form(self):
@@ -82,8 +85,14 @@ class Context(object):
         return name in self._form
 
 
+def debug(state):
+    """Return the name and immediate dependencies of the given `state`."""
+
+    return [dep for dep in state.__dbg__() if dep is not None] if hasattr(state, "__dbg__") else []
+
+
 def form_of(state):
-    """Return the form of the given state."""
+    """Return the form of the given `state`."""
 
     if hasattr(state, "__form__"):
         if callable(state.__form__) and not inspect.isclass(state.__form__):
@@ -144,7 +153,8 @@ class URI(object):
     """
 
     def __init__(self, root, path=[]):
-        assert root is not None
+        if not root:
+            raise ValueError(f"invalid URI root: {root}")
 
         if root.startswith("$$"):
             raise ValueError(f"invalid reference: {root}")
@@ -209,6 +219,17 @@ class URI(object):
             return self
 
         return URI(str(self), [name])
+
+    def id(self):
+        """Return the ID segment of this `URI`, if present."""
+
+        this = str(self)
+        if this.startswith('$'):
+            if '/' in this:
+                end = this.index("/")
+                return this[1:end]
+            else:
+                return this[1:]
 
     def is_id(self):
         """Return `True` if this URI is a simple ID, like `$foo`."""

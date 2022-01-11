@@ -45,6 +45,10 @@ class Get(Op):
     def __call__(self, key=None):
         return ref.Get(self, key)
 
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [cxt]
+
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
 
@@ -77,6 +81,10 @@ class Put(Op):
 
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
+
+    def __dbg__(self):
+        _, _, cxt = form_of(self)
+        return [cxt]
 
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
@@ -141,6 +149,9 @@ class Post(Op):
 
         return ref.Get(self, args)
 
+    def __dbg__(self):
+        return [form_of(self)]
+
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
 
@@ -171,6 +182,10 @@ class Delete(Op):
 
     def __call__(self, key=None):
         return ref.Get(self, key)
+
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [cxt]
 
     def __form__(self):
         return Get.__form__(self)
