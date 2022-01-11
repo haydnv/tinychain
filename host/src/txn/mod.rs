@@ -24,6 +24,7 @@ pub use tc_transact::TxnId;
 
 mod request;
 mod server;
+pub mod hypothetical;
 
 struct Active {
     workspace: fs::Dir,
