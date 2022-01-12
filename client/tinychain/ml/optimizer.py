@@ -1,12 +1,15 @@
 from abc import abstractmethod
-from typing import List, Dict
+import typing as t
 
-from tinychain.collection.tensor import Dense, Tensor
+import tinychain as tc
+from tinychain.collection.tensor import Tensor
 from tinychain.decorators import closure, post_op
 from tinychain.ref import After, While
 from tinychain.state import Map
 from tinychain.value import F32, UInt
 from tinychain.ml import EPS, Parameter, DiffedParameter
+
+from client.tinychain.ml import Parameter, DiffedParameter
 
 
 class Optimizer(Map):
@@ -28,58 +31,76 @@ class GradientDescent(Optimizer):
 
         return cls({"lr": lr})
 
-    def optimize(self, i, param_list: List[Parameter]):
+    def optimize(self, i, param_list: t.List[Parameter]):
         return [param.value.write(param.value - (param.grad * self.lr)) for param in param_list]
 
-
 class Adam(Optimizer):
+
     @classmethod
-    def create(cls, param_list: List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
+    def create(cls, param_list: t.List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
         """Create a new `Adam` optimizer with the given hyperparameters.
         'lr': learning rate;
         'beta1': The exponential decay rate for the 1st moment estimates;
         'beta2': The exponential decay rate for the 2nd moment estimates;
         'eps': A small constant for numerical stability.
-
         Args:
             `param_list`: a `List[Parameter]` of model's parameters for optimizing.
         """
 
-        m = {p.name: Dense.zeros(p.value.shape, F32) for p in param_list}
-        v = {p.name: Dense.zeros(p.value.shape, F32) for p in param_list}
+        m = {p.name: tc.Dense.zeros(p.value.shape, F32) for p in param_list}
+        v = {p.name: tc.Dense.zeros(p.value.shape, F32) for p in param_list}
 
-        return cls({'beta1': beta1, 'beta2': beta2, 'lr': lr, 'eps': eps, 'm': m, 'v': v})
+        # return cls({'beta1': beta1, 'beta2': beta2, 'lr': lr, 'eps': eps, 'm': m, 'v': v})
 
-    @property
-    def beta1(self) -> F32:
-        return self['beta1']
+        class _Adam(cls):
 
-    @property
-    def beta2(self) -> F32:
-        return self['beta2']
+            def optimize(self, i, param_list: t.List[DiffedParameter]):
+                update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1) - beta1)) for p in param_list]
+                update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1) - beta2)) for p in param_list]
+                a = lr * (F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
+                return After(
+                    when=[update_m, update_v],
+                    then=[
+                        p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
+                        for p in param_list
+                    ])
 
-    @property
-    def eps(self) -> F32:
-        return self['eps']
+            @property
+            def lr(self) -> F32:
+                return lr
 
-    @property
-    def m(self) -> Dict[str, Tensor]:
-        return self['m']
+        return _Adam()
 
-    @property
-    def v(self) -> Dict[str, Tensor]:
-        return self['v']
+    # @property
+    # def beta1(self) -> F32:
+    #     return self['beta1']
 
-    def optimize(self, i, param_list: List[DiffedParameter]):
-        update_m = [self.m[p.name].write(self.m[p.name] * self.beta1 + p.grad * (F32(1) - self.beta1)) for p in param_list]
-        update_v = [self.v[p.name].write(self.v[p.name] * self.beta2 + p.grad.pow(2) * (F32(1) - self.beta2)) for p in param_list]
-        a = self.lr * (F32(1) - self.beta2.pow(i)).pow(F32(0.5)) / (F32(1) - self.beta1.pow(i))
-        return After(
-            when=[update_m, update_v],
-            then=[
-                p.value.write(p.value - self.m[p.name] / (self.v[p.name].pow(F32(0.5).add(self.eps)))*a)
-                for p in param_list
-            ])
+    # @property
+    # def beta2(self) -> F32:
+    #     return self['beta2']
+
+    # @property
+    # def eps(self) -> F32:
+    #     return self['eps']
+
+    # def m(self) -> Dict[str, Tensor]:
+    #     return self['m']['m_stat']
+
+    # @property
+    # def v(self) -> Dict[str, Tensor]:
+    #     return self['v']['v_stat']
+
+    # def optimize(self, i, param_list: List[DiffedParameter]):
+    #     print(self['m'])
+    #     update_m = [self.m[p.name].write(self.m[p.name] * self.beta1 + p.grad * (F32(1) - self.beta1)) for p in param_list]
+    #     update_v = [self.v[p.name].write(self.v[p.name] * self.beta2 + p.grad.pow(2) * (F32(1) - self.beta2)) for p in param_list]
+    #     a = self.lr * (F32(1) - self.beta2.pow(i)).pow(F32(0.5)) / (F32(1) - self.beta1.pow(i))
+    #     return After(
+    #         when=[update_m, update_v],
+    #         then=[
+    #             p.value.write(p.value - self.m[p.name] / (self.v[p.name].pow(F32(0.5).add(self.eps)))*a)
+    #             for p in param_list
+    #         ])
 
 
 def train(model, optimizer, inputs, cost, train_while):

@@ -106,14 +106,26 @@ class NeuralNet(Tuple, Differentiable):
     def load(cls, *args, **kwargs):
         pass
 
-class Parameter:
+class Parameter(Map):
 
-    def __init__(self, name: str, value: Tensor):
-        self.name = name
-        self.value = value
+    @classmethod
+    def create(cls, name: str, value: Tensor):
+        return cls({'name': name, 'value': value})
+
+    @property
+    def name(self) -> str:
+        return self['name']
+
+    @property
+    def value(self) -> Tensor:
+        return self['value']
 
 class DiffedParameter(Parameter):
 
-    def __init__(self, name: str, value: Tensor, grad: Tensor):
-        super().__init__(name, value)
-        self.grad = grad
+    @classmethod
+    def create(cls, name: str, value: Tensor, grad: Tensor):
+        return cls({'name': name, 'value': value, 'grad': grad})
+
+    @property
+    def grad(self) -> Tensor:
+        return self['grad']
