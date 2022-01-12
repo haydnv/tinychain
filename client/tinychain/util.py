@@ -46,6 +46,7 @@ class Context(object):
         for state in self.form.values():
             deps.update(requires(state))
 
+        deps -= provided
         return deps - provided
 
     def __getattr__(self, name):
@@ -300,20 +301,6 @@ class URI(object):
             i = self._root.index("://")
             if i > 0:
                 return self._root[:i]
-
-    def subject(self):
-        """Return only the ID portion of this `URI`, or `None` in the case of a link."""
-
-        if "://" in self._root:
-            return None
-        elif self._root.startswith('/'):
-            return None
-
-        uri = str(self)
-        if '/' in uri:
-            return URI(uri[:uri.index('/')])
-        else:
-            return URI(uri)
 
     def startswith(self, prefix):
         return str(self).startswith(str(prefix))

@@ -21,9 +21,10 @@ class Op(object):
         self.form = form
 
     def __deps__(self):
+        form = form_of(self)
         params = inspect.signature(self.form).parameters
         provided = set(URI(param) for param in params)
-        return requires(form_of(self)) - provided
+        return requires(form) - provided
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
