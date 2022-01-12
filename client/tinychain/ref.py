@@ -420,7 +420,7 @@ class MethodSubject(object):
             name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
             self.__uri__ = URI(name).append(self.method_name)
 
-            if not cxt.is_defined(name):
+            if not name in cxt:
                 logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
         else:
@@ -457,7 +457,7 @@ def is_op_ref(fn):
 
 def reference(cxt, state):
     name = f"{state.__class__.__name__}_{hex_id(state)}"
-    if not cxt.is_defined(name):
+    if not name in cxt:
         logging.debug(f"auto-assigning name {name} to {state} in {cxt}")
         setattr(cxt, name, state)
 

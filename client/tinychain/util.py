@@ -33,6 +33,9 @@ class Context(object):
 
         return concat
 
+    def __contains__(self, item):
+        return self._get_name(item) in self.form
+
     def __dbg__(self):
         return [self.form[next(reversed(self.form))]] if self.form else []
 
@@ -46,6 +49,8 @@ class Context(object):
         return deps - provided
 
     def __getattr__(self, name):
+        name = self._get_name(name)
+
         if name in self.form:
             value = self.form[name]
             if hasattr(value, "__ref__"):
@@ -63,6 +68,8 @@ class Context(object):
         if state is self:
             raise ValueError(f"cannot assign transaction Context to itself")
 
+        name = self._get_name(name)
+
         deanonymize(state, self)
 
         if name in self.form:
@@ -74,15 +81,18 @@ class Context(object):
         data = list(self.form.keys())
         return f"Op context with data {data}"
 
+    def _get_name(self, item):
+        if hasattr(item, "__uri__"):
+            if uri(item).id() != uri(item):
+                raise ValueError(f"invalid name: {item}")
+            else:
+                return uri(item).id()
+        else:
+            return str(item)
+
     @property
     def form(self):
         return self._form
-
-    def is_defined(self, name):
-        if isinstance(name, URI):
-            name = name.id()
-
-        return name in self._form
 
 
 def debug(state):
