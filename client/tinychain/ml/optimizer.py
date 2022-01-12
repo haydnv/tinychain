@@ -2,7 +2,7 @@ from abc import abstractmethod
 import typing as t
 
 import tinychain as tc
-from tinychain.collection.tensor import Tensor
+from tinychain.collection.tensor import Tensor, Dense
 from tinychain.decorators import closure, post_op
 from tinychain.ref import After, While
 from tinychain.state import Map
@@ -14,7 +14,7 @@ from client.tinychain.ml import Parameter, DiffedParameter
 
 class Optimizer(Map):
     @abstractmethod
-    def optimize(self, i, gradient, inputs, loss):
+    def optimize(self):
         """Update the given `gradient` by computing deltas for the given `loss`."""
 
     @property
@@ -47,10 +47,9 @@ class Adam(Optimizer):
             `param_list`: a `List[Parameter]` of model's parameters for optimizing.
         """
 
-        m = {p.name: tc.Dense.zeros(p.value.shape, F32) for p in param_list}
-        v = {p.name: tc.Dense.zeros(p.value.shape, F32) for p in param_list}
+        m = {p.name: Dense.zeros(p.value.shape, F32) for p in param_list}
+        v = {p.name: Dense.zeros(p.value.shape, F32) for p in param_list}
 
-        # return cls({'beta1': beta1, 'beta2': beta2, 'lr': lr, 'eps': eps, 'm': m, 'v': v})
 
         class _Adam(cls):
 
@@ -71,37 +70,6 @@ class Adam(Optimizer):
 
         return _Adam()
 
-    # @property
-    # def beta1(self) -> F32:
-    #     return self['beta1']
-
-    # @property
-    # def beta2(self) -> F32:
-    #     return self['beta2']
-
-    # @property
-    # def eps(self) -> F32:
-    #     return self['eps']
-
-    # def m(self) -> Dict[str, Tensor]:
-    #     return self['m']['m_stat']
-
-    # @property
-    # def v(self) -> Dict[str, Tensor]:
-    #     return self['v']['v_stat']
-
-    # def optimize(self, i, param_list: List[DiffedParameter]):
-    #     print(self['m'])
-    #     update_m = [self.m[p.name].write(self.m[p.name] * self.beta1 + p.grad * (F32(1) - self.beta1)) for p in param_list]
-    #     update_v = [self.v[p.name].write(self.v[p.name] * self.beta2 + p.grad.pow(2) * (F32(1) - self.beta2)) for p in param_list]
-    #     a = self.lr * (F32(1) - self.beta2.pow(i)).pow(F32(0.5)) / (F32(1) - self.beta1.pow(i))
-    #     return After(
-    #         when=[update_m, update_v],
-    #         then=[
-    #             p.value.write(p.value - self.m[p.name] / (self.v[p.name].pow(F32(0.5).add(self.eps)))*a)
-    #             for p in param_list
-    #         ])
-
 
 def train(model, optimizer, inputs, cost, train_while):
     """
@@ -117,8 +85,8 @@ def train(model, optimizer, inputs, cost, train_while):
     @post_op
     def step(i: UInt, output: Tensor, loss: Tensor):
         loss = cost(output)
-        dL = cost(output, dL=True)
-        param_list = model.backward(inputs, dL)
+        dloss = cost(output, dl=True)
+        param_list = model.backward(inputs, dloss)
         update = optimizer.optimize(i, param_list)
         return After(update, {"i": i + 1, "output": model.forward(inputs).copy(), 'loss': loss})
 

@@ -23,36 +23,6 @@ class DNNLayer(Layer):
     def load(cls, name, weights, bias, activation=Sigmoid()):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
 
-        # class _DNNLayer(cls):
-        #     @classmethod
-        #     @property
-        #     def shape(cls):
-        #         return {"weights": weights.shape, "bias": bias.shape}
-
-        #     @property
-        #     def activation(self):
-        #         return activation
-
-        #     def forward(self, x):
-        #         inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-        #         return activation.forward(inputs)
-
-        #     def backward(self, x, loss):
-        #         m = x.shape[0]
-        #         inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-        #         delta = Tensor(loss * activation.backward(inputs))
-        #         dL = einsum("ij,kj->ki", [self["weights"], delta])
-        #         return dL, [
-        #             DiffedParameter(name=name + '.weight', value=self["weights"], grad= einsum("ki,kj->ij", [x, delta]).copy() / m),
-        #             DiffedParameter(name=name + '.bias', value=self["bias"], grad=delta.sum(0) / m)
-        #         ]
-
-        #     def get_param_list(self) -> List[Parameter]:
-        #         return [Parameter(name=name + '.weight', value=self["weights"]),
-        #             Parameter(name=name + '.bias', value=self["bias"])]
-
-        # return _DNNLayer({"weights": weights, "bias": bias})
-
         class _DNNLayer(cls):
             @classmethod
             @property
@@ -80,28 +50,6 @@ class DNNLayer(Layer):
                 ]
 
         return _DNNLayer()
-
-    # @property
-    # def activation(self):
-    #     return self['activation']
-
-    # def forward(self, x):
-    #     inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-    #     return self.activation.forward(inputs)
-
-    # def backward(self, x, loss):
-    #     m = x.shape[0]
-    #     inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-    #     delta = Tensor(loss * self.activation.backward(inputs))
-    #     dL = einsum("ij,kj->ki", [self["weights"], delta])
-    #     return dL, [
-    #         DiffedParameter(name=self['name'] + '.weight', value=self["weights"], grad= einsum("ki,kj->ij", [x, delta]).copy() / m),
-    #         DiffedParameter(name=self['name'] + '.bias', value=self["bias"], grad=delta.sum(0) / m)
-    #     ]
-
-    # def get_param_list(self) -> List[Parameter]:
-    #     return [Parameter(name=self['name'] + '.weight', value=self["weights"]),
-    #            Parameter(name=self['name'] + '.bias', value=self["bias"])]
 
 
 class DNN(NeuralNet):

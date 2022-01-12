@@ -31,7 +31,6 @@ def truncated_normal(size, mean=0., std=None):
 
 
 # TODO: implement AdamOptimizer
-#@unittest.skip
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
@@ -101,8 +100,8 @@ class DNNTests(ClientTest):
         self.execute(cxt)
 
     def execute(self, cxt):
-        def cost(output, dL=False):
-            if dL:
+        def cost(output, dl=False):
+            if dl:
                 return (output - cxt.labels)*2
             return (output - cxt.labels)**2
 
@@ -120,23 +119,23 @@ class DNNTests(ClientTest):
     
     def testAdam(self):
 
-        def BCELoss(output, dL=False):
-            if dL:
-                return ((output - cxt.labels) / (output - output * cxt.labels)).sum() / output.shape[0]
-            return (cxt.labels*output.log() - (cxt.labels.add(-1)) * (output.add(-1)*-1).log()).sum() / output.shape[0]
-        
+        def cost(output, dl=False):
+            if dl:
+                return (output - cxt.labels)*2
+            return (output - cxt.labels)**2
+
         @tc.closure
         @tc.post_op
         def train_while(i: tc.UInt, loss: tc.tensor.Tensor):
-            return (i <= MAX_ITERATIONS).logical_and(loss >= 1e-3)
+            return (i <= MAX_ITERATIONS).logical_and((loss >= 1e-3).all())
 
         cxt = tc.Context()
 
-        inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
-        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        inputs = np.random.random(NUM_EXAMPLES * 5).reshape([NUM_EXAMPLES, 5])
+        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1]).astype(np.float32)
 
         cxt.inputs = load(inputs)
-        cxt.labels = load(labels, tc.Bool)
+        cxt.labels = load(labels, tc.F32)
 
         cxt.input_layer0 = self.create_layer('layer0', 5, 4, tc.ml.Sigmoid())
         cxt.input_layer1 = self.create_layer('layer1', 4, 2, tc.ml.ReLU())
@@ -144,11 +143,12 @@ class DNNTests(ClientTest):
 
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
         param_list = cxt.nn.get_param_list()
-
         cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, BCELoss, train_while)
+        #result = visualize(tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while))
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
+
 
 
 # TODO: implement AdamOptimizer

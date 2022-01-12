@@ -71,20 +71,15 @@ def create_layer(name, input_size, output_size, activation):
     
 def testAdam():
 
-    # def BCELoss(output, dL=False):
-    #     if dL:
-    #         return -((output - cxt.labels) / (output - output * cxt.labels)).sum() / output.shape[0]
-    #     return -(cxt.labels*output.log() - (cxt.labels.add(-1)) * (output.add(-1)*-1).log()).sum() / output.shape[0]
-
-    def cost(output, dL=False):
-        if dL:
+    def cost(output, dl=False):
+        if dl:
             return (output - cxt.labels)*2
         return (output - cxt.labels)**2
 
     @tc.closure
     @tc.post_op
     def train_while(i: tc.UInt, loss: tc.tensor.Tensor):
-        return (i <= MAX_ITERATIONS).logical_and(loss >= 1e-3)
+        return (i <= MAX_ITERATIONS).logical_and((loss >= 1e-3).all())
 
     cxt = tc.Context()
 
@@ -102,11 +97,13 @@ def testAdam():
     param_list = cxt.nn.get_param_list()
     cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list)
     result = visualize(tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while))
+    cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
     print(result)
+    # print(labels)
     # cxt.output = cxt.nn.forward(cxt.inputs)
     # cxt.loss = cost(cxt.output)
-    # cxt.dl = cost(cxt.output, dL=True)
-    # cxt.result = cxt.nn.backward(cxt.inputs, cxt.dl)
+    # cxt.dl = cost(cxt.output, dl=True)
+    # cxt.result = (cxt.loss >= 1e-3)
 
     response = HOST.post(ENDPOINT, cxt)
 
