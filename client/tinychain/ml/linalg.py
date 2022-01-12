@@ -315,16 +315,10 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
             def cond(j: UInt, n: UInt) -> Bool:
                 return j < n
 
-            tup = Tuple(After(
-                U[i:, i].write(U[i:, i] / scale),
-                Tuple([dot(U[i:, i], U[i:, i]), U[i, i]])))
-            s = Float(tup[0])
-            f = Float(tup[1])
+            s, f = Tuple(After(U[i:, i].write(U[i:, i] / scale), [dot(U[i:, i], U[i:, i]), U[i, i]])).unpack(2)
+            s = Float(s)
+            f = Float(f)
             g = -sign_like(s.pow(0.5), f)
-            h = After(
-                U[i, i].write(f - g),
-                F32(f * g) - s)
-
             h = Float(After(U[i, i].write(f - g), (f * g) - s))
 
             g = After(While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)), g)
@@ -349,10 +343,14 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
             f = Float(f)
             g = -sign_like(s**0.5, f)
             h = After(U[i, l].write(f - g), (f * g) - s)
-            s = After(e[l:].write(U[i, l:] / h), s)  # <-- this is not used
+
+            s = After(e[l:].write(U[i, l:] / h), s)
 
             g = After(While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)), g)
-            return After(U[i, l:].write(U[i, l:] * scale), g)
+
+            return After([s, U[i, l:].write(U[i, l:] * scale)], g)
+
+         
 
         cxt.update_cols = update_cols
         cxt.update_rows = update_rows
@@ -364,12 +362,16 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
             cxt.update_cols(i=i, l=l, n=n, U=U, scale=scale),
             0.0))
 
-        g = Float(After(W[i].write(scale * g), g))  # <-- this is not used
-
-        scale = Float(If(
+        @closure
+        @get_op
+        def get_scale(i: UInt):
+            return Float(If(
             Bool(i < m).logical_and(i != n - 1),
             dot(U[i, l:], U[i, l:]),
-            scale))
+            scale))   
+        cxt.get_scale = get_scale    
+
+        scale = Float(After(W[i].write(scale * g), cxt.get_scale(i)))
 
         g = If(
             Bool(i < m).logical_and(i != n - 1).logical_and(scale > EPS),
