@@ -23,6 +23,9 @@ class State(object):
 
         reflect.meta.gen_headers(self)
 
+    def __dbg__(self):
+        return [form_of(self)]
+
     def __deps__(self):
         return requires(form_of(self))
 

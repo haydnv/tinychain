@@ -9,7 +9,7 @@
 [docs-badge]: https://docs.rs/tinychain/badge.svg
 [docs-url]: https://docs.rs/tinychain/
 [discord-badge]: https://img.shields.io/discord/909338776675967046.svg
-[discord-url]: https://discord.com/channels/909338776675967046
+[discord-url]: https://discord.gg/jQMnN5k3D9
 
 TinyChain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
