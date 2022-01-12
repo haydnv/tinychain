@@ -274,7 +274,7 @@ class Get(Op):
 
     def __json__(self):
         if isinstance(self.subject, Ref):
-            subject = self.subject
+            subject = uri(self.subject)
             is_scalar = False
         else:
             subject = uri(self.subject)
