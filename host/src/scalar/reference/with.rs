@@ -31,6 +31,12 @@ pub struct With {
     op: OpDef,
 }
 
+impl With {
+    pub fn new(capture: Tuple<Id>, op: OpDef) -> Self {
+        With { capture, op }
+    }
+}
+
 #[async_trait]
 impl Refer for With {
     fn dereference_self(self, path: &TCPathBuf) -> Self {

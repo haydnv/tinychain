@@ -16,13 +16,12 @@ use crate::object::{InstanceClass, InstanceExt};
 use crate::route::{Public, Static};
 use crate::scalar::{OpRefType, Scalar, ScalarType};
 use crate::state::{State, StateType};
-use crate::txn::Txn;
+use crate::txn::{hypothetical, Txn};
 
+use crate::txn::hypothetical::Hypothetical;
 use hosted::Hosted;
-use hypothetical::Hypothetical;
 
 mod hosted;
-mod hypothetical;
 
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {

@@ -12,7 +12,7 @@ AREA_SERVICE = "http://127.0.0.1:8702/app/area"
 
 @tc.get_op
 def loop(until: tc.Number) -> tc.Int:
-    @tc.closure  # this decorator captures referenced states from the outer scope (in this case "until")
+    @tc.closure(until)
     @tc.post_op
     def cond(i: tc.Int):
         return i < until
