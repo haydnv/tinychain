@@ -416,25 +416,29 @@ class MethodSubject(object):
         return deps
 
     def __ns__(self, cxt):
-        if uri(self):
-            return
-
-        deanonymize(self.subject, cxt)
-
         name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
         auto_uri = URI(name).append(self.method_name)
 
-        if uri(self.subject).startswith("/state"):
-            name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
+        if uri(self):
+            if uri(self) == auto_uri and name not in cxt:
+                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
+                setattr(cxt, name, self.subject)
+            else:
+                return
+
+        elif uri(self.subject).startswith("/state"):
             self.__uri__ = auto_uri
 
             if name not in cxt:
                 logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
-        elif uri(self) == auto_uri and name not in cxt:
-            raise RuntimeError(f"{self} has an auto-assigned URI but is not present in {cxt}")
+
+            deanonymize(self.subject, cxt)
+
         else:
+            deanonymize(self.subject, cxt)
             self.__uri__ = uri(self.subject).append(self.method_name)
+
 
     def __json__(self):
         if self.__uri__ is None:
