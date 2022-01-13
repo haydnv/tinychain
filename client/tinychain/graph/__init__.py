@@ -143,7 +143,7 @@ def graph_table(graph, schema, table_name):
     def maybe_update_row(edge, adjacent, row, cond, new_id):
         to_table = graph[edge.to_table]
 
-        args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
+        args = closure(new_id)(get_op(lambda row: [new_id, Tuple(row)[0]]))
 
         # assumes row[0] is always the key
         add = put_op(lambda new_id, key: Put(uri(adjacent), [new_id, key], True))
@@ -173,7 +173,7 @@ def graph_table(graph, schema, table_name):
         def read_vector(self, node_ids):
             """Given a vector of `node_ids`, return a :class:`Stream` of :class:`Table` rows matching those IDs."""
 
-            @closure
+            @closure(self)
             @get_op
             def read_node(row: Tuple):
                 return self[row[0]]
