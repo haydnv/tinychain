@@ -203,3 +203,4 @@ def testAdam_a():
 #         return i <= num_iterations#.logical_and((loss >= min_loss).all())
 
 #     return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})
+testAdam_h()
