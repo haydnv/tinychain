@@ -196,12 +196,11 @@ class With(Ref):
         self.capture = []
 
         for ref in capture:
-            captured = uri(ref).subject()
-
-            if captured is None:
+            id = uri(ref).id()
+            if id is None:
                 raise ValueError(f"With can only capture states with an ID in the current context, not {ref}")
 
-            self.capture.append(captured)
+            self.capture.append(URI(id))
 
         self.op = op
 
@@ -214,9 +213,8 @@ class With(Ref):
     def __json__(self):
         return {str(uri(self)): to_json([self.capture, self.op])}
 
-    def __ns__(self, cxt):
-        deanonymize(self.capture, cxt)
-        deanonymize(self.op, cxt)
+    def __ns__(self, _cxt):
+        pass
 
     def __ref__(self, name):
         return get_ref(self.op, name)
@@ -237,7 +235,12 @@ class Op(Ref):
 
     def __deps__(self):
         deps = set()
-        deps.update(requires(self.subject))
+
+        if is_ref(self.subject):
+            subject = uri(self.subject).id()
+            if subject:
+                deps.add(URI(subject))
+
         deps.update(requires(self.args))
         return deps
 
@@ -274,7 +277,7 @@ class Get(Op):
 
     def __json__(self):
         if isinstance(self.subject, Ref):
-            subject = self.subject
+            subject = uri(self.subject)
             is_scalar = False
         else:
             subject = uri(self.subject)
@@ -354,6 +357,9 @@ class Post(Op):
     def __ns__(self, cxt):
         super().__ns__(cxt)
 
+        if not isinstance(self.args, dict):
+            raise ValueError(f"POST arguments must be a Python dict, not {self.args}")
+
         self.args = {
             name: reference(cxt, arg) if is_op_ref(arg) else arg
             for name, arg in self.args.items()}
@@ -405,26 +411,34 @@ class MethodSubject(object):
         return [self.subject]
 
     def __deps__(self):
-        if uri(self).is_id():
-            return set([uri(self)])
-        else:
-            return requires(self.subject)
+        deps = set([uri(self)]) if uri(self).is_id() else set()
+        deps.update(requires(self.subject))
+        return deps
 
     def __ns__(self, cxt):
+        name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
+        auto_uri = URI(name).append(self.method_name)
+
         if uri(self):
-            return
-
-        deanonymize(self.subject, cxt)
-
-        if uri(self.subject).startswith("/state"):
-            name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
-            self.__uri__ = URI(name).append(self.method_name)
-
-            if not cxt.is_defined(name):
+            if uri(self) == auto_uri and name not in cxt:
                 logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
+            else:
+                return
+
+        elif uri(self.subject).startswith("/state"):
+            self.__uri__ = auto_uri
+
+            if name not in cxt:
+                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
+                setattr(cxt, name, self.subject)
+
+            deanonymize(self.subject, cxt)
+
         else:
+            deanonymize(self.subject, cxt)
             self.__uri__ = uri(self.subject).append(self.method_name)
+
 
     def __json__(self):
         if self.__uri__ is None:
@@ -457,7 +471,7 @@ def is_op_ref(fn):
 
 def reference(cxt, state):
     name = f"{state.__class__.__name__}_{hex_id(state)}"
-    if not cxt.is_defined(name):
+    if not name in cxt:
         logging.debug(f"auto-assigning name {name} to {state} in {cxt}")
         setattr(cxt, name, state)
 

@@ -22,9 +22,9 @@ pub use request::*;
 pub use server::*;
 pub use tc_transact::TxnId;
 
+pub mod hypothetical;
 mod request;
 mod server;
-pub mod hypothetical;
 
 struct Active {
     workspace: fs::Dir,

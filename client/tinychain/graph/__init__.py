@@ -3,7 +3,7 @@ from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
-from tinychain.ref import After, Get, If, MethodSubject, While, With
+from tinychain.ref import After, Get, If, MethodSubject, Put, While, With
 from tinychain.state import Map, Tuple
 from tinychain.util import uri
 from tinychain.value import Bool, Nil, U64, String
@@ -146,7 +146,7 @@ def graph_table(graph, schema, table_name):
         args = closure(get_op(lambda row: [new_id, Tuple(row)[0]]))
 
         # assumes row[0] is always the key
-        add = closure(put_op(lambda new_id, key: adjacent[new_id, key].write(True)))
+        add = put_op(lambda new_id, key: Put(uri(adjacent), [new_id, key], True))
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
 
         return After(If(cond, delete_row(edge, adjacent, row)), add)

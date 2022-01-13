@@ -437,7 +437,18 @@ impl Refer for Scalar {
 
                 Self::Map(map)
             }
-            Self::Op(op_def) => Self::Op(op_def.reference_self(path)),
+            Self::Op(op_def) => {
+                let before = op_def.clone();
+                let after = op_def.reference_self(path);
+                if before == after {
+                    Self::Op(after)
+                } else {
+                    Self::Ref(Box::new(TCRef::With(Box::new(With::new(
+                        vec![SELF.into()].into(),
+                        after,
+                    )))))
+                }
+            }
             Self::Ref(tc_ref) => {
                 let tc_ref = tc_ref.reference_self(path);
                 Self::Ref(Box::new(tc_ref))
