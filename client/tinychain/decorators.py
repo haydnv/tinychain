@@ -41,7 +41,7 @@ def cond(if_condition, then, or_else):
     return rtype(If(if_condition, then, or_else))
 
 
-def closure(op):
+def closure(*deps):
     """
     Annotation to capture data referenced by an :class:`Op` and return a `Closure`.
 
