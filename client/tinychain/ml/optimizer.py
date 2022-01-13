@@ -38,7 +38,7 @@ class GradientDescent(Optimizer):
         return update(gradient, deltas)
 
 
-def train(model, optimizer, inputs, cost, train_while):
+def train(model, optimizer, inputs, labels, cost, train_while):
     """
     Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
 
@@ -47,10 +47,10 @@ def train(model, optimizer, inputs, cost, train_while):
         `output`: a `Tensor`, the last output of the model.
     """
 
-    @closure
+    @closure(model, optimizer, inputs, labels)
     @post_op
     def step(i: UInt, output: Tensor):
-        loss = cost(output)
+        loss = cost(output, labels)
         update = optimizer.optimize(i, model, inputs, loss)
         return After(update, {"i": i + 1, "output": model.forward(inputs).copy()})
 

@@ -100,17 +100,17 @@ class DNNTests(ClientTest):
         self.execute(cxt)
 
     def execute(self, cxt):
-        def cost(output):
-            return (output - cxt.labels)**2
+        def cost(output, labels):
+            return (output - labels)**2
 
-        @tc.closure
+        @tc.closure(cxt.labels)
         @tc.post_op
         def train_while(i: tc.UInt, output: tc.tensor.Tensor):
             fit = ((output > 0.5) == cxt.labels).all()
             return fit.logical_not().logical_and(i <= MAX_ITERATIONS)
 
         cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
+        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")

@@ -26,7 +26,7 @@ def example1(tensor, size):
 def example2(tensor):
     # the `@tc.closure` decorator captures referenced states from the outer context
     # in this case "tensor"
-    @tc.closure
+    @tc.closure(tensor)
     @tc.get_op  # since the `step` Op will be called at runtime, it needs a decorator
     def step(i: tc.U64):
         return tensor[i].write(tensor[i] * 10)
@@ -38,12 +38,12 @@ def example2(tensor):
 # `example3` needs its own Op context at runtime, so we define it as a POST Op using the `@tc.post_op` decorator
 @tc.post_op
 def example3(x: tc.tensor.Dense):  # without this type annotation, TinyChain won't know what type of `x` to expect
-    @tc.closure
+    @tc.closure(x)
     @tc.post_op
     def cond(i: tc.UInt):
         return i < x.size
 
-    @tc.closure
+    @tc.closure(x)
     @tc.post_op
     def step(i: tc.UInt):
         write = x[i].write(x[i] * 10)
@@ -97,10 +97,11 @@ def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
     # this is a tensor creation `Op` itself, i.e. each usage of `transposed` would create a new tensor
     # transposed = tc.tensot.Dense.zeros([n, m], a.dtype)
 
-    @tc.closure
+    @tc.closure(a, cxt.transposed)
     @tc.get_op
     def row_step(x: tc.U64):
-        @tc.closure
+
+        @tc.closure(a, x, cxt.transposed)
         @tc.get_op
         def step(y: tc.U64):
             return cxt.transposed[y, x].write(a[x, y])
