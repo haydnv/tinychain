@@ -18,8 +18,8 @@ use crate::scalar::{OpRefType, Scalar, ScalarType};
 use crate::state::{State, StateType};
 use crate::txn::{hypothetical, Txn};
 
-use hosted::Hosted;
 use crate::txn::hypothetical::Hypothetical;
+use hosted::Hosted;
 
 mod hosted;
 
