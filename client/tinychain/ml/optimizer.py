@@ -69,6 +69,7 @@ class Adam(Optimizer):
         return _Adam()
 
 
+
 # def train(model, optimizer, inputs, cost, train_while):
 #     """
 #     Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
@@ -116,6 +117,6 @@ def train(model, optimizer, inputs, labels, cost, num_iterations: UInt):
     @tc.closure
     @tc.post_op
     def cond(i: tc.UInt, loss: tc.tensor.Tensor):
-        return i <= num_iterations#.logical_and((loss >= min_loss).all())
+        return i <= num_iterations#.logical_and((loss >= min_loss).all()
 
     return While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})

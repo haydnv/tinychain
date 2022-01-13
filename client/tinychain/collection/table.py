@@ -48,7 +48,7 @@ class Table(Collection):
         Example: `orders.aggregate(["customer_id", "product_id"], Table.count)`
         """
 
-        @closure
+        @closure(self)
         @get_op
         def group(cxt, key: Tuple) -> Tuple:
             cxt.where = Tuple(columns).zip(key).cast(Map)
@@ -82,7 +82,7 @@ class Table(Collection):
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        delete_row = closure(delete_op(lambda cxt, key: self.delete_row(key)))
+        delete_row = closure(self)(delete_op(lambda cxt, key: self.delete_row(key)))
         to_delete = self.where(where) if where else self
         return to_delete.select(self.key_names()).rows().for_each(delete_row)
 
@@ -156,7 +156,7 @@ class Table(Collection):
     def update(self, values, where={}):
         """Update the specified rows of this table with the given `values`."""
 
-        update_row = closure(get_op(lambda cxt, key: self.update_row(key, values)))
+        update_row = closure(self)(get_op(lambda cxt, key: self.update_row(key, values)))
         return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
 
     def update_row(self, key, values):
