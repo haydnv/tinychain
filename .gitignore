@@ -7,3 +7,6 @@ tests/venv
 # IDE metadata
 .idea
 .project
+
+#igrore
+.vscode

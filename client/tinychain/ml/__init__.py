@@ -1,7 +1,9 @@
+import typing as t
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
 from tinychain.collection.tensor import Tensor
+from tinychain.value import String
 
 EPS = 10**-6
 
@@ -106,26 +108,47 @@ class NeuralNet(Tuple, Differentiable):
     def load(cls, *args, **kwargs):
         pass
 
-class Parameter(Map):
+# class Parameter(Map):
+
+#     @classmethod
+#     def create(cls, name: str, value: Tensor):
+#         return cls({'name': name, 'value': value})
+
+#     @property
+#     def name(self) -> String:
+#         return self['name']
+
+#     @property
+#     def value(self) -> Tensor:
+#         return self['value']
+
+class Parameter:
+
+    def __init__(self, name: str, value: Tensor, ct_shape: t.List[int]) -> None:
+        self.name = name
+        self.value = value
+        self.ct_shape = ct_shape
 
     @classmethod
-    def create(cls, name: str, value: Tensor):
-        return cls({'name': name, 'value': value})
+    def create(cls, name: str, value: Tensor, ct_shape: t.List[int]):
+        return cls(name=name, value=value, ct_shape=ct_shape)
 
-    @property
-    def name(self) -> str:
-        return self['name']
+# class DiffedParameter(Parameter):
 
-    @property
-    def value(self) -> Tensor:
-        return self['value']
+#     @classmethod
+#     def create(cls, name: str, value: Tensor, grad: Tensor):
+#         return cls({'name': name, 'value': value, 'grad': grad})
+
+#     @property
+#     def grad(self) -> Tensor:
+#         return self['grad']
 
 class DiffedParameter(Parameter):
 
-    @classmethod
-    def create(cls, name: str, value: Tensor, grad: Tensor):
-        return cls({'name': name, 'value': value, 'grad': grad})
+    def __init__(self, name: str, value: Tensor, ct_shape: t.List[int], grad: Tensor) -> None:
+        super().__init__(name, value, ct_shape)
+        self.grad = grad
 
-    @property
-    def grad(self) -> Tensor:
-        return self['grad']
+    @classmethod
+    def create(cls, name: str, value: Tensor, ct_shape: t.List[int], grad: Tensor):
+        return cls(name=name, value=value, ct_shape=ct_shape, grad=grad)
