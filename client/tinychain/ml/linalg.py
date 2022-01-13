@@ -388,3 +388,63 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
     scale = 0.0
 
     return Map(While(cond, step, Map(i=UInt(0), n=n, m=m, U=U, W=W, e=e, scale=scale, g=g)))
+
+@post_op
+def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
+    """Accumulation of right hand transformations (rht)"""
+    
+    @post_op
+    def step(
+            cxt,
+            i: UInt,
+            n: UInt,
+            m: UInt,
+            U: Tensor,
+            V: Tensor,
+            e: Tensor,
+            l: UInt,
+            g: F32) -> Map:
+        
+        @post_op
+        def update_cols_wo_last(i: UInt, l: UInt, n: UInt, U: Tensor, V: Tensor, g: F32):
+
+            @post_op
+            def update_cols(n: UInt, l: UInt, i: UInt, U: Tensor,  V: Tensor):
+                
+                @post_op
+                def step(j: UInt, n: UInt, l: UInt, i: UInt, U: Tensor,  V: Tensor) -> Map:
+                    return Map(After(
+                        V[l:, j].write(V[l:, j] + V[l:, i] * dot(U[i, l:], V[l:, j])),
+                        Map(j=j + 1, n=n, l=l, i=i, U=U, V=V)
+                    ))
+
+                @post_op
+                def cond(j: UInt, n: UInt) -> Bool:
+                    return j < n
+
+                loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g),While(cond, step, Map(j=l, n=n, l=l, i=i, U=U, V=V)))
+                cond = If(Bool(g != 0), loop)
+
+                return After(cond, [V[i,l:].write(Float(0.0)), V[l:,i].write(Float(0.0))])
+
+
+            return If(Bool(i < n-1), update_cols(n=n, l=l, i=i, U=U,  V=V))
+
+        cxt.update_cols_wo_last = update_cols_wo_last
+        l = After([cxt.update_cols_wo_last(i=i, l=l, n=n, U=U, V=V, g=g), 
+                    V[i,i].write(Float(1.0)),], i)
+        g = e[i].copy()            
+        
+        return Map(i=i - 1, l=l, g=g, n=n, m=m, U=U, V=V, e=e)
+
+    @post_op
+    def cond(i: UInt) -> Bool:
+        return i >= 0
+
+    m, n = U.shape.unpack(2)
+    n = Float(n)
+    m = Float(m)
+    g = 0.0
+    l = 0
+
+    return Map(While(cond, step, Map(i=n-1, n=n, m=m, U=U, V=V, e=e, l=l, g=g)))    
