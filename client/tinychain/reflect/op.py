@@ -95,9 +95,9 @@ class Put(Op):
             pass
         elif len(sig.parameters) - len(args) == 1:
             param_name = list(sig.parameters.keys())[-1]
-            param = sig.parameters[key_name]
+            param = sig.parameters[param_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            if param_name in ["key", "value"]:
+            if param_name in set(["key", "value"]):
                 args.append(dtype(URI(param_name)))
             else:
                 raise ValueError(f"{self.dtype()} argument {param_name} is ambiguous--use 'key' or 'value' instead")
