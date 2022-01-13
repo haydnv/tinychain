@@ -14,6 +14,7 @@ use destream::de;
 use destream::de::Error as DestreamError;
 use destream::de::Visitor as DestreamVisitor;
 use destream::en;
+use email_address_parser::EmailAddress;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -40,6 +41,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueType {
     Bytes,
+    Email,
     Id,
     Link,
     None,
@@ -74,6 +76,16 @@ impl ValueType {
                     .map(Value::Bytes),
                 other => Err(TCError::bad_request("cannot cast into Bytes from", other)),
             },
+            Self::Email => match value {
+                Value::Email(email) => Ok(Value::Email(email)),
+                Value::Id(id) => parse_email(id.as_str())
+                    .map(Value::Email)
+                    .ok_or_else(|| TCError::bad_request("cannot cast into Email from", id)),
+                Value::String(s) => parse_email(&s)
+                    .map(Value::Email)
+                    .ok_or_else(|| TCError::bad_request("cannot cast into Email from", s)),
+                other => Err(TCError::bad_request("cannot cast into Email from", other)),
+            },
             Self::Id => value.try_cast_into(on_err).map(Value::Id),
             Self::Link => value.try_cast_into(on_err).map(Value::String),
             Self::None => Ok(Value::None),
@@ -85,12 +97,14 @@ impl ValueType {
             Self::Tuple => value.try_cast_into(on_err).map(Value::Tuple),
             Self::Value => Ok(value),
             Self::Version => match value {
+                Value::Id(id) => id.as_str().parse().map(Value::Version),
                 Value::String(s) => s.parse().map(Value::Version),
                 Value::Tuple(t) => {
                     let (maj, min, rev) =
                         t.try_cast_into(|t| TCError::bad_request("invalid semantic version", t))?;
                     Ok(Value::Version(Version::from((maj, min, rev))))
                 }
+                Value::Version(v) => Ok(Value::Version(v)),
                 other => Err(TCError::bad_request("cannot cast into Version from", other)),
             },
         }
@@ -121,6 +135,7 @@ impl NativeClass for ValueType {
             } else if path.len() == 4 {
                 match path[3].as_str() {
                     "bytes" => Some(Self::Bytes),
+                    "email" => Some(Self::Email),
                     "id" => Some(Self::Id),
                     "link" => Some(Self::Link),
                     "number" => Some(Self::Number(NT::Number)),
@@ -179,6 +194,7 @@ impl NativeClass for ValueType {
 
         match self {
             Self::Bytes => prefix.append(label("bytes")),
+            Self::Email => prefix.append(label("email")),
             Self::Id => prefix.append(label("id")),
             Self::Link => prefix.append(label("link")),
             Self::None => prefix.append(label("none")),
@@ -262,6 +278,9 @@ impl Ord for ValueType {
 
             (Self::String, _) => Greater,
             (_, Self::String) => Less,
+
+            (Self::Email, _) => Greater,
+            (_, Self::Email) => Less,
 
             (Self::Id, _) => Greater,
             (_, Self::Id) => Less,
@@ -350,6 +369,7 @@ impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bytes => f.write_str("type Bytes"),
+            Self::Email => f.write_str("type Email"),
             Self::Id => f.write_str("type Id"),
             Self::Link => f.write_str("type Link"),
             Self::None => f.write_str("type None"),
@@ -411,6 +431,7 @@ impl DestreamVisitor for ValueTypeVisitor {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     Bytes(Bytes),
+    Email(EmailAddress),
     Link(Link),
     Id(Id),
     None,
@@ -463,6 +484,7 @@ impl Value {
 
         match class {
             VT::Bytes => self.opt_cast_into().map(Self::Bytes),
+            VT::Email => self.opt_cast_into().map(Self::Email),
             VT::Id => self.opt_cast_into().map(Self::Id),
             VT::Link => self.opt_cast_into().map(Self::Link),
             VT::None => Some(Self::None),
@@ -493,6 +515,7 @@ impl Instance for Value {
         use ValueType as VT;
         match self {
             Self::Bytes(_) => VT::Bytes,
+            Self::Email(_) => VT::Email,
             Self::Id(_) => VT::Id,
             Self::Link(_) => VT::Link,
             Self::None => VT::None,
@@ -504,10 +527,17 @@ impl Instance for Value {
     }
 }
 
+impl<D: Digest> Hash<D> for Value {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self)
+    }
+}
+
 impl<'a, D: Digest> Hash<D> for &'a Value {
     fn hash(self) -> Output<D> {
         match self {
             Value::Bytes(bytes) => D::digest(bytes),
+            Value::Email(email) => Hash::<D>::hash(email.to_string()),
             Value::Id(id) => Hash::<D>::hash(id),
             Value::Link(link) => Hash::<D>::hash(link),
             Value::None => GenericArray::default(),
@@ -531,6 +561,11 @@ impl Serialize for Value {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(&self.class().path().to_string(), &base64::encode(&bytes))?;
+                map.end()
+            }
+            Self::Email(email) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(&self.class().path().to_string(), &email.to_string())?;
                 map.end()
             }
             Self::Id(id) => {
@@ -584,6 +619,11 @@ impl<'en> en::ToStream<'en> for Value {
 
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(bytes),
+            Self::Email(email) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(self.class().path().to_string(), email.to_string())?;
+                map.end()
+            }
             Self::Id(id) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(id, &EMPTY_SEQ)?;
@@ -616,6 +656,11 @@ impl<'en> en::IntoStream<'en> for Value {
 
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
+            Self::Email(ref email) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(self.class().path().to_string(), email.to_string())?;
+                map.end()
+            }
             Self::Id(id) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(id, &EMPTY_SEQ)?;
@@ -761,6 +806,26 @@ impl TryCastFrom<Value> for Bytes {
     }
 }
 
+impl TryCastFrom<Value> for EmailAddress {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Email(_) => true,
+            Value::Id(id) => parse_email(id.as_str()).is_some(),
+            Value::String(s) => parse_email(s).is_some(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Email(email) => Some(email),
+            Value::Id(id) => parse_email(id.as_str()),
+            Value::String(s) => parse_email(&s),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for Id {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -783,6 +848,7 @@ impl TryCastFrom<Value> for Number {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Bytes(_) => false,
+            Value::Email(_) => false,
             Value::Id(id) => f64::from_str(id.as_str()).is_ok(),
             Value::Link(_) => false,
             Value::None => true,
@@ -800,6 +866,7 @@ impl TryCastFrom<Value> for Number {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Bytes(_) => None,
+            Value::Email(_) => None,
             Value::Id(id) => f64::from_str(id.as_str())
                 .map(Float::F64)
                 .map(Self::Float)
@@ -1073,6 +1140,7 @@ impl fmt::Debug for Value {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
             Self::Id(id) => write!(f, "{}: {:?}", ValueType::Id, id.as_str()),
+            Self::Email(email) => write!(f, "{}: {:?}", ValueType::Email, email),
             Self::Link(link) => write!(f, "{}: {:?}", ValueType::Link, link),
             Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Debug::fmt(n, f),
@@ -1095,6 +1163,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
+            Self::Email(email) => fmt::Display::fmt(email, f),
             Self::Id(id) => f.write_str(id.as_str()),
             Self::Link(link) => fmt::Display::fmt(link, f),
             Self::None => f.write_str("None"),
@@ -1139,6 +1208,15 @@ impl ValueVisitor {
                     .map(Bytes::from)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
+            }
+            VT::Email => {
+                let email: &str = map.next_value()?;
+                parse_email(email).map(Value::Email).ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "invalid value: {}, expected an email address",
+                        email
+                    ))
+                })
             }
             VT::Id => {
                 let id: &str = map.next_value()?;
@@ -1193,6 +1271,12 @@ impl ValueVisitor {
             VT::Bytes => {
                 let bytes = map.next_value(()).await?;
                 Ok(Value::Bytes(bytes))
+            }
+            VT::Email => {
+                let email: String = map.next_value(()).await?;
+                parse_email(&email)
+                    .map(Value::Email)
+                    .ok_or_else(|| de::Error::invalid_value(email, "an email address"))
             }
             VT::Id => {
                 let id = map.next_value(()).await?;
@@ -1463,4 +1547,8 @@ impl destream::de::Visitor for ValueVisitor {
 
         Ok(Value::Tuple(value.into()))
     }
+}
+
+fn parse_email(s: &str) -> Option<EmailAddress> {
+    EmailAddress::parse(s.as_ref(), None)
 }

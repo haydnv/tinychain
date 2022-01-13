@@ -99,7 +99,7 @@ def qr(cxt, x: Tensor) -> Tuple:
 
     outer_cxt = cxt
 
-    @closure
+    @closure(outer_cxt.m, cxt.householder)
     @post_op
     def qr_step(cxt, Q: Tensor, R: Tensor, k: UInt) -> Map:
         cxt.v, cxt.tau = outer_cxt.householder(x=R[k:, k]).unpack(2)
@@ -167,7 +167,6 @@ def plu(x: Tensor) -> PLUFactorization:
 
     def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
 
-        @closure
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
             p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
@@ -256,16 +255,16 @@ def slogdet(cxt, x: Dense) -> Tuple:
     cxt.logdet_result = Dense.create([n])
     cxt.det = det
 
-    @closure
+    @closure(x, cxt.det, cxt.sign_result, cxt.logdet_result)
     @get_op
     def step(i: UInt):
         d = cxt.det(x=x[i])
         logdet = F32(d.abs().log())
         sign = Int(If(d > 0, 1, -1))*1
-        return After(when=[
+        return [
             cxt.sign_result[i].write(sign),
             cxt.logdet_result[i].write(logdet),
-        ], then=[cxt.sign_result, cxt.logdet_result])
+        ]
 
     return After(Stream.range((0, n)).for_each(step), Tuple([cxt.sign_result, cxt.logdet_result]))
 

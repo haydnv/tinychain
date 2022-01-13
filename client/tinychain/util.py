@@ -33,6 +33,12 @@ class Context(object):
 
         return concat
 
+    def __contains__(self, item):
+        return self._get_name(item) in self.form
+
+    def __dbg__(self):
+        return [self.form[next(reversed(self.form))]] if self.form else []
+
     def __deps__(self):
         provided = set(URI(name) for name in self.form.keys())
 
@@ -40,9 +46,12 @@ class Context(object):
         for state in self.form.values():
             deps.update(requires(state))
 
+        deps -= provided
         return deps - provided
 
     def __getattr__(self, name):
+        name = self._get_name(name)
+
         if name in self.form:
             value = self.form[name]
             if hasattr(value, "__ref__"):
@@ -60,6 +69,8 @@ class Context(object):
         if state is self:
             raise ValueError(f"cannot assign transaction Context to itself")
 
+        name = self._get_name(name)
+
         deanonymize(state, self)
 
         if name in self.form:
@@ -69,21 +80,30 @@ class Context(object):
 
     def __repr__(self):
         data = list(self.form.keys())
-        return f"execution context with data {data}"
+        return f"Op context with data {data}"
+
+    def _get_name(self, item):
+        if hasattr(item, "__uri__"):
+            if uri(item).id() != uri(item):
+                raise ValueError(f"invalid name: {item}")
+            else:
+                return uri(item).id()
+        else:
+            return str(item)
 
     @property
     def form(self):
         return self._form
 
-    def is_defined(self, name):
-        if isinstance(name, URI):
-            name = name.id()
 
-        return name in self._form
+def debug(state):
+    """Return the name and immediate dependencies of the given `state`."""
+
+    return [dep for dep in state.__dbg__() if dep is not None] if hasattr(state, "__dbg__") else []
 
 
 def form_of(state):
-    """Return the form of the given state."""
+    """Return the form of the given `state`."""
 
     if hasattr(state, "__form__"):
         if callable(state.__form__) and not inspect.isclass(state.__form__):
@@ -144,7 +164,8 @@ class URI(object):
     """
 
     def __init__(self, root, path=[]):
-        assert root is not None
+        if not root:
+            raise ValueError(f"invalid URI root: {root}")
 
         if root.startswith("$$"):
             raise ValueError(f"invalid reference: {root}")
@@ -210,6 +231,17 @@ class URI(object):
 
         return URI(str(self), [name])
 
+    def id(self):
+        """Return the ID segment of this `URI`, if present."""
+
+        this = str(self)
+        if this.startswith('$'):
+            if '/' in this:
+                end = this.index("/")
+                return this[1:end]
+            else:
+                return this[1:]
+
     def is_id(self):
         """Return `True` if this URI is a simple ID, like `$foo`."""
 
@@ -269,20 +301,6 @@ class URI(object):
             i = self._root.index("://")
             if i > 0:
                 return self._root[:i]
-
-    def subject(self):
-        """Return only the ID portion of this `URI`, or `None` in the case of a link."""
-
-        if "://" in self._root:
-            return None
-        elif self._root.startswith('/'):
-            return None
-
-        uri = str(self)
-        if '/' in uri:
-            return URI(uri[:uri.index('/')])
-        else:
-            return URI(uri)
 
     def startswith(self, prefix):
         return str(self).startswith(str(prefix))

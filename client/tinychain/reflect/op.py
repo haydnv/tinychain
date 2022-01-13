@@ -21,9 +21,10 @@ class Op(object):
         self.form = form
 
     def __deps__(self):
+        form = form_of(self)
         params = inspect.signature(self.form).parameters
         provided = set(URI(param) for param in params)
-        return requires(form_of(self)) - provided
+        return requires(form) - provided
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
@@ -42,8 +43,9 @@ class Get(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __call__(self, key=None):
-        return ref.Get(self, key)
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [cxt]
 
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
@@ -63,8 +65,8 @@ class Get(Op):
         rtype = self.rtype
 
         class GetRef(op.Get):
-            def __call__(self, *args, **kwargs):
-                return rtype(op.Get.__call__(self, *args, **kwargs))
+            def __call__(self, key):
+                return rtype(ref.Get(self, key))
 
         return GetRef(URI(name))
 
@@ -77,6 +79,10 @@ class Put(Op):
 
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
+
+    def __dbg__(self):
+        _, _, cxt = form_of(self)
+        return [cxt]
 
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
@@ -116,8 +122,8 @@ class Put(Op):
 
     def __ref__(self, name):
         class PutRef(op.Put):
-            def __call__(self, *args, **kwargs):
-                return Nil(op.Put.__call__(self, *args, **kwargs))
+            def __call__(self, key=None, value=None):
+                return Nil(ref.Put(key, value))
 
         return PutRef(URI(name))
 
@@ -132,14 +138,8 @@ class Post(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __call__(self, *args, **kwargs):
-        if args and kwargs:
-            raise ValueError("POST Op takes one arg (a Map) or kwargs, but not both")
-
-        if not args:
-            args = kwargs
-
-        return ref.Get(self, args)
+    def __dbg__(self):
+        return [form_of(self)]
 
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
@@ -158,7 +158,13 @@ class Post(Op):
 
         class PostRef(op.Post):
             def __call__(self, *args, **kwargs):
-                return rtype(op.Post.__call__(self, *args, **kwargs))
+                if args and kwargs:
+                    raise ValueError("POST Op takes one arg (a Map) or kwargs, but not both")
+
+                if not args:
+                    args = kwargs
+
+                return rtype(ref.Post(self, args))
 
         return PostRef(URI(name))
 
@@ -169,16 +175,17 @@ class Post(Op):
 class Delete(Op):
     __uri__ = uri(op.Delete)
 
-    def __call__(self, key=None):
-        return ref.Get(self, key)
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [cxt]
 
     def __form__(self):
         return Get.__form__(self)
 
     def __ref__(self, name):
         class DeleteRef(op.Delete):
-            def __call__(self, *args, **kwargs):
-                return Nil(op.Delete.__call__(self, *args, **kwargs))
+            def __call__(self, key=None):
+                return Nil(ref.Delete(self, key))
 
         return DeleteRef(URI(name))
 

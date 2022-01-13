@@ -2,10 +2,13 @@
 
 use std::fmt;
 
+use async_hash::Hash;
 use async_trait::async_trait;
-use destream::{de, en, EncodeMap};
+use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{TryCastFrom, TryCastInto};
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -71,6 +74,15 @@ impl fmt::Display for ObjectType {
 pub enum Object {
     Class(InstanceClass),
     Instance(InstanceExt<State>),
+}
+
+impl Object {
+    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Class(class) => Ok(Hash::<Sha256>::hash(class)),
+            Self::Instance(instance) => instance.hash(txn).await,
+        }
+    }
 }
 
 impl tcgeneric::Instance for Object {
@@ -169,6 +181,8 @@ pub enum ObjectView<'en> {
 
 impl<'en> en::IntoStream<'en> for ObjectView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use destream::en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(1))?;
 
         match self {

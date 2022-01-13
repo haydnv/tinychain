@@ -5,20 +5,23 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
 use futures::future::TryFutureExt;
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom};
+use sha2::digest::{Digest, Output};
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::{Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{self, Chain, ChainType, ChainVisitor};
+use crate::chain::{self, Chain, ChainInstance, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -189,6 +192,52 @@ pub enum State {
 }
 
 impl State {
+    /// Compute the SHA256 hash of this `State`.
+    pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
+        Box::pin(async move {
+            match self {
+                Self::Collection(collection) => collection.hash(txn).await,
+                Self::Chain(chain) => chain.hash(txn).await,
+                Self::Closure(closure) => closure.hash(txn).await,
+                Self::Map(map) => {
+                    let mut hashes = stream::iter(map)
+                        .map(|(id, state)| {
+                            state
+                                .hash(txn.clone())
+                                .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
+                        })
+                        .buffered(num_cpus::get())
+                        .map_ok(|(id, state)| {
+                            let mut inner_hasher = Sha256::default();
+                            inner_hasher.update(&id);
+                            inner_hasher.update(&state);
+                            inner_hasher.finalize()
+                        });
+
+                    let mut hasher = Sha256::default();
+                    while let Some(hash) = hashes.try_next().await? {
+                        hasher.update(&hash);
+                    }
+                    Ok(hasher.finalize())
+                }
+                Self::Object(object) => object.hash(txn).await,
+                Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
+                Self::Stream(stream) => stream.hash(txn).await,
+                Self::Tuple(tuple) => {
+                    let mut hashes = stream::iter(tuple)
+                        .map(|state| state.hash(txn.clone()))
+                        .buffered(num_cpus::get());
+
+                    let mut hasher = Sha256::default();
+                    while let Some(hash) = hashes.try_next().await? {
+                        hasher.update(&hash);
+                    }
+                    Ok(hasher.finalize())
+                }
+            }
+        })
+    }
+
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {

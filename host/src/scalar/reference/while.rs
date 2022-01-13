@@ -1,5 +1,6 @@
 //! Resolve a `Closure` repeatedly while a condition is met.
 
+use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -8,6 +9,7 @@ use destream::{de, en};
 use futures::try_join;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
+use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
@@ -121,6 +123,12 @@ impl Refer for While {
                 ));
             }
         }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a While {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((&self.cond, &self.closure, &self.state))
     }
 }
 

@@ -7,6 +7,8 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{Persist, Store};
@@ -55,6 +57,13 @@ impl ChainInstance for BlockChain {
         value: State,
     ) -> TCResult<()> {
         self.history.append_put(txn, path, key, value).await
+    }
+
+    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
+        self.history
+            .read_latest(*txn.id())
+            .map_ok(|block| block.hash())
+            .await
     }
 
     async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {

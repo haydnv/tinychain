@@ -48,6 +48,10 @@ class Get(Method):
         rtype = _get_rtype(self.form, State)
         return rtype(ref.Get(self.subject(), key))
 
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [self.subject(), cxt]
+
     def __form__(self):
         cxt, args = _first_params(self)
 
@@ -80,6 +84,10 @@ class Put(Method):
 
     def __call__(self, key, value):
         return ref.Put(self.subject(), key, value)
+
+    def __dbg__(self):
+        _, _, cxt = form_of(self)
+        return [self.subject(), cxt]
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -131,6 +139,10 @@ class Post(Method):
         rtype = _get_rtype(self.form, State)
         return rtype(ref.Post(self.subject(), params))
 
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [self.subject(), cxt]
+
     def __form__(self):
         cxt, args = _first_params(self)
 
@@ -158,6 +170,10 @@ class Delete(Method):
 
     def __call__(self, key=None):
         return ref.Delete(self.subject(), key)
+
+    def __dbg__(self):
+        _, cxt = form_of(self)
+        return [self.subject(), cxt]
 
     def __form__(self):
         return Get.__form__(self)

@@ -26,7 +26,7 @@ class Object(Class, metaclass=Meta):
         if uri(self.__class__) == uri(Class):
             name = f"Class_{self.__class__.__name__}_{format(id(self.__class__), 'x')}"
 
-            if not cxt.is_defined(name):
+            if not name in cxt:
                 setattr(cxt, name, self.__class__)
 
             self.class_uri = URI(name)
@@ -85,9 +85,9 @@ def is_ref(state):
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))
     elif isinstance(state, list) or isinstance(state, tuple):
-        return any(is_op(item) for item in state)
+        return any(is_ref(item) for item in state)
     elif isinstance(state, dict):
-        return any(is_op(state[k]) for k in state)
+        return any(is_ref(state[k]) for k in state)
     else:
         return False
 
