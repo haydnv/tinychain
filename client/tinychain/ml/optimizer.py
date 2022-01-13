@@ -71,7 +71,7 @@ class Adam(Optimizer):
         return _Adam()
 
 
-def train(model, optimizer, inputs, cost, train_while):
+def train(model, optimizer, inputs, labels, cost, train_while):
     """
     Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
 
@@ -80,15 +80,13 @@ def train(model, optimizer, inputs, cost, train_while):
         `output`: a `Tensor`, the last output of the model;
         `loss`: a `Number`, the lats loss of the model's predict.
     """
-    
-    @closure
+
+    @closure(model, optimizer, inputs, labels)
     @post_op
-    def step(i: UInt, output: Tensor, loss: Tensor):
-        loss = cost(output)
-        dloss = cost(output, dl=True)
-        param_list = model.backward(inputs, dloss)
-        update = optimizer.optimize(i, param_list)
-        return After(update, {"i": i + 1, "output": model.forward(inputs).copy(), 'loss': loss})
+    def step(i: UInt, output: Tensor):
+        loss = cost(output, labels)
+        update = optimizer.optimize(i, model, inputs, loss)
+        return After(update, {"i": i + 1, "output": model.forward(inputs).copy()})
 
     output = model.forward(inputs).copy()
     loss = cost(output)
