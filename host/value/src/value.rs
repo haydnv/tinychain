@@ -879,16 +879,16 @@ impl TryCastFrom<Value> for Number {
                 let im = Self::opt_cast_from(t.pop().unwrap());
                 let re = Self::opt_cast_from(t.pop().unwrap());
                 match (re, im) {
-                    (Some(Number::Float(re)), Some(Number::Float(im))) => match (re, im) {
-                        (Float::F32(re), Float::F32(im)) => {
-                            let c = Complex::from([re, im]);
-                            Some(Self::Complex(c))
-                        }
-                        (re, im) => {
-                            let c = Complex::from([f64::cast_from(re), f64::cast_from(im)]);
-                            Some(Self::Complex(c))
-                        }
-                    },
+                    (Some(Number::Float(Float::F32(re))), Some(Number::Float(Float::F32(im)))) => {
+                        let c = Complex::from([re, im]);
+                        Some(Self::Complex(c))
+                    }
+                    (Some(re), Some(im)) => {
+                        let re = f64::cast_from(re);
+                        let im = f64::cast_from(im);
+                        let c = Complex::from([re, im]);
+                        Some(Self::Complex(c))
+                    }
                     _ => None,
                 }
             }
