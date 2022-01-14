@@ -2,7 +2,7 @@ import inspect
 
 from tinychain import op, ref
 from tinychain.state import State
-from tinychain.util import form_of, requires, to_json, uri, Context, URI
+from tinychain.util import form_of, to_json, uri, Context, URI
 from tinychain.value import Nil, Value
 
 from . import _get_rtype, resolve_class
@@ -19,12 +19,6 @@ class Op(object):
             raise ValueError(f"reflection requires a Python callable, not {form}")
 
         self.form = form
-
-    def __deps__(self):
-        form = form_of(self)
-        params = inspect.signature(self.form).parameters
-        provided = set(URI(param) for param in params)
-        return requires(form) - provided
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
@@ -95,9 +89,9 @@ class Put(Op):
             pass
         elif len(sig.parameters) - len(args) == 1:
             param_name = list(sig.parameters.keys())[-1]
-            param = sig.parameters[key_name]
+            param = sig.parameters[param_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            if param_name in ["key", "value"]:
+            if param_name in set(["key", "value"]):
                 args.append(dtype(URI(param_name)))
             else:
                 raise ValueError(f"{self.dtype()} argument {param_name} is ambiguous--use 'key' or 'value' instead")

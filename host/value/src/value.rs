@@ -879,16 +879,16 @@ impl TryCastFrom<Value> for Number {
                 let im = Self::opt_cast_from(t.pop().unwrap());
                 let re = Self::opt_cast_from(t.pop().unwrap());
                 match (re, im) {
-                    (Some(Number::Float(re)), Some(Number::Float(im))) => match (re, im) {
-                        (Float::F32(re), Float::F32(im)) => {
-                            let c = Complex::from([re, im]);
-                            Some(Self::Complex(c))
-                        }
-                        (re, im) => {
-                            let c = Complex::from([f64::cast_from(re), f64::cast_from(im)]);
-                            Some(Self::Complex(c))
-                        }
-                    },
+                    (Some(Number::Float(Float::F32(re))), Some(Number::Float(Float::F32(im)))) => {
+                        let c = Complex::from([re, im]);
+                        Some(Self::Complex(c))
+                    }
+                    (Some(re), Some(im)) => {
+                        let re = f64::cast_from(re);
+                        let im = f64::cast_from(im);
+                        let c = Complex::from([re, im]);
+                        Some(Self::Complex(c))
+                    }
                     _ => None,
                 }
             }
@@ -969,65 +969,39 @@ impl TryCastFrom<Value> for Version {
     }
 }
 
-impl TryCastFrom<Value> for bool {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
+macro_rules! cast_real {
+    ($n:ty) => {
+        impl TryCastFrom<Value> for $n {
+            fn can_cast_from(value: &Value) -> bool {
+                match value {
+                    Value::Number(_) => true,
+                    Value::String(s) => Self::from_str(s).is_ok(),
+                    _ => false,
+                }
+            }
 
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
+            fn opt_cast_from(value: Value) -> Option<Self> {
+                match value {
+                    Value::Number(n) => n.opt_cast_into(),
+                    Value::String(s) => Self::from_str(&s).ok(),
+                    _ => None,
+                }
+            }
+        }
+    };
 }
 
-impl TryCastFrom<Value> for u8 {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
-}
-
-impl TryCastFrom<Value> for usize {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
-}
-
-impl TryCastFrom<Value> for u32 {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
-}
-
-impl TryCastFrom<Value> for u64 {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
-}
-
-impl TryCastFrom<Value> for i64 {
-    fn can_cast_from(value: &Value) -> bool {
-        Number::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        Number::opt_cast_from(value).map(|n| n.cast_into())
-    }
-}
+cast_real!(bool);
+cast_real!(f32);
+cast_real!(f64);
+cast_real!(u8);
+cast_real!(u16);
+cast_real!(u32);
+cast_real!(u64);
+cast_real!(usize);
+cast_real!(i16);
+cast_real!(i32);
+cast_real!(i64);
 
 impl TryCastFrom<Value> for TCPathBuf {
     fn can_cast_from(value: &Value) -> bool {

@@ -20,7 +20,7 @@ use tcgeneric::*;
 
 use crate::route::Public;
 use crate::scalar::{Link, Scalar, Scope, Value, SELF};
-use crate::state::{State, ToState};
+use crate::state::{State, StateType, ToState};
 use crate::txn::Txn;
 
 use super::{IdRef, Refer, TCRef};
@@ -84,6 +84,13 @@ pub enum Subject {
 }
 
 impl Subject {
+    pub fn as_class(&self) -> Option<StateType> {
+        match self {
+            Self::Link(link) => StateType::from_path(link.path()),
+            _ => None,
+        }
+    }
+
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Ref(id_ref, suffix) if id_ref.id() == &SELF => {
@@ -551,6 +558,24 @@ impl OpRefVisitor {
                 Ok(OpRef::Get((subject, key)))
             }
             Scalar::Tuple(mut tuple) if tuple.len() == 2 => {
+                if let Some(class) = subject.as_class() {
+                    const ERR_IMMUTABLE: &str =
+                        "a scalar is immutable and cannot contain a mutable type";
+                    const HINT: &str = "(consider using a closure)";
+
+                    if let StateType::Chain(ct) = class {
+                        return Err(E::custom(format!(
+                            "{} {}: {} {}",
+                            ERR_IMMUTABLE, ct, tuple, HINT
+                        )));
+                    } else if let StateType::Collection(ct) = class {
+                        return Err(E::custom(format!(
+                            "{} {}: {} {}",
+                            ERR_IMMUTABLE, ct, tuple, HINT
+                        )));
+                    }
+                }
+
                 let value = tuple.pop().unwrap();
                 let key = tuple.pop().unwrap();
                 Ok(OpRef::Put((subject, key, value)))

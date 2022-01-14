@@ -170,8 +170,8 @@ where
             return Err(TCError::unsupported(format!(
                 "DenseTensor of shape {} requires {} values, found {}",
                 shape,
+                shape.size(),
                 size,
-                shape.size()
             )));
         }
 
