@@ -2,13 +2,9 @@ from abc import abstractmethod
 import typing as t
 
 import tinychain as tc
-from tinychain.collection.tensor import Tensor, Dense
-from tinychain.decorators import closure, post_op
-from tinychain.ref import After, While
+from tinychain.ml import Parameter, DiffedParameter
 from tinychain.state import Map
 from tinychain.value import F32, UInt
-from tinychain.ml import EPS, Parameter, DiffedParameter
-
 
 class Optimizer(Map):
     @abstractmethod
@@ -45,8 +41,8 @@ class Adam(Optimizer):
             `param_list`: a `List[Parameter]` of model's parameters for optimizing.
         """
 
-        m = {p.name: Dense.zeros(p.ct_shape, F32) for p in param_list}
-        v = {p.name: Dense.zeros(p.ct_shape, F32) for p in param_list}
+        m = {p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list}
+        v = {p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list}
 
 
         class _Adam(cls):
@@ -55,7 +51,7 @@ class Adam(Optimizer):
                 update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1.0) - beta1)) for p in param_list]
                 update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
                 a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
-                return After(
+                return tc.After(
                     when=[update_m, update_v],
                     then=[
                         p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
@@ -69,54 +65,21 @@ class Adam(Optimizer):
         return _Adam()
 
 
-
-# def train(model, optimizer, inputs, cost, train_while):
-#     """
-#     Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
-
-#     Two named states are provided to `train_while`:
-#         `i`: the iteration number, a one-indexed `UInt`;
-#         `output`: a `Tensor`, the last output of the model;
-#         `loss`: a `Number`, the lats loss of the model's predict.
-#     """
-    
-#     @closure
-#     @post_op
-#     def step(i: UInt, output: Tensor, loss: Tensor):
-#         loss = cost(output)
-#         dloss = cost(output, dl=True)
-#         param_list = model.backward(inputs, dloss)
-#         update = optimizer.optimize(i, param_list)
-#         return After(update, {"i": i + 1, "output": model.forward(inputs).copy(), 'loss': loss})
-
-#     output = model.forward(inputs).copy()
-#     loss = cost(output)
-#     return While(train_while, step, {"i": 1, "output": output, "loss": loss})
-
-
 def train(model, optimizer, inputs, labels, cost, num_iterations: UInt):
-    """
-    Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
-
-    Two named states are provided to `train_while`:
-        `i`: the iteration number, a one-indexed `UInt`;
-        `output`: a `Tensor`, the last output of the model;
-        `loss`: a `Number`, the lats loss of the model's predict.
-    """
     
-    @closure
-    @post_op
-    def step(i: UInt, loss: Tensor):
+    @tc.closure(model, optimizer, labels, inputs)
+    @tc.post_op
+    def step(i: UInt, loss, dloss, output, inputs: tc.tensor.Tensor):
         output = model.forward(inputs).copy()
         loss = cost(output, labels)
         dloss = cost(output, labels, dl=True)
         param_list = model.backward(inputs, dloss)
         update = optimizer.optimize(i, param_list)
-        return After(update, {"i": i + 1, 'loss': loss})
+        return tc.After(update, {"i": i + 1, 'loss': loss})
 
-    @tc.closure
+    @tc.closure()
     @tc.post_op
-    def cond(i: tc.UInt, loss: tc.tensor.Tensor):
-        return i <= num_iterations#.logical_and((loss >= min_loss).all()
+    def cond(i: UInt):
+        return i <= num_iterations
 
-    return While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})
+    return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones(inputs.shape)})

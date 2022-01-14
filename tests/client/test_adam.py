@@ -1,48 +1,13 @@
 import json
 import math
-import numpy as np
-import operator
-import tinychain as tc
-import unittest
 
-from functools import reduce
-  
-import matplotlib.pyplot as plt
-import networkx as nx
+import numpy as np
 import tinychain as tc
 from tinychain.collection.tensor import Tensor
 
-# np.random.seed(42)
-# print(np.random.rand(1))
+np.random.seed(42)
 
-# TODO
-def visualize(state, cxt=tc.Context()):
-    G = nx.Graph()
-    add_edges(G, state, cxt)
-    nx.draw_networkx(G)
-    plt.show()
-
-
-def add_edges(graph, state, cxt):
-    for dep in tc.util.debug(state):
-        if isinstance(dep, tc.URI):
-            if dep.id() is not None:
-                if dep.id() in cxt.form:
-                    dep = cxt.form[dep.id()]
-                else:
-                    print(f"{dep.id()} not in {cxt}")
-
-        graph.add_edge(repr(state), repr(dep))
-
-        if isinstance(dep, tc.Context):
-            cxt = dep
-            if cxt.form:
-                dep = cxt.form[next(reversed(cxt.form))]
-                graph.add_edge(repr(cxt), repr(dep))
-                add_edges(graph, dep, cxt)
-        else:
-            add_edges(graph, dep, cxt)
-
+# TODO: implement AdamOptimizer
 def truncated_normal(size, mean=0., std=None):
     std = std if std else math.sqrt(size)
 
@@ -121,7 +86,7 @@ def testAdam_h():
     #step3
     cxt.loss_1 = cost(cxt.out_1, cxt.labels)
     cxt.dl_1 = cost(cxt.out_1, cxt.labels, dl=True)
-    cxt.out_2 = Tensor(tc.After(cxt.optimizer.optimize(2, cxt.nn.backward(cxt.inputs, cxt.dl_1)), cxt.nn.forward(cxt.inputs)))
+    cxt.out_2 = Tensor(tc.After(cxt.optimizer.optimize(2, cxt.nn.backward(cxt.inputs, cxt.dl_1)), cxt.nn.forward(cxt.inputs))).copy()
 
     #result
     cxt.result = tc.Map(o0=cxt.out_0, o1=cxt.out_1, o2=cxt.out_2)
@@ -163,44 +128,15 @@ def testAdam_a():
     param_list = cxt.nn.get_param_list()
 
     #create Adam optimizer with (beta1=0.9, beta2=0.999, lr=0.01, eps=1e-8)
-    cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list, lr=tc.F32(LEARNING_RATE))
+    cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list)
 
     #train model
-    cxt.result = train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, tc.UInt(MAX_ITERATIONS))
+    cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, MAX_ITERATIONS)
 
     with open('adam_dump_auto_train.json','w') as f:
         json.dump(tc.to_json(cxt), f, indent=4)
-    
     response = HOST.post(ENDPOINT, cxt)
     print(response)
 
-
-
-def train(model, optimizer, inputs, labels, cost, num_iterations: tc.UInt):
-    """
-    Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
-
-    Two named states are provided to `train_while`:
-        `i`: the iteration number, a one-indexed `UInt`;
-        `output`: a `Tensor`, the last output of the model;
-        `loss`: a `Number`, the lats loss of the model's predict.
-    """
-    
-    @tc.closure
-    @tc.post_op
-    def step(i: tc.UInt, loss: Tensor):
-        print(123)
-        output = model.forward(inputs).copy()
-        loss = cost(output, labels)
-        dloss = cost(output, labels, dl=True)
-        param_list = model.backward(inputs, dloss)
-        update = optimizer.optimize(i, param_list)
-        return tc.After(update, {"i": i + 1, 'loss': loss})
-
-    @tc.closure
-    @tc.post_op
-    def cond(i: tc.UInt, loss: tc.tensor.Tensor):
-        return i <= num_iterations#.logical_and((loss >= min_loss).all())
-
-    return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})
+#testAdam_h()
 testAdam_a()
