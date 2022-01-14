@@ -113,14 +113,14 @@ def testAdam_h():
     cxt.out_0 = cxt.output.copy()
 
     #step2
-    cxt.loss = cost(cxt.out_0)
-    cxt.dl = cost(cxt.output, dl=True)
+    cxt.loss = cost(cxt.out_0, cxt.labels)
+    cxt.dl = cost(cxt.output, cxt.labels, dl=True)
     cxt.out_1 = Tensor(tc.After(cxt.optimizer.optimize(1, cxt.nn.backward(cxt.inputs, cxt.dl)), cxt.nn.forward(cxt.inputs)))
     cxt.o1 = cxt.out_1.copy()
 
     #step3
-    cxt.loss_1 = cost(cxt.out_1)
-    cxt.dl_1 = cost(cxt.out_1, dl=True)
+    cxt.loss_1 = cost(cxt.out_1, cxt.labels)
+    cxt.dl_1 = cost(cxt.out_1, cxt.labels, dl=True)
     cxt.out_2 = Tensor(tc.After(cxt.optimizer.optimize(2, cxt.nn.backward(cxt.inputs, cxt.dl_1)), cxt.nn.forward(cxt.inputs)))
 
     #result
@@ -176,31 +176,31 @@ def testAdam_a():
 
 
 
-# def train(model, optimizer, inputs, labels, cost, num_iterations: tc.UInt):
-#     """
-#     Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
+def train(model, optimizer, inputs, labels, cost, num_iterations: tc.UInt):
+    """
+    Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
 
-#     Two named states are provided to `train_while`:
-#         `i`: the iteration number, a one-indexed `UInt`;
-#         `output`: a `Tensor`, the last output of the model;
-#         `loss`: a `Number`, the lats loss of the model's predict.
-#     """
+    Two named states are provided to `train_while`:
+        `i`: the iteration number, a one-indexed `UInt`;
+        `output`: a `Tensor`, the last output of the model;
+        `loss`: a `Number`, the lats loss of the model's predict.
+    """
     
-#     @tc.closure
-#     @tc.post_op
-#     def step(i: tc.UInt, loss: Tensor):
-#         print(123)
-#         output = model.forward(inputs).copy()
-#         loss = cost(output, labels)
-#         dloss = cost(output, labels, dl=True)
-#         param_list = model.backward(inputs, dloss)
-#         update = optimizer.optimize(i, param_list)
-#         return tc.After(update, {"i": i + 1, 'loss': loss})
+    @tc.closure
+    @tc.post_op
+    def step(i: tc.UInt, loss: Tensor):
+        print(123)
+        output = model.forward(inputs).copy()
+        loss = cost(output, labels)
+        dloss = cost(output, labels, dl=True)
+        param_list = model.backward(inputs, dloss)
+        update = optimizer.optimize(i, param_list)
+        return tc.After(update, {"i": i + 1, 'loss': loss})
 
-#     @tc.closure
-#     @tc.post_op
-#     def cond(i: tc.UInt, loss: tc.tensor.Tensor):
-#         return i <= num_iterations#.logical_and((loss >= min_loss).all())
+    @tc.closure
+    @tc.post_op
+    def cond(i: tc.UInt, loss: tc.tensor.Tensor):
+        return i <= num_iterations#.logical_and((loss >= min_loss).all())
 
-#     return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})
-testAdam_h()
+    return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones([1, 1])})
+testAdam_a()
