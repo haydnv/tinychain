@@ -164,6 +164,9 @@ class Number(Value):
     def __div__(self, other):
         return self.div(other)
 
+    def __mod__(self, other):
+        return self.modulo(other)
+
     def __mul__(self, other):
         return self.mul(other)
 
@@ -254,6 +257,11 @@ class Number(Value):
         """
 
         return self._post("log", {"r": base}, F64)
+
+    def modulo(self, other):
+        """Return the remainder of `self` divided by `other`."""
+
+        return self._get("mod", other, self.__class__)
 
     def mul(self, other):
         """Return the product of `self` and `other`."""

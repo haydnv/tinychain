@@ -3,7 +3,6 @@ from tinychain.ref import After, If, With
 from tinychain.reflect.meta import MethodStub
 from tinychain.reflect import method, op
 from tinychain.state import State
-from tinychain.util import requires
 
 
 def after(when, then):
@@ -41,7 +40,7 @@ def cond(if_condition, then, or_else):
     return rtype(If(if_condition, then, or_else))
 
 
-def closure(op):
+def closure(*deps):
     """
     Annotation to capture data referenced by an :class:`Op` and return a `Closure`.
 
