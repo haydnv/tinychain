@@ -26,9 +26,6 @@ class State(object):
     def __dbg__(self):
         return [form_of(self)]
 
-    def __deps__(self):
-        return requires(form_of(self))
-
     def __eq__(self, _other):
         raise NotImplementedError("State does not support equality; use a more specific type")
 
@@ -400,11 +397,6 @@ class TypeForm(object):
 
         self.__form__ = form
         self.type_data = type_data
-
-    def __deps__(self):
-        deps = set() if self.__form__ is None else requires(self.__form__)
-        deps.update(requires(self.type_data))
-        return deps
 
     def __getitem__(self, key):
         return self.type_data[key]

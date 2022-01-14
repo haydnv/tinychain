@@ -39,16 +39,6 @@ class Context(object):
     def __dbg__(self):
         return [self.form[next(reversed(self.form))]] if self.form else []
 
-    def __deps__(self):
-        provided = set(URI(name) for name in self.form.keys())
-
-        deps = set()
-        for state in self.form.values():
-            deps.update(requires(state))
-
-        deps -= provided
-        return deps - provided
-
     def __getattr__(self, name):
         name = self._get_name(name)
 
@@ -62,8 +52,22 @@ class Context(object):
         else:
             raise AttributeError(f"Context has no such value: {name}")
 
+    def __getitem__(self, selector):
+        if isinstance(selector, slice):
+            cxt = Context()
+            keys = list(self.form.keys())
+            for name in keys[selector]:
+                setattr(cxt, name, self.form[name])
+
+            return cxt
+        else:
+            return getattr(self, selector)
+
     def __json__(self):
         return to_json(list(self.form.items()))
+
+    def __len__(self):
+        return len(self.form)
 
     def __setattr__(self, name, state):
         if state is self:
@@ -181,14 +185,6 @@ class URI(object):
 
     def __radd__(self, other):
         return URI(other) + str(self)
-
-    def __deps__(self):
-        if "://" in self._root or self.startswith('/'):
-            return set()
-        elif '/' in self._root:
-            return set([URI(self._root[:self._root.index('/')])])
-        else:
-            return set([URI(self._root)])
 
     def __eq__(self, other):
         return str(self) == str(other)
@@ -308,28 +304,6 @@ class URI(object):
 
 def print_json(obj):
     print(json.dumps(to_json(obj), indent=4))
-
-
-def requires(subject):
-    """Return a set of the IDs of the dependencies required to resolve the given state."""
-
-    if inspect.isclass(subject):
-        return set()
-
-    if hasattr(subject, "__deps__"):
-        return subject.__deps__()
-
-    deps = set()
-
-    if isinstance(subject, list) or isinstance(subject, tuple):
-        for item in subject:
-            deps.update(requires(item))
-
-    elif isinstance(subject, dict):
-        for item in subject.values():
-            deps.update(requires(item))
-
-    return deps
 
 
 def uri(subject):
