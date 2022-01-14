@@ -4,6 +4,7 @@ from tinychain.reflect.meta import MethodStub
 from tinychain.reflect import method, op
 from tinychain.state import State
 
+
 def after(when, then):
     """
     Delay resolving `then` until `when` has been resolved.
