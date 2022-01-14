@@ -6,7 +6,7 @@ Reference types.
 import logging
 
 from tinychain.reflect import is_conditional, is_op, is_ref
-from tinychain.util import deanonymize, form_of, get_ref, hex_id, requires, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
 class Ref(object):
@@ -36,12 +36,6 @@ class After(Ref):
 
     def __dbg__(self):
         return [self.when, self.then]
-
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.when))
-        deps.update(requires(self.then))
-        return deps
 
     def __json__(self):
         return {str(uri(self)): to_json([self.when, self.then])}
@@ -82,13 +76,6 @@ class Case(Ref):
     def __dbg__(self):
         return [self.cond, self.switch, self.case]
 
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.cond))
-        deps.update(requires(self.switch))
-        deps.update(requires(self.case))
-        return deps
-
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.switch, self.case])}
 
@@ -123,13 +110,6 @@ class If(Ref):
     def __dbg__(self):
         return [self.cond, self.then, self.or_else]
 
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.cond))
-        deps.update(requires(self.then))
-        deps.update(requires(self.or_else))
-        return deps
-
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
 
@@ -163,13 +143,6 @@ class While(Ref):
 
     def __dbg__(self):
         return [self.cond, self.op, self.state]
-
-    def __deps__(self):
-        deps = set()
-        deps.update(requires(self.cond))
-        deps.update(requires(self.op))
-        deps.update(requires(self.state))
-        return deps
 
     def __json__(self):
         return {str(uri(self)): to_json([self.cond, self.op, self.state])}
@@ -207,9 +180,6 @@ class With(Ref):
     def __dbg__(self):
         return [self.capture, self.op]
 
-    def __deps__(self):
-        return set(self.capture)
-
     def __json__(self):
         return {str(uri(self)): to_json([self.capture, self.op])}
 
@@ -232,17 +202,6 @@ class Op(Ref):
     def __dbg__(self):
         subject = [self.subject] if is_ref(self.subject) else []
         return subject + list(self.args)
-
-    def __deps__(self):
-        deps = set()
-
-        if is_ref(self.subject):
-            subject = uri(self.subject).id()
-            if subject:
-                deps.add(URI(subject))
-
-        deps.update(requires(self.args))
-        return deps
 
     def __json__(self):
         if hasattr(self.subject, "__form__"):
@@ -409,11 +368,6 @@ class MethodSubject(object):
 
     def __dbg__(self):
         return [self.subject]
-
-    def __deps__(self):
-        deps = set([uri(self)]) if uri(self).is_id() else set()
-        deps.update(requires(self.subject))
-        return deps
 
     def __ns__(self, cxt):
         name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"

@@ -2,7 +2,7 @@ import inspect
 
 from tinychain import op, ref
 from tinychain.state import State
-from tinychain.util import form_of, requires, to_json, uri, Context, URI
+from tinychain.util import form_of, to_json, uri, Context, URI
 from tinychain.value import Nil, Value
 
 from . import _get_rtype, resolve_class
@@ -19,12 +19,6 @@ class Op(object):
             raise ValueError(f"reflection requires a Python callable, not {form}")
 
         self.form = form
-
-    def __deps__(self):
-        form = form_of(self)
-        params = inspect.signature(self.form).parameters
-        provided = set(URI(param) for param in params)
-        return requires(form) - provided
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
