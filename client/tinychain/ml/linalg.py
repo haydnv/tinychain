@@ -300,13 +300,15 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
             scale: F32,
             g: F32) -> Map:
 
-        @post_op
+        cxt.col_i = U[i:, i]
+        @closure(cxt.col_i)
         def update_cols(i: UInt, l: UInt, n: UInt, U: Tensor, scale: F32) -> F32:
 
             @post_op
             def step(j: UInt, n: UInt, i: UInt, U: Tensor, h: F32) -> Map:
+                cxt.col_j = U[i:, j]
                 return After(
-                    U[i:, j].write(U[i:, j] + U[i:, i] * dot(U[i:, i], U[i:, j]) / h),
+                    cxt.col_j.write(cxt.col_j + cxt.col_i * dot(cxt.col_i, cxt.col_j) / h),
                     Map(j=j + 1, n=n, i=i, U=U, h=h)
                 )
 
@@ -314,30 +316,33 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
             def cond(j: UInt, n: UInt) -> Bool:
                 return j < n
 
-            s, f = Tuple(After(U[i:, i].write(U[i:, i] / scale), [dot(U[i:, i], U[i:, i]), U[i, i]])).unpack(2)
+            s, f = Tuple(After(cxt.col_i.write(cxt.col_i / scale), [dot(cxt.col_i, cxt.col_i), U[i, i]])).unpack(2)
             s = Float(s)
             f = Float(f)
-            g = -sign_like(s.pow(0.5), f)
+            g = -sign_like(s**0.5, f)
             h = Float(After(U[i, i].write(f - g), (f * g) - s))
 
             g = After(While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)), g)
-            return After(U[i:, i].write(U[i:, i] * scale), g)
+            return After(cxt.col_i.write(cxt.col_i * scale), g)
 
         @post_op
         def update_rows(i: UInt, l: UInt, m: UInt, U: Tensor, e: Tensor, scale: F32) -> F32:
 
+            cxt.row_i = U[i, l:]
+            @closure(cxt.row_i)
             @post_op
             def step(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Map:
-                return Map(After(
-                    U[j, l:].write(U[j, l:] + e[l:] * dot(U[j, l:], U[i, l:])),
+                cxt.row_j = U[j, l:]
+                return After(
+                    cxt.row_j.write(cxt.row_j + e[l:] * dot(cxt.row_j, cxt.row_i)),
                     Map(j=j + 1, m=m, l=l, i=i, U=U, e=e)
-                ))
+                )
 
             @post_op
             def cond(j: UInt, m: UInt) -> Bool:
                 return j < m
 
-            s, f = Tuple(After(U[i, l:].write(U[i, l:] / scale), [dot(U[i, l:], U[i, l:]), U[i, l]])).unpack(2)
+            s, f = Tuple(After(cxt.row_i.write(cxt.row_i / scale), [dot(cxt.row_i, cxt.row_i), U[i, l]])).unpack(2)
             s = Float(s)
             f = Float(f)
             g = -sign_like(s**0.5, f)
@@ -347,7 +352,7 @@ def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
 
             g = After(While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)), g)
 
-            return After([s, U[i, l:].write(U[i, l:] * scale)], g)
+            return After([s, cxt.row_i.write(cxt.row_i * scale)], g)
 
          
 
