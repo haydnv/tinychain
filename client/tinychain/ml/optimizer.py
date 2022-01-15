@@ -1,58 +1,86 @@
 from abc import abstractmethod
 
-from tinychain.collection.tensor import Tensor
+from tinychain.collection.tensor import Dense, Tensor
 from tinychain.decorators import closure, post_op
 from tinychain.ref import After, While
 from tinychain.state import Map
-from tinychain.value import F32, UInt
+from tinychain.value import F32, Float, UInt
 
 
 class Optimizer(Map):
     @abstractmethod
-    def optimize(self, i, gradient, inputs, loss):
+    def optimize(self):
         """Update the given `gradient` by computing deltas for the given `loss`."""
+
+    @property
+    def lr(self) -> Float:
+        return self['lr']
 
 
 class GradientDescent(Optimizer):
     @classmethod
-    def create(cls, learning_rate=F32(0.01)):
-        """Create a new `GradientDescent` optimizer with the given `learning_rate`."""
+    def create(cls, lr=F32(0.01)):
+        """
+        Create a new `GradientDescent` optimizer with the given hyperparameter.
 
-        return cls({"lr": learning_rate})
+        Args:
+            `lr` (float): learning rate
+        """
 
-    def optimize(self, i, gradient, inputs, loss):
+        return cls({"lr": lr})
+
+    def optimize(self, i, param_list):
+        return [param.value.write(param.value - (param.grad * self.lr)) for param in param_list]
+
+
+class Adam(Optimizer):
+
+    @classmethod
+    def create(cls, param_list,  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
+        """
+        Create a new `Adam` optimizer with the given hyperparameters.
+
+        Args:
+            `param_list` (list): A list of parameters to optimize
+            `beta1` (float): The exponential decay rate for the 1st moment estimates;
+            `beta2` (float): The exponential decay rate for the 2nd moment estimates;
+            `lr` (float): learning rate
+            `eps` (float): A small constant for numerical stability.
+        """
+
+        m = Map({p.name: Dense.zeros(p.shape, F32) for p in param_list})
+        v = Map({p.name: Dense.zeros(p.shape, F32) for p in param_list})
+
+        return cls({"beta1": beta1, "beta2": beta2, "m": m, "v": v, "lr": lr, "eps": eps})
+
+    def optimize(self, i, param_list):
+        # TODO: is there a better way to make these accessible to `Map` methods?
+        beta1 = self["beta1"]
+        beta2 = self["beta2"]
+        m = self["m"]
+        v = self["v"]
         lr = self["lr"]
+        eps = self["eps"]
 
-        def update(gradient, deltas):
-            shape = gradient.shape
-
-            if isinstance(shape, dict):
-                return {name: update(gradient[name], deltas[name]) for name in shape}
-            elif isinstance(shape, list) or isinstance(shape, tuple):
-                return [update(gradient[n], deltas[n]) for n in range(len(shape))]
-            else:
-                return gradient.write(gradient - (deltas * lr))
-
-        # discard the loss here since there's nowhere to propagate it to
-        _loss, deltas = gradient.backward(inputs, loss)
-        return update(gradient, deltas)
+        update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1.0) - beta1)) for p in param_list]
+        update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
+        a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
+        return After(
+            [update_m, update_v],
+            [
+                p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
+                for p in param_list
+            ])
 
 
-def train(model, optimizer, inputs, labels, cost, train_while):
-    """
-    Train a :class:`Differentiable` such as a neural network while the given `train_while` condition is `True`.
-
-    Two named states are provided to `train_while`:
-        `i`: the iteration number, a one-indexed `UInt`
-        `output`: a `Tensor`, the last output of the model.
-    """
-
-    @closure(model, optimizer, inputs, labels)
+def train(model, optimizer, inputs, labels, cost, cond):
+    @closure(model, optimizer, labels, inputs)
     @post_op
-    def step(i: UInt, output: Tensor):
-        loss = cost(output, labels)
-        update = optimizer.optimize(i, model, inputs, loss)
-        return After(update, {"i": i + 1, "output": model.forward(inputs).copy()})
+    def step(cxt, i: UInt):
+        cxt.output = model.forward(inputs).copy()
+        cxt.loss = cost(cxt.output, labels)
+        _, param_list = model.backward(inputs, cxt.loss)
+        update = optimizer.optimize(i, param_list)
+        return After(update, {"i": i + 1, "output": cxt.output})
 
-    output = model.forward(inputs).copy()
-    return While(train_while, step, {"i": 1, "output": output})
+    return While(cond, step, {"i": 1, "output": model.forward(inputs)})

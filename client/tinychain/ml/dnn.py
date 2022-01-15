@@ -1,24 +1,32 @@
 # Constructors for a generic deep neural network.
 #
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
+import functools
+import operator
 
-from tinychain.collection.tensor import einsum, Dense
-from tinychain.ml import Layer, NeuralNet, Sigmoid
+from tinychain.collection.tensor import einsum, Dense, Tensor
+from tinychain.ml import Layer, NeuralNet, Sigmoid, DiffedParameter, Parameter
 
 
 class DNNLayer(Layer):
     @classmethod
-    def create(cls, input_size, output_size, activation=Sigmoid()):
+    def create(cls, name, input_size, output_size, activation=Sigmoid()):
         """Create a new, empty `DNNLayer` with the given shape and activation function."""
 
         weights = Dense.create((input_size, output_size))
         bias = Dense.create((output_size,))
 
-        return cls.load(weights, bias, activation)
+        return cls.load(name, weights, [input_size, output_size], bias, [output_size,], activation)
 
     @classmethod
-    def load(cls, weights, bias, activation=Sigmoid()):
+    def load(cls, name, weights, bias, activation=Sigmoid()):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
+
+        if not isinstance(bias, Tensor):
+            raise ValueError(f"Layer bias must be a Tensor, not {bias}")
+
+        if not isinstance(weights, Tensor):
+            raise ValueError(f"Layer weights must be a Tensor, not {weights}")
 
         class _DNNLayer(cls):
             @classmethod
@@ -26,26 +34,33 @@ class DNNLayer(Layer):
             def shape(cls):
                 return {"weights": weights.shape, "bias": bias.shape}
 
-            @property
-            def activation(self):
-                return activation
+            def forward(self, x):
+                inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+                return activation.forward(inputs)
 
-        return _DNNLayer({"weights": weights, "bias": bias})
+            def backward(self, x, loss):
+                m = x.shape[0]
+                inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
+                delta = Tensor(loss * activation.backward(inputs))
+                dL = einsum("ij,kj->ki", [self["weights"], delta])
+                return dL, [
+                    DiffedParameter(
+                        name=name + '.weight',
+                        value=self["weights"],
+                        grad=einsum("ki,kj->ij", [x, delta]).copy() / m),
+                    DiffedParameter(
+                        name=name + '.bias',
+                        value=self["bias"],
+                        grad=delta.sum(0) / m)
+                ]
 
-    @property
-    def activation(self):
-        return Sigmoid()
+            def get_param_list(self):
+                return [
+                    Parameter(name=name + '.weight', value=self["weights"]),
+                    Parameter(name=name + '.bias', value=self["bias"]),
+                ]
 
-    def forward(self, x):
-        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-        return self.activation.forward(inputs)
-
-    def backward(self, x, loss):
-        m = x.shape[0]
-        inputs = einsum("ki,ij->kj", [x, self["weights"]]) + self["bias"]
-        delta = loss * self.activation.backward(inputs)
-        update = einsum("ki,kj->ij", [x, delta]).copy()
-        return delta, {"weights": update / m, "bias": update.sum(0) / m}
+        return _DNNLayer({"bias": bias, "weights": weights})
 
 
 class DNN(NeuralNet):
@@ -87,12 +102,15 @@ class DNN(NeuralNet):
                     layer_output = self[l].forward(layer_inputs[-1]).copy()
                     layer_inputs.append(layer_output)
 
-                layer_gradients = []
+                param_list = []
                 for l in reversed(range(n)):
-                    loss, layer_gradient = self[l].backward(layer_inputs[l], loss)
+                    loss, layer_param_list = self[l].backward(layer_inputs[l], loss)
                     loss = loss.copy()
-                    layer_gradients.insert(0, layer_gradient)
+                    param_list.extend(layer_param_list)
 
-                return loss, layer_gradients
+                return loss, param_list
+
+            def get_param_list(self):
+                return functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])
 
         return DNN(layers)

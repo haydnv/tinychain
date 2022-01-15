@@ -60,6 +60,13 @@ class Differentiable(object):
         """
 
     @abstractmethod
+    def get_param_list(self):
+        """
+        Returns a parameters as List[Parameter] of `Layer`
+        """
+        return []
+
+    @abstractmethod
     def write(self, new_values):
         """
         Overwrite the values of this `Gradient` with the given `new_values`.
@@ -98,3 +105,17 @@ class NeuralNet(Tuple, Differentiable):
     @abstractmethod
     def load(cls, *args, **kwargs):
         pass
+
+
+class Parameter(object):
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+        self.shape = self.value.shape
+
+
+class DiffedParameter(object):
+    def __init__(self, name, value, grad):
+        self.name = name
+        self.value = value
+        self.grad = grad
