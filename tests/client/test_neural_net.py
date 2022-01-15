@@ -109,30 +109,7 @@ class DNNTests(ClientTest):
             fit = ((output > 0.5) == cxt.labels).all()
             return fit.logical_not().logical_and(i <= MAX_ITERATIONS)
 
-        cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
-
-        response = self.host.post(ENDPOINT, cxt)
-        self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
-
-    def testAdam(self):
-        def cost(output, labels):
-            return (output - labels)**2
-
-        cxt = tc.Context()
-
-        inputs = np.random.random(NUM_EXAMPLES * 5).reshape([NUM_EXAMPLES, 5])
-        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1]).astype(np.float32)
-
-        cxt.inputs = load(inputs)
-        cxt.labels = load(labels, tc.F32)
-
-        cxt.input_layer0 = self.create_layer('layer0', 5, 4, tc.ml.Sigmoid())
-        cxt.input_layer1 = self.create_layer('layer1', 4, 2, tc.ml.ReLU())
-        cxt.output_layer = self.create_layer('layer2', 2, 1, tc.ml.Sigmoid())
-
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
-        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list())
+        cxt.optimizer = tc.ml.optimizer.Adam.create(cxt.nn.get_param_list())
 
         @tc.closure(cxt.labels)
         @tc.post_op
@@ -140,7 +117,6 @@ class DNNTests(ClientTest):
             return (i <= MAX_ITERATIONS).logical_and(((output - cxt.labels)**2 >= 1e-3).all())
 
         cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
-
         response = self.host.post(ENDPOINT, cxt)
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
 
