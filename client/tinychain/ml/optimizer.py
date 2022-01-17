@@ -15,7 +15,6 @@ class Optimizer(Map):
     def lr(self) -> F32:
         return self['lr']
 
-
 class GradientDescent(Optimizer):
     @classmethod
     def create(cls, lr=F32(0.01)):
@@ -41,45 +40,48 @@ class Adam(Optimizer):
             `param_list`: a `List[Parameter]` of model's parameters for optimizing.
         """
 
-        m = {p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list}
-        v = {p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list}
+        m = Map({p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list})
+        v = Map({p.name: tc.tensor.Dense.zeros(p.ct_shape, F32) for p in param_list})
 
+        return cls({"beta1": beta1, "beta2": beta2, "eps": eps, "lr": lr, "m": m, "v": v})
 
-        class _Adam(cls):
-
-            def optimize(self, i, param_list: t.List[DiffedParameter]):
-                update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1.0) - beta1)) for p in param_list]
-                update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
-                a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
-                return tc.After(
-                    when=[update_m, update_v],
-                    then=[
-                        p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
-                        for p in param_list
-                    ])
-
-            @property
-            def lr(self) -> F32:
-                return lr
-
-        return _Adam()
-
-
-def train(model, optimizer, inputs, labels, cost, num_iterations: UInt):
     
+        
+    def optimize(self, i, param_list: t.List[DiffedParameter], model):
+        beta1 = self["beta1"]
+        beta2 = self["beta2"]
+        lr = self["lr"]
+        eps = self["eps"]
+        m = self["m"]
+        v = self["v"]
+        update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1.0) - beta1)) for p in param_list]
+        update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
+        a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
+        update_model = [
+                p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
+                for p in param_list
+                ]
+        return tc.After(
+            when=[update_m, update_v],
+            then=update_model)
+
+
+def train(cxt, model, optimizer, inputs, labels, cost, num_iterations: UInt):
+
+
     @tc.closure(model, optimizer, labels, inputs)
     @tc.post_op
-    def step(i: UInt, loss, dloss, output, inputs: tc.tensor.Tensor):
-        output = model.forward(inputs).copy()
-        loss = cost(output, labels)
-        dloss = cost(output, labels, dl=True)
-        param_list = model.backward(inputs, dloss)
-        update = optimizer.optimize(i, param_list)
-        return tc.After(update, {"i": i + 1, 'loss': loss})
+    def step(cxt, i: UInt):
+        cxt.output = model.forward(inputs).copy()
+        cxt.loss = cost(cxt.output, labels)
+        cxt.dloss = cost(cxt.output, labels, dl=True)
+        param_list = model.backward(inputs, cxt.dloss)
+        update = optimizer.optimize(i, param_list, model)
+        return tc.After(update, {"i": i + 1, 'loss': cxt.loss})
 
-    @tc.closure()
+    @tc.closure(model, optimizer, labels, inputs)
     @tc.post_op
-    def cond(i: UInt):
+    def cond(i: UInt, loss: tc.tensor.Tensor):
         return i <= num_iterations
-
-    return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones(inputs.shape)})
+    
+    return tc.While(cond, step, {"i": 1, "loss": tc.tensor.Dense.ones(labels.shape)})
