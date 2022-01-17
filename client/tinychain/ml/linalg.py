@@ -2,7 +2,8 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, Float, UInt, F32, Int, Number
+from tinychain.value import Bool, F64, Float, UInt, F32, Int, Number, String
+from tinychain.error import BadRequest
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -284,115 +285,117 @@ def sign_like(a, b):
 def dot(x1, x2):
     return (x1 * x2).sum()
 
-@post_op
-def householder_bidiag(U: Tensor, W: Tensor, e: Tensor) -> Map:
+def householder(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
     """Householder's reduction to bidiagonal form"""
 
+    txn.shape = U.shape
+    txn.m, txn.n = [UInt(dim) for dim in txn.shape.unpack(2)]
+    
+    @closure(U, W, e, txn.m, txn.n)
     @post_op
-    def step(
-            cxt,
-            i: UInt,
-            n: UInt,
-            m: UInt,
-            U: Tensor,
-            W: Tensor,
-            e: Tensor,
-            scale: F32,
-            g: F32) -> Map:
+    def step(cxt, i: UInt, scale: F32, g: F32) -> Map:
 
-        cxt.col_i = U[i:, i]
-        @closure(cxt.col_i)
-        def update_cols(i: UInt, l: UInt, n: UInt, U: Tensor, scale: F32) -> F32:
+        @closure(U, txn.n)
+        @post_op
+        def update_cols(cxt, i: UInt, l: UInt, scale: F32) -> F32:
+            cxt.col_i = U[i:, i]
 
+            outer_cxt = cxt
+            @closure(U, txn.n, i, outer_cxt.col_i)
             @post_op
-            def step(j: UInt, n: UInt, i: UInt, U: Tensor, h: F32) -> Map:
+            def step(cxt, j: UInt, h: F32) -> Map:
                 cxt.col_j = U[i:, j]
                 return After(
-                    cxt.col_j.write(cxt.col_j + cxt.col_i * dot(cxt.col_i, cxt.col_j) / h),
-                    Map(j=j + 1, n=n, i=i, U=U, h=h)
+                    cxt.col_j.write(cxt.col_j + outer_cxt.col_i * dot(outer_cxt.col_i, cxt.col_j) / h),
+                    Map(j=j + 1, h=h)
                 )
 
+            @closure(txn.n)
             @post_op
-            def cond(j: UInt, n: UInt) -> Bool:
-                return j < n
+            def cond(j: UInt) -> Bool:
+                return j < txn.n
 
-            s, f = Tuple(After(cxt.col_i.write(cxt.col_i / scale), [dot(cxt.col_i, cxt.col_i), U[i, i]])).unpack(2)
-            s = Float(s)
-            f = Float(f)
-            g = -sign_like(s**0.5, f)
-            h = Float(After(U[i, i].write(f - g), (f * g) - s))
+            cxt.descale_col = cxt.col_i.write(cxt.col_i / scale)
 
-            g = After(While(cond, step, Map(j=l, n=n, i=i, U=U, h=h)), g)
-            return After(cxt.col_i.write(cxt.col_i * scale), g)
+            cxt.s = Float(After(cxt.descale_col, dot(cxt.col_i, cxt.col_i)))
+            cxt.f = Float(After(cxt.descale_col, U[i, i]))
+            cxt.g = -sign_like(cxt.s ** 0.5, cxt.f)
 
+            cxt.h = Float(After(U[i, i].write(cxt.f - cxt.g), (cxt.f * cxt.g) - cxt.s))
+
+            cxt.update_col = While(cond, step, Map(j=l, h=cxt.h))
+            cxt.rescale_col = After(cxt.update_col, cxt.col_i.write(cxt.col_i * scale))
+            return If(
+                scale.abs() < EPS,
+                BadRequest(String("scale of column {{i}} is {{scale}}").render(i=i, scale=scale)),
+                After(cxt.rescale_col, cxt.g))
+
+        @closure(U, e, txn.m, i)
         @post_op
-        def update_rows(i: UInt, l: UInt, m: UInt, U: Tensor, e: Tensor, scale: F32) -> F32:
-
+        def update_rows(cxt, l: UInt, scale: F32) -> F32:
             cxt.row_i = U[i, l:]
-            @closure(cxt.row_i)
+
+            outer_cxt = cxt
+            @closure(U, e, txn.m, i, l, outer_cxt.row_i)
             @post_op
-            def step(j: UInt, m: UInt, l: UInt, i: UInt, U: Tensor, e: Tensor) -> Map:
+            def step(cxt, j: UInt) -> Map:
                 cxt.row_j = U[j, l:]
-                return After(
-                    cxt.row_j.write(cxt.row_j + e[l:] * dot(cxt.row_j, cxt.row_i)),
-                    Map(j=j + 1, m=m, l=l, i=i, U=U, e=e)
-                )
+                cxt.update = cxt.row_j.write(cxt.row_j + e[l:] * dot(cxt.row_j, outer_cxt.row_i))
+                return After(cxt.update, Map(j=j + 1))
 
+            @closure(txn.m)
             @post_op
-            def cond(j: UInt, m: UInt) -> Bool:
-                return j < m
+            def cond(j: UInt) -> Bool:
+                return j < txn.m
 
-            s, f = Tuple(After(cxt.row_i.write(cxt.row_i / scale), [dot(cxt.row_i, cxt.row_i), U[i, l]])).unpack(2)
-            s = Float(s)
-            f = Float(f)
-            g = -sign_like(s**0.5, f)
-            h = After(U[i, l].write(f - g), (f * g) - s)
+            cxt.U_i_l = U[i, l]
+            
+            cxt.descale = cxt.row_i.write(cxt.row_i / scale)
 
-            s = After(e[l:].write(U[i, l:] / h), s)
+            cxt.s_init = Float(After(cxt.descale, dot(cxt.row_i, cxt.row_i)))
+            cxt.f = Float(After(cxt.descale, U[i, l]))
+            cxt.g_init = -sign_like(cxt.s_init ** 0.5, cxt.f)
 
-            g = After(While(cond, step, Map(j=l, m=m, l=l, i=i, U=U, e=e)), g)
+            cxt.h = After(cxt.U_i_l.write(cxt.f - cxt.g_init), (cxt.f * cxt.g_init) - cxt.s_init)
+            cxt.s_final = After(e[l:].write(cxt.row_i / cxt.h), cxt.s_init)
+            cxt.g_final = After(While(cond, step, Map(j=l)), cxt.g_init)
 
-            return After([s, cxt.row_i.write(cxt.row_i * scale)], g)
+            cxt.rescale = After(cxt.s_final, cxt.row_i.write(cxt.row_i * scale))
+            return After(cxt.rescale, cxt.g_final)
 
          
 
         cxt.update_cols = update_cols
         cxt.update_rows = update_rows
 
-        l = UInt(After(e[i].write(scale * g), i + 1))
-        scale = Float(If(i < m, dot(U[i:, i], U[i:, i]), scale))
-        g = Float(If(
-            Bool(i < m).logical_and(scale > EPS),
-            cxt.update_cols(i=i, l=l, n=n, U=U, scale=scale),
+        cxt.update_e = e[i].write(scale * g)
+        cxt.l = UInt(After(cxt.update_e, i + 1))
+        cxt.scale_init = Float(If(i < txn.m, dot(U[i:, i], U[i:, i]), scale))
+        cxt.g_init = Float(If(
+            Bool(i < txn.m).logical_and(cxt.scale_init.abs() > EPS),
+            cxt.update_cols(i=i, l=cxt.l, scale=cxt.scale_init),
             0.0))
 
-        @closure
-        @get_op
-        def get_scale(i: UInt):
-            return Float(If(
-            Bool(i < m).logical_and(i != n - 1),
-            dot(U[i, l:], U[i, l:]),
-            scale))   
-        cxt.get_scale = get_scale    
+        cxt.scale_new = Float(If(
+            Bool(i < txn.m).logical_and(i != txn.n - 1),
+            dot(U[i, cxt.l:], U[i, cxt.l:]),
+            scale))
 
-        scale = Float(After(W[i].write(scale * g), cxt.get_scale(i)))
+        cxt.scale_final = Float(After(W[i].write(cxt.scale_new * cxt.g_init), cxt.scale_new))
 
         g = If(
-            Bool(i < m).logical_and(i != n - 1).logical_and(scale > EPS),
-            cxt.update_rows(i=i, l=l, m=m, U=U, e=e, scale=scale),
+            Bool(i < txn.m).logical_and(i != txn.n - 1).logical_and(cxt.scale_init > EPS),
+            cxt.update_rows(l=cxt.l, scale=cxt.scale_final),
             0.0)
 
-        return Map(i=i + 1, n=n, m=m, U=U, W=W, e=e, scale=scale, g=g)
+        return Map(i=i + 1, scale=cxt.scale_final, g=g, U=U, W=W, e=e)
 
+    @closure(txn.n)
     @post_op
-    def cond(i: UInt, n: UInt) -> Bool:
-        return i < n
+    def cond(i: UInt) -> Bool:
+        return i < txn.n
 
-    m, n = U.shape.unpack(2)
-    g = 0.0
-    scale = 0.0
-
-    return Map(While(cond, step, Map(i=UInt(0), n=n, m=m, U=U, W=W, e=e, scale=scale, g=g)))
+    return Map(While(cond, step, Map(i=0, scale=0.0, g=0.0, U=U, W=W, e=e)))
 
 @post_op
 def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
