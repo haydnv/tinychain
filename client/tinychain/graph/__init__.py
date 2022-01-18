@@ -6,7 +6,7 @@ from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.ref import After, Get, If, MethodSubject, Put, While, With
 from tinychain.state import Map, Tuple
 from tinychain.util import uri
-from tinychain.value import Bool, Nil, U64, String
+from tinychain.value import Bool, Nil, U32, String
 
 from .edge import DIM, Edge, ForeignKey
 
@@ -35,14 +35,14 @@ class Schema(object):
         assert edge.to_table in self.tables
         to_table = self.tables[edge.to_table]
 
-        if from_table.key != [Column(edge.column, U64)]:
+        if from_table.key != [Column(edge.column, U32)]:
             raise ValueError(f"invalid foreign key column: {edge.from_table}.{edge.column} (key is {from_table.key})")
 
         [pk] = [col for col in from_table.key if col.name == edge.column]
 
         if edge.from_table != edge.to_table:
             if len(to_table.key) != 1:
-                raise ValueError("the primary key of a Graph node type must be a single U64 column, not", to_table.key)
+                raise ValueError("the primary key of a Graph node type must be a single U32 column, not", to_table.key)
 
             [fk] = [col for col in to_table.values if col.name == edge.column]
             if pk != fk:
@@ -66,7 +66,7 @@ class Schema(object):
 
 class Graph(Map):
     """
-    A graph database consisting of a set of :class:`Table` s with :class:`U64` primary keys which serve as node IDs.
+    A graph database consisting of a set of :class:`Table` s with :class:`U32` primary keys which serve as node IDs.
 
     Relationships are stored in 2D `Sparse` tensors whose coordinates take the form `[from_id, to_id]`.
     The two types of relationships are `Edge` and `ForeignKey`. These are distinguished by the graph schema--
@@ -114,11 +114,11 @@ def graph_table(graph, schema, table_name):
     table_schema = schema.tables[table_name]
 
     if len(table_schema.key) != 1:
-        raise ValueError("Graph table key must be a single column of type U64, not", table_schema.key)
+        raise ValueError("Graph table key must be a single column of type U32, not", table_schema.key)
 
     [key_col] = table_schema.key
-    if key_col.dtype != U64:
-        raise ValueError("Graph table key must be type U64, not", key_col.dtype)
+    if key_col.dtype != U32:
+        raise ValueError("Graph table key must be type U32, not", key_col.dtype)
 
     def delete_row(edge, adjacent, row):
         delete_from = adjacent[row[edge.column]].write(False)
@@ -168,7 +168,7 @@ def graph_table(graph, schema, table_name):
             """Return the maximum ID present in this :class:`Table`."""
 
             row = Tuple(self.order_by([key_col.name], True).select([key_col.name]).rows().first())
-            return U64(If(row.is_none(), 0, row[0]))
+            return U32(If(row.is_none(), 0, row[0]))
 
         def read_vector(self, node_ids):
             """Given a vector of `node_ids`, return a :class:`Stream` of :class:`Table` rows matching those IDs."""

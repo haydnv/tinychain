@@ -259,6 +259,7 @@ class Get(Op):
 
         if is_op_ref(self.args):
             (key,) = self.args
+            log_anonymous(key)
             self.args = (reference(cxt, key),)
 
 
@@ -287,8 +288,13 @@ class Put(Op):
 
         if is_op_ref(self.args):
             key, value = self.args
+
+            log_anonymous(key)
             key = reference(cxt, key)
+
+            log_anonymous(value)
             value = reference(cxt, value)
+
             self.args = (key, value)
 
 
@@ -319,9 +325,15 @@ class Post(Op):
         if not isinstance(self.args, dict):
             raise ValueError(f"POST arguments must be a Python dict, not {self.args}")
 
-        self.args = {
-            name: reference(cxt, arg) if is_op_ref(arg) else arg
-            for name, arg in self.args.items()}
+        args = {}
+        for name, arg in self.args.items():
+            if is_op_ref(arg):
+                log_anonymous(arg)
+                args[name] = reference(cxt, arg)
+            else:
+                args[name] = arg
+
+        self.args = args
 
 
 class Delete(Op):
@@ -349,6 +361,7 @@ class Delete(Op):
         super().__ns__(cxt)
 
         if is_op_ref(self.args):
+            log_anonymous(self.args)
             self.args = reference(cxt, self.args)
 
 
@@ -423,10 +436,30 @@ def is_op_ref(fn):
         return False
 
 
+def is_write_op_ref(fn):
+    if isinstance(fn, Delete) or isinstance(fn, Put):
+        return True
+    elif hasattr(fn, "__form__"):
+        return is_write_op_ref(form_of(fn))
+    elif isinstance(fn, list) or isinstance(fn, tuple):
+        return any(is_write_op_ref(item) for item in fn)
+    elif isinstance(fn, dict):
+        return any(is_write_op_ref(fn[k]) for k in fn)
+    else:
+        return False
+
+
+def log_anonymous(arg):
+    if is_write_op_ref(arg):
+        logging.warning(f"assigning auto-generated name to the result of {arg}")
+    elif is_op_ref(arg):
+        logging.info(f"assigning auto-generated name to the result of {arg}")
+
+
 def reference(cxt, state):
     name = f"{state.__class__.__name__}_{hex_id(state)}"
-    if not name in cxt:
-        logging.debug(f"auto-assigning name {name} to {state} in {cxt}")
+    if name not in cxt:
+        logging.debug(f"assigned name {name} to {state} in {cxt}")
         setattr(cxt, name, state)
 
     return URI(name)

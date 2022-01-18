@@ -1,4 +1,5 @@
 import inspect
+import logging
 
 from tinychain import op, ref
 from tinychain.state import State
@@ -53,6 +54,9 @@ class Get(Op):
             args.append(dtype(URI(key_name)))
 
         cxt._return = self.form(*args)  # populate the Context
+
+        validate(cxt, sig.parameters)
+
         return key_name, cxt
 
     def __ref__(self, name):
@@ -112,6 +116,9 @@ class Put(Op):
                 f"{self.dtype()} accepts a maximum of three arguments: (cxt, key, value) (found {param_names})")
 
         cxt._return = self.form(*args)
+
+        validate(cxt, sig.parameters)
+
         return key_name, value_name, cxt
 
     def __ref__(self, name):
@@ -145,6 +152,9 @@ class Post(Op):
             kwargs[name] = dtype(URI(name))
 
         cxt._return = self.form(*args, **kwargs)
+
+        validate(cxt, sig.parameters)
+
         return cxt
 
     def __ref__(self, name):
@@ -203,4 +213,38 @@ def _maybe_first_arg(op):
             else:
                 raise ValueError(f"{param} must be a {Context}, not {param.annotation}")
 
+    validate(cxt, sig.parameters)
+
     return cxt, args
+
+
+def validate(cxt, provided):
+    defined = set(provided)
+    for name in cxt.form:
+        def validate_ref(ref):
+            if not hasattr(ref, "__uri__") and not isinstance(ref, URI):
+                return
+
+            ref = uri(ref)
+            if ref.id() is not None and ref.id() not in defined:
+                logging.info(f"{cxt} depends on undefined state {ref.id()}--is it part of a Closure?")
+
+        form = cxt.form[name]
+        while hasattr(form, "__form__"):
+            form = form_of(form)
+
+        if isinstance(form, URI):
+            validate_ref(form)
+        if isinstance(form, ref.Op):
+            validate_ref(form.subject)
+
+            if isinstance(form.args, list) or isinstance(form.args, tuple):
+                for arg in form.args:
+                    validate_ref(arg)
+            elif isinstance(form.args, dict):
+                for arg_name in form.args:
+                    validate_ref(form.args[arg_name])
+            else:
+                validate_ref(form.args)
+
+        defined.add(name)

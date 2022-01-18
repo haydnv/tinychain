@@ -94,7 +94,7 @@ class Bytes(Value):
     __uri__ = uri(Value) + "/bytes"
 
 
-class Email(Value):
+class EmailAddress(Value):
     """An email address"""
 
     __uri__ = uri(Value) + "/email"
