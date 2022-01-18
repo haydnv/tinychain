@@ -278,6 +278,7 @@ def svd(matrix: Tensor) -> Tuple:
 
     raise NotImplementedError("singular value decomposition")
 
+
 def sign_like(a, b):
     return Number(If(b >= 0, a.abs(), -a.abs()))
 
@@ -285,7 +286,8 @@ def sign_like(a, b):
 def dot(x1, x2):
     return (x1 * x2).sum()
 
-def householder(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
+
+def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
     """Householder's reduction to bidiagonal form"""
 
     txn.shape = U.shape
@@ -363,8 +365,6 @@ def householder(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
             cxt.rescale = After(cxt.s_final, cxt.row_i.write(cxt.row_i * scale))
             return After(cxt.rescale, cxt.g_final)
 
-         
-
         cxt.update_cols = update_cols
         cxt.update_rows = update_rows
 
@@ -396,6 +396,7 @@ def householder(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
         return i < txn.n
 
     return Map(While(cond, step, Map(i=0, scale=0.0, g=0.0, U=U, W=W, e=e)))
+
 
 @post_op
 def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
@@ -435,7 +436,6 @@ def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
 
                 return After(cond, [V[i,l:].write(Float(0.0)), V[l:,i].write(Float(0.0))])
 
-
             return If(Bool(i < n-1), update_cols(n=n, l=l, i=i, U=U,  V=V))
 
         cxt.update_cols_wo_last = update_cols_wo_last
@@ -456,3 +456,4 @@ def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
     l = 0
 
     return Map(While(cond, step, Map(i=n-1, n=n, m=m, U=U, V=V, e=e, l=l, g=g)))    
+    
