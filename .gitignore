@@ -8,5 +8,4 @@ tests/venv
 .idea
 .project
 
-#igrore
 .vscode
