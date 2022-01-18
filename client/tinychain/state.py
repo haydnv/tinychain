@@ -1,5 +1,7 @@
 """TinyChain `State` s, like `Map`, `Tuple`, and `Op`."""
 
+import logging
+
 from tinychain import ref, reflect
 from tinychain.util import *
 
