@@ -1,5 +1,7 @@
 """TinyChain `State` s, like `Map`, `Tuple`, and `Op`."""
 
+import logging
+
 from tinychain import ref, reflect
 from tinychain.util import *
 
@@ -58,7 +60,7 @@ class State(object):
     def _get(self, name, key=None, rtype=None):
         subject = ref.MethodSubject(self, name)
         op_ref = ref.Get(subject, key)
-        rtype = State if rtype is None else rtype
+        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
         return rtype(op_ref)
 
     def _put(self, name, key=None, value=None):
@@ -72,7 +74,7 @@ class State(object):
 
         subject = ref.MethodSubject(self, name)
         op_ref = ref.Post(subject, params)
-        rtype = Nil if rtype is None else rtype
+        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
         return rtype(op_ref)
 
     def _delete(self, name, key=None):
@@ -146,6 +148,7 @@ class Map(State):
         form = form_of(self)
         if isinstance(form, TypeForm):
             rtype = type(form[key])
+            rtype = rtype if issubclass(rtype, State) else State
             if hasattr(form[key], "__ref__"):
                 return rtype(get_ref(form[key], f"{uri(self)}/{key}"))
         else:
@@ -213,6 +216,7 @@ class Tuple(State):
         form = form_of(self)
         if isinstance(form, TypeForm):
             rtype = type(form[key])
+            rtype = rtype if issubclass(rtype, State) else State
             if hasattr(form[key], "__ref__"):
                 return rtype(get_ref(form[key], f"{uri(self)}/{key}"))
         else:

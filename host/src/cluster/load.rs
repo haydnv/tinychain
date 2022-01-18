@@ -39,25 +39,6 @@ pub async fn instantiate(
         debug!("Cluster member: {}", scalar);
 
         match scalar {
-            Scalar::Ref(tc_ref) => {
-                let op_ref = OpRef::try_from(*tc_ref)?;
-                match op_ref {
-                    OpRef::Get((class, schema)) => {
-                        let classpath = TCPathBuf::try_from(class)?;
-                        let ct = ChainType::from_path(&classpath)
-                            .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
-
-                        debug!("an instance of {} with schema {}", ct, schema);
-                        let schema = Schema::from_scalar(schema)?;
-                        chain_schema.insert(id, (ct, schema));
-                    }
-                    OpRef::Post((extends, proto)) => {
-                        let extends = extends.try_into()?;
-                        classes.insert(id, InstanceClass::new(Some(extends), proto));
-                    }
-                    other => return Err(TCError::bad_request("expected a Chain but found", other)),
-                }
-            }
             Scalar::Op(op_def) => {
                 let op_def = if op_def.is_write() {
                     // make sure not to replicate ops internal to this OpDef
@@ -82,11 +63,37 @@ pub async fn instantiate(
 
                 cluster_proto.insert(id, Scalar::Op(op_def));
             }
+            Scalar::Ref(tc_ref) => {
+                let op_ref = OpRef::try_from(*tc_ref)?;
+                match op_ref {
+                    OpRef::Get((class, schema)) => {
+                        let classpath = TCPathBuf::try_from(class)?;
+                        let ct = ChainType::from_path(&classpath)
+                            .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
+
+                        debug!("an instance of {} with schema {}", ct, schema);
+                        let schema = Schema::from_scalar(schema)?;
+                        chain_schema.insert(id, (ct, schema));
+                    }
+                    OpRef::Post((extends, proto)) => {
+                        let extends = extends.try_into()?;
+                        classes.insert(id, InstanceClass::new(Some(extends), proto));
+                    }
+                    other => {
+                        return Err(TCError::bad_request(
+                            "expected a Chain or Class but found",
+                            other,
+                        ))
+                    }
+                }
+            }
+            Scalar::Value(Value::Link(extends)) => {
+                classes.insert(id, InstanceClass::new(Some(extends), Map::default()));
+            }
             other => {
-                return Err(TCError::bad_request(
-                    "Cluster member must be a Chain (for mutable data), or an immutable OpDef, not",
-                    other,
-                ))
+                let err_msg = format!("Cluster member must be a Class, Chain (for mutable data), or an OpDef, not {:?}", other);
+
+                return Err(TCError::unsupported(err_msg));
             }
         }
     }
