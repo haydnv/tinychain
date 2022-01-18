@@ -10,16 +10,16 @@ class TestGraph(tc.graph.Graph):
     @classmethod
     def create(cls):
         users = tc.table.Schema(
-            [tc.Column("user_id", tc.U64)],
+            [tc.Column("user_id", tc.U32)],
             [tc.Column("email", tc.String, 320), tc.Column("display_name", tc.String, 100)])
 
         products = tc.table.Schema(
-            [tc.Column("sku", tc.U64)],
+            [tc.Column("sku", tc.U32)],
             [tc.Column("name", tc.String, 256), tc.Column("price", tc.U32)])
 
         orders = tc.table.Schema(
-            [tc.Column("order_id", tc.U64)],
-            [tc.Column("user_id", tc.U64), tc.Column("sku", tc.U64), tc.Column("quantity", tc.U32)]
+            [tc.Column("order_id", tc.U32)],
+            [tc.Column("user_id", tc.U32), tc.Column("sku", tc.U32), tc.Column("quantity", tc.U32)]
         ).create_index("user", ["user_id"]).create_index("product", ["sku"])
 
         schema = (tc.graph.Schema()
@@ -40,26 +40,26 @@ class TestService(tc.Cluster):
         self.graph = tc.chain.Sync(TestGraph.create())
 
     @tc.put_method
-    def create_user(self, user_id: tc.U64, data: tc.Map):
+    def create_user(self, user_id: tc.U32, data: tc.Map):
         return self.graph["users"].insert([user_id], [data["email"], data["display_name"]])
 
     @tc.put_method
-    def add_friend(self, user_id: tc.U64, friend: tc.U64):
+    def add_friend(self, user_id: tc.U32, friend: tc.U32):
         return self.graph.add_edge("friends", user_id, friend), self.graph.add_edge("friends", friend, user_id)
 
     @tc.put_method
-    def add_product(self, sku: tc.U64, data: tc.Map):
+    def add_product(self, sku: tc.U32, data: tc.Map):
         return self.graph["products"].insert([sku], [data["name"], data["price"]])
 
     @tc.post_method
-    def place_order(self, cxt, user_id: tc.U64, sku: tc.U64, quantity: tc.U64):
+    def place_order(self, cxt, user_id: tc.U32, sku: tc.U32, quantity: tc.U32):
         cxt.orders = self.graph["orders"]
         order_id = cxt.orders.max_id() + 1
         insert = cxt.orders.insert([order_id], [user_id, sku, quantity])
         return tc.After(insert, order_id)
 
     @tc.get_method
-    def recommend(self, txn, user_id: tc.U64):
+    def recommend(self, txn, user_id: tc.U32):
         txn.vector = tc.tensor.Sparse.zeros([tc.graph.edge.DIM], tc.Bool)
         txn.user_ids = tc.After(txn.vector[user_id].write(True), txn.vector)
         txn.friend_ids = tc.If(
