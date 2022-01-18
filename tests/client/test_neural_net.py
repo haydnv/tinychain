@@ -12,8 +12,8 @@ Dense = tc.tensor.Dense
 
 ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = tc.F32(0.01)
-MAX_ITERATIONS = 500
-NUM_EXAMPLES = 10
+MAX_ITERATIONS = 100
+NUM_EXAMPLES = 5
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -30,11 +30,10 @@ def truncated_normal(size, mean=0., std=None):
             return dist
 
 
-# TODO: implement AdamOptimizer
 class DNNTests(ClientTest):
     @classmethod
     def setUpClass(cls):
-        np.random.seed()
+        np.random.seed(3)
         super().setUpClass()
 
     @staticmethod
@@ -49,12 +48,12 @@ class DNNTests(ClientTest):
 
         inputs = np.random.random(NUM_EXAMPLES).reshape([NUM_EXAMPLES, 1])
         cxt.inputs = load(inputs)
-        cxt.labels = load(inputs < 0.5, tc.Bool)
+        cxt.labels = load((inputs[:, :] < 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1]))
 
         cxt.input_layer = self.create_layer('layer0', 1, 1, tc.ml.Sigmoid())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt)
+        self.execute(cxt, optim='GrDes')
 
     def testAnd(self):
         cxt = tc.Context()
@@ -62,13 +61,13 @@ class DNNTests(ClientTest):
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
 
-        labels = np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
-        cxt.labels = load(labels, tc.Bool)
+        labels = np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels)
 
         cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt)
+        self.execute(cxt, optim='GrDes')
 
     def testOr(self):
         cxt = tc.Context()
@@ -76,82 +75,66 @@ class DNNTests(ClientTest):
         inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
         cxt.inputs = load(inputs)
 
-        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
-        cxt.labels = load(labels, tc.Bool)
+        labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels)
 
         cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt)
+        self.execute(cxt, optim='GrDes')
 
     def testXor(self):
         cxt = tc.Context()
 
-        inputs = np.random.random(NUM_EXAMPLES * 2).reshape([NUM_EXAMPLES, 2])
-        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1])
+        inputs = np.random.random(NUM_EXAMPLES * 3).reshape([NUM_EXAMPLES, 3])
         cxt.inputs = load(inputs)
-        cxt.labels = load(labels, tc.Bool)
 
-        cxt.input_layer0 = self.create_layer('layer0', 2, 3, tc.ml.Sigmoid())
-        cxt.input_layer1 = self.create_layer('layer1', 3, 4, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer('layer2', 4, 1, tc.ml.ReLU())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
+        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels)
 
-        self.execute(cxt)
+        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer('layer1', 2, 1, tc.ml.Sigmoid())
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.output_layer])
 
-    def execute(self, cxt):
-        def cost(output, dl=False):
+        self.execute(cxt, optim='GrDes')
+
+    def execute(self, cxt, optim):
+        def cost(output, labels, dl=False):
             if dl:
-                return (output - cxt.labels)*2
-            return (output - cxt.labels)**2
+                return output.sub(labels).mul(2).sum() / output.shape[0]
+            return output.sub(labels).pow(2).sum() / output.shape[0]
 
         @tc.closure(cxt.labels)
         @tc.post_op
-        def train_while(i: tc.UInt, output: tc.tensor.Tensor):
-            fit = ((output > 0.5) == cxt.labels).all()
-            return fit.logical_not().logical_and(i <= MAX_ITERATIONS)
-
-        cxt.optimizer = tc.ml.optimizer.GradientDescent.create(LEARNING_RATE)
+        def train_while(i: tc.UInt, output: tc.tensor.Dense):
+            return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != cxt.labels).any())
+        
+        if optim == 'GrDes':
+            cxt.optimizer = tc.ml.optimizer.GradientDescent.create(lr=LEARNING_RATE)
+        elif optim == 'Adam':
+            cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list(), lr=LEARNING_RATE)
         cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
+
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
-    
+
     def testAdam(self):
-
-        def cost(output, dl=False):
-            if dl:
-                return (output - cxt.labels)*2
-            return (output - cxt.labels)**2
-
-        @tc.closure
-        @tc.post_op
-        def train_while(i: tc.UInt, loss: tc.tensor.Tensor):
-            return (i <= MAX_ITERATIONS).logical_and((loss >= 1e-3).all())
-
         cxt = tc.Context()
 
-        inputs = np.random.random(NUM_EXAMPLES * 5).reshape([NUM_EXAMPLES, 5])
-        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1]).astype(np.float32)
-
+        inputs = np.random.random(NUM_EXAMPLES * 3).reshape([NUM_EXAMPLES, 3])
         cxt.inputs = load(inputs)
+
+        labels = np.logical_and(inputs[:, 0] > 0.1, inputs[:, 1] < 0.5, inputs[:, 2] > 0.7).astype(np.float32).reshape([NUM_EXAMPLES, 1])
         cxt.labels = load(labels, tc.F32)
 
-        cxt.input_layer0 = self.create_layer('layer0', 5, 4, tc.ml.Sigmoid())
-        cxt.input_layer1 = self.create_layer('layer1', 4, 2, tc.ml.ReLU())
-        cxt.output_layer = self.create_layer('layer2', 2, 1, tc.ml.Sigmoid())
-
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
-        param_list = cxt.nn.get_param_list()
-        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list)
-        #result = visualize(tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while))
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
-
-        response = self.host.post(ENDPOINT, cxt)
+        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
+        cxt.output_layer = self.create_layer('layer1', 2, 1, tc.ml.Sigmoid())
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.output_layer])
+        
+        self.execute(cxt, optim='Adam')
 
 
-
-# TODO: implement AdamOptimizer
 class CNNTests(ClientTest):
     @classmethod
     def conv(cls, num_spatial_dims, input_shape, output_shape, kernel_shape):

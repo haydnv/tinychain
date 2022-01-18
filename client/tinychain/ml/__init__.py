@@ -3,7 +3,6 @@ from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
 from tinychain.collection.tensor import Tensor
-from tinychain.value import String
 
 EPS = 10**-6
 
@@ -108,47 +107,25 @@ class NeuralNet(Tuple, Differentiable):
     def load(cls, *args, **kwargs):
         pass
 
-# class Parameter(Map):
-
-#     @classmethod
-#     def create(cls, name: str, value: Tensor):
-#         return cls({'name': name, 'value': value})
-
-#     @property
-#     def name(self) -> String:
-#         return self['name']
-
-#     @property
-#     def value(self) -> Tensor:
-#         return self['value']
 
 class Parameter:
 
-    def __init__(self, name: str, value: Tensor, ct_shape: t.List[int]) -> None:
+    def __init__(self, name: str, value: Tensor) -> None:
         self.name = name
         self.value = value
-        self.ct_shape = ct_shape
 
     @classmethod
-    def create(cls, name: str, value: Tensor, ct_shape: t.List[int]):
-        return cls(name=name, value=value, ct_shape=ct_shape)
+    def create(cls, name: str, value: Tensor):
+        return cls(name=name, value=value)
 
-# class DiffedParameter(Parameter):
-
-#     @classmethod
-#     def create(cls, name: str, value: Tensor, grad: Tensor):
-#         return cls({'name': name, 'value': value, 'grad': grad})
-
-#     @property
-#     def grad(self) -> Tensor:
-#         return self['grad']
 
 class DiffedParameter(Parameter):
 
-    def __init__(self, name: str, value: Tensor, ct_shape: t.List[int], grad: Tensor) -> None:
-        super().__init__(name, value, ct_shape)
+    def __init__(self, name: str, value: Tensor, grad: Tensor) -> None:
+        super().__init__(name, value)
         self.grad = grad
 
     @classmethod
-    def create(cls, name: str, value: Tensor, ct_shape: t.List[int], grad: Tensor):
-        return cls(name=name, value=value, ct_shape=ct_shape, grad=grad)
+    def create(cls, name: str, value: Tensor, grad: Tensor):
+        return cls(name=name, value=value, grad=grad)
+
