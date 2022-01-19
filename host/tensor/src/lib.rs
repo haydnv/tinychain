@@ -875,11 +875,11 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
-    async fn write(self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
+    async fn write(self, txn: T, bounds: Bounds, value: Tensor<FD, FS, D, T>) -> TCResult<()> {
         debug!("Tensor::write {} to {}", value, bounds);
 
         match self {

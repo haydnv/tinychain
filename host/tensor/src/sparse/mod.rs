@@ -167,14 +167,11 @@ where
     }
 
     /// Tile the given `tensor` into a new `SparseTensor`
-    pub async fn tile<A>(
+    pub async fn tile(
         txn: T,
-        tensor: SparseTensor<FD, FS, D, T, A>,
+        tensor: SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>,
         multiples: Vec<u64>,
-    ) -> TCResult<Self>
-    where
-        A: SparseAccess<FD, FS, D, T>,
-    {
+    ) -> TCResult<Self> {
         if multiples.len() != tensor.ndim() {
             return Err(TCError::bad_request(
                 "wrong number of multiples to tile a Tensor with shape",
@@ -192,8 +189,16 @@ where
             .map(|(dim, m)| dim * m)
             .collect();
 
+        let input = match tensor.accessor {
+            SparseAccessor::Table(table) => table.into(),
+            other => {
+                let dir = txn.context().create_dir_unique(*txn.id()).await?;
+                SparseTensor::copy_from(other.into(), dir, &txn).await?
+            }
+        };
+
         let output = Self::create(&dir, Schema { shape, dtype }, txn_id).await?;
-        tile(txn, tensor, output, multiples).await
+        tile(txn, input, output, multiples).await
     }
 }
 
@@ -568,7 +573,7 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, L, R> TensorDualIO<D, SparseTensor<FD, FS, D, T, R>>
+impl<FD, FS, D, T, L> TensorDualIO<D, SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>>
     for SparseTensor<FD, FS, D, T, L>
 where
     D: Dir,
@@ -578,7 +583,6 @@ where
     D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
     L: SparseWrite<FD, FS, D, T>,
-    R: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
 
@@ -586,7 +590,7 @@ where
         self,
         txn: T,
         bounds: Bounds,
-        other: SparseTensor<FD, FS, D, T, R>,
+        other: SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>,
     ) -> TCResult<()> {
         let slice_shape = bounds.to_shape(self.shape())?;
         if &slice_shape != other.shape() {
@@ -621,7 +625,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    D::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseWrite<FD, FS, D, T>,
 {
     type Txn = T;
@@ -640,8 +644,22 @@ where
         };
 
         match other {
-            Tensor::Dense(other) => self.write(txn, bounds, other.into_sparse()).await,
-            Tensor::Sparse(other) => self.write(txn, bounds, other).await,
+            Tensor::Dense(other) => {
+                let dir = txn.context().create_dir_unique(*txn.id()).await?;
+                let other = SparseTensor::copy_from(other.into_sparse(), dir, &txn).await?;
+
+                self.write(txn, bounds, other.into_sparse()).await
+            }
+            Tensor::Sparse(other) => match other.accessor {
+                SparseAccessor::Table(table) => {
+                    self.write(txn, bounds, SparseTensor::from(table)).await
+                }
+                other => {
+                    let dir = txn.context().create_dir_unique(*txn.id()).await?;
+                    let other = SparseTensor::copy_from(other.into(), dir, &txn).await?;
+                    self.write(txn, bounds, other).await
+                }
+            },
         }
     }
 }
