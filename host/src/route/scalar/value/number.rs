@@ -175,6 +175,7 @@ impl Route for Number {
             "log" => Box::new(Log::new(*self)),
             "mod" => Box::new(Dual::new(move |other| Ok(*self % other))),
             "mul" => Box::new(Dual::new(move |other| Ok(*self * other))),
+            "round" => Box::new(Unary::new("round", move || self.ln())),
             "sub" => Box::new(Dual::new(move |other| Ok(*self - other))),
             "pow" => Box::new(Dual::new(move |other| Ok(self.pow(other)))),
 
