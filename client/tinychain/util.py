@@ -333,11 +333,15 @@ def use(cls):
 def to_json(obj):
     """Return a JSON-encodable representation of the given state or reference."""
 
+    err_native_method = "Python method {} is not JSON serializable; consider using a decorator like @get_method"
+    err_native_function = "Python function {} is not JSON serializable; consider using a decorator like @get_op"
+
     if inspect.ismethod(obj):
         if not hasattr(obj, "__json__"):
-            raise ValueError(
-                f"Python method {obj} is not JSON serializable; "
-                + "try using a decorator like @get_method")
+            raise ValueError(err_native_method.format(obj))
+    elif inspect.isfunction(obj):
+        if not hasattr(obj, "__json__"):
+            raise ValueError(err_native_function.format(obj))
 
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):

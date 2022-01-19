@@ -162,14 +162,11 @@ where
             .await
     }
 
-    pub async fn tile<A>(
+    pub async fn tile(
         txn: T,
-        tensor: DenseTensor<FD, FS, D, T, A>,
+        tensor: DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>,
         multiples: Vec<u64>,
-    ) -> TCResult<Self>
-    where
-        A: DenseAccess<FD, FS, D, T>,
-    {
+    ) -> TCResult<Self> {
         if multiples.len() != tensor.ndim() {
             return Err(TCError::bad_request(
                 "wrong number of multiples to tile a Tensor with shape",
@@ -178,7 +175,7 @@ where
         }
 
         let txn_id = *txn.id();
-        let file = txn
+        let output_file = txn
             .context()
             .create_file_unique(txn_id, TensorType::Dense)
             .await?;
@@ -191,8 +188,21 @@ where
             .collect();
 
         let dtype = tensor.dtype();
-        let output = Self::constant(file, txn_id, shape, dtype.zero()).await?;
-        tile(txn, tensor, output, multiples).await
+        let input = match tensor.blocks {
+            DenseAccessor::File(file) => DenseTensor::from(file),
+            other => {
+                let input_file = txn
+                    .context()
+                    .create_file_unique(txn_id, TensorType::Dense)
+                    .await?;
+
+                DenseTensor::copy_from(DenseTensor::from(other), input_file, &txn).await?
+            }
+        };
+
+        let output = Self::constant(output_file, txn_id, shape, dtype.zero()).await?;
+
+        tile(txn, input, output, multiples).await
     }
 }
 
@@ -635,7 +645,7 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T, B, O> TensorDualIO<D, DenseTensor<FD, FS, D, T, O>>
+impl<FD, FS, D, T, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>>
     for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
@@ -644,7 +654,6 @@ where
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
-    O: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
     type Txn = T;
@@ -653,7 +662,7 @@ where
         self,
         txn: T,
         bounds: Bounds,
-        other: DenseTensor<FD, FS, D, T, O>,
+        other: DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>,
     ) -> TCResult<()> {
         debug!("write {} to dense {}", other, bounds);
         self.blocks.write(txn, bounds, other.blocks).await
@@ -759,8 +768,27 @@ where
         };
 
         match other {
-            Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
-            Tensor::Sparse(sparse) => self.write(txn, bounds, sparse.into_dense()).await,
+            Tensor::Dense(dense) => match dense.blocks {
+                DenseAccessor::File(file) => self.write(txn, bounds, DenseTensor::from(file)).await,
+                other => {
+                    let file = txn
+                        .context()
+                        .create_file_unique(*txn.id(), TensorType::Dense)
+                        .await?;
+
+                    let other = DenseTensor::copy_from(other.into(), file, &txn).await?;
+                    self.write(txn, bounds, other).await
+                }
+            },
+            Tensor::Sparse(sparse) => {
+                let file = txn
+                    .context()
+                    .create_file_unique(*txn.id(), TensorType::Dense)
+                    .await?;
+
+                let other = DenseTensor::copy_from(sparse.into_dense(), file, &txn).await?;
+                self.write(txn, bounds, other).await
+            }
         }
     }
 }
@@ -1187,6 +1215,12 @@ where
     fn ln(&self) -> TCResult<Self::Unary> {
         let dtype = self.dtype().one().ln().class();
         let blocks = BlockListUnary::new(self.blocks.clone(), Array::ln, Number::ln, dtype);
+        Ok(DenseTensor::from(blocks))
+    }
+
+    fn round(&self) -> TCResult<Self::Unary> {
+        let dtype = self.dtype().one().round().class();
+        let blocks = BlockListUnary::new(self.blocks.clone(), Array::round, Number::round, dtype);
         Ok(DenseTensor::from(blocks))
     }
 

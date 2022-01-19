@@ -122,7 +122,7 @@ async fn main() -> Result<(), TokioError> {
         return Err(TCError::bad_request("the minimum cache size is", MIN_CACHE_SIZE).into());
     }
 
-    let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_secs(1));
+    let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace).await?;
     let txn_id = TxnId::new(Gateway::time());
 

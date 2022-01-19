@@ -47,7 +47,11 @@ class Collection(State):
         if is_ref(data):
             raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
 
-        return cls(Put(cls, schema, data))
+        class Load(cls):
+            def __ref__(self, name):
+                return cls(URI(name))
+
+        return Load(Put(cls, schema, data))
 
     def schema(self):
         """Return the schema of this `Collection`."""
