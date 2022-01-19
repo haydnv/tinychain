@@ -1,6 +1,6 @@
 [package]
 name = "tc-tensor"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's Tensor collection type"
@@ -12,7 +12,7 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
-afarray = "~0.12.1"
+afarray = "0.13"
 arrayfire = "3.8"
 async-trait = "0.1"
 destream = "0.5"

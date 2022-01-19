@@ -430,6 +430,9 @@ pub trait TensorUnary<D: Dir> {
     /// Element-wise natural logarithm
     fn ln(&self) -> TCResult<Self::Unary>;
 
+    /// Element-wise round to the nearest integer
+    fn round(&self) -> TCResult<Self::Unary>;
+
     /// Return `true` if all elements in this [`Tensor`] are nonzero.
     async fn all(self, txn: Self::Txn) -> TCResult<bool>;
 
@@ -1221,6 +1224,13 @@ where
         match self {
             Self::Dense(dense) => dense.ln().map(Self::from),
             Self::Sparse(sparse) => sparse.ln().map(Self::from),
+        }
+    }
+
+    fn round(&self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.round().map(Self::from),
+            Self::Sparse(sparse) => sparse.round().map(Self::from),
         }
     }
 

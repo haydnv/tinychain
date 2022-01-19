@@ -1218,6 +1218,12 @@ where
         Ok(DenseTensor::from(blocks))
     }
 
+    fn round(&self) -> TCResult<Self::Unary> {
+        let dtype = self.dtype().one().round().class();
+        let blocks = BlockListUnary::new(self.blocks.clone(), Array::round, Number::round, dtype);
+        Ok(DenseTensor::from(blocks))
+    }
+
     async fn all(self, txn: T) -> TCResult<bool> {
         let mut blocks = self.blocks.block_stream(txn).await?;
 
