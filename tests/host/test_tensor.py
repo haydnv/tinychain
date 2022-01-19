@@ -43,7 +43,7 @@ class DenseTests(unittest.TestCase):
 
     def testAssignSlice(self):
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.zeros([2, 2, 5])
+        cxt.big = tc.tensor.Dense.zeros([2, 2, 5], tc.I32)
         cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
         cxt.result = tc.After(cxt.big[1, :2].write(cxt.small[0]), cxt.big)
 
@@ -51,7 +51,7 @@ class DenseTests(unittest.TestCase):
 
         expected = np.zeros([2, 2, 5], np.int64)
         expected[1, 0:2] = np.arange(1, 11).reshape(2, 5)[0]
-        expected = expect_dense(tc.I64, [2, 2, 5], expected.flatten())
+        expected = expect_dense(tc.I32, [2, 2, 5], expected.flatten())
 
         self.assertEqual(actual, expected)
 
@@ -484,8 +484,8 @@ class SparseTests(unittest.TestCase):
         shape = [2, 5, 2, 3, 4, 10]
 
         cxt = tc.Context()
-        cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], tc.F32, data)
-        cxt.big = cxt.small * tc.tensor.Dense.ones(shape)
+        cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], tc.I32, data)
+        cxt.big = cxt.small * tc.tensor.Dense.ones(shape, tc.I32)
         cxt.slice = cxt.big[:-1, 1:4, 1]
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -496,7 +496,7 @@ class SparseTests(unittest.TestCase):
         expected = expected * np.ones(shape)
         expected = expected[:-1, 1:4, 1]
 
-        expected = expect_sparse(tc.F64, expected.shape, expected)
+        expected = expect_sparse(tc.I32, expected.shape, expected)
         self.assertEqual(actual, expected)
 
     def testArgmax(self):

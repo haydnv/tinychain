@@ -454,7 +454,7 @@ class Dense(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls.constant(shape, dtype(1))
+        return cls.constant(shape, Number(1).cast(dtype))
 
     @classmethod
     def zeros(cls, shape, dtype=F32):
@@ -464,7 +464,7 @@ class Dense(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls.constant(shape, dtype(0))
+        return cls.constant(shape, Number(0).cast(dtype))
 
     def elements(self, bounds):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
