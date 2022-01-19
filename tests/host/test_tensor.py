@@ -1,5 +1,8 @@
+import functools
 import itertools
 import math
+import operator
+
 import numpy as np
 import tinychain as tc
 import unittest
@@ -175,6 +178,19 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [False, True, True, False, True])
 
+    def testMean(self):
+        shape = [2, 3, 4]
+        axis = 1
+        x = (np.random.random(np.product(shape)) * 10).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(shape, tc.F32, x.flatten().tolist())
+        cxt.result = cxt.x.mean(axis)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.mean(x, axis)
+        self.assertTrue(allClose(actual, expected))
+
     def testProduct(self):
         shape = [2, 3, 4]
         axis = 1
@@ -196,6 +212,17 @@ class DenseTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, np.product(range(1, 7)))
+
+    def testRound(self):
+        shape = [10, 20]
+        x = (np.random.random(np.product(shape)) * 10).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(shape, tc.F32, x.flatten().tolist())
+        cxt.result = cxt.x.round()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expect_dense(tc.I32, shape, x.round().astype(np.int).flatten()))
 
     def testSum(self):
         shape = [4, 2, 3, 5]
@@ -642,6 +669,10 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
             actual = host.get("/test/tensor/eq")
             self.assertEqual(actual, eq)
+
+
+def allClose(actual, expected):
+    return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
 
 
 def expect_dense(dtype, shape, flat):

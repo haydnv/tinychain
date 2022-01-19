@@ -1425,6 +1425,7 @@ where
             ))),
             "exp" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::exp))),
             "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
+            "round" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::round))),
 
             // basic math
             "add" => Some(Box::new(DualHandler::new(

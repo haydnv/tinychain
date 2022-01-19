@@ -273,6 +273,15 @@ class Number(Value):
 
         return self._get("pow", other, self.__class__)
 
+    def round(self, digits=None):
+        """Round this `Number` to the nearest integer, or `digits` decimal places (if `digits` is provided)."""
+
+        if digits is None:
+            return self._get("round", rtype=self.__class__)
+        else:
+            places = Int(10)**digits
+            return (self * places).round() / places
+
     def sin(self):
         """Return the sine of this `Number`."""
 
