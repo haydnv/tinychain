@@ -11,6 +11,7 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
+[dependencies]
 afarray = "0.13"
 arrayfire = "3.8"
 async-trait = "0.1"
