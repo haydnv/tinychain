@@ -306,6 +306,11 @@ class Tensor(Collection):
 
         return self._get("reshape", shape, self.__class__)
 
+    def round(self):
+        """Round this `Tensor` to the nearest integer, element-wise."""
+
+        return self._get("round", rtype=self.__class__)
+
     # TODO: use a custom shape object to support `type(x.shape[0]) == UInt`
     @property
     def shape(self):
