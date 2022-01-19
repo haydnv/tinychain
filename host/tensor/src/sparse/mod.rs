@@ -1184,6 +1184,13 @@ where
         Ok(SparseTensor::from(accessor))
     }
 
+    fn round(&self) -> TCResult<Self::Unary> {
+        let dtype = self.dtype().one().ln().class();
+        let source = self.accessor.clone().accessor();
+        let accessor = SparseUnary::new(source, Number::round, dtype);
+        Ok(SparseTensor::from(accessor))
+    }
+
     async fn all(self, txn: Self::Txn) -> TCResult<bool> {
         let affected = stream::iter(Bounds::all(self.shape()).affected());
         let filled = self.accessor.filled(txn).await?;

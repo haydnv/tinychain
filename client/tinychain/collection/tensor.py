@@ -280,6 +280,17 @@ class Tensor(Collection):
 
         return self._get("ndim", rtype=UInt)
 
+    def mean(self, axis=None):
+        """
+        Return the average of this `Tensor` along the given `axis`,
+        or the average of the entire `Tensor` if no axis is given.
+        """
+
+        if axis is None:
+            return self.sum() / self.size
+        else:
+            return self.sum(axis) / self.shape[axis]
+
     def mul(self, other):
         """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
@@ -305,6 +316,11 @@ class Tensor(Collection):
         """Return a view of this `Tensor` with the given `shape`."""
 
         return self._get("reshape", shape, self.__class__)
+
+    def round(self):
+        """Round this `Tensor` to the nearest integer, element-wise."""
+
+        return self._get("round", rtype=self.__class__)
 
     # TODO: use a custom shape object to support `type(x.shape[0]) == UInt`
     @property
