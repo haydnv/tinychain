@@ -280,6 +280,17 @@ class Tensor(Collection):
 
         return self._get("ndim", rtype=UInt)
 
+    def mean(self, axis=None):
+        """
+        Return the average of this `Tensor` along the given `axis`,
+        or the average of the entire `Tensor` if no axis is given.
+        """
+
+        if axis is None:
+            return self.sum() / self.size
+        else:
+            return self.sum(axis) / self.shape[axis]
+
     def mul(self, other):
         """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
