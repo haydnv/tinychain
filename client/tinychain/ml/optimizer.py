@@ -11,7 +11,7 @@ from tinychain.value import F32, UInt
 
 class Optimizer(Map):
     @abstractmethod
-    def optimize(self):
+    def optimize(self, param_list: t.List[Parameter]):
         """Update the given `gradient` by computing deltas for the given `loss`."""
 
     @property
@@ -23,7 +23,8 @@ class GradientDescent(Optimizer):
     @classmethod
     def create(cls, lr=F32(0.01)):
         """Create a new `GradientDescent` optimizer with the given hyperparameter.
-        'lr': learning rate
+        Args:
+            'lr': learning rate
         """
 
         return cls({"lr": lr})
@@ -37,11 +38,11 @@ class Adam(Optimizer):
     @classmethod
     def create(cls, param_list: t.List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
         """Create a new `Adam` optimizer with the given hyperparameters.
-        'lr': learning rate;
-        'beta1': The exponential decay rate for the 1st moment estimates;
-        'beta2': The exponential decay rate for the 2nd moment estimates;
-        'eps': A small constant for numerical stability.
         Args:
+            'lr': learning rate;
+            'beta1': The exponential decay rate for the 1st moment estimates;
+            'beta2': The exponential decay rate for the 2nd moment estimates;
+            'eps': A small constant for numerical stability.
             `param_list`: a `List[Parameter]` of model's parameters for optimizing.
         """
 

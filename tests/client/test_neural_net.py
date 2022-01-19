@@ -53,7 +53,7 @@ class DNNTests(ClientTest):
         cxt.input_layer = self.create_layer('layer0', 1, 1, tc.ml.Sigmoid())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt, optim='GrDes')
+        self.execute(cxt)
 
     def testAnd(self):
         cxt = tc.Context()
@@ -67,7 +67,7 @@ class DNNTests(ClientTest):
         cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt, optim='GrDes')
+        self.execute(cxt)
 
     def testOr(self):
         cxt = tc.Context()
@@ -81,9 +81,9 @@ class DNNTests(ClientTest):
         cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
 
-        self.execute(cxt, optim='GrDes')
+        self.execute(cxt)
 
-    def testXor(self):
+    def testXor_2layer(self):
         cxt = tc.Context()
 
         inputs = np.random.random(NUM_EXAMPLES * 3).reshape([NUM_EXAMPLES, 3])
@@ -96,9 +96,25 @@ class DNNTests(ClientTest):
         cxt.output_layer = self.create_layer('layer1', 2, 1, tc.ml.Sigmoid())
         cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.output_layer])
 
-        self.execute(cxt, optim='GrDes')
+        self.execute(cxt)
 
-    def execute(self, cxt, optim):
+    def testXor_3layer(self):
+        cxt = tc.Context()
+
+        inputs = np.random.random(NUM_EXAMPLES * 3).reshape([NUM_EXAMPLES, 3])
+        cxt.inputs = load(inputs)
+
+        labels = np.logical_and(inputs[:, 0] > 0.1, inputs[:, 1] < 0.5, inputs[:, 2] > 0.7).astype(np.float32).reshape([NUM_EXAMPLES, 1])
+        cxt.labels = load(labels, tc.F32)
+
+        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
+        cxt.input_layer1 = self.create_layer('layer1', 2, 2, tc.ml.ReLU())
+        cxt.output_layer = self.create_layer('layer2', 2, 1, tc.ml.Sigmoid())
+        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
+
+        self.execute(cxt)
+
+    def execute(self, cxt):
         def cost(output, labels, dl=False):
             if dl:
                 return output.sub(labels).mul(2).sum() / output.shape[0]
@@ -109,30 +125,12 @@ class DNNTests(ClientTest):
         def train_while(i: tc.UInt, output: tc.tensor.Dense):
             return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != cxt.labels).any())
         
-        if optim == 'GrDes':
-            cxt.optimizer = tc.ml.optimizer.GradientDescent.create(lr=LEARNING_RATE)
-        elif optim == 'Adam':
-            cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list(), lr=LEARNING_RATE)
+        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list(), lr=LEARNING_RATE)
         cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
 
         response = self.host.post(ENDPOINT, cxt)
 
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
-
-    def testAdam(self):
-        cxt = tc.Context()
-
-        inputs = np.random.random(NUM_EXAMPLES * 3).reshape([NUM_EXAMPLES, 3])
-        cxt.inputs = load(inputs)
-
-        labels = np.logical_and(inputs[:, 0] > 0.1, inputs[:, 1] < 0.5, inputs[:, 2] > 0.7).astype(np.float32).reshape([NUM_EXAMPLES, 1])
-        cxt.labels = load(labels, tc.F32)
-
-        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer('layer1', 2, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.output_layer])
-        
-        self.execute(cxt, optim='Adam')
 
 
 class CNNTests(ClientTest):
