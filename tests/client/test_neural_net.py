@@ -119,6 +119,7 @@ class DNNTests(ClientTest):
             if dl:
                 return output.sub(labels).mul(2).mean()
             return output.sub(labels).pow(2).mean()
+
         @tc.closure(cxt.labels)
         @tc.post_op
         def train_while(i: tc.UInt, output: tc.tensor.Dense):
