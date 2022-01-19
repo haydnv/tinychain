@@ -1,9 +1,10 @@
+import typing as t
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
+from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
-
 
 class Activation(ABC):
     """A differentiable activation function for a neural network."""
@@ -58,6 +59,13 @@ class Differentiable(object):
         Returns a tuple `(loss, gradient)` where `loss` is the loss to propagate further backwards and `gradient` is
         the total gradient for an `Optimizer` to use in order to calculate an update to this `Differentiable`.
         """
+    
+    @abstractmethod
+    def get_param_list(self):
+        """
+        Returns a parameters as List[Parameter] of `Layer`
+        """
+        return []
 
     @abstractmethod
     def write(self, new_values):
@@ -98,3 +106,26 @@ class NeuralNet(Tuple, Differentiable):
     @abstractmethod
     def load(cls, *args, **kwargs):
         pass
+
+
+class Parameter:
+
+    def __init__(self, name: str, value: Tensor) -> None:
+        self.name = name
+        self.value = value
+
+    @classmethod
+    def create(cls, name: str, value: Tensor):
+        return cls(name=name, value=value)
+
+
+class DiffedParameter(Parameter):
+
+    def __init__(self, name: str, value: Tensor, grad: Tensor) -> None:
+        super().__init__(name, value)
+        self.grad = grad
+
+    @classmethod
+    def create(cls, name: str, value: Tensor, grad: Tensor):
+        return cls(name=name, value=value, grad=grad)
+

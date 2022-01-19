@@ -7,3 +7,5 @@ tests/venv
 # IDE metadata
 .idea
 .project
+
+.vscode
