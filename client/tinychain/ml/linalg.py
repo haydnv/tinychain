@@ -287,6 +287,7 @@ def dot(x1, x2):
     return (x1 * x2).sum()
 
 
+@post_op
 def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
     """Householder's reduction to bidiagonal form"""
 
@@ -317,8 +318,8 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
             def cond(j: UInt) -> Bool:
                 return j < txn.n
 
-            cxt.descale_col = cxt.col_i.write(cxt.col_i / scale)
-
+            cxt.new_col = (cxt.col_i / scale).copy()
+            cxt.descale_col = cxt.col_i.write(cxt.new_col)
             cxt.s = Float(After(cxt.descale_col, dot(cxt.col_i, cxt.col_i)))
             cxt.f = Float(After(cxt.descale_col, U[i, i]))
             cxt.g = -sign_like(cxt.s ** 0.5, cxt.f)
@@ -351,8 +352,8 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
                 return j < txn.m
 
             cxt.U_i_l = U[i, l]
-            
-            cxt.descale = cxt.row_i.write(cxt.row_i / scale)
+            cxt.new_row = (cxt.row_i / scale).copy()
+            cxt.descale = cxt.row_i.write(cxt.new_row)
 
             cxt.s_init = Float(After(cxt.descale, dot(cxt.row_i, cxt.row_i)))
             cxt.f = Float(After(cxt.descale, U[i, l]))
@@ -381,7 +382,7 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
             dot(U[i, cxt.l:], U[i, cxt.l:]),
             scale))
 
-        cxt.scale_final = Float(After(W[i].write(cxt.scale_new * cxt.g_init), cxt.scale_new))
+        cxt.scale_final = Float(After(W[i].write(cxt.scale_init * cxt.g_init), cxt.scale_new))
 
         g = If(
             Bool(i < txn.m).logical_and(i != txn.n - 1).logical_and(cxt.scale_init > EPS),
@@ -399,61 +400,63 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
 
 
 @post_op
-def rht(U: Tensor, V: Tensor, e: Tensor) -> Map:
+def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
     """Accumulation of right hand transformations (rht)"""
-    
-    @post_op
-    def step(
-            cxt,
-            i: UInt,
-            n: UInt,
-            m: UInt,
-            U: Tensor,
-            V: Tensor,
-            e: Tensor,
-            l: UInt,
-            g: F32) -> Map:
-        
-        @post_op
-        def update_cols_wo_last(i: UInt, l: UInt, n: UInt, U: Tensor, V: Tensor, g: F32):
 
+    txn.shape = U.shape
+    txn.m, txn.n = [UInt(dim) for dim in txn.shape.unpack(2)]
+    
+    @closure(U, V, e, txn.m, txn.n)
+    @post_op
+    def step(cxt, i: UInt, l: F32, g: F32) -> Map:
+        
+        @closure(U, V, e, txn.m, txn.n)
+        @post_op
+        def update_cols_wo_last(cxt, i: UInt, l: UInt, g: F32) -> F32:
+
+            @closure(U, V, e, txn.m, txn.n)
             @post_op
-            def update_cols(n: UInt, l: UInt, i: UInt, U: Tensor,  V: Tensor):
+            def update_cols(cxt, i: UInt, l: UInt, g: F32) -> F32:
                 
+                @closure(U, V, e, txn.m, txn.n)
                 @post_op
-                def step(j: UInt, n: UInt, l: UInt, i: UInt, U: Tensor,  V: Tensor) -> Map:
+                def step(j: UInt, l: UInt, i: UInt) -> Map:
+                    cxt.col_j = V[l:, j]
                     return Map(After(
-                        V[l:, j].write(V[l:, j] + V[l:, i] * dot(U[i, l:], V[l:, j])),
-                        Map(j=j + 1, n=n, l=l, i=i, U=U, V=V)
+                        cxt.col_j.write(cxt.col_j + V[l:, i] * dot(U[i, l:], cxt.col_j)),
+                        Map(j=j + 1, n=txn.n, l=l, i=i, U=U, V=V)
                     ))
 
+                @closure(txn.n)
                 @post_op
-                def cond(j: UInt, n: UInt) -> Bool:
-                    return j < n
+                def cond(j: UInt) -> Bool:
+                    return j < txn.n
 
-                loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g),While(cond, step, Map(j=l, n=n, l=l, i=i, U=U, V=V)))
-                cond = If(Bool(g != 0), loop)
+                loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g), While(cond, step, Map(j=l, n=txn.n, l=l, i=i, U=U, V=V)))
 
-                return After(cond, [V[i,l:].write(Float(0.0)), V[l:,i].write(Float(0.0))])
+                shape_V_i_l =  V[i, l:].shape
+                shape_V_l_i =  V[l:, i].shape
+                return After(loop, [V[i,l:].write(Dense.zeros((shape_V_i_l,), dtype=F32)), 
+                                    V[l:,i].write(Dense.zeros((shape_V_l_i,), dtype=F32))])
 
-            return If(Bool(i < n-1), update_cols(n=n, l=l, i=i, U=U,  V=V))
+                # return tc.After(loop, [V[i,l:].write(tc.Float(0.0)), V[l:,i].write(tc.Float(0.0))])
+
+            cxt.update_cols = update_cols
+            res = cxt.update_cols(n=txn.n, l=l, i=i, U=U,  V=V)
+            return If(Bool(g != 0.0), res)
 
         cxt.update_cols_wo_last = update_cols_wo_last
-        l = After([cxt.update_cols_wo_last(i=i, l=l, n=n, U=U, V=V, g=g), 
-                    V[i,i].write(Float(1.0)),], i)
-        g = e[i].copy()            
+        g_init = After(V[i,i].write(1.0), e[i].copy())            
         
-        return Map(i=i - 1, l=l, g=g, n=n, m=m, U=U, V=V, e=e)
+        g = If(
+            Bool(i < txn.n-1),
+            cxt.update_cols_wo_last(l=l, g=g),
+            g_init)
+
+        return Map(i=i - 1, l=i, g=g, U=U, V=V, e=e)
 
     @post_op
     def cond(i: UInt) -> Bool:
         return i >= 0
 
-    m, n = U.shape.unpack(2)
-    n = Float(n)
-    m = Float(m)
-    g = 0.0
-    l = 0
-
-    return Map(While(cond, step, Map(i=n-1, n=n, m=m, U=U, V=V, e=e, l=l, g=g)))    
-    
+    return Map(While(cond, step, Map(i=txn.n-1, l=0, g=0.0, U=U, V=V, e=e)))
