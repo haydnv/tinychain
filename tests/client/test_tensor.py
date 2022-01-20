@@ -92,10 +92,10 @@ def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
     m, n = a.shape.unpack(2)
 
     # this creates one `Tensor` in this `Op` context, to write to
-    cxt.transposed = tc.tensor.Dense.zeros([n, m], a.dtype)
+    cxt.transposed = tc.tensor.Dense.zeros([n, m])
 
     # this is a tensor creation `Op` itself, i.e. each usage of `transposed` would create a new tensor
-    # transposed = tc.tensot.Dense.zeros([n, m], a.dtype)
+    # transposed = tc.tensor.Dense.zeros([n, m])
 
     @tc.closure(a, cxt.transposed)
     @tc.get_op

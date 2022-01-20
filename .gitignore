@@ -14,3 +14,4 @@ client/.DS_Store
 client/tinychain/.DS_Store
 client/tinychain/ml/.DS_Store
 local.Dockerfile
+.vscode
