@@ -27,29 +27,35 @@ class DNNLayer(Layer):
             @classmethod
             @property
             def shape(cls):
-                return {"weights": weights.shape, "bias": bias.shape}
+                return {name + ".weights": weights.shape, name + ".bias": bias.shape}
 
             def forward(self, x):
-                inputs = einsum("ki,ij->kj", [x, weights]) + bias
+                inputs = einsum("ki,ij->kj", [x, self[name + ".weights"]]) + self[name + ".bias"]
                 return activation.forward(inputs)
 
             def backward(self, x, loss):
                 m = x.shape[0]
-                inputs = einsum("ki,ij->kj", [x, weights]) + bias
-                delta = Tensor(loss * activation.backward(inputs))
-                dL = einsum("ij,kj->ki", [weights, delta])
+                inputs = einsum("ki,ij->kj", [x, self[name + ".weights"]]) + self[name + ".bias"]
+                delta = Tensor(activation.backward(inputs) * loss)
+                dL = einsum("ij,kj->ki", [self[name + ".weights"], delta])
                 return dL, [
-                    DiffedParameter.create(name=name + '.weight', value=weights, grad=einsum("ki,kj->ij", [x, delta]).copy() / m),
-                    DiffedParameter.create(name=name + '.bias', value=bias, grad=delta.sum(0) / m)
+                    DiffedParameter.create(
+                        name=name + '.weight',
+                        value=self[name + ".weights"],
+                        grad=einsum("ki,kj->ij", [x, delta]).copy() / m),
+                    DiffedParameter.create(
+                        name=name + '.bias',
+                        value=self[name + ".bias"],
+                        grad=delta.sum(0) / m)
                 ]
 
-            def get_param_list(self) -> List[Parameter]:
+            def get_param_list(self) -> List[Parameter]: 
                 return [
-                    Parameter.create(name=name + '.weight', value=weights),
-                    Parameter.create(name=name + '.bias', value=bias)
+                    Parameter.create(name=name + '.weight', value=self[name + ".weights"]),
+                    Parameter.create(name=name + '.bias', value=self[name + ".bias"])
                 ]
 
-        return _DNNLayer()
+        return _DNNLayer({name + ".bias": bias, name + ".weights": weights})
 
 
 class DNN(NeuralNet):
@@ -97,7 +103,7 @@ class DNN(NeuralNet):
                     loss = loss.copy()
                     param_list.extend(layer_param_list)
 
-                return param_list
+                return loss, param_list
             
             def get_param_list(self)  -> List[Parameter]:
                 return functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])

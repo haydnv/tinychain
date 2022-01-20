@@ -1,5 +1,5 @@
 """TinyChain `State` s, like `Map`, `Tuple`, and `Op`."""
-
+import inspect
 import logging
 
 from tinychain import ref, reflect
@@ -70,8 +70,6 @@ class State(object):
         return Nil(ref.Put(subject, key, value))
 
     def _post(self, name, params, rtype):
-        from .value import Nil
-
         subject = ref.MethodSubject(self, name)
         op_ref = ref.Post(subject, params)
         rtype = State if rtype is None or not issubclass(rtype, State) else rtype
@@ -86,7 +84,11 @@ class State(object):
     def cast(self, dtype):
         """Attempt to cast this `State` into the given `dtype`."""
 
-        return dtype(ref.Get(uri(dtype), self))
+        # TODO: allow casting to a type known only at run-time
+        if not inspect.isclass(dtype) or not issubclass(dtype, State):
+            raise NotImplementedError("dtype to cast into must be known at compile-time")
+
+        return dtype(ref.Get(dtype, self))
 
     def copy(self):
         """Create a new `State` by copying this one."""
