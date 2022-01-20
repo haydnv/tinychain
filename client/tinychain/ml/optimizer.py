@@ -1,6 +1,5 @@
 import typing as t
 from abc import abstractmethod
-import typing as t
 
 from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
@@ -8,9 +7,6 @@ from tinychain.ml import DiffedParameter, Parameter
 from tinychain.ref import After, While
 from tinychain.state import Map
 from tinychain.value import F32, UInt
-from tinychain.ml import EPS, Parameter, DiffedParameter
-
-from client.tinychain.ml import Parameter, DiffedParameter
 
 
 class Optimizer(Map):

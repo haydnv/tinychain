@@ -131,39 +131,6 @@ class DNNTests(ClientTest):
         response = self.host.post(ENDPOINT, cxt)
 
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")
-    
-    def testAdam(self):
-
-        def cost(output, dl=False):
-            if dl:
-                return (output - cxt.labels)*2
-            return (output - cxt.labels)**2
-
-        @tc.closure
-        @tc.post_op
-        def train_while(i: tc.UInt, loss: tc.tensor.Tensor):
-            return (i <= MAX_ITERATIONS).logical_and((loss >= 1e-3).all())
-
-        cxt = tc.Context()
-
-        inputs = np.random.random(NUM_EXAMPLES * 5).reshape([NUM_EXAMPLES, 5])
-        labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).reshape([NUM_EXAMPLES, 1]).astype(np.float32)
-
-        cxt.inputs = load(inputs)
-        cxt.labels = load(labels, tc.F32)
-
-        cxt.input_layer0 = self.create_layer('layer0', 5, 4, tc.ml.Sigmoid())
-        cxt.input_layer1 = self.create_layer('layer1', 4, 2, tc.ml.ReLU())
-        cxt.output_layer = self.create_layer('layer2', 2, 1, tc.ml.Sigmoid())
-
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
-        param_list = cxt.nn.get_param_list()
-        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=param_list)
-        #result = visualize(tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while))
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cost, train_while)
-
-        response = self.host.post(ENDPOINT, cxt)
-
 
 
 class CNNTests(ClientTest):
