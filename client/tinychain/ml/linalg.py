@@ -408,7 +408,7 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
     
     @closure(U, V, e, txn.m, txn.n)
     @post_op
-    def step(cxt, i: UInt, l: F32, g: F32) -> Map:
+    def step(cxt, i: UInt, l: UInt, g: F32) -> Map:
         
         @closure(U, V, e, txn.m, txn.n)
         @post_op
@@ -434,29 +434,78 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
 
                 loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g), While(cond, step, Map(j=l, n=txn.n, l=l, i=i, U=U, V=V)))
 
-                shape_V_i_l =  V[i, l:].shape
-                shape_V_l_i =  V[l:, i].shape
-                return After(loop, [V[i,l:].write(Dense.zeros((shape_V_i_l,), dtype=F32)), 
-                                    V[l:,i].write(Dense.zeros((shape_V_l_i,), dtype=F32))])
-
-                # return tc.After(loop, [V[i,l:].write(tc.Float(0.0)), V[l:,i].write(tc.Float(0.0))])
+                return loop
 
             cxt.update_cols = update_cols
-            res = cxt.update_cols(n=txn.n, l=l, i=i, U=U,  V=V)
-            return If(Bool(g != 0.0), res)
+            cxt.res = cxt.update_cols(n=txn.n, l=l, i=i, U=U,  V=V)
+            return If(Bool(g != 0.0), cxt.res)
 
+        cxt.update_g = Float(e[i].copy())
         cxt.update_cols_wo_last = update_cols_wo_last
-        g_init = After(V[i,i].write(1.0), e[i].copy())            
+        cxt.update_cols_funct = After(cxt.update_cols_wo_last(l=l, g=g), [V[i,l:].write(V[i,l:]*0.0), V[l:,i].write(V[l:,i]*0.0)])
         
-        g = If(
+        cxt.check_last_col = If(
             Bool(i < txn.n-1),
-            cxt.update_cols_wo_last(l=l, g=g),
-            g_init)
+            cxt.update_cols_funct)
+        
+        g_final = After([cxt.check_last_col, V[i,i].write(1.0)], cxt.update_g)
 
-        return Map(i=i - 1, l=i, g=g, U=U, V=V, e=e)
+        return Map(i=i - 1, l=i, g=g_final, U=U, V=V, e=e)
 
     @post_op
     def cond(i: UInt) -> Bool:
         return i >= 0
 
     return Map(While(cond, step, Map(i=txn.n-1, l=0, g=0.0, U=U, V=V, e=e)))
+
+
+@post_op
+def lht(txn, U: Tensor, W: Tensor) -> Map:
+    """Accumulation of left hand transformations (lht)"""
+
+    txn.shape = U.shape
+    txn.m, txn.n = [UInt(dim) for dim in txn.shape.unpack(2)]
+    txn.min_m_n = UInt(If(txn.m < txn.n, txn.m, txn.n))
+    
+    @closure(U, W, txn.m, txn.n)
+    @post_op
+    def step(cxt, i: UInt, l: UInt, g: F32) -> Map:
+        
+        @closure(U, W, txn.m, txn.n)
+        @post_op
+        def update_cols(cxt, i: UInt, l: UInt, g: F32) -> F32:
+
+            @closure(U, W, txn.m, txn.n)
+            @post_op
+            def step(j: UInt, l: UInt, i: UInt) -> Map:
+                cxt.col_j = U[i:,j]
+                return Map(After(
+                    cxt.col_j.write(cxt.col_j + U[i:, i] * ((dot(U[l:, i], U[l:, j])/U[i,i])*g)),
+                    Map(j=j + 1, n=txn.n, l=l, i=i, U=U, W=W)
+                ))
+
+            @closure(txn.n)
+            @post_op
+            def cond(j: UInt) -> Bool:
+                return j < txn.n
+
+            cxt.update_g = 1.0 / g
+            loop = After(cxt.update_g, While(cond, step, Map(j=l, n=txn.n, l=l, i=i, U=U, W=W)))
+            update_U = After([loop, U[i:,i].write(U[i:,i]*cxt.update_g)], cxt.update_g)
+
+            return If(Bool(g != 0.0), update_U, g)
+
+        cxt.update_cols = update_cols
+        cxt.new_l = UInt(i + 1)
+        cxt.l = UInt(After(U[i, cxt.new_l:].write(U[i, cxt.new_l:]*0), cxt.new_l))
+        cxt.new_g = Float(W[i].copy())
+        cxt.final_g = cxt.update_cols(i=i, l=cxt.l, g=cxt.new_g)
+
+
+        return Map(i=i - 1, l=cxt.l, g=cxt.final_g, U=U, W=W)
+
+    @post_op
+    def cond(i: UInt) -> Bool:
+        return i >= 0
+
+    return Map(While(cond, step, Map(i=txn.min_m_n-1, l=0, g=0.0, U=U, W=W)))

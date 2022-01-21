@@ -8,10 +8,7 @@ tests/venv
 .idea
 .project
 
-.DS_Store
+**.DS_Store
 .venv/
-client/.DS_Store
-client/tinychain/.DS_Store
-client/tinychain/ml/.DS_Store
 local.Dockerfile
 .vscode
