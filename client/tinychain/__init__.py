@@ -6,6 +6,7 @@ import tinychain.graph.edge
 import tinychain.host
 import tinychain.ml.cnn
 import tinychain.ml.dnn
+import tinychain.ml.layers
 import tinychain.ml.optimizer
 import tinychain.op
 import tinychain.ref
