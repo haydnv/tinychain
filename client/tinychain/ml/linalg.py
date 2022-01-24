@@ -287,6 +287,7 @@ def dot(x1, x2):
     return (x1 * x2).sum()
 
 
+# TODO: make it work like numpy version
 @post_op
 def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
     """Householder's reduction to bidiagonal form"""
@@ -399,6 +400,7 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
     return Map(While(cond, step, Map(i=0, scale=0.0, g=0.0, U=U, W=W, e=e)))
 
 
+# TODO: make it work like numpy version
 @post_op
 def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
     """Accumulation of right hand transformations (rht)"""
@@ -420,11 +422,12 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
                 
                 @closure(U, V, e, txn.m, txn.n)
                 @post_op
-                def step(j: UInt, l: UInt, i: UInt) -> Map:
+                def step(cxt, j: UInt, l: UInt, i: UInt) -> Map:
                     cxt.col_j = V[l:, j]
+                    cxt.update_col = cxt.col_j.write(cxt.col_j + V[l:, i] * dot(U[i, l:], cxt.col_j))
                     return Map(After(
-                        cxt.col_j.write(cxt.col_j + V[l:, i] * dot(U[i, l:], cxt.col_j)),
-                        Map(j=j + 1, n=txn.n, l=l, i=i, U=U, V=V)
+                        cxt.update_col,
+                        Map(j=j + 1, n=txn.n, l=l, i=i)
                     ))
 
                 @closure(txn.n)
@@ -432,20 +435,20 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
                 def cond(j: UInt) -> Bool:
                     return j < txn.n
 
-                loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g), While(cond, step, Map(j=l, n=txn.n, l=l, i=i, U=U, V=V)))
+                loop = After(V[l:,i].write((U[i,l:] / U[i,l]) / g), While(cond, step, Map(j=l, n=txn.n, l=l, i=i)))
 
                 return loop
 
             cxt.update_cols = update_cols
-            cxt.res = cxt.update_cols(n=txn.n, l=l, i=i, U=U,  V=V)
-            return If(Bool(g != 0.0), cxt.res)
+            cxt.res = cxt.update_cols(n=txn.n, l=l, i=i)
+            return If((g != 0.0), cxt.res)
 
         cxt.update_g = Float(e[i].copy())
         cxt.update_cols_wo_last = update_cols_wo_last
-        cxt.update_cols_funct = After(cxt.update_cols_wo_last(l=l, g=g), [V[i,l:].write(V[i,l:]*0.0), V[l:,i].write(V[l:,i]*0.0)])
+        cxt.update_cols_funct = After(cxt.update_cols_wo_last(l=l, g=g), [V[i,l:].write(0.0), V[l:,i].write(0.0)])
         
         cxt.check_last_col = If(
-            Bool(i < txn.n-1),
+            (i < txn.n-1),
             cxt.update_cols_funct)
         
         g_final = After([cxt.check_last_col, V[i,i].write(1.0)], cxt.update_g)
@@ -459,6 +462,7 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
     return Map(While(cond, step, Map(i=txn.n-1, l=0, g=0.0, U=U, V=V, e=e)))
 
 
+# TODO: make it work like numpy version
 @post_op
 def lht(txn, U: Tensor, W: Tensor) -> Map:
     """Accumulation of left hand transformations (lht)"""
@@ -479,9 +483,10 @@ def lht(txn, U: Tensor, W: Tensor) -> Map:
             @post_op
             def step(j: UInt, l: UInt, i: UInt) -> Map:
                 cxt.col_j = U[i:,j]
+                cxt.update_col = cxt.col_j.write(cxt.col_j + U[i:, i] * ((dot(U[l:, i], U[l:, j])/U[i,i])*g))
                 return Map(After(
-                    cxt.col_j.write(cxt.col_j + U[i:, i] * ((dot(U[l:, i], U[l:, j])/U[i,i])*g)),
-                    Map(j=j + 1, n=txn.n, l=l, i=i, U=U, W=W)
+                    cxt.update_col,
+                    Map(j=j + 1, n=txn.n, l=l, i=i)
                 ))
 
             @closure(txn.n)
@@ -490,15 +495,15 @@ def lht(txn, U: Tensor, W: Tensor) -> Map:
                 return j < txn.n
 
             cxt.update_g = 1.0 / g
-            loop = After(cxt.update_g, While(cond, step, Map(j=l, n=txn.n, l=l, i=i, U=U, W=W)))
+            loop = After(cxt.update_g, While(cond, step, Map(j=l, n=txn.n, l=l, i=i)))
             update_U = After([loop, U[i:,i].write(U[i:,i]*cxt.update_g)], cxt.update_g)
 
-            return If(Bool(g != 0.0), update_U, g)
+            return If((g != 0.0), update_U, g)
 
         cxt.update_cols = update_cols
         cxt.new_l = UInt(i + 1)
-        cxt.l = UInt(After(U[i, cxt.new_l:].write(U[i, cxt.new_l:]*0), cxt.new_l))
-        cxt.new_g = Float(W[i].copy())
+        cxt.l = UInt(After(U[i, cxt.new_l:].write(0.0), cxt.new_l))
+        cxt.new_g = Float(W[i])
         cxt.final_g = cxt.update_cols(i=i, l=cxt.l, g=cxt.new_g)
 
 
@@ -509,3 +514,14 @@ def lht(txn, U: Tensor, W: Tensor) -> Map:
         return i >= 0
 
     return Map(While(cond, step, Map(i=txn.min_m_n-1, l=0, g=0.0, U=U, W=W)))
+
+
+@post_op
+def golub_kahan(txn, U: Tensor, W: Tensor, e: Tensor, k: UInt, maxiter=30):
+    """
+    Diagonalization of the bidiagonal form: 
+        - k is the kth singular value
+        - loop over maxiter allowed iteration
+    """
+
+    raise NotImplementedError("golub kahan diagonalization")
