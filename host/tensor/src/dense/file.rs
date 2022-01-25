@@ -21,7 +21,9 @@ use tc_value::{Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
-use crate::{coord_bounds, transform, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
+use crate::{
+    coord_bounds, transform, Bounds, Coord, FloatType, Schema, Shape, TensorAccess, TensorType,
+};
 
 use super::access::BlockListTranspose;
 use super::{DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
@@ -62,6 +64,45 @@ where
     pub async fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
         debug!("BlockListFile::constant {} {}", shape, value);
 
+        let value_clone = value.clone();
+        let generator = |length| Array::constant(value_clone.clone(), length);
+        Self::from_blocks_generator(file, txn_id, shape, value.class(), generator).await
+    }
+
+    /// Construct a new `BlockListFile` with the given [`Shape`], with a random normal distribution.
+    pub async fn random_normal(
+        file: FD,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: FloatType,
+    ) -> TCResult<Self> {
+        debug!("BlockListFile::random_normal {}", shape);
+        let generator = |length| Array::random_normal(dtype, length);
+        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator).await
+    }
+
+    /// Construct a new `BlockListFile` with the given [`Shape`], with a random normal distribution.
+    pub async fn random_uniform(
+        file: FD,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: FloatType,
+    ) -> TCResult<Self> {
+        debug!("BlockListFile::random_normal {}", shape);
+        let generator = |length| Array::random_uniform(dtype, length);
+        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator).await
+    }
+
+    async fn from_blocks_generator<G>(
+        file: FD,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: NumberType,
+        generator: G,
+    ) -> TCResult<Self>
+    where
+        G: Fn(usize) -> Array + Send + Copy,
+    {
         if !file.is_empty(txn_id).await? {
             return Err(TCError::unsupported(
                 "cannot create new tensor: file is not empty",
@@ -70,30 +111,15 @@ where
 
         let size = shape.size();
 
-        let value_clone = value.clone();
-        let blocks = (0..(size / PER_BLOCK as u64))
-            .map(move |_| Ok(Array::constant(value_clone.clone(), PER_BLOCK)));
+        let blocks = (0..(size / PER_BLOCK as u64)).map(move |_| Ok(generator(PER_BLOCK)));
 
         let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(Ok(Array::constant(value.clone(), trailing_len))));
-            Self::from_blocks(
-                file,
-                txn_id,
-                Some(shape),
-                value.class(),
-                stream::iter(blocks),
-            )
-            .await
+            let blocks = blocks.chain(iter::once(Ok(generator(trailing_len))));
+
+            Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
         } else {
-            Self::from_blocks(
-                file,
-                txn_id,
-                Some(shape),
-                value.class(),
-                stream::iter(blocks),
-            )
-            .await
+            Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
         }
     }
 
