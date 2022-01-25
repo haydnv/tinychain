@@ -71,10 +71,10 @@ class DenseTests(unittest.TestCase):
 
     def testCast(self):
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.ones([3, 3])
+        cxt.x = tc.tensor.Dense.random_normal([3, 3])
         cxt.y1 = cxt.x / tc.Float(3.)
         cxt.y2 = cxt.x / tc.Int(3).cast(tc.Float)
-        cxt.y3 = cxt.x.cast(tc.F64) / 3
+        cxt.y3 = cxt.x.cast(tc.F32) / 3
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
         actual = self.host.post(ENDPOINT, cxt)
