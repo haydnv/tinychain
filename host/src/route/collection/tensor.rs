@@ -12,7 +12,8 @@ use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::Transaction;
 use tc_value::{
-    Bound, Number, NumberClass, NumberInstance, NumberType, Range, TCString, Value, ValueType,
+    Bound, FloatType, Number, NumberClass, NumberInstance, NumberType, Range, TCString, Value,
+    ValueType,
 };
 use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
@@ -597,6 +598,56 @@ impl<T> From<T> for FlipHandler<T> {
     }
 }
 
+struct RandomNormalHandler;
+
+impl<'a> Handler<'a> for RandomNormalHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let shape =
+                    key.try_cast_into(|v| TCError::bad_request("invalid shape for Tensor", v))?;
+
+                let file = create_file(&txn).await?;
+
+                BlockListFile::random_normal(file, *txn.id(), shape, FloatType::F64)
+                    .map_ok(DenseTensor::from)
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+struct RandomUniformHandler;
+
+impl<'a> Handler<'a> for RandomUniformHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let shape =
+                    key.try_cast_into(|v| TCError::bad_request("invalid shape for Tensor", v))?;
+
+                let file = create_file(&txn).await?;
+
+                BlockListFile::random_uniform(file, *txn.id(), shape, FloatType::F64)
+                    .map_ok(DenseTensor::from)
+                    .map_ok(Tensor::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
 struct RangeHandler;
 
 impl<'a> Handler<'a> for RangeHandler {
@@ -833,22 +884,37 @@ impl Route for TensorType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             return Some(Box::new(CreateHandler { class: *self }));
-        } else if path.len() != 1 {
-            return None;
         }
 
-        match self {
-            Self::Dense => match path[0].as_str() {
-                "copy_from" => Some(Box::new(CopyDenseHandler)),
-                "concatenate" => Some(Box::new(ConcatenateHandler)),
-                "constant" => Some(Box::new(ConstantHandler)),
-                "range" => Some(Box::new(RangeHandler)),
-                _ => None,
-            },
-            Self::Sparse => match path[0].as_str() {
-                "copy_from" => Some(Box::new(CopySparseHandler)),
-                _ => None,
-            },
+        if path.len() == 1 {
+            match self {
+                Self::Dense => match path[0].as_str() {
+                    "copy_from" => Some(Box::new(CopyDenseHandler)),
+                    "concatenate" => Some(Box::new(ConcatenateHandler)),
+                    "constant" => Some(Box::new(ConstantHandler)),
+                    "range" => Some(Box::new(RangeHandler)),
+                    "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
+                    _ => None,
+                },
+                Self::Sparse => match path[0].as_str() {
+                    "copy_from" => Some(Box::new(CopySparseHandler)),
+                    _ => None,
+                },
+            }
+        } else if path.len() == 2 {
+            match self {
+                Self::Dense => match path[0].as_str() {
+                    "random" => match path[1].as_str() {
+                        "normal" => Some(Box::new(RandomNormalHandler)),
+                        "uniform" => Some(Box::new(RandomUniformHandler)),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                Self::Sparse => None,
+            }
+        } else {
+            None
         }
     }
 }
@@ -1425,7 +1491,10 @@ where
             ))),
             "exp" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::exp))),
             "not" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::not))),
-            "round" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::round))),
+            "round" => Some(Box::new(UnaryHandler::new(
+                tensor.into(),
+                TensorUnary::round,
+            ))),
 
             // basic math
             "add" => Some(Box::new(DualHandler::new(
