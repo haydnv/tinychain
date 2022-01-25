@@ -1,12 +1,14 @@
 # Constructors for a generic deep neural network.
 #
 # Prefer this implementation if no more domain-specific neural net architecture is needed.
+
 import functools
 import operator
+
 from typing import List
 
-from tinychain.collection.tensor import einsum, Dense, Tensor
-from tinychain.ml import Layer, NeuralNet, Sigmoid, DiffedParameter, Parameter
+from tinychain.collection.tensor import einsum, Tensor
+from tinychain.ml import Dense, Layer, NeuralNet, Sigmoid, DiffedParameter, Parameter
 
 
 class DNNLayer(Layer):
@@ -105,7 +107,7 @@ class DNN(NeuralNet):
 
                 return loss, param_list
             
-            def get_param_list(self)  -> List[Parameter]:
+            def get_param_list(self) -> List[Parameter]:
                 return functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])
 
         return DNN(layers)

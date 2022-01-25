@@ -1,10 +1,30 @@
-import typing as t
 from abc import abstractmethod, ABC
 
+from tinychain.collection import tensor
 from tinychain.state import Map, Tuple
-from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
+
+
+class Dense(tensor.Dense):
+    @classmethod
+    def with_shape(cls, shape):
+        if shape != tuple(shape) or not all([dim > 0 for dim in shape]):
+            raise ValueError(f"invalid shape for Dense tensor in ML model: {shape}")
+
+        class _Dense(tensor.Dense):
+            @property
+            def shape(self):
+                return shape
+
+        return _Dense
+
+    @classmethod
+    def create(cls, shape):
+        cls.with_shape(shape).create(shape)
+
+
+
 
 class Activation(ABC):
     """A differentiable activation function for a neural network."""
@@ -110,22 +130,21 @@ class NeuralNet(Tuple, Differentiable):
 
 class Parameter:
 
-    def __init__(self, name: str, value: Tensor) -> None:
+    def __init__(self, name: str, value: tensor.Tensor) -> None:
         self.name = name
         self.value = value
 
     @classmethod
-    def create(cls, name: str, value: Tensor):
+    def create(cls, name: str, value: tensor.Tensor):
         return cls(name=name, value=value)
 
 
 class DiffedParameter(Parameter):
 
-    def __init__(self, name: str, value: Tensor, grad: Tensor) -> None:
+    def __init__(self, name: str, value: tensor.Tensor, grad: tensor.Tensor) -> None:
         super().__init__(name, value)
         self.grad = grad
 
     @classmethod
-    def create(cls, name: str, value: Tensor, grad: Tensor):
+    def create(cls, name: str, value: tensor.Tensor, grad: tensor.Tensor):
         return cls(name=name, value=value, grad=grad)
-

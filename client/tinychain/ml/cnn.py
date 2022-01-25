@@ -1,7 +1,7 @@
 import math
 
-from tinychain.collection.tensor import einsum, Dense
-from tinychain.ml import Layer, Sigmoid
+from tinychain.collection.tensor import einsum
+from tinychain.ml import Dense, Layer, Sigmoid
 from tinychain.ref import After
 from tinychain.state import Map
 

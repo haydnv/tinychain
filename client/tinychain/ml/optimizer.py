@@ -1,9 +1,8 @@
 import typing as t
 from abc import abstractmethod
 
-from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
-from tinychain.ml import DiffedParameter, Parameter
+from tinychain.ml import Dense, DiffedParameter, Parameter
 from tinychain.ref import After, While
 from tinychain.state import Map
 from tinychain.value import F32, UInt
