@@ -42,21 +42,21 @@ class Host(object):
             return response
         elif status == 204:
             return None
-        elif status == 400:
+        elif status == BadRequest.CODE:
             raise BadRequest(response)
-        elif status == 401:
+        elif status == Unauthorized.CODE:
             raise Unauthorized(response)
-        elif status == 403:
+        elif status == Forbidden.CODE:
             raise Forbidden(response)
-        elif status == 404:
+        elif status == NotFound.CODE:
             raise NotFound(response)
-        elif status == 405:
+        elif status == MethodNotAllowed.CODE:
             raise MethodNotAllowed(response)
-        elif status == 408:
+        elif status == Timeout.CODE:
             raise Timeout(response)
-        elif status == 409:
+        elif status == Conflict.CODE:
             raise Conflict(response)
-        elif status == 501:
+        elif status == NotImplemented.CODE:
             raise NotImplemented(response)
         else:
             raise UnknownError(f"HTTP error code {status}: {response}")

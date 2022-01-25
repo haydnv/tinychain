@@ -466,6 +466,18 @@ class Dense(Tensor):
 
         return cls.constant(shape, Number(0).cast(dtype))
 
+    @classmethod
+    def random_normal(cls, shape):
+        """Return a `Dense` tensor filled with a random normal distribution of `F64`s."""
+
+        return cls(ref.Get(uri(cls) + "/random/normal", shape))
+
+    @classmethod
+    def random_uniform(cls, shape):
+        """Return a `Dense` tensor filled with a uniform random distribution of `F64`s."""
+
+        return cls(ref.Get(uri(cls) + "/random/uniform", shape))
+
     def elements(self, bounds):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
 

@@ -11,7 +11,7 @@ DEFAULT_PORT = 8702
 
 class Process(tc.host.Local.Process):
     ADDRESS = "127.0.0.1"
-    BUILD = "docker build -f tests/client/Dockerfile ."
+    BUILD = "docker build -f tests/apps/Dockerfile ."
 
     def __init__(self, config_dir, clusters):
         self.client = docker.from_env()

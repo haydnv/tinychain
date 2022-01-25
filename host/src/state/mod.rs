@@ -72,6 +72,7 @@ impl NativeClass for StateType {
         } else if &path[0] == "state" {
             if path.len() == 2 {
                 match path[1].as_str() {
+                    "closure" => Some(Self::Closure),
                     "map" => Some(Self::Map),
                     "tuple" => Some(Self::Tuple),
                     _ => None,
@@ -1158,6 +1159,8 @@ impl StateVisitor {
         class: StateType,
         access: &mut A,
     ) -> Result<State, A::Error> {
+        debug!("decode instance of {}", class);
+
         match class {
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())

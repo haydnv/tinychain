@@ -1,19 +1,20 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use destream::en;
+use destream::{en, EncodeMap};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tcgeneric::{Id, TCBoxTryStream};
+use tcgeneric::{Id, NativeClass, TCBoxTryStream};
 
 use crate::chain::ChainView;
 use crate::collection::CollectionView;
 use crate::fs;
 use crate::object::ObjectView;
 use crate::scalar::{OpDef, Scalar};
+use crate::state::StateType;
 use crate::txn::Txn;
 
 use super::State;
@@ -80,7 +81,12 @@ impl<'en> en::IntoStream<'en> for StateView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Collection(collection) => collection.into_stream(encoder),
-            Self::Closure(closure) => closure.into_stream(encoder),
+            Self::Closure(closure) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_key(StateType::Closure.path().to_string())?;
+                map.encode_value(closure)?;
+                map.end()
+            }
             Self::Chain(chain) => chain.into_stream(encoder),
             Self::Map(map) => map.into_stream(encoder),
             Self::Object(object) => object.into_stream(encoder),
