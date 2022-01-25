@@ -443,7 +443,7 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
             cxt.res = cxt.update_cols(n=txn.n, l=l, i=i)
             return If((g != 0.0), cxt.res)
 
-        cxt.update_g = Float(e[i].copy())
+        cxt.update_g = Float(e[i])
         cxt.update_cols_wo_last = update_cols_wo_last
         cxt.update_cols_funct = After(cxt.update_cols_wo_last(l=l, g=g), [V[i,l:].write(0.0), V[l:,i].write(0.0)])
         
@@ -514,6 +514,72 @@ def lht(txn, U: Tensor, W: Tensor) -> Map:
         return i >= 0
 
     return Map(While(cond, step, Map(i=txn.min_m_n-1, l=0, g=0.0, U=U, W=W)))
+
+
+# helper functions
+def sqr(a):
+    return Number(If(a == 0.0, 0.0, a*a))
+
+
+def pythag(a,b): 
+    aa = a.abs()
+    bb = b.abs()
+    return If(aa > bb, aa * (1.0 + sqr(bb/aa)**0.5), bb * (1.0 + sqr(aa/bb))**0.5)
+
+
+@post_op
+def cancelation(txn, U, W, e, l, k):
+    txn.c = 0.0
+    txn.s = 1.0
+    txn.l1 = l-1
+
+    @closure(U, W, e, l, k, txn.c, txn.s, txn.l1)
+    @post_op
+    def step(cxt, i: UInt) -> Map:
+        cxt.f = txn.s * e[i]
+        e[i] = txn.c * e[i]
+        cxt.g = W[i]
+        #TODO: change with break analog
+        # cxt.h = Float(If(cxt.f.abs() <= EPS, break, pythag(cxt.f, cxt.g)))
+        cxt.h = 1.0
+        W[i] = cxt.h
+        txn.c = cxt.g/cxt.h
+        txn.s  = -cxt.f/cxt.h
+        cxt.Y = U[:,txn.l1].copy()
+        cxt.Z = U[:,i].copy()
+        update_prev_col = U[:,txn.l1].write(cxt.Y * txn.c + cxt.Z * txn.s)
+        update_col = U[:,i].write(-cxt.Y * txn.s + cxt.Z * txn.c)
+        U_final = After([update_prev_col, update_col], U)
+        return Map(i=i + 1, U=U_final, W=W, e=e)
+
+    @closure(k)
+    @post_op
+    def cond(i: UInt) -> Bool:
+        return i < k+1
+
+    return Map(While(cond, step, Map(i=l)))    
+
+
+# TODO: make it work with break
+@post_op
+def testfsplit(txn, U, W, e, k):
+    @closure(U, W, e, k)
+    @post_op
+    def step(cxt, l: UInt) -> Map:
+        goto_test_f_convergence = If((e[l].abs() <= EPS), True, False)
+        goto_test_f_convergence_final = If((W[l-1].abs() <= EPS).logical_OR(goto_test_f_convergence), 1.0, goto_test_f_convergence)
+        # goto_test_f_convergence_final = If((W[l-1].abs() <= EPS).logical_OR(goto_test_f_convergence), break, goto_test_f_convergence)
+        return Map(l=l - 1, goto_test_f_convergence=goto_test_f_convergence_final, U=U, W=W, e=e)
+
+    @closure(k)
+    @post_op
+    def cond(l: UInt) -> Bool:
+        return l >= 0
+
+    # txn.cancelation = cancelation(U, W, e, l, k)
+    # If(goto_test_f_convergence, l, txn.cancelation)    
+
+    return Map(While(cond, step, Map(l=k)))
 
 
 @post_op
