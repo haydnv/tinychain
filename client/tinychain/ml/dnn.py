@@ -40,7 +40,7 @@ class DNNLayer(Layer):
                 dL = einsum("ij,kj->ki", [self[name + ".weights"], delta])
                 return dL, [
                     DiffedParameter.create(
-                        name=name + '.weight',
+                        name=name + '.weights',
                         value=self[name + ".weights"],
                         grad=einsum("ki,kj->ij", [x, delta]).copy() / m),
                     DiffedParameter.create(
@@ -51,7 +51,7 @@ class DNNLayer(Layer):
 
             def get_param_list(self) -> List[Parameter]: 
                 return [
-                    Parameter.create(name=name + '.weight', value=self[name + ".weights"]),
+                    Parameter.create(name=name + '.weights', value=self[name + ".weights"]),
                     Parameter.create(name=name + '.bias', value=self[name + ".bias"])
                 ]
 
