@@ -45,6 +45,26 @@ do
     apt-get -y install curl
 done
 
+af_installer=ArrayFire-v3.8.0_Linux_x86_64.sh
+
+while [ ! -d $af_prefix/arrayfire ]
+do
+    echo "installing ArrayFire"
+    curl -sSL https://arrayfire.s3.amazonaws.com/3.8.0/$af_installer --output $af_installer
+    chmod +x $af_installer
+    ./$af_installer --include-subdir --prefix=$af_prefix --skip-license
+done
+
+if [ -f $af_installer ]
+then
+    rm $af_installer
+fi
+
+AF_PATH=$af_prefix/arrayfire
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$AF_PATH/lib64
+
+echo '/opt/arrayfire/lib64' > /etc/ld.so.conf.d/arrayfire.conf
+
 # make sure cargo is installed
 while ! command -v cargo &> /dev/null
 do
@@ -52,16 +72,6 @@ do
     curl https://sh.rustup.rs -sSf | sh -s -- -y
     source $HOME/.cargo/env
     echo "installed cargo"
-done
-
-# make sure ArrayFire is installed
-while ! dpkg-query -l arrayfire > /dev/null 2>&1
-do
-    echo "installing ArrayFire (more info: https://arrayfire.org/)"
-    apt-get install -y gnupg2 ca-certificates apt-utils software-properties-common
-    apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
-    echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu $UBUNTU_CODENAME main" | tee /etc/apt/sources.list.d/arrayfire.list
-    apt-get update && apt-get install -y arrayfire
 done
 
 # make sure the C linker is installed
@@ -78,4 +88,4 @@ do
     cargo install tinychain --features=tensor
 done
 
-echo 'TinyChain installed successfully--remember to run source $HOME/.cargo/env before running the tinychain command'
+echo 'TinyChain installed successfully--remember to run source $HOME/.cargo/env and set AF_PATH and LD_LIBRARY_PATH before running the tinychain command'
