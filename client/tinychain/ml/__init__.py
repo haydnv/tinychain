@@ -1,10 +1,10 @@
-import typing as t
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
 from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
+
 
 class Activation(ABC):
     """A differentiable activation function for a neural network."""
@@ -18,6 +18,14 @@ class Activation(ABC):
         """Compute the partial differential of this function"""
 
 
+class Blank(Activation):
+    def forward(self, x):
+        return x
+
+    def backward(self, x):
+        return x
+
+
 class Sigmoid(Activation):
     def forward(self, x):
         return 1 / (1 + (-x).exp())
@@ -25,6 +33,14 @@ class Sigmoid(Activation):
     def backward(self, x):
         sig = self.forward(x)
         return sig * (1 - sig)
+
+
+class Tanh(Activation):
+    def forward(self, x):
+        return ((x).exp() - (-x).exp()) / ((x).exp() + (-x).exp())
+
+    def backward(self, x):
+        return 1 - self.forward(x)**2
 
 
 class ReLU(Activation):
@@ -59,7 +75,7 @@ class Differentiable(object):
         Returns a tuple `(loss, gradient)` where `loss` is the loss to propagate further backwards and `gradient` is
         the total gradient for an `Optimizer` to use in order to calculate an update to this `Differentiable`.
         """
-    
+
     @abstractmethod
     def get_param_list(self):
         """
@@ -128,4 +144,3 @@ class DiffedParameter(Parameter):
     @classmethod
     def create(cls, name: str, value: Tensor, grad: Tensor):
         return cls(name=name, value=value, grad=grad)
-
