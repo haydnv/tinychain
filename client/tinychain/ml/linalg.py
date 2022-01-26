@@ -555,7 +555,7 @@ def cancelation(txn, U, W, e, l, k):
     return Map(While(cond, step, Map(running = True, i=l)))    
 
 
-post_op
+@post_op
 def testfsplit(txn, U, W, e, k):
     @closure(U, W, e, k)
     @post_op
