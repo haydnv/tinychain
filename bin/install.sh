@@ -63,7 +63,7 @@ fi
 AF_PATH=$af_prefix/arrayfire
 LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$AF_PATH/lib64
 
-echo '/opt/arrayfire/lib64' > /etc/ld.so.conf.d/arrayfire.conf
+echo "$af_prefix/arrayfire/lib64" > /etc/ld.so.conf.d/arrayfire.conf
 
 # make sure cargo is installed
 while ! command -v cargo &> /dev/null
