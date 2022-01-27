@@ -18,7 +18,7 @@ class Activation(ABC):
         """Compute the partial differential of this function"""
 
 
-class Blank(Activation):
+class Identity(Activation):
     def forward(self, x):
         return x
 
@@ -34,10 +34,10 @@ class Sigmoid(Activation):
         sig = self.forward(x)
         return sig * (1 - sig)
 
-
+#TODO: remove when automatic differentiation is implemented"
 class Tanh(Activation):
     def forward(self, x):
-        return ((x).exp() - (-x).exp()) / ((x).exp() + (-x).exp())
+        return x.tanh()
 
     def backward(self, x):
         return 1 - self.forward(x)**2
