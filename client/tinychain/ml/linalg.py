@@ -578,11 +578,79 @@ def testfsplit(txn, U, W, e, k):
 
 
 @post_op
-def golub_kahan(txn, U: Tensor, W: Tensor, e: Tensor, k: UInt, maxiter=30):
+def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxiter=30):
     """
     Diagonalization of the bidiagonal form: 
         - k is the kth singular value
         - loop over maxiter allowed iteration
     """
 
-    raise NotImplementedError("golub kahan diagonalization")
+    @closure(U, W, e)
+    @post_op
+    def step(cxt, t, k, maxiter) -> Map:
+        
+        l = testfsplit(U, W, e, k)
+        cxt.update_mtrx = After([W[k].write(W[k].abs()), V[:,k].write(V[:,k].abs())], running = False)
+        W_upd = If(l == k, cxt.update_mtrx, W)
+        running = If(l == k, False, True)
+        #TODO: add convergence check
+        # if t == maxiter-1:
+        #     if __debug__: print ('Error: no convergence.')
+        #     raise ValueError('SVD Error: no convergence found.')
+
+        # shift from bottom 2x2 minor
+        x = W[l]
+        y = W[k-1]
+        z = W[k]
+        g = e[k-1]
+        h = e[k]
+
+        f = ((y-z)*(y+z)+(g-h)*(g+h))/(2.0*h*y)
+        g = pythag(f, 1.0)
+        f = ((x-z)*(x+z)+h*((y/(f+sign_like(g,f)))-h))/x
+
+        # next QR transformation
+        c = 1.0
+        s = 1.0
+
+        @closure(U, W, e, s, c, f)
+        @post_op
+        def step(cxt, i, k, maxiter) -> Map:
+            g= e[i]
+            y = W[i]
+            h = s*g
+            g = c*g
+
+            z = pythag(f,h)
+            e[i-1] = z
+
+            c = f/z
+            s = h/z
+            f = x*c+g*s
+            g = g*c-x*s
+            h = y*s
+            y = y*c
+
+            X = V[:,i-1].copy()
+            Z = V[:,i].copy()
+            V[:,i-1] = c * X + s * Z
+            V[:,i  ] = c * Z - s * X
+
+            z = pythag(f, h)
+            W[i-1] = z
+
+        
+        @closure(k)
+        @post_op
+        def cond(i: UInt) -> Bool:
+            return i < k+1
+
+
+        return Map(t=t + 1, running=running, l=l, U=U, W=W_upd, e=e)
+
+    @closure(maxiter)
+    @post_op
+    def cond(t: UInt, running: Bool) -> Bool:
+        return running.logical_and(t < maxiter)
+
+    return Map(While(cond, step, Map(t=0, U=U, W=W, e=e)))
