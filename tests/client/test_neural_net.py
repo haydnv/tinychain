@@ -13,7 +13,7 @@ Dense = tc.tensor.Dense
 ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = tc.F32(0.01)
 MAX_ITERATIONS = 100
-NUM_EXAMPLES = 5
+NUM_EXAMPLES = 20
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -124,7 +124,7 @@ class DNNTests(ClientTest):
         @tc.post_op
         def train_while(i: tc.UInt, output: tc.tensor.Dense):
             return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != cxt.labels).any())
-        
+
         cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list(), lr=LEARNING_RATE)
         cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
 
