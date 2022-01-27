@@ -1258,7 +1258,16 @@ impl Reductor {
         }
     }
 
-    fn call(self, blocks: TCBoxTryStream<Array>) -> TCBoxTryStream<Array> {
+    fn reduce_block(self, block: Array) -> TCResult<Array> {
+        match self {
+            Self::Product(_dtype, stride) => {
+                block.reduce_product(stride).map_err(TCError::unsupported)
+            }
+            Self::Sum(_dtype, stride) => block.reduce_sum(stride).map_err(TCError::unsupported),
+        }
+    }
+
+    fn reduce_stream(self, blocks: TCBoxTryStream<Array>) -> TCBoxTryStream<Array> {
         let reduced = match self {
             Self::Product(dtype, stride) => {
                 afarray::reduce_product(blocks, dtype, PER_BLOCK, stride)
@@ -1377,7 +1386,7 @@ where
 
             if axis == ndim - 1 {
                 let blocks = source.block_stream(txn).await?;
-                Ok(reductor.call(blocks))
+                Ok(reductor.reduce_stream(blocks))
             } else {
                 let mut permutation: Vec<usize> = (0..ndim).collect();
                 permutation[axis] = ndim - 1;
@@ -1385,7 +1394,7 @@ where
 
                 let transpose = source.transpose(Some(permutation))?;
                 let blocks = transpose.block_stream(txn).await?;
-                Ok(reductor.call(blocks))
+                Ok(reductor.reduce_stream(blocks))
             }
         })
     }
@@ -1414,15 +1423,22 @@ where
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
-        let coords = coords.into_vec();
-        let values: Vec<Number> = stream::iter(coords)
-            .map(move |coord| self.clone().read_value_at(txn.clone(), coord))
-            .buffered(num_cpus::get())
-            .map_ok(|(_coord, value)| value)
-            .try_collect()
-            .await?;
+        let reduce_dim = self.source.shape()[self.rebase.reduce_axis()];
+        if (reduce_dim * coords.len() as u64) < PER_BLOCK as u64 {
+            let source_coords = self.rebase.invert_coords(coords);
+            let source_values = self.source.read_values(txn, source_coords).await?;
+            self.reductor.reduce_block(source_values)
+        } else {
+            let coords = coords.into_vec();
+            let values: Vec<Number> = stream::iter(coords)
+                .map(move |coord| self.clone().read_value_at(txn.clone(), coord))
+                .buffered(num_cpus::get())
+                .map_ok(|(_coord, value)| value)
+                .try_collect()
+                .await?;
 
-        Ok(Array::from(values))
+            Ok(Array::from(values))
+        }
     }
 }
 
