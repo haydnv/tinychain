@@ -389,6 +389,10 @@ impl Reduce {
         bounds.into()
     }
 
+    pub fn invert_coords(&self, coords: Coords) -> Coords {
+        coords.expand(&self.source_shape, self.axis)
+    }
+
     pub fn reduce_axis(&self) -> usize {
         self.axis
     }
