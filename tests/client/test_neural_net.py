@@ -6,6 +6,7 @@ import unittest
 
 from functools import reduce
 from testutils import ClientTest
+from tcdebug.board import Board
 
 Dense = tc.tensor.Dense
 
@@ -13,7 +14,7 @@ Dense = tc.tensor.Dense
 ENDPOINT = "/transact/hypothetical"
 LEARNING_RATE = tc.F32(0.01)
 MAX_ITERATIONS = 100
-NUM_EXAMPLES = 20
+NUM_EXAMPLES = 1
 
 
 def truncated_normal(size, mean=0., std=None):
@@ -36,12 +37,12 @@ class DNNTests(ClientTest):
         np.random.seed(3)
         super().setUpClass()
 
-    @staticmethod
-    def create_layer(name, input_size, output_size, activation):
-        shape = (input_size, output_size)
-        bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(output_size).tolist())
-        weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(input_size * output_size).tolist())
-        return tc.ml.dnn.DNNLayer.load(name, weights, bias, activation)
+    # @staticmethod
+    # def create_layer(name, input_size, output_size, activation):
+    #     shape = (input_size, output_size)
+    #     bias = tc.tensor.Dense.load([output_size], tc.F32, truncated_normal(output_size).tolist())
+    #     weights = tc.tensor.Dense.load(shape, tc.F32, truncated_normal(input_size * output_size).tolist())
+    #     return tc.ml.dnn.DNNLayer.load(name, weights, bias, activation)
 
     def testNot(self):
         cxt = tc.Context()
@@ -50,8 +51,8 @@ class DNNTests(ClientTest):
         cxt.inputs = load(inputs)
         cxt.labels = load((inputs[:, :] < 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1]))
 
-        cxt.input_layer = self.create_layer('layer0', 1, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
+        layer0 = tc.ml.nn.DNNLayer.create('layer0', 1, 1, tc.ml.Sigmoid())
+        cxt.neural_net = tc.ml.nn.Sequential.create([layer0])
 
         self.execute(cxt)
 
@@ -64,8 +65,8 @@ class DNNTests(ClientTest):
         labels = np.logical_and(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
         cxt.labels = load(labels)
 
-        cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
+        layer0 = tc.ml.nn.DNNLayer.create('layer0', 2, 1, tc.ml.ReLU())
+        cxt.neural_net = tc.ml.nn.Sequential.create([layer0])
 
         self.execute(cxt)
 
@@ -78,8 +79,8 @@ class DNNTests(ClientTest):
         labels = np.logical_or(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
         cxt.labels = load(labels)
 
-        cxt.input_layer = self.create_layer('layer0', 2, 1, tc.ml.ReLU())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer])
+        layer0 = tc.ml.nn.DNNLayer.create('layer0', 2, 1, tc.ml.ReLU())
+        cxt.neural_net = tc.ml.nn.Sequential.create([layer0])
 
         self.execute(cxt)
 
@@ -92,9 +93,9 @@ class DNNTests(ClientTest):
         labels = np.logical_xor(inputs[:, 0] > 0.5, inputs[:, 1] > 0.5).astype(np.float32).reshape([NUM_EXAMPLES, 1])
         cxt.labels = load(labels)
 
-        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
-        cxt.output_layer = self.create_layer('layer1', 2, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.output_layer])
+        layer0 = tc.ml.nn.DNNLayer.create('layer0', 3, 2, tc.ml.Sigmoid())
+        layer1 = tc.ml.nn.DNNLayer.create('layer1', 2, 1, tc.ml.Sigmoid())
+        cxt.neural_net = tc.ml.nn.Sequential.create([layer0, layer1])
 
         self.execute(cxt)
 
@@ -107,10 +108,10 @@ class DNNTests(ClientTest):
         labels = np.logical_and(inputs[:, 0] > 0.1, inputs[:, 1] < 0.5, inputs[:, 2] > 0.7).astype(np.float32).reshape([NUM_EXAMPLES, 1])
         cxt.labels = load(labels, tc.F32)
 
-        cxt.input_layer0 = self.create_layer('layer0', 3, 2, tc.ml.Sigmoid())
-        cxt.input_layer1 = self.create_layer('layer1', 2, 2, tc.ml.ReLU())
-        cxt.output_layer = self.create_layer('layer2', 2, 1, tc.ml.Sigmoid())
-        cxt.nn = tc.ml.dnn.DNN.load([cxt.input_layer0, cxt.input_layer1, cxt.output_layer])
+        layer0 = tc.ml.nn.DNNLayer.create('layer0', 3, 2, tc.ml.Sigmoid())
+        layer1 = tc.ml.nn.DNNLayer.create('layer1', 2, 2, tc.ml.ReLU())
+        layer2 = tc.ml.nn.DNNLayer.create('layer2', 2, 1, tc.ml.Sigmoid())
+        cxt.neural_net = tc.ml.nn.Sequential.create([layer0, layer1, layer2])
 
         self.execute(cxt)
 
@@ -123,11 +124,10 @@ class DNNTests(ClientTest):
         @tc.closure(cxt.labels)
         @tc.post_op
         def train_while(i: tc.UInt, output: tc.tensor.Dense):
-            return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != cxt.labels).any())
+            return (i <= 1).logical_and(((output > 0.5) != cxt.labels).any())
 
-        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.nn.get_param_list(), lr=LEARNING_RATE)
-        cxt.result = tc.ml.optimizer.train(cxt.nn, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
-
+        cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.neural_net.get_param_list(), lr=LEARNING_RATE)
+        cxt.result = tc.ml.optimizer.train(cxt.neural_net, cxt.optimizer, cxt.inputs, cxt.labels, cost, train_while)
         response = self.host.post(ENDPOINT, cxt)
 
         self.assertLess(response["i"], MAX_ITERATIONS, "failed to converge")

@@ -1,3 +1,4 @@
+from distutils.log import debug
 import tinychain.chain
 import tinychain.collection.bound as bound
 import tinychain.error
@@ -6,7 +7,7 @@ import tinychain.graph.edge
 import tinychain.host
 import tinychain.ml.cnn
 import tinychain.ml.dnn
-import tinychain.ml.layers
+import tinychain.ml.nn
 import tinychain.ml.optimizer
 import tinychain.op
 import tinychain.ref
