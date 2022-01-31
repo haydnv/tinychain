@@ -560,21 +560,19 @@ def testfsplit(txn, U, W, e, k):
     @closure(U, W, e, k)
     @post_op
     def step(cxt, l: UInt) -> Map:
-        goto_test_f_convergence_not = If((e[l].abs() <= EPS), False, True)
+        goto_test_f_convergence = (e[l].abs() <= EPS)
         running = If((W[l-1].abs() <= EPS), False, True)
-        return Map(l=l - 1, goto_test_f_convergence_not=goto_test_f_convergence_not, running=running, U=U, W=W, e=e)
+        return Map(l=l - 1, goto_test_f_convergence=goto_test_f_convergence, running=running, U=U, W=W, e=e)
 
     @closure(k)
     @post_op
-    def cond(l: UInt, goto_test_f_convergence_not:Bool, running: Bool) -> Bool:
-        return (running.logical_and(goto_test_f_convergence_not)).logical_and(l >= 0)
+    def cond(l: UInt, goto_test_f_convergence:Bool, running: Bool) -> Bool:
+        running.logical_and(goto_test_f_convergence.logical_not()).logical_and(l >= 0)
 
-    txn.res = Map(While(cond, step, Map(l=k, goto_test_f_convergence_not = False)))
-    txn.l = txn.res['l']
-    txn.goto_test_f_convergence_not = txn.res['goto_test_f_convergence_not']
+    txn.res = Map(While(cond, step, Map(l=k, goto_test_f_convergence = False)))
     txn.cancelation = cancelation(U, W, e, txn.l, k)
 
-    return If(txn.goto_test_f_convergence_not, txn.cancelation, txn.l)
+    return If(txn.res['goto_test_f_convergence'], txn.res['l'], txn.cancelation)
 
 
 @post_op
@@ -587,19 +585,18 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
 
     @closure(U, W, e)
     @post_op
-    def step(cxt, t, k, maxiter) -> Map:
+    def step(cxt, t: UInt, k: UInt, maxiter: UInt) -> Map:
         
-        l = testfsplit(U, W, e, k)
-        cxt.update_mtrx = After([W[k].write(W[k].abs()), V[:,k].write(V[:,k].abs())], running = False)
-        W_upd = If(l == k, cxt.update_mtrx, W)
-        running = If(l == k, False, True)
-        #TODO: add convergence check
-        # if t == maxiter-1:
-        #     if __debug__: print ('Error: no convergence.')
-        #     raise ValueError('SVD Error: no convergence found.')
+        cxt.l = testfsplit(U, W, e, k)
+        cxt.update_mtrx = If(W[k] < 0.0, [W[k].write(W[k].abs()), V[:,k].write(V[:,k].abs())], W)
+        W_upd_init = If(cxt.l != k, W, cxt.update_mtrx)
+        running = If(cxt.l != k, True, False)
+        convergence = If(t == maxiter-1, 
+                        BadRequest(String("SVD Error: no convergence found. t is {{t}}").render(t=t)),
+                        True)
 
         # shift from bottom 2x2 minor
-        x = W[l]
+        x = W[cxt.l]
         y = W[k-1]
         z = W[k]
         g = e[k-1]
@@ -613,9 +610,9 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
         c = 1.0
         s = 1.0
 
-        @closure(U, W, e, s, c, f)
+        @closure(U, W, V, e)
         @post_op
-        def step(cxt, i, k, maxiter) -> Map:
+        def step(cxt, i: UInt, x: F32, c: F32, s: F32, f: F32) -> Map:
             g= e[i]
             y = W[i]
             h = s*g
@@ -631,26 +628,49 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
             h = y*s
             y = y*c
 
-            X = V[:,i-1].copy()
-            Z = V[:,i].copy()
-            V[:,i-1] = c * X + s * Z
-            V[:,i  ] = c * Z - s * X
+            cxt.X = V[:,i-1].copy()
+            cxt.Z = V[:,i].copy()
+            V_upd = After([cxt.X, cxt.Z], V[:, i-1].write(c * cxt.X + s * cxt.Z))
+            V_upd_final = After(V_upd, V[:, i].write(c * cxt.Z - s * cxt.X))
 
             z = pythag(f, h)
             W[i-1] = z
 
-        
+            @closure(c, s)
+            @post_op
+            def update_c_s(f: F32, z: F32, h: F32) -> Tuple:
+                c = f/z
+                s = h/z
+                return c, s
+
+            cxt.update_c_s = update_c_s(f, z, h)     
+            c, s = If(z >= EPS, cxt.update_c_s, Tuple([c, s]))
+
+            f = c*g+s*y
+            x = c*y-s*g
+
+            cxt.Y = U[:,i-1].copy()
+            cxt.T = U[:,i].copy()
+            U_upd = After([cxt.Y, cxt.T], U[:, i-1].write(c * cxt.Y + s * cxt.T))
+            U_upd_final = After(U_upd, U[:, i].write(c * cxt.T - s * cxt.Y))
+            return Map(U=U_upd_final, W=W, V=V_upd_final, e=e, f = f, x = x)
+
         @closure(k)
         @post_op
         def cond(i: UInt) -> Bool:
             return i < k+1
 
+        e[cxt.l] = 0.0
+        e[k] = f 
+        cxt.U_V_upd = Map(While(cond, step, Map(i=cxt.l+1, x = x, c = c, s = s, U=U, W=W, V=V, e=e)))
+        W_upd = Tensor(After(W_upd_init, cxt.U_V_upd['W']))
+        W_upd[k] = x
 
-        return Map(t=t + 1, running=running, l=l, U=U, W=W_upd, e=e)
+        return Map(t=t + 1, l=cxt.l, W=W_upd, running=running, convergence=convergence, U=cxt.U_V_upd['U'], V=cxt.U_V_upd['V'], e=e)
 
     @closure(maxiter)
     @post_op
-    def cond(t: UInt, running: Bool) -> Bool:
-        return running.logical_and(t < maxiter)
+    def cond(t: UInt, running: Bool, convergence: Bool) -> Bool:
+        return running.logical_and(t < maxiter).logical_and(convergence)
 
-    return Map(While(cond, step, Map(t=0, U=U, W=W, e=e)))
+    return Map(While(cond, step, Map(t=0, U=U, W=W, V=V, e=e)))
