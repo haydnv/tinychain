@@ -516,11 +516,12 @@ class Dense(Tensor):
         return cls.constant(shape, Number(0).cast(dtype))
 
     @classmethod
-    def random_normal(cls, shape):
+    def random_normal(cls, shape, mean=0.0, std=1.0):
         """Return a `Dense` tensor filled with a random normal distribution of `F64`s."""
 
         schema = Schema(shape, F64)
-        return cls(Create(uri(cls) + "/random/normal", shape, schema))
+        args = {"shape": shape, "mean": mean, "std": std}
+        return cls(Distribution(uri(cls) + "/random/normal", args, schema))
 
     @classmethod
     def random_uniform(cls, shape):
@@ -625,6 +626,12 @@ def _handle_bounds(bounds):
 class Create(ref.Get):
     def __init__(self, subject, args, schema):
         ref.Get.__init__(self, subject, args)
+        self.schema = schema
+
+
+class Distribution(ref.Get):
+    def __init__(self, subject, args, schema):
+        ref.Post.__init__(self, subject, args)
         self.schema = schema
 
 

@@ -13,12 +13,12 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::{CastInto, Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Digest;
 
 use tc_error::*;
-use tc_value::{Link, Number, Range, TCString, Value, ValueType};
+use tc_value::{Float, Link, Number, Range, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::closure::Closure;
@@ -789,6 +789,16 @@ impl TryCastFrom<Scalar> for Link {
             Scalar::Value(value) => Self::opt_cast_from(value),
             _ => None,
         }
+    }
+}
+
+impl TryCastFrom<Scalar> for Float {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        Number::can_cast_from(scalar)
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        Number::opt_cast_from(scalar).map(|n| n.cast_into())
     }
 }
 

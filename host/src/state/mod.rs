@@ -18,7 +18,7 @@ use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, Number, NumberType, TCString, Value, ValueType};
+use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::chain::{self, Chain, ChainInstance, ChainType, ChainVisitor};
@@ -1102,7 +1102,39 @@ impl TryCastFrom<State> for Value {
     }
 }
 
+impl TryCastFrom<State> for Float {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<State> for Number {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for u64 {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Scalar(scalar) => Self::can_cast_from(scalar),
