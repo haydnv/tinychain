@@ -1,7 +1,7 @@
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Add, Deref, Mul};
 
 use afarray::{Array, ArrayExt, ArrayInstance, CoordBlocks, Coords, Offsets};
 use arrayfire as af;
@@ -17,7 +17,7 @@ use tc_btree::Node;
 use tc_error::*;
 use tc_transact::fs::{BlockId, CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
@@ -75,9 +75,17 @@ where
         txn_id: TxnId,
         shape: Shape,
         dtype: FloatType,
+        mean: Float,
+        std: Float,
     ) -> TCResult<Self> {
         debug!("BlockListFile::random_normal {}", shape);
-        let generator = |length| Array::random_normal(dtype, length);
+        let generator = |length| {
+            // TODO: impl Add<Number> and Mul<Number> for Array
+            let std = Array::constant(std.into(), length);
+            let mean = Array::constant(mean.into(), length);
+            Array::random_normal(dtype, length).mul(&std).add(&mean)
+        };
+
         Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator).await
     }
 

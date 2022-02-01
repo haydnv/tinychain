@@ -149,6 +149,9 @@ class Map(State):
     def __getitem__(self, key):
         form = form_of(self)
         if isinstance(form, TypeForm):
+            if key not in form:
+                raise KeyError(f"Map with keys {set(form.keys())} does not contain any entry for {key}")
+
             rtype = type(form[key])
             rtype = rtype if issubclass(rtype, State) else State
             if hasattr(form[key], "__ref__"):
@@ -422,3 +425,6 @@ class TypeForm(object):
     def __json__(self):
         form = form_of(self)
         return to_json(self.type_data if form is None else form)
+
+    def keys(self):
+        return self.type_data.keys()

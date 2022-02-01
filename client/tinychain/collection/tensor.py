@@ -1,9 +1,10 @@
 """An n-dimensional array of numbers."""
 
 from tinychain import ref
+from tinychain.reflect import is_ref
 from tinychain.state import Class, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
-from tinychain.value import Bool, I16, F32, Number, UInt
+from tinychain.value import Bool, I16, F32, F64, Number, UInt
 
 from .bound import Range
 from .collection import Collection
@@ -19,6 +20,14 @@ class Schema(object):
     def __init__(self, shape, dtype=F32):
         self.shape = shape
         self.dtype = dtype
+
+    def __getitem__(self, i):
+        if i == 0:
+            return self.shape
+        elif i == 1:
+            return self.dtype
+        else:
+            raise KeyError(f"Tensor schema (shape, dtype) has no element {i}")
 
     def __json__(self):
         return to_json([self.shape, self.dtype])
@@ -36,7 +45,8 @@ class Tensor(Collection):
     def create(cls, shape, dtype=F32):
         """Create a new, empty `Tensor`. Call this method to initialize a persistent `Tensor` in a `Chain`."""
 
-        return cls(ref.Get(cls, Schema(shape, dtype)))
+        schema = Schema(shape, dtype)
+        return cls(Create(cls, schema, schema))
 
     @classmethod
     def load(cls, shape, dtype, data):
@@ -115,6 +125,16 @@ class Tensor(Collection):
 
     def __rtruediv__(self, other):
         return other * (self.pow(-1))
+
+    def __ref__(self, name):
+        form = form_of(self)
+        if hasattr(form, "schema"):
+            ref_form = TypeRef(URI(name), form.schema)
+            return self.__class__(ref_form)
+        elif hasattr(form, "__ref__"):
+            return self.__class__(get_ref(form, name))
+        else:
+            return self.__class__(URI(name))
 
     def abs(self):
         """Return the element-wise absolute value of this `Tensor`."""
@@ -201,7 +221,7 @@ class Tensor(Collection):
 
     @property
     def dtype(self):
-        """Return the shape of this `Tensor`."""
+        """Return the data type of this `Tensor`."""
 
         return self._get("dtype", rtype=Class)
 
@@ -322,12 +342,15 @@ class Tensor(Collection):
 
         return self._get("round", rtype=self.__class__)
 
-    # TODO: use a custom shape object to support `type(x.shape[0]) == UInt`
     @property
     def shape(self):
         """Return the shape of this `Tensor`."""
 
-        return self._get("shape", rtype=Tuple)
+        form = form_of(self)
+        if hasattr(form, "schema"):
+            return form.schema[0]
+        else:
+            return self._get("shape", rtype=Tuple)
 
     def sin(self):
         """Return the element-wise sine of this `Tensor`."""
@@ -413,7 +436,9 @@ class Dense(Tensor):
         evenly distributed between `start` and `stop`.
         """
 
-        return cls(ref.Get(uri(cls) + "/range", (shape, start, stop)))
+        dtype = type(start) if isinstance(start, Number) else Number
+        schema = Schema(shape, dtype)
+        return cls(Create(uri(cls) + "/range", (shape, start, stop), schema))
 
     @classmethod
     def concatenate(cls, tensors, axis=None):
@@ -429,7 +454,9 @@ class Dense(Tensor):
     def constant(cls, shape, value):
         """Return a `Dense` tensor filled with the given `value`."""
 
-        return cls(ref.Get(uri(cls) + "/constant", (shape, value)))
+        dtype = type(value) if isinstance(value, Number) else Number
+        schema = Schema(shape, dtype)
+        return cls(Create(uri(cls) + "/constant", (shape, value), schema))
 
     @classmethod
     def load(cls, shape, dtype, data):
@@ -439,12 +466,34 @@ class Dense(Tensor):
         Example: `tc.tensor.Dense.load([2, 2], tc.i32, [1, 2, 3, 4])`
         """
 
-        if hasattr(data, "__iter__"):
-            for n in data:
-                if hasattr(n, "__iter__"):
-                    raise ValueError(f"Dense.load requires a flat list of numbers, not {n}")
+        if is_ref(shape) or is_ref(dtype):
+            raise ValueError(f"cannot load schema ({shape}, {dtype}) (consider calling `copy_from` instead)")
 
-        return super().load(shape, dtype, data)
+        if is_ref(data):
+            raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
+
+        schema = Schema(shape, dtype)
+
+        class Load(cls):
+            def __init__(self, put_op):
+                cls.__init__(self, put_op)
+
+            @property
+            def dtype(self):
+                return schema[1]
+
+            @property
+            def schema(self):
+                return schema
+
+            @property
+            def shape(self):
+                return schema[0]
+
+            def __ref__(self, name):
+                return cls(URI(name))
+
+        return Load(ref.Put(cls, schema, data))
 
     @classmethod
     def ones(cls, shape, dtype=F32):
@@ -467,16 +516,19 @@ class Dense(Tensor):
         return cls.constant(shape, Number(0).cast(dtype))
 
     @classmethod
-    def random_normal(cls, shape):
+    def random_normal(cls, shape, mean=0.0, std=1.0):
         """Return a `Dense` tensor filled with a random normal distribution of `F64`s."""
 
-        return cls(ref.Get(uri(cls) + "/random/normal", shape))
+        schema = Schema(shape, F64)
+        args = {"shape": shape, "mean": mean, "std": std}
+        return cls(Distribution(uri(cls) + "/random/normal", args, schema))
 
     @classmethod
     def random_uniform(cls, shape):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64`s."""
 
-        return cls(ref.Get(uri(cls) + "/random/uniform", shape))
+        schema = Schema(shape, F64)
+        return cls(Create(uri(cls) + "/random/uniform", shape, schema))
 
     def elements(self, bounds):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
@@ -569,3 +621,24 @@ def _handle_bounds(bounds):
     return [
         Range.from_slice(x) if isinstance(x, slice)
         else x for x in bounds]
+
+
+class Create(ref.Get):
+    def __init__(self, subject, args, schema):
+        ref.Get.__init__(self, subject, args)
+        self.schema = schema
+
+
+class Distribution(ref.Get):
+    def __init__(self, subject, args, schema):
+        ref.Post.__init__(self, subject, args)
+        self.schema = schema
+
+
+class TypeRef(ref.Ref):
+    def __init__(self, name, schema):
+        self.__uri__ = name
+        self.schema = schema
+
+    def __json__(self):
+        return to_json(self.__uri__)
