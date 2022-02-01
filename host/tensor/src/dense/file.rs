@@ -261,26 +261,32 @@ where
             return Ok(());
         }
 
-        for block_id in 0..(num_blocks - 1) {
-            let next_block_id = BlockId::from(block_id + 1);
-            let block_id = BlockId::from(block_id);
+        loop {
+            let mut sorted = true;
+            for block_id in 0..(num_blocks - 1) {
+                let next_block_id = BlockId::from(block_id + 1);
+                let block_id = BlockId::from(block_id);
 
-            let left = self.file.write_block(txn_id, block_id);
+                let left = self.file.write_block(txn_id, block_id);
 
-            let right = self.file.write_block(txn_id, next_block_id);
+                let right = self.file.write_block(txn_id, next_block_id);
 
-            let (mut left, mut right) = try_join!(left, right)?;
+                let (mut left, mut right) = try_join!(left, right)?;
 
-            let mut block = Array::concatenate(&left, &right);
-            block.sort(true).map_err(array_err)?;
+                let mut block = Array::concatenate(&left, &right);
+                block.sort(true).map_err(array_err)?;
 
-            let (left_sorted, right_sorted) = block.split(PER_BLOCK).map_err(array_err)?;
+                let (left_sorted, right_sorted) = block.split(PER_BLOCK).map_err(array_err)?;
+                sorted = sorted && left.deref() == &left_sorted && right.deref() == &right_sorted;
 
-            *left = left_sorted;
-            *right = right_sorted;
+                *left = left_sorted;
+                *right = right_sorted;
+            }
+
+            if sorted {
+                return Ok(());
+            }
         }
-
-        Ok(())
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
