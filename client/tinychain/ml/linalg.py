@@ -273,12 +273,6 @@ def slogdet(cxt, x: Dense) -> Tuple:
     return After(Stream.range((0, n)).for_each(step), Tuple([cxt.sign_result, cxt.logdet_result]))
 
 
-def svd(matrix: Tensor) -> Tuple:
-    """Return the singular value decomposition of the given `matrix`."""
-
-    raise NotImplementedError("singular value decomposition")
-
-
 def sign_like(a, b):
     return Number(If(b >= 0, a.abs(), -a.abs()))
 
@@ -590,7 +584,7 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
         cxt.l = testfsplit(U, W, e, k)
         cxt.update_mtrx = If(W[k] < 0.0, [W[k].write(W[k].abs()), V[:,k].write(V[:,k].abs())], W)
         W_upd_init = If(cxt.l != k, W, cxt.update_mtrx)
-        running = If(cxt.l != k, True, False)
+        running = cxt.l != k
         convergence = If(t == maxiter-1, 
                         BadRequest(String("SVD Error: no convergence found. t is {{t}}").render(t=t)),
                         True)
@@ -674,3 +668,69 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
         return running.logical_and(t < maxiter).logical_and(convergence)
 
     return Map(While(cond, step, Map(t=0, U=U, W=W, V=V, e=e)))
+
+
+@post_op
+def bidiagonalize(txn, A: Tensor):
+    """
+    Reduction to bidiagonal form
+    """    
+
+    U_init = A.copy()
+    txn.shape = U_init.shape
+    txn.m, txn.n = [UInt(dim) for dim in txn.shape.unpack(2)]
+    W_init = Dense.zeros((txn.n,), dtype=F32)
+    V_init = Dense.zeros((txn.n, txn.n), dtype=F32)
+    e_init = Dense.zeros((txn.n,), dtype=F32)
+
+    txn.householder = householder(U_init, W_init, e_init)
+    U_hh = txn.householder['U']
+    W_hh = txn.householder['W']
+    e_hh = txn.householder['e']
+    txn.rht = rht(U_hh, V_init, e_hh)
+    U_rht = txn.rht['U']
+    V_rht = txn.rht['V']
+    e_rht = txn.rht['e']
+    txn.lht = lht(U_rht, W_hh)
+    U_lht = txn.lht['U']
+    W_lht = txn.lht['W']
+
+    return Map(U=U_lht, W=W_lht, V=V_rht, e=e_rht)
+
+
+@post_op
+def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
+    """Return the singular value decomposition of the given `matrix`."""
+
+    # Bidiagonal form
+    txn.bidiagonalize = bidiagonalize(matrix)
+    U_bidiag = txn.bidiagonalize['U']
+    W_bidiag = txn.bidiagonalize['W']
+    V_bidiag = txn.bidiagonalize['V']
+    e_bidiag = txn.bidiagonalize['e']
+
+    # Diagonalization of the bidiagonal form: 
+    #    - loop over singular values
+    #    - for each singular value apply golub-kahan method
+    @closure(U_bidiag, W_bidiag, V_bidiag, e_bidiag)
+    @post_op
+    def step(cxt, k: UInt):
+        cxt.golub_kahan = golub_kahan(U_bidiag, W_bidiag, V_bidiag, e_bidiag, k, maxiter)
+        return Map(U=cxt.golub_kahan['U'], W=cxt.golub_kahan['W'], V=cxt.golub_kahan['V'], e=cxt.golub_kahan['e'])
+
+    @post_op
+    def cond(k: UInt) -> Bool:
+        return k >= 0
+
+    txn.golub_kahan = Map(While(cond, step, Map(k=UInt(U_bidiag.shape.unpack(2)[1]))))   
+    txn.shape = txn.golub_kahan['U'].shape
+    txn.m, txn.n = [UInt(dim) for dim in txn.shape.unpack(2)]
+    #TODO: numpy functions argsort and diag
+    # idsorted = np.argsort(-W)
+
+    # U = txn.golub_kahan['U'][:,idsorted]
+    # W = txn.golub_kahan['W'][idsorted]
+    # V = txn.golub_kahan['V'][:,idsorted]
+
+    # return U[:,:m], np.diag(W)[:m,:], V 
+    return U, W, V
