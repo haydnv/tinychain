@@ -22,21 +22,9 @@ class DNNLayer(Layer):
             `activation`: activation function.
         """
 
-        if activation == Identity():
-            a = (input_size*output_size)**(-0.5)
-            gain = 1
-        elif activation == Sigmoid():
-            a = (2 / (input_size + output_size))**0.5
-            gain = 1
-        elif activation == Tanh():
-            a = (2 / (input_size + output_size))**0.5
-            gain = 5 / 3
-        elif activation == ReLU():
-            a = ((input_size) / (output_size))**(-0.5)
-            gain = 2**0.5
-        std = gain * a
-        weights = Dense.random_normal(shape=[input_size, output_size], 0, std)
-        bias = Dense.random_normal(shape=[output_size,], 0, std)
+        std = activation.std_initializer(input_size, output_size)
+        weights = Dense.random_normal(shape=[input_size, output_size], mean=0.0, std=std)
+        bias = Dense.random_normal(shape=[output_size, ], mean=0.0, std=std)
 
         return cls.load(name, weights, bias, activation)
 
@@ -101,21 +89,9 @@ class ConvLayer(Layer):
         c_i, h_i, w_i = inputs_shape
         out_c, h_f, w_f = filter_shape
 
-        if activation == Identity():
-            a = (out_c * c_i * h_f * w_f)**(-0.5)
-            gain = 1
-        elif activation == Sigmoid():
-            a = (2 / (c_i * h_i * w_i + out_c * h_f * w_f))**0.5
-            gain = 1
-        elif activation == Tanh():
-            a = (2 / (c_i * h_i * w_i + out_c * h_f * w_f))**0.5
-            gain = 5 / 3
-        elif activation == ReLU():
-            a = ((c_i * h_i * w_i) / (out_c * h_f * w_f))**(-0.5)
-            gain = 2**0.5
-        #std = gain * a
-        weights = Dense.random_uniform(shape=[out_c, c_i, h_f, w_f])#, 0, std)
-        bias = Dense.random_uniform(shape=[out_c , 1])#, 0, std)
+        std = activation.std_initializer(c_i * h_i * w_i, out_c * h_f * w_f)
+        weights = Dense.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
+        bias = Dense.random_normal([out_c, 1], mean=0.0, std=std)
 
         return cls.load(name, weights, bias, inputs_shape, filter_shape, stride, padding, activation)
 
@@ -185,7 +161,6 @@ class ConvLayer(Layer):
         return _ConvLayer({name + ".weights": weights, name + ".bias": bias})
 
 #TODO: delete DNN, CNN and replace usages with Sequential
-
 class Sequential(NeuralNet):
     """Create a new NeuralNet as list `Layer`'s. `Layer`'s could be `DNNLayer` and `ConvLayer`.
         Args:
@@ -226,8 +201,8 @@ class Sequential(NeuralNet):
                     param_list.extend(layer_param_list)
 
                 return loss, param_list
-            
-            def get_param_list(self)  -> List[Parameter]:
+
+            def get_param_list(self) -> List[Parameter]:
                 return functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])
 
         return Sequential(layers)

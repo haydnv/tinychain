@@ -17,6 +17,10 @@ class Activation(ABC):
     def backward(self, Z):
         """Compute the partial differential of this function"""
 
+    @abstractmethod
+    def std_initializer(self, input_size, output_size):
+        """Calculate Standard Deviation to activate weights"""
+
 
 class Identity(Activation):
     def forward(self, x):
@@ -24,6 +28,9 @@ class Identity(Activation):
 
     def backward(self, x):
         return x
+
+    def std_initializer(self, input_size, output_size):
+        return 1.0 * (input_size*output_size)**(-0.5)
 
 
 class Sigmoid(Activation):
@@ -34,6 +41,10 @@ class Sigmoid(Activation):
         sig = self.forward(x)
         return sig * (1 - sig)
 
+    def std_initializer(self, input_size, output_size):
+        return 1.0 * (2 / (input_size + output_size))**0.5
+
+
 #TODO: remove when automatic differentiation is implemented"
 class Tanh(Activation):
     def forward(self, x):
@@ -42,6 +53,9 @@ class Tanh(Activation):
     def backward(self, x):
         return 1 - self.forward(x)**2
 
+    def std_initializer(self, input_size, output_size):
+        return (5 / 3) * (2 / (input_size + output_size))**0.5
+
 
 class ReLU(Activation):
     def forward(self, Z):
@@ -49,6 +63,9 @@ class ReLU(Activation):
 
     def backward(self, Z):
         return Z > 0
+
+    def std_initializer(self, input_size, output_size):
+        return (2**(0.5)) * (2 / (input_size + output_size))**0.5
 
 
 class Differentiable(object):
