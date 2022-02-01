@@ -44,8 +44,24 @@ impl<T> Map<T> {
         self.inner
     }
 
-    pub fn or_default<P: Default + TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P>
+    pub fn option<P, D>(&mut self, name: &Id, default: D) -> TCResult<P>
     where
+        P: TryCastFrom<T>,
+        D: FnOnce() -> P,
+        T: fmt::Display,
+    {
+        if let Some(param) = self.remove(name) {
+            P::try_cast_from(param, |p| {
+                TCError::bad_request(format!("invalid value for {}", name), p)
+            })
+        } else {
+            Ok((default)())
+        }
+    }
+
+    pub fn or_default<P>(&mut self, name: &Id) -> TCResult<P>
+    where
+        P: Default + TryCastFrom<T>,
         T: fmt::Display,
     {
         if let Some(param) = self.remove(name) {
@@ -57,8 +73,9 @@ impl<T> Map<T> {
         }
     }
 
-    pub fn require<P: TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P>
+    pub fn require<P>(&mut self, name: &Id) -> TCResult<P>
     where
+        P: TryCastFrom<T>,
         T: fmt::Display,
     {
         let param = self

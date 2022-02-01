@@ -1,7 +1,7 @@
 from tinychain.ref import Post, Put
 from tinychain.reflect import is_ref
 from tinychain.state import Map, State, Tuple
-from tinychain.util import uri, URI
+from tinychain.util import form_of, uri, URI
 
 
 class Collection(State):
@@ -48,12 +48,24 @@ class Collection(State):
             raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
 
         class Load(cls):
+            def __init__(self, put_op):
+                cls.__init__(self, put_op)
+
+            @property
+            def schema(self):
+                return schema
+
             def __ref__(self, name):
                 return cls(URI(name))
 
         return Load(Put(cls, schema, data))
 
+    @property
     def schema(self):
         """Return the schema of this `Collection`."""
 
-        return self._get("schema", rtype=Tuple)
+        form = form_of(self)
+        if hasattr(form, "schema"):
+            return form.schema
+        else:
+            return self._get("schema", rtype=Tuple)

@@ -34,6 +34,9 @@ const AXIS: Label = label("axis");
 const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
+const MEAN: f64 = 0.0;
+const STD: f64 = 0.0;
+
 struct ArgmaxHandler<T> {
     tensor: T,
 }
@@ -612,12 +615,49 @@ impl<'a> Handler<'a> for RandomNormalHandler {
 
                 let file = create_file(&txn).await?;
 
-                BlockListFile::random_normal(file, *txn.id(), shape, FloatType::F64)
-                    .map_ok(DenseTensor::from)
-                    .map_ok(Tensor::from)
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
+                let tensor = BlockListFile::random_normal(
+                    file,
+                    *txn.id(),
+                    shape,
+                    FloatType::F64,
+                    MEAN.into(),
+                    STD.into(),
+                )
+                .map_ok(DenseTensor::from)
+                .map_ok(Tensor::from)
+                .await?;
+
+                Ok(State::Collection(tensor.into()))
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let shape: Vec<u64> = params.require(&label("shape").into())?;
+                let mean = params.option(&label("mean").into(), || MEAN.into())?;
+                let std = params.option(&label("std").into(), || STD.into())?;
+                params.expect_empty()?;
+
+                let file = create_file(&txn).await?;
+
+                let tensor = BlockListFile::random_normal(
+                    file,
+                    *txn.id(),
+                    shape.into(),
+                    FloatType::F64,
+                    mean,
+                    std,
+                )
+                .map_ok(DenseTensor::from)
+                .map_ok(Tensor::from)
+                .await?;
+
+                Ok(State::Collection(tensor.into()))
             })
         }))
     }
@@ -637,12 +677,12 @@ impl<'a> Handler<'a> for RandomUniformHandler {
 
                 let file = create_file(&txn).await?;
 
-                BlockListFile::random_uniform(file, *txn.id(), shape, FloatType::F64)
+                let tensor = BlockListFile::random_uniform(file, *txn.id(), shape, FloatType::F64)
                     .map_ok(DenseTensor::from)
                     .map_ok(Tensor::from)
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
+                    .await?;
+
+                Ok(State::Collection(tensor.into()))
             })
         }))
     }
