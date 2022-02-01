@@ -2,16 +2,19 @@ import functools
 import operator
 from typing import List
 
-from tinychain.collection.tensor import einsum, Dense, Tensor
-from tinychain.ml import Layer, Identity, Sigmoid, Tanh, ReLU, DiffedParameter, Parameter, NeuralNet
-from tinychain.ref import After
 from client.tinychain.value import Int
+from tinychain.collection.tensor import Dense, Tensor, einsum
+from tinychain.ml import (DiffedParameter, Identity, Layer, NeuralNet,
+                          Parameter, ReLU, Sigmoid, Tanh)
+from tinychain.ref import After
 
 
 class DNNLayer(Layer):
-    @staticmethod
-    def create(name: str, input_size, output_size, activation=Identity()):
-        """Create a new, empty `DNNLayer` with the given shape and activation function.
+    @classmethod
+    def create(cls, name: str, input_size, output_size, activation=Identity()):
+        """Create a new, empty `DNNLayer` with the given shape and activation function. Initializing `ConvLayer`
+        parameters by Xavier initialization for Sigmoid, Tanh activations, and Kaiming initialization for ReLU.
+
         Args:
             `name`: name and number of layer;
             `input_size`: size of inputs;
@@ -19,29 +22,21 @@ class DNNLayer(Layer):
             `activation`: activation function.
         """
 
-        return DNNLayer(), (name, input_size, output_size, activation)
-
-    @classmethod
-    def initialize_layer(cls, name: str, input_size, output_size, activation=Identity()):
-        """Initializing `ConvLayer` parameters by Xavier initialization for Sigmoid, Tanh activations,
-        and Kaiming initialization for ReLU
-        """
-
         if activation == Identity():
             a = (input_size*output_size)**(-0.5)
             gain = 1
         elif activation == Sigmoid():
-            a = (2/(input_size + output_size))**0.5
+            a = (2 / (input_size + output_size))**0.5
             gain = 1
         elif activation == Tanh():
-            a = (2/(input_size + output_size))**0.5
-            gain = 5/3
+            a = (2 / (input_size + output_size))**0.5
+            gain = 5 / 3
         elif activation == ReLU():
-            a = ((input_size)/(output_size))**(-0.5)
+            a = ((input_size) / (output_size))**(-0.5)
             gain = 2**0.5
-        #std = gain * a
-        weights = Dense.random_uniform(shape=[input_size, output_size])#, 0, std)
-        bias = Dense.random_uniform(shape=[output_size, 1])#, 0, std)
+        std = gain * a
+        weights = Dense.random_normal(shape=[input_size, output_size], 0, std)
+        bias = Dense.random_normal(shape=[output_size,], 0, std)
 
         return cls.load(name, weights, bias, activation)
 
@@ -55,7 +50,7 @@ class DNNLayer(Layer):
                 return weights.shape
 
             def forward(self, x):
-                inputs = einsum("ki,ij->kj", [x, self[name + ".weights"]]) + self[name + ".bias"]
+                inputs = Tensor(einsum("ki,ij->kj", [x, self[name + ".weights"]])) + self[name + ".bias"]
                 return activation.forward(inputs), None
 
             def backward(self, x, loss):
@@ -66,28 +61,30 @@ class DNNLayer(Layer):
                 return dL, [
                     DiffedParameter.create(
                         name=name + '.weights',
-                        value=self[name + ".weights"],
+                        value=Tensor(self[name + ".weights"]),
                         grad=einsum("ki,kj->ij", [x, delta]).copy() / m),
                     DiffedParameter.create(
                         name=name + '.bias',
-                        value=self[name + ".bias"],
+                        value=Tensor(self[name + ".bias"]),
                         grad=delta.sum(0) / m)
                 ]
 
             def get_param_list(self) -> List[Parameter]:
                 return [
-                    Parameter.create(name=name + '.weights', value=self[name + ".weights"]),
-                    Parameter.create(name=name + '.bias', value=self[name + ".bias"])
+                    Parameter.create(name=name + '.weights', value=Tensor(self[name + ".weights"])),
+                    Parameter.create(name=name + '.bias', value=Tensor(self[name + ".bias"]))
                 ]
 
         return _DNNLayer({name + ".bias": bias, name + ".weights": weights})
 
 
-#TODO: Implementation ConvLayer.forward and ConvLayer.backward 
+#TODO: Implementation ConvLayer.forward and ConvLayer.backward
 class ConvLayer(Layer):
     @classmethod
-    def create(cls, name: str, input_size, output_size, stride=1, padding=1, activation=Identity()):
-        """Create a new, empty `ConvLayer` with the given shape and activation function.
+    def create(cls, name: str, inputs_shape, filter_shape, stride=1, padding=1, activation=Identity()):
+        """Create a new, empty `ConvLayer` with the given shape and activation function. Initializing `ConvLayer` 
+        parameters by Xavier initialization for Sigmoid, Tanh activations, and Kaiming initialization for ReLU
+
         Args:
             `name`: name and number of layer;
             `inputs_stape`: size of inputs [c_i, h_i, w_i] where
@@ -101,28 +98,20 @@ class ConvLayer(Layer):
             `activation`: activation function.
         """
 
-        return ConvLayer(), (name, input_size, output_size, stride, padding, activation)
-
-    @classmethod
-    def initialize_layer(cls, name: str, inputs_shape, filter_shape, stride=1, padding=1, activation=Identity()):
-        """Initializing `ConvLayer` parameters by Xavier initialization for Sigmoid, Tanh activations,
-        and Kaiming initialization for ReLU
-        """
-
         c_i, h_i, w_i = inputs_shape
-        out_c, h_f, w_f  = filter_shape
+        out_c, h_f, w_f = filter_shape
 
         if activation == Identity():
-            a = (out_c*c_i*h_f*w_f)**(-0.5)
+            a = (out_c * c_i * h_f * w_f)**(-0.5)
             gain = 1
         elif activation == Sigmoid():
-            a = (2/(c_i*h_i*w_i + out_c*h_f*w_f))**0.5
+            a = (2 / (c_i * h_i * w_i + out_c * h_f * w_f))**0.5
             gain = 1
         elif activation == Tanh():
-            a = (2/(c_i*h_i*w_i + out_c*h_f*w_f))**0.5
-            gain = 5/3
+            a = (2 / (c_i * h_i * w_i + out_c * h_f * w_f))**0.5
+            gain = 5 / 3
         elif activation == ReLU():
-            a = ((c_i*h_i*w_i)/(out_c*h_f*w_f))**(-0.5)
+            a = ((c_i * h_i * w_i) / (out_c * h_f * w_f))**(-0.5)
             gain = 2**0.5
         #std = gain * a
         weights = Dense.random_uniform(shape=[out_c, c_i, h_f, w_f])#, 0, std)
@@ -149,11 +138,11 @@ class ConvLayer(Layer):
                 im2col_matrix = []
                 for i in range(h_out):
                     for j in range(w_out):
-                        im2col_matrix.append(pad_matrix[:, :, i:i+h_f, j:j+w_f].reshape([c_i*h_f*w_f, b_i]))
-                im2col_concat = Tensor(After(pad_matrix[:, :, padding:-padding, padding:-padding].write(x.copy()), Dense.concatenate(im2col_matrix, 0)))
-                im2col_matrix = Tensor(After(im2col_concat, im2col_concat.reshape([b_i*h_out*w_out, c_i*h_f*w_f]).transpose()))
-                w_col = self[name+'.weights'].reshape([out_c, c_i*h_f*w_f])
-                in2col_multiply = Tensor(einsum("ij,jm->im", [w_col, im2col_matrix]) + self[name+'.bias']).reshape([out_c, h_out, w_out, b_i])
+                        im2col_matrix.append(pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape([c_i * h_f * w_f, b_i]))
+                im2col_concat = Tensor(After(pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(x.copy()), Dense.concatenate(im2col_matrix, 0)))
+                im2col_matrix = Tensor(After(im2col_concat, im2col_concat.reshape([b_i * h_out * w_out, c_i * h_f * w_f]).transpose()))
+                w_col = self[name + '.weights'].reshape([out_c, c_i * h_f * w_f])
+                in2col_multiply = Tensor(einsum("ij,jm->im", [w_col, im2col_matrix]) + self[name + '.bias']).reshape([out_c, h_out, w_out, b_i])
                 output = Tensor(in2col_multiply.copy().transpose([3, 0, 1, 2]))
 
                 return activation.forward(output), im2col_matrix
@@ -166,15 +155,15 @@ class ConvLayer(Layer):
                 w_out = int((w_i - w_f + 2 * padding) / stride + 1)
                 inputs, im2col_matrix = self.forward(x)
                 delta = Tensor(activation.backward(Tensor(inputs)) * loss)
-                delta_reshaped = Tensor(delta.transpose([1, 2, 3, 0])).reshape([out_c, h_out*w_out*b_i])
-                dw = Tensor(einsum('ij,mj->im', [delta_reshaped, im2col_matrix])).reshape(self[name+'.weights'].shape)
+                delta_reshaped = Tensor(delta.transpose([1, 2, 3, 0])).reshape([out_c, h_out * w_out * b_i])
+                dw = Tensor(einsum('ij,mj->im', [delta_reshaped, im2col_matrix])).reshape(self[name + '.weights'].shape)
                 db = Tensor(einsum('ijkb->j', [delta])).reshape([out_c, 1])
-                dloss_col = Tensor(einsum('ji,jm->im', [self[name+'.weights'].reshape([out_c, c_i*h_f*w_f]), delta_reshaped]))
+                dloss_col = Tensor(einsum('ji,jm->im', [self[name + '.weights'].reshape([out_c, c_i * h_f * w_f]), delta_reshaped]))
                 dloss_col_reshaped = dloss_col.reshape([c_i, h_f, w_f, h_out, w_out, b_i]).copy().transpose([5, 0, 3, 4, 1, 2])
                 pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-                result = [pad_matrix[:, :, i:i+h_f, j:j+w_f].write(pad_matrix[:, :, i:i+h_f, j:j+w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
+                result = [pad_matrix[:, :, i:i + h_f, j:j + w_f].write(pad_matrix[:, :, i:i + h_f, j:j + w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
                 for i in range(h_out) for j in range(w_out)]
-                dloss_result = Tensor(After(result, pad_matrix[:, :, padding:-padding, padding:-padding]))
+                dloss_result = Tensor(After(result, pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)]))
 
                 return dloss_result, [
                     DiffedParameter.create(
@@ -195,17 +184,13 @@ class ConvLayer(Layer):
 
         return _ConvLayer({name + ".weights": weights, name + ".bias": bias})
 
+#TODO: delete DNN, CNN and replace usages with Sequential
 
 class Sequential(NeuralNet):
-    @classmethod
-    def create(cls, seq_list):
-        """Create a new NeuralNet as `List[layers]`. `layers` could be `DNNLayer` and `ConvLayer`.
+    """Create a new NeuralNet as list `Layer`'s. `Layer`'s could be `DNNLayer` and `ConvLayer`.
         Args:
-            `seq_list` a list of exemplar `DNNLayer` or `ConvLayer` with parameters:
-                `name`, `input_size`, `output_size`, `activation`
-        """
-        layers = [layer.initialize_layer(*param_layer) for layer, param_layer in seq_list]
-        return cls.load(layers)
+            `layers` a list of exemplar `DNNLayer` or `ConvLayer` with parameters:
+    """
 
     @classmethod
     def load(cls, layers):
@@ -221,11 +206,9 @@ class Sequential(NeuralNet):
                 return [layer.shape for layer in layers]
 
             def forward(self, inputs):
-                #TODO: test Sequential
                 state, _ = self[0].forward(inputs)
                 for i in range(1, n):
                     state, _ = self[i].forward(state)
-
                 return state
 
             def backward(self, inputs, loss):
@@ -245,6 +228,6 @@ class Sequential(NeuralNet):
                 return loss, param_list
             
             def get_param_list(self)  -> List[Parameter]:
-                return layers[0].get_param_list()#functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])
+                return functools.reduce(operator.add, [layer.get_param_list() for layer in layers], [])
 
         return Sequential(layers)
