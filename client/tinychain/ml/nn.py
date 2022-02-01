@@ -4,8 +4,7 @@ from typing import List
 
 from client.tinychain.value import Int
 from tinychain.collection.tensor import Dense, Tensor, einsum
-from tinychain.ml import (DiffedParameter, Identity, Layer, NeuralNet,
-                          Parameter, ReLU, Sigmoid, Tanh)
+from tinychain.ml import DiffedParameter, Identity, Layer, NeuralNet, Parameter
 from tinychain.ref import After
 
 
@@ -66,11 +65,10 @@ class DNNLayer(Layer):
         return _DNNLayer({name + ".bias": bias, name + ".weights": weights})
 
 
-#TODO: Implementation ConvLayer.forward and ConvLayer.backward
 class ConvLayer(Layer):
     @classmethod
     def create(cls, name: str, inputs_shape, filter_shape, stride=1, padding=1, activation=Identity()):
-        """Create a new, empty `ConvLayer` with the given shape and activation function. Initializing `ConvLayer` 
+        """Create a new, empty `ConvLayer` with the given shape and activation function. Initializing `ConvLayer`
         parameters by Xavier initialization for Sigmoid, Tanh activations, and Kaiming initialization for ReLU
 
         Args:
@@ -137,8 +135,10 @@ class ConvLayer(Layer):
                 dloss_col = Tensor(einsum('ji,jm->im', [self[name + '.weights'].reshape([out_c, c_i * h_f * w_f]), delta_reshaped]))
                 dloss_col_reshaped = dloss_col.reshape([c_i, h_f, w_f, h_out, w_out, b_i]).copy().transpose([5, 0, 3, 4, 1, 2])
                 pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-                result = [pad_matrix[:, :, i:i + h_f, j:j + w_f].write(pad_matrix[:, :, i:i + h_f, j:j + w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
-                for i in range(h_out) for j in range(w_out)]
+                result = [
+                    pad_matrix[:, :, i:i + h_f, j:j + w_f].write(pad_matrix[:, :, i:i + h_f, j:j + w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
+                    for i in range(h_out) for j in range(w_out)
+                    ]
                 dloss_result = Tensor(After(result, pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)]))
 
                 return dloss_result, [
@@ -152,7 +152,7 @@ class ConvLayer(Layer):
                         grad=db)
                 ]
 
-            def get_param_list(self) -> List[Parameter]: 
+            def get_param_list(self) -> List[Parameter]:
                 return [
                     Parameter.create(name=name + '.weights', value=self[name + ".weights"]),
                     Parameter.create(name=name + '.bias', value=self[name + ".bias"])
@@ -160,7 +160,7 @@ class ConvLayer(Layer):
 
         return _ConvLayer({name + ".weights": weights, name + ".bias": bias})
 
-#TODO: delete DNN, CNN and replace usages with Sequential
+
 class Sequential(NeuralNet):
     """Create a new NeuralNet as list `Layer`'s. `Layer`'s could be `DNNLayer` and `ConvLayer`.
         Args:
