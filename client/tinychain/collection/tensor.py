@@ -348,7 +348,9 @@ class Tensor(Collection):
 
         form = form_of(self)
         if hasattr(form, "schema"):
-            return form.schema[0]
+            shape = form.schema[0]
+            shape = shape if isinstance(shape, Tuple) else Tuple(shape)
+            return shape
         else:
             return self._get("shape", rtype=Tuple)
 
