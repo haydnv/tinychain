@@ -26,7 +26,7 @@ use crate::{
 };
 
 use super::access::BlockListTranspose;
-use super::{DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
+use super::{array_err, div_ceil, DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
 
 /// The size of a dense tensor block on disk, in bytes (1 mebibyte + 5 bytes overhead).
 const BLOCK_SIZE: usize = MEBIBYTE + 5;
@@ -124,7 +124,6 @@ where
         let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
             let blocks = blocks.chain(iter::once(Ok(generator(trailing_len))));
-
             Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
         } else {
             Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
@@ -246,6 +245,11 @@ where
             .map_ok(|block| (*block).clone());
 
         Box::pin(blocks)
+    }
+
+    /// Borrow this `BlockListFile`'s underlying `File`.
+    pub(super) fn file(&self) -> &FD {
+        &self.file
     }
 
     /// Sort the elements in this `BlockListFile`.
@@ -1120,20 +1124,6 @@ where
 impl<FD, FS, D, T> fmt::Display for BlockListFileSlice<FD, FS, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("dense Tensor slice")
-    }
-}
-
-#[inline]
-fn array_err(err: afarray::ArrayError) -> TCError {
-    TCError::new(ErrorType::BadRequest, err.to_string())
-}
-
-#[inline]
-fn div_ceil(l: u64, r: u64) -> u64 {
-    if l % r == 0 {
-        l / r
-    } else {
-        (l / r) + 1
     }
 }
 
