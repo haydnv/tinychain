@@ -10,9 +10,9 @@ use safecast::AsType;
 
 use tc_btree::*;
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{BlockId, Dir, File};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType, UIntType};
 use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
@@ -24,7 +24,7 @@ use crate::{
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
-use super::{DenseTensor, PER_BLOCK};
+use super::{array_err, div_ceil, DenseTensor, PER_BLOCK};
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
@@ -2023,4 +2023,63 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListUnary<FD, FS, D, T, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("dense Tensor unary op")
     }
+}
+
+// TODO: add support for sorting along a given axis
+/// Compute the coordinates needed to sort the elements in the given dense Tensor.
+pub async fn arg_sort<FD, FS, D, T, B>(source: B, txn: T) -> TCResult<BlockListFile<FD, FS, D, T>>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    B: DenseAccess<FD, FS, D, T>,
+    D::File: AsType<FD>,
+    D::FileClass: From<TensorType>,
+{
+    let txn_id = *txn.id();
+    let file = txn
+        .context()
+        .create_file_unique(txn_id, TensorType::Dense)
+        .await?;
+
+    let shape = source.shape().clone();
+    let size = source.size();
+    let dtype = source.dtype();
+    let source_blocks = source.block_stream(txn.clone()).await?;
+    let copy = BlockListFile::<FD, FS, D, T>::from_blocks(
+        file,
+        txn_id,
+        Some(shape.clone()),
+        dtype,
+        source_blocks,
+    )
+    .await?;
+
+    let num_blocks = div_ceil(size, PER_BLOCK as u64);
+    if num_blocks == 0 {
+        return Ok(copy);
+    } else if num_blocks == 1 {
+        let block_id = BlockId::from(0u64);
+        let block = copy.file().read_block(txn_id, block_id).await?;
+        let (_, indices) = block.argsort(true).map_err(array_err)?;
+        let blocks = stream::once(future::ready(Ok(indices.into())));
+
+        let file = txn
+            .context()
+            .create_file_unique(txn_id, TensorType::Dense)
+            .await?;
+
+        return BlockListFile::from_blocks(
+            file,
+            txn_id,
+            Some(vec![size].into()),
+            UIntType::U64.into(),
+            blocks,
+        )
+        .await;
+    }
+
+    // TODO: add support for large tensors
+    Err(TCError::not_implemented("arg_sort with multiple blocks"))
 }

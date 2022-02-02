@@ -532,6 +532,11 @@ class Dense(Tensor):
         schema = Schema(shape, F64)
         return cls(Create(uri(cls) + "/random/uniform", shape, schema))
 
+    def argsort(self):
+        """Return the coordinates needed to sort this `Tensor`."""
+
+        return self._get("argsort", rtype=self.__class__)
+
     def elements(self, bounds):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
 

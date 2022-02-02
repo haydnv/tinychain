@@ -24,7 +24,7 @@ use stream::ReadValueAt;
 
 pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
-pub use dense::{BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
+pub use dense::{arg_sort, BlockListFile, DenseAccess, DenseAccessor, DenseTensor, DenseWrite};
 pub use sparse::{SparseAccess, SparseAccessor, SparseTable, SparseTensor, SparseWrite};
 
 mod bounds;
