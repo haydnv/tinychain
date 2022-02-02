@@ -1,10 +1,10 @@
-import typing as t
 from abc import abstractmethod, ABC
 
 from tinychain.state import Map, Tuple
 from tinychain.collection.tensor import Tensor
 
 EPS = 10**-6
+
 
 class Activation(ABC):
     """A differentiable activation function for a neural network."""
@@ -17,6 +17,21 @@ class Activation(ABC):
     def backward(self, Z):
         """Compute the partial differential of this function"""
 
+    @abstractmethod
+    def std_initializer(self, input_size, output_size):
+        """Calculate Standard Deviation to activate weights"""
+
+
+class Identity(Activation):
+    def forward(self, x):
+        return x
+
+    def backward(self, x):
+        return x
+
+    def std_initializer(self, input_size, output_size):
+        return 1.0 * (input_size*output_size)**(-0.5)
+
 
 class Sigmoid(Activation):
     def forward(self, x):
@@ -26,6 +41,21 @@ class Sigmoid(Activation):
         sig = self.forward(x)
         return sig * (1 - sig)
 
+    def std_initializer(self, input_size, output_size):
+        return 1.0 * (2 / (input_size + output_size))**0.5
+
+
+#TODO: remove when automatic differentiation is implemented"
+class Tanh(Activation):
+    def forward(self, x):
+        return x.tanh()
+
+    def backward(self, x):
+        return 1 - self.forward(x)**2
+
+    def std_initializer(self, input_size, output_size):
+        return (5 / 3) * (2 / (input_size + output_size))**0.5
+
 
 class ReLU(Activation):
     def forward(self, Z):
@@ -33,6 +63,9 @@ class ReLU(Activation):
 
     def backward(self, Z):
         return Z > 0
+
+    def std_initializer(self, input_size, output_size):
+        return (2**(0.5)) * (2 / (input_size + output_size))**0.5
 
 
 class Differentiable(object):
@@ -59,7 +92,7 @@ class Differentiable(object):
         Returns a tuple `(loss, gradient)` where `loss` is the loss to propagate further backwards and `gradient` is
         the total gradient for an `Optimizer` to use in order to calculate an update to this `Differentiable`.
         """
-    
+
     @abstractmethod
     def get_param_list(self):
         """
@@ -128,4 +161,3 @@ class DiffedParameter(Parameter):
     @classmethod
     def create(cls, name: str, value: Tensor, grad: Tensor):
         return cls(name=name, value=value, grad=grad)
-
