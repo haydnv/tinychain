@@ -134,7 +134,10 @@ class ConvLayer(Layer):
                 db = Tensor(einsum('ijkb->j', [delta])).reshape([out_c, 1])
                 dloss_col = Tensor(einsum('ji,jm->im', [self[name + '.weights'].reshape([out_c, c_i * h_f * w_f]), delta_reshaped]))
                 dloss_col_reshaped = dloss_col.reshape([c_i, h_f, w_f, h_out, w_out, b_i]).copy().transpose([5, 0, 3, 4, 1, 2])
+
+                # TODO: make this a property of the ConvLayer instance
                 pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
+
                 result = [
                     pad_matrix[:, :, i:i + h_f, j:j + w_f].write(pad_matrix[:, :, i:i + h_f, j:j + w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
                     for i in range(h_out) for j in range(w_out)
