@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
@@ -124,13 +124,22 @@ struct LockState<T> {
     readers: BTreeMap<TxnId, usize>,
     writer: Option<TxnId>,
     pending_writes: BTreeSet<TxnId>,
-    wakers: VecDeque<Waker>,
+    waiters: VecDeque<Weak<FutureState<T>>>,
 }
 
 impl<T> LockState<T> {
     fn wake(&mut self) {
-        while let Some(waker) = self.wakers.pop_front() {
-            waker.wake();
+        let mut i = 0;
+        while i < self.waiters.len() {
+            if let Some(state) = self.waiters[i].upgrade() {
+                let waker = state.waker.lock().expect("TxnLock waiter");
+                if let Some(waker) = waker.deref() {
+                    waker.wake_by_ref();
+                }
+                i += 1;
+            } else {
+                self.waiters.remove(i);
+            }
         }
     }
 }
@@ -163,7 +172,7 @@ impl<T> TxnLock<T> {
             readers: BTreeMap::new(),
             writer: None,
             pending_writes: BTreeSet::new(),
-            wakers: VecDeque::new(),
+            waiters: VecDeque::new(),
         };
 
         let inner = Inner {
@@ -185,9 +194,16 @@ impl<T> TxnLock<T> {
 impl<T: Clone + Send> TxnLock<T> {
     /// Try to acquire a read lock.
     pub fn read(&self, txn_id: TxnId) -> TxnLockReadFuture<T> {
-        TxnLockReadFuture {
-            lock: self.clone(),
+        let future_state = Arc::new(FutureState {
             txn_id,
+            lock: self.clone(),
+            waker: Mutex::new(None),
+        });
+
+        let mut lock_state = self.lock_inner("TxnLock::read");
+        lock_state.waiters.push_back(Arc::downgrade(&future_state));
+        TxnLockReadFuture {
+            state: future_state,
         }
     }
 
@@ -228,9 +244,16 @@ impl<T: Clone + Send> TxnLock<T> {
 
     /// Try to acquire a write lock.
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        TxnLockWriteFuture {
-            lock: self.clone(),
+        let future_state = Arc::new(FutureState {
             txn_id,
+            lock: self.clone(),
+            waker: Mutex::new(None),
+        });
+
+        let mut lock_state = self.lock_inner("TxnLock.write");
+        lock_state.waiters.push_back(Arc::downgrade(&future_state));
+        TxnLockWriteFuture {
+            state: future_state,
         }
     }
 
@@ -381,21 +404,25 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
     }
 }
 
-pub struct TxnLockReadFuture<T> {
+struct FutureState<T> {
     lock: TxnLock<T>,
     txn_id: TxnId,
+    waker: Mutex<Option<Waker>>,
+}
+
+pub struct TxnLockReadFuture<T> {
+    state: Arc<FutureState<T>>,
 }
 
 impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
     type Output = TCResult<TxnLockReadGuard<T>>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.lock.try_read(self.txn_id) {
+    fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.state.lock.try_read(self.state.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                let mut state = self.lock.lock_inner("TxnLockWriteFuture::poll");
-                state.wakers.push_back(cx.waker().clone());
+                *self.state.waker.lock().expect("TxnLock read waker") = Some(cxt.waker().clone());
                 Poll::Pending
             }
         }
@@ -403,20 +430,18 @@ impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
 }
 
 pub struct TxnLockWriteFuture<T> {
-    lock: TxnLock<T>,
-    txn_id: TxnId,
+    state: Arc<FutureState<T>>,
 }
 
 impl<T: Clone + Send> Future for TxnLockWriteFuture<T> {
     type Output = TCResult<TxnLockWriteGuard<T>>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.lock.try_write(self.txn_id) {
+    fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.state.lock.try_write(self.state.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
-                let mut state = self.lock.lock_inner("TxnLockWriteFuture::poll");
-                state.wakers.push_back(cx.waker().clone());
+                *self.state.waker.lock().expect("TxnLock write waiter") = Some(cxt.waker().clone());
                 Poll::Pending
             }
         }
