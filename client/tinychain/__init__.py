@@ -1,4 +1,3 @@
-from distutils.log import debug
 import tinychain.chain
 import tinychain.collection.bound as bound
 import tinychain.error
