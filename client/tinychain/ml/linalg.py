@@ -555,7 +555,7 @@ def testfsplit(txn, U, W, e, k):
     @post_op
     def step(cxt, l: UInt) -> Map:
         goto_test_f_convergence = (e[l].abs() <= EPS)
-        running = If((W[l-1].abs() <= EPS), False, True)
+        running = W[l-1].abs() > EPS
         return Map(l=l - 1, goto_test_f_convergence=goto_test_f_convergence, running=running, U=U, W=W, e=e)
 
     @closure(k)
@@ -628,17 +628,17 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
             V_upd_final = After(V_upd, V[:, i].write(c * cxt.Z - s * cxt.X))
 
             z = pythag(f, h)
-            W[i-1] = z
+            W[i - 1].write(z)
 
             @closure(c, s)
             @post_op
             def update_c_s(f: F32, z: F32, h: F32) -> Tuple:
                 c = f/z
                 s = h/z
-                return c, s
+                return [c, s]
 
             cxt.update_c_s = update_c_s(f, z, h)     
-            c, s = If(z >= EPS, cxt.update_c_s, Tuple([c, s]))
+            c, s = Tuple(If(z >= EPS, cxt.update_c_s, [c, s])).unpack(2)
 
             f = c*g+s*y
             x = c*y-s*g
@@ -703,7 +703,8 @@ def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
     """Return the singular value decomposition of the given `matrix`."""
 
     # Bidiagonal form
-    txn.bidiagonalize = bidiagonalize(matrix)
+    A = matrix.copy()
+    txn.bidiagonalize = bidiagonalize(A)
     U_bidiag = txn.bidiagonalize['U']
     W_bidiag = txn.bidiagonalize['W']
     V_bidiag = txn.bidiagonalize['V']
@@ -714,9 +715,8 @@ def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
     #    - for each singular value apply golub-kahan method
     @closure(U_bidiag, W_bidiag, V_bidiag, e_bidiag)
     @post_op
-    def step(cxt, k: UInt):
-        cxt.golub_kahan = golub_kahan(U_bidiag, W_bidiag, V_bidiag, e_bidiag, k, maxiter)
-        return Map(U=cxt.golub_kahan['U'], W=cxt.golub_kahan['W'], V=cxt.golub_kahan['V'], e=cxt.golub_kahan['e'])
+    def step(k: UInt):
+        return golub_kahan(U_bidiag, W_bidiag, V_bidiag, e_bidiag, k, maxiter)
 
     @post_op
     def cond(k: UInt) -> Bool:
@@ -732,5 +732,8 @@ def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
     # W = txn.golub_kahan['W'][idsorted]
     # V = txn.golub_kahan['V'][:,idsorted]
 
-    # return U[:,:m], np.diag(W)[:m,:], V 
-    return U, W, V
+    U = txn.golub_kahan['U']
+    W = txn.golub_kahan['W']
+    V = txn.golub_kahan['V']
+
+    return U[:,:txn.m], diagonal(W)[:txn.m,:], V
