@@ -138,13 +138,14 @@ where
         dtype: NumberType,
         blocks: S,
     ) -> TCResult<Self> {
+        let bytes_per_element = dtype.size();
         let size = blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
             .map_ok(|(id, block)| {
-                let len = block.len() as u64;
-                file.create_block(txn_id, id, block, BLOCK_SIZE)
-                    .map_ok(move |_| len)
+                let len = block.len();
+                file.create_block(txn_id, id, block, len * bytes_per_element)
+                    .map_ok(move |_| len as u64)
             })
             .try_buffer_unordered(num_cpus::get())
             .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
