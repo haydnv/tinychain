@@ -1484,7 +1484,7 @@ where
     B: TensorAccess,
 {
     pub fn new(source: B, shape: Shape) -> TCResult<Self> {
-        let rebase = transform::Reshape::new(source.shape().clone(), shape)?;
+        let rebase = transform::Reshape::new(source.shape().clone(), shape, "reshape")?;
         Ok(Self {
             source,
             rebase,

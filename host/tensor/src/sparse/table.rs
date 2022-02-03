@@ -51,7 +51,7 @@ where
 {
     /// Create a new `SparseTable` with the given [`Schema`].
     pub async fn create(context: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        schema.validate()?;
+        schema.validate("create Sparse")?;
 
         let table_schema = Self::table_schema(&schema);
         let table = TableIndex::create(context, table_schema, txn_id).await?;

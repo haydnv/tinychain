@@ -115,7 +115,7 @@ where
 {
     /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        schema.validate()?;
+        schema.validate("create Dense")?;
 
         let Schema { shape, dtype } = schema;
         BlockListFile::constant(file, txn_id, shape, dtype.zero())
@@ -132,7 +132,7 @@ where
             shape: shape.into(),
             dtype: value.class(),
         };
-        schema.validate()?;
+        schema.validate("create Dense constant")?;
 
         BlockListFile::constant(file, txn_id, schema.shape, value)
             .map_ok(Self::from)
@@ -155,7 +155,7 @@ where
             dtype: Ord::max(start.class(), stop.class()),
         };
 
-        schema.validate()?;
+        schema.validate("create Dense range")?;
 
         BlockListFile::range(file, txn_id, schema.shape, start, stop)
             .map_ok(Self::from)
@@ -1433,8 +1433,9 @@ where
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         debug!("deserialize DenseTensor");
 
-        let schema = seq.next_element(()).await?;
+        let schema = seq.next_element::<Schema>(()).await?;
         let schema = schema.ok_or_else(|| de::Error::invalid_length(0, "a tensor schema"))?;
+        schema.validate("load Dense").map_err(de::Error::custom)?;
         debug!("DenseTensor schema is {}", schema);
 
         let cxt = (self.txn_id, self.file, schema);

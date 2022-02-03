@@ -23,6 +23,9 @@ pub struct Broadcast {
 
 impl Broadcast {
     pub fn new(source_shape: Shape, shape: Shape) -> TCResult<Broadcast> {
+        source_shape.validate("broadcast")?;
+        shape.validate("broadcast")?;
+
         if source_shape.is_empty() {
             return Err(TCError::unsupported("cannot broadcast an empty Tensor"));
         } else if shape.is_empty() {
@@ -408,7 +411,10 @@ pub struct Reshape {
 }
 
 impl Reshape {
-    pub fn new(source_shape: Shape, shape: Shape) -> TCResult<Self> {
+    pub fn new(source_shape: Shape, shape: Shape, debug_info: &'static str) -> TCResult<Self> {
+        source_shape.validate(debug_info)?;
+        shape.validate(debug_info)?;
+
         if source_shape.size() != shape.size() {
             return Err(TCError::unsupported(format!(
                 "cannot reshape tensor with shape {} into {}",
