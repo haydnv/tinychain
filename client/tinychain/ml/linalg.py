@@ -626,9 +626,7 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
             cxt.Z = V[:,i].copy()
             V_upd = After([cxt.X, cxt.Z], V[:, i-1].write(c * cxt.X + s * cxt.Z))
             V_upd_final = After(V_upd, V[:, i].write(c * cxt.Z - s * cxt.X))
-
             z = pythag(f, h)
-            W[i - 1].write(z)
 
             @closure(c, s)
             @post_op
@@ -647,7 +645,7 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
             cxt.T = U[:,i].copy()
             U_upd = After([cxt.Y, cxt.T], U[:, i-1].write(c * cxt.Y + s * cxt.T))
             U_upd_final = After(U_upd, U[:, i].write(c * cxt.T - s * cxt.Y))
-            return Map(U=U_upd_final, W=W, V=V_upd_final, e=e, f = f, x = x)
+            return After(W[i - 1].write(z), Map(U=U_upd_final, W=W, V=V_upd_final, e=e, f = f, x = x))
 
         @closure(k)
         @post_op
@@ -657,10 +655,10 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
         e[cxt.l] = 0.0
         e[k] = f 
         cxt.U_V_upd = Map(While(cond, step, Map(i=cxt.l+1, x = x, c = c, s = s, U=U, W=W, V=V, e=e)))
-        W_upd = Tensor(After(W_upd_init, cxt.U_V_upd['W']))
-        W_upd[k] = x
+        W = cxt.U_V_upd['W']
+        W = After(After(W_upd_init, W[k].write(x)), W)
 
-        return Map(t=t + 1, l=cxt.l, W=W_upd, running=running, convergence=convergence, U=cxt.U_V_upd['U'], V=cxt.U_V_upd['V'], e=e)
+        return Map(t=t + 1, l=cxt.l, W=W, running=running, convergence=convergence, U=cxt.U_V_upd['U'], V=cxt.U_V_upd['V'], e=e)
 
     @closure(maxiter)
     @post_op

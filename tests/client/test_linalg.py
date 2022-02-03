@@ -123,7 +123,6 @@ class LinearAlgebraTests(ClientTest):
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
-    @unittest.skip
     def testSVD(self):
         m = 4
         n = 3
@@ -132,8 +131,15 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
         cxt.result = tc.linalg.svd(cxt.matrix)
-
-        self.assertRaises(tc.error.NotImplemented, lambda: self.host.post(ENDPOINT, cxt))
+        cxt.U_shape = cxt.result['U'].shape
+        response = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(response, [m, n])
+        cxt.W_shape = cxt.result['W'].shape
+        response = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(response, [n, n])
+        cxt.V_shape = cxt.result['V'].shape
+        response = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(response, [n, n])
 
 
 def expect_dense(x, dtype):
