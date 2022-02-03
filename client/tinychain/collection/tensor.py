@@ -348,7 +348,9 @@ class Tensor(Collection):
 
         form = form_of(self)
         if hasattr(form, "schema"):
-            return form.schema[0]
+            shape = form.schema[0]
+            shape = shape if isinstance(shape, Tuple) else Tuple(shape)
+            return shape
         else:
             return self._get("shape", rtype=Tuple)
 
@@ -529,6 +531,11 @@ class Dense(Tensor):
 
         schema = Schema(shape, F64)
         return cls(Create(uri(cls) + "/random/uniform", shape, schema))
+
+    def argsort(self):
+        """Return the coordinates needed to sort this `Tensor`."""
+
+        return self._get("argsort", rtype=self.__class__)
 
     def elements(self, bounds):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""

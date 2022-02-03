@@ -26,7 +26,7 @@ use crate::{
 };
 
 use super::access::BlockListTranspose;
-use super::{DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
+use super::{array_err, div_ceil, DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
 
 /// The size of a dense tensor block on disk, in bytes (1 mebibyte + 5 bytes overhead).
 const BLOCK_SIZE: usize = MEBIBYTE + 5;
@@ -124,7 +124,6 @@ where
         let trailing_len = (size % PER_BLOCK as u64) as usize;
         if trailing_len > 0 {
             let blocks = blocks.chain(iter::once(Ok(generator(trailing_len))));
-
             Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
         } else {
             Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
@@ -139,13 +138,14 @@ where
         dtype: NumberType,
         blocks: S,
     ) -> TCResult<Self> {
+        let bytes_per_element = dtype.size();
         let size = blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
             .map_ok(|(id, block)| {
-                let len = block.len() as u64;
-                file.create_block(txn_id, id, block, BLOCK_SIZE)
-                    .map_ok(move |_| len)
+                let len = block.len();
+                file.create_block(txn_id, id, block, len * bytes_per_element)
+                    .map_ok(move |_| len as u64)
             })
             .try_buffer_unordered(num_cpus::get())
             .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
@@ -248,6 +248,11 @@ where
         Box::pin(blocks)
     }
 
+    /// Borrow this `BlockListFile`'s underlying `File`.
+    pub(super) fn file(&self) -> &FD {
+        &self.file
+    }
+
     /// Sort the elements in this `BlockListFile`.
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
@@ -261,26 +266,32 @@ where
             return Ok(());
         }
 
-        for block_id in 0..(num_blocks - 1) {
-            let next_block_id = BlockId::from(block_id + 1);
-            let block_id = BlockId::from(block_id);
+        loop {
+            let mut sorted = true;
+            for block_id in 0..(num_blocks - 1) {
+                let next_block_id = BlockId::from(block_id + 1);
+                let block_id = BlockId::from(block_id);
 
-            let left = self.file.write_block(txn_id, block_id);
+                let left = self.file.write_block(txn_id, block_id);
 
-            let right = self.file.write_block(txn_id, next_block_id);
+                let right = self.file.write_block(txn_id, next_block_id);
 
-            let (mut left, mut right) = try_join!(left, right)?;
+                let (mut left, mut right) = try_join!(left, right)?;
 
-            let mut block = Array::concatenate(&left, &right);
-            block.sort(true).map_err(array_err)?;
+                let mut block = Array::concatenate(&left, &right);
+                block.sort(true).map_err(array_err)?;
 
-            let (left_sorted, right_sorted) = block.split(PER_BLOCK).map_err(array_err)?;
+                let (left_sorted, right_sorted) = block.split(PER_BLOCK).map_err(array_err)?;
+                sorted = sorted && left.deref() == &left_sorted && right.deref() == &right_sorted;
 
-            *left = left_sorted;
-            *right = right_sorted;
+                *left = left_sorted;
+                *right = right_sorted;
+            }
+
+            if sorted {
+                return Ok(());
+            }
         }
-
-        Ok(())
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -1114,20 +1125,6 @@ where
 impl<FD, FS, D, T> fmt::Display for BlockListFileSlice<FD, FS, D, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("dense Tensor slice")
-    }
-}
-
-#[inline]
-fn array_err(err: afarray::ArrayError) -> TCError {
-    TCError::new(ErrorType::BadRequest, err.to_string())
-}
-
-#[inline]
-fn div_ceil(l: u64, r: u64) -> u64 {
-    if l % r == 0 {
-        l / r
-    } else {
-        (l / r) + 1
     }
 }
 

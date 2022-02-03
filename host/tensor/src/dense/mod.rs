@@ -30,7 +30,7 @@ use super::{
 };
 
 use access::*;
-pub use access::{BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
+pub use access::{arg_sort, BlockListSparse, DenseAccess, DenseAccessor, DenseWrite};
 pub use file::BlockListFile;
 
 mod access;
@@ -1588,4 +1588,18 @@ fn encodable_c64<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = 
 
             dest
         })
+}
+
+#[inline]
+fn array_err(err: afarray::ArrayError) -> TCError {
+    TCError::new(ErrorType::BadRequest, err.to_string())
+}
+
+#[inline]
+fn div_ceil(l: u64, r: u64) -> u64 {
+    if l % r == 0 {
+        l / r
+    } else {
+        (l / r) + 1
+    }
 }

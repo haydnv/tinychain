@@ -89,6 +89,39 @@ impl<T> From<T> for ArgmaxHandler<T> {
     }
 }
 
+struct ArgsortHandler<B> {
+    tensor: DenseTensor<B>,
+}
+
+impl<'a, B> Handler<'a> for ArgsortHandler<B>
+where
+    B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_some() {
+                    return Err(TCError::not_implemented("argmax with axis"));
+                }
+
+                let indices = tc_tensor::arg_sort(self.tensor.into_inner(), txn.clone()).await?;
+                Ok(State::Collection(
+                    Tensor::Dense(indices.accessor().into()).into(),
+                ))
+            })
+        }))
+    }
+}
+
+impl<B> From<DenseTensor<B>> for ArgsortHandler<B> {
+    fn from(tensor: DenseTensor<B>) -> Self {
+        Self { tensor }
+    }
+}
+
 struct CastHandler<T> {
     tensor: T,
 }
@@ -140,55 +173,60 @@ impl ConcatenateHandler {
         DenseTensor::constant(file, txn_id, shape, dtype.zero()).await
     }
 
-    async fn concatenate(
-        txn: &Txn,
-        shape_in: Shape,
-        dtype: NumberType,
-        tensors: Vec<Tensor>,
-    ) -> TCResult<Tensor> {
-        let mut shape_out = Vec::with_capacity(shape_in.len() + 1);
-        shape_out.push(tensors.len() as u64);
-        shape_out.extend(shape_in.iter().cloned());
-
-        let concatenated = Self::blank(txn, shape_out, dtype).await?;
-
-        let mut writes: FuturesUnordered<_> = tensors
-            .into_iter()
-            .enumerate()
-            .map(|(i, tensor)| {
-                let bounds = vec![AxisBounds::At(i as u64)].into();
-                concatenated.clone().write(txn.clone(), bounds, tensor)
-            })
-            .collect();
-
-        while let Some(()) = writes.try_next().await? {
-            // no-op
-        }
-
-        Ok(concatenated.into())
-    }
-
     async fn concatenate_axis(
         txn: &Txn,
-        shape_in: Shape,
         axis: usize,
         dtype: NumberType,
         tensors: Vec<Tensor>,
     ) -> TCResult<Tensor> {
-        let mut shape_out = shape_in.to_vec();
-        shape_out[axis] = shape_in[axis] * tensors.len() as u64;
+        const ERR_OFF_AXIS: &str = "Tensors to concatenate must have the same off-axis dimensions";
 
-        let bounds: Bounds = shape_in.iter().map(|dim| AxisBounds::all(*dim)).collect();
+        let ndim = tensors[0].ndim();
+        let mut offsets = Vec::with_capacity(tensors.len());
+        let mut shape_out = tensors[0].shape().to_vec();
+        shape_out[axis] = 0;
 
-        let concatenated = Self::blank(txn, shape_out, dtype).await?;
+        for tensor in &tensors {
+            if tensor.ndim() != ndim {
+                return Err(TCError::unsupported(
+                    "Tensors to concatenate must have the same dimensions",
+                ));
+            }
+
+            let shape = tensor.shape();
+
+            for x in 0..axis {
+                let dim = shape[x];
+                if dim != shape_out[x] {
+                    return Err(TCError::unsupported(ERR_OFF_AXIS));
+                }
+            }
+
+            if axis < tensor.ndim() {
+                for x in (axis + 1)..ndim {
+                    if shape[x] != shape_out[x] {
+                        return Err(TCError::unsupported(ERR_OFF_AXIS));
+                    }
+                }
+            }
+
+            shape_out[axis] += shape[axis];
+            if let Some(offset) = offsets.last().cloned() {
+                offsets.push(offset + shape[axis]);
+            } else {
+                offsets.push(shape[axis]);
+            }
+        }
+
+        let bounds: Bounds = shape_out.iter().map(|dim| AxisBounds::all(*dim)).collect();
+        let concatenated = Self::blank(txn, shape_out.clone().into(), dtype).await?;
 
         let mut writes: FuturesUnordered<_> = tensors
             .into_iter()
-            .enumerate()
-            .map(|(i, tensor)| {
-                let start = i as u64 * shape_in[axis];
+            .zip(offsets)
+            .map(|(tensor, offset)| {
                 let mut bounds = bounds.clone();
-                bounds[axis] = AxisBounds::In(start..(start + shape_in[axis]));
+                bounds[axis] = AxisBounds::In((offset - tensor.shape()[axis])..offset);
                 concatenated.clone().write(txn.clone(), bounds, tensor)
             })
             .collect();
@@ -213,20 +251,7 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
-                    return Err(TCError::unsupported(
-                        "need at least one Tensor to concatenate",
-                    ));
-                }
-
-                let shape_in = tensors[0].shape().clone();
-                for tensor in &tensors {
-                    tensor.shape().validate()?;
-
-                    if tensor.shape() != &shape_in {
-                        return Err(TCError::unsupported(
-                            "can only concatenate Tensors with the same shape",
-                        ));
-                    }
+                    return Err(TCError::unsupported("no Tensors to concatenate"));
                 }
 
                 let dtype = tensors
@@ -234,14 +259,21 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                     .map(TensorAccess::dtype)
                     .fold(tensors[0].dtype(), Ord::max);
 
-                if axis.is_none() {
-                    Self::concatenate(txn, shape_in, dtype, tensors).await
+                let axis = if axis.is_some() {
+                    cast_axis(axis, tensors[0].ndim())?
                 } else {
-                    let axis = cast_axis(axis, shape_in.len())?;
-                    Self::concatenate_axis(txn, shape_in, axis, dtype, tensors).await
+                    0
+                };
+
+                if tensors[0].ndim() < axis {
+                    return Err(TCError::unsupported(format!(
+                        "axis {} is out of bounds for {}",
+                        axis, tensors[0]
+                    )));
                 }
-                .map(Collection::Tensor)
-                .map(State::Collection)
+
+                let tensor = Self::concatenate_axis(txn, axis, dtype, tensors).await?;
+                Ok(State::Collection(tensor.into()))
             })
         }))
     }
@@ -1573,6 +1605,10 @@ where
 
             // indexing
             "argmax" => Some(Box::new(ArgmaxHandler::from(tensor))),
+            "argsort" => match Tensor::from(tensor) {
+                Tensor::Dense(dense) => Some(Box::new(ArgsortHandler::from(dense))),
+                _ => None, // TODO: implement argsort for SparseTensor
+            },
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
