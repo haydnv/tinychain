@@ -615,6 +615,16 @@ class TensorTests(unittest.TestCase):
         expected = expect_sparse(tc.I32, [3, 3], matrix)
         self.assertEqual(actual, expected)
 
+    def testConcatenate(self):
+        x1 = np.ones([5, 8], np.int)
+        x2 = np.ones([5, 4], np.int) * 2
+
+        cxt = tc.Context()
+        cxt.result = tc.tensor.Dense.concatenate([load_dense(x1, tc.I32), load_dense(x2, tc.I32)], axis=1)
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.concatenate([x1, x2], axis=1)
+        self.assertEqual(actual, expect_dense(tc.I32, [5, 12], expected.flatten().tolist()))
+
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
