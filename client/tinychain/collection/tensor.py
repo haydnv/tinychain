@@ -81,6 +81,9 @@ class Tensor(Collection):
     def __add__(self, other):
         return self.add(other)
 
+    def __abs__(self):
+        return self.abs()
+
     def __radd__(self, other):
         return self.add(other)
 
