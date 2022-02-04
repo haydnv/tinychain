@@ -385,7 +385,7 @@ class Tensor(Collection):
         `self.shape[axis]` then a `BadRequest` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), self.__class__)
+        return self._get("split", (num_or_size_splits, axis), Tuple)
 
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""

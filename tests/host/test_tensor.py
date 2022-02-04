@@ -142,7 +142,7 @@ class DenseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.x1 = tc.tensor.Dense.load(x.shape, tc.I64, x.flatten().tolist())
         cxt.x2 = cxt.x1.split(3, axis=0)
-        cxt.result = [cxt.x2[i].shape for i in range(3)]
+        cxt.result = [tc.tensor.Tensor(cxt.x2[i]).shape for i in range(3)]
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [[shape[0] // splits, 30]] * splits)
 
