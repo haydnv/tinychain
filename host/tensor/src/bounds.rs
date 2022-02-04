@@ -220,6 +220,7 @@ impl Bounds {
         self.len() == shape.len() && self.axes.iter().all(|bound| bound.is_index())
     }
 
+    /// Return the number of dimensions of this `Tensor`.
     pub fn ndim(&self) -> usize {
         self.axes.iter().filter(|bound| !bound.is_index()).count()
     }

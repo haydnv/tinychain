@@ -555,6 +555,7 @@ where
     D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
+    /// Get the [`Schema`] of this [`Tensor`]
     pub fn schema(&self) -> Schema {
         Schema {
             dtype: self.dtype(),

@@ -37,13 +37,6 @@ pub trait Class: fmt::Display + Sized {}
 /// A generic native (i.e. implemented in Rust) class trait
 pub trait NativeClass: Class {
     /// Given a fully qualified path, return this class, or a subclass.
-    ///
-    /// Example:
-    /// ```no_run
-    /// assert_eq!(
-    ///     Number::from_path("/state/scalar/value/number/int/32"),
-    ///     NumberType::Int(IntType::I32));
-    /// ```
     fn from_path(path: &[PathSegment]) -> Option<Self>;
 
     /// Returns the fully-qualified path of this class.
