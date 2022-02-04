@@ -131,15 +131,10 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
         cxt.result = tc.linalg.svd(cxt.matrix)
-        cxt.U_shape = cxt.result['U'].shape
         response = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(response, [m, n])
-        cxt.W_shape = cxt.result['W'].shape
-        response = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(response, [n, n])
-        cxt.V_shape = cxt.result['V'].shape
-        response = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(response, [n, n])
+        self.assertEqual(response['U'][0][0], [m, n])
+        self.assertEqual(response['W'][0][0], [n, n])
+        self.assertEqual(response['V'][0][0], [n, n])
 
 
 def expect_dense(x, dtype):

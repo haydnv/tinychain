@@ -47,7 +47,7 @@ def householder(cxt, x: Tensor) -> Tuple:
     cxt.v = x.copy()  # make a copy in case X is updated before the return values are evaluated
     cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha -
                      cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
-    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero **
+    tau = If(abs(cxt.s) < EPS, 0, 2 * cxt.v_zero **
              2 / (cxt.s + cxt.v_zero ** 2))
     v = After(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero)
 
@@ -188,7 +188,7 @@ def plu(x: Tensor) -> PLUFactorization:
 
         @post_op
         def cond(x: Tensor, k: UInt):
-            return (k < UInt(Tuple(x.shape)[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
+            return (k < UInt(Tuple(x.shape)[0]) - 1).logical_and(abs(x[k, k]) < 1e-3)
 
         return Map(While(cond, step, Map(
             p=p.copy(),
@@ -263,7 +263,7 @@ def slogdet(cxt, x: Dense) -> Tuple:
     @get_op
     def step(i: UInt):
         d = cxt.det(x=x[i])
-        logdet = F32(d.abs().log())
+        logdet = F32(abs(d).log())
         sign = Int(If(d > 0, 1, -1))*1
         return [
             cxt.sign_result[i].write(sign),
@@ -274,7 +274,7 @@ def slogdet(cxt, x: Dense) -> Tuple:
 
 
 def sign_like(a, b):
-    return Number(If(b >= 0, a.abs(), -a.abs()))
+    return Number(If(b >= 0, abs(a), -abs(a)))
 
 
 def dot(x1, x2):
@@ -324,7 +324,7 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
             cxt.update_col = While(cond, step, Map(j=l, h=cxt.h))
             cxt.rescale_col = After(cxt.update_col, cxt.col_i.write(cxt.col_i * scale))
             return If(
-                scale.abs() < EPS,
+                abs(scale) < EPS,
                 BadRequest(String("scale of column {{i}} is {{scale}}").render(i=i, scale=scale)),
                 After(cxt.rescale_col, cxt.g))
 
@@ -368,7 +368,7 @@ def householder_vector(txn, U: Tensor, W: Tensor, e: Tensor) -> Map:
         cxt.l = UInt(After(cxt.update_e, i + 1))
         cxt.scale_init = Float(If(i < txn.m, dot(U[i:, i], U[i:, i]), scale))
         cxt.g_init = Float(If(
-            Bool(i < txn.m).logical_and(cxt.scale_init.abs() > EPS),
+            Bool(i < txn.m).logical_and(abs(cxt.scale_init) > EPS),
             cxt.update_cols(i=i, l=cxt.l, scale=cxt.scale_init),
             0.0))
 
@@ -434,12 +434,12 @@ def rht(txn, U: Tensor, V: Tensor, e: Tensor) -> Map:
                 return loop
 
             cxt.update_cols = update_cols
-            cxt.res = cxt.update_cols(n=txn.n, l=l, i=i)
+            cxt.res = cxt.update_cols(i=i, l=l, g=g)
             return If((g != 0.0), cxt.res)
 
         cxt.update_g = Float(e[i])
         cxt.update_cols_wo_last = update_cols_wo_last
-        cxt.update_cols_funct = After(cxt.update_cols_wo_last(l=l, g=g), [V[i,l:].write(0.0), V[l:,i].write(0.0)])
+        cxt.update_cols_funct = After(cxt.update_cols_wo_last(i=i, l=l, g=g), [V[i,l:].write(0.0), V[l:,i].write(0.0)])
         
         cxt.check_last_col = If(
             (i < txn.n-1),
@@ -511,8 +511,8 @@ def lht(txn, U: Tensor, W: Tensor) -> Map:
 
 # helper functions
 def pythag(a,b): 
-    aa = a.abs()
-    bb = b.abs()
+    aa = abs(a)
+    bb = abs(b)
     return If(aa > bb, aa * (1.0 + (bb/aa)**2)**0.5, bb * (1.0 + (aa/bb)**2)**0.5)
 
 
@@ -526,10 +526,10 @@ def cancelation(txn, U, W, e, l, k):
     @post_op
     def step(cxt, i: UInt) -> Map:
         cxt.f = txn.s * e[i]
-        e[i] = txn.c * e[i]
+        e[i].write(txn.c * e[i])
         cxt.g = W[i]
         cxt.h = pythag(cxt.f, cxt.g)
-        W[i] = cxt.h
+        W[i].write(cxt.h)
         txn.c = cxt.g/cxt.h
         txn.s  = -cxt.f/cxt.h
         cxt.Y = U[:,txn.l1].copy()
@@ -537,9 +537,9 @@ def cancelation(txn, U, W, e, l, k):
         update_prev_col = U[:,txn.l1].write(cxt.Y * txn.c + cxt.Z * txn.s)
         update_col = U[:,i].write(-cxt.Y * txn.s + cxt.Z * txn.c)
         U_final = After([update_prev_col, update_col], U)
-        return If(cxt.f.abs() <= EPS, 
-                Map(running=cxt.f.abs() <= EPS, i=i + 1, U=U_final, W=W, e=e),
-                Map(running=cxt.f.abs() <= EPS, i=i + 1, U=U, W=W, e=e))
+        return If(abs(cxt.f) <= EPS, 
+                Map(running=abs(cxt.f) <= EPS, i=i + 1, U=U_final, W=W, e=e),
+                Map(running=abs(cxt.f) <= EPS, i=i + 1, U=U, W=W, e=e))
 
     @closure(k)
     @post_op
@@ -553,9 +553,9 @@ def cancelation(txn, U, W, e, l, k):
 def testfsplit(txn, U, W, e, k):
     @closure(U, W, e, k)
     @post_op
-    def step(cxt, l: UInt) -> Map:
-        goto_test_f_convergence = (e[l].abs() <= EPS)
-        running = W[l-1].abs() > EPS
+    def step(l: UInt) -> Map:
+        goto_test_f_convergence = (abs(e[l]) <= EPS)
+        running = abs(W[l-1]) > EPS
         return Map(l=l - 1, goto_test_f_convergence=goto_test_f_convergence, running=running, U=U, W=W, e=e)
 
     @closure(k)
@@ -564,9 +564,9 @@ def testfsplit(txn, U, W, e, k):
         running.logical_and(goto_test_f_convergence.logical_not()).logical_and(l >= 0)
 
     txn.res = Map(While(cond, step, Map(l=k, goto_test_f_convergence = False)))
-    txn.cancelation = cancelation(U, W, e, txn.l, k)
+    txn.cancelation = cancelation
 
-    return If(txn.res['goto_test_f_convergence'], txn.res['l'], txn.cancelation)
+    return If(txn.res['goto_test_f_convergence'], txn.res['l'], txn.cancelation(U=U, W=W, e=e, l=txn.l, k=k))
 
 
 @post_op
@@ -581,8 +581,9 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
     @post_op
     def step(cxt, t: UInt, k: UInt, maxiter: UInt) -> Map:
         
-        cxt.l = testfsplit(U, W, e, k)
-        cxt.update_mtrx = If(W[k] < 0.0, [W[k].write(W[k].abs()), V[:,k].write(V[:,k].abs())], W)
+        cxt.testfsplit = testfsplit
+        cxt.l = cxt.testfsplit(U=U, W=W, e=e, k=k)
+        cxt.update_mtrx = If(W[k] < 0.0, [W[k].write(abs(W[k])), V[:,k].write(abs(V[:,k]))], W)
         W_upd_init = If(cxt.l != k, W, cxt.update_mtrx)
         running = cxt.l != k
         convergence = If(t == maxiter-1, 
@@ -613,7 +614,7 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
             g = c*g
 
             z = pythag(f,h)
-            e[i-1] = z
+            e[i-1].write(z)
 
             c = f/z
             s = h/z
@@ -635,8 +636,8 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
                 s = h/z
                 return [c, s]
 
-            cxt.update_c_s = update_c_s(f, z, h)     
-            c, s = Tuple(If(z >= EPS, cxt.update_c_s, [c, s])).unpack(2)
+            cxt.update_c_s = update_c_s   
+            c, s = Tuple(If(z >= EPS, cxt.update_c_s(f=f, z=z, h=h), [c, s])).unpack(2)
 
             f = c*g+s*y
             x = c*y-s*g
@@ -652,9 +653,9 @@ def golub_kahan(txn, U: Tensor, W: Tensor, V: Tensor, e: Tensor, k: UInt, maxite
         def cond(i: UInt) -> Bool:
             return i < k+1
 
-        e[cxt.l] = 0.0
-        e[k] = f 
-        cxt.U_V_upd = Map(While(cond, step, Map(i=cxt.l+1, x = x, c = c, s = s, U=U, W=W, V=V, e=e)))
+        e[cxt.l].write(0.0)
+        e[k].write(f) 
+        cxt.U_V_upd = Map(While(cond, step, Map(i=cxt.l+1, x = x, c = c, s = s)))
         W = cxt.U_V_upd['W']
         W = After(After(W_upd_init, W[k].write(x)), W)
 
@@ -681,15 +682,18 @@ def bidiagonalize(txn, A: Tensor):
     V_init = Dense.zeros((txn.n, txn.n), dtype=F32)
     e_init = Dense.zeros((txn.n,), dtype=F32)
 
-    txn.householder = householder(U_init, W_init, e_init)
+    txn.householder_vector = householder_vector
+    txn.householder = txn.householder_vector(U=U_init, W=W_init, e=e_init)
     U_hh = txn.householder['U']
     W_hh = txn.householder['W']
     e_hh = txn.householder['e']
-    txn.rht = rht(U_hh, V_init, e_hh)
+    txn.rht_func = rht
+    txn.rht = txn.rht_func(U=U_hh, V=V_init, e=e_hh)
     U_rht = txn.rht['U']
     V_rht = txn.rht['V']
     e_rht = txn.rht['e']
-    txn.lht = lht(U_rht, W_hh)
+    txn.lht_func = lht
+    txn.lht = txn.lht_func(U=U_rht, W=W_hh)
     U_lht = txn.lht['U']
     W_lht = txn.lht['W']
 
@@ -702,7 +706,8 @@ def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
 
     # Bidiagonal form
     A = matrix.copy()
-    txn.bidiagonalize = bidiagonalize(A)
+    txn.bidiagonalize_func = bidiagonalize
+    txn.bidiagonalize = txn.bidiagonalize_func(A)
     U_bidiag = txn.bidiagonalize['U']
     W_bidiag = txn.bidiagonalize['W']
     V_bidiag = txn.bidiagonalize['V']
@@ -713,8 +718,9 @@ def svd(txn, matrix: Tensor, maxiter=30) -> Tuple:
     #    - for each singular value apply golub-kahan method
     @closure(U_bidiag, W_bidiag, V_bidiag, e_bidiag)
     @post_op
-    def step(k: UInt):
-        return golub_kahan(U_bidiag, W_bidiag, V_bidiag, e_bidiag, k, maxiter)
+    def step(cxt, k: UInt):
+        cxt.golub_kahan = golub_kahan
+        return cxt.golub_kahan(U_bidiag, W_bidiag, V_bidiag, e_bidiag, k, maxiter)
 
     @post_op
     def cond(k: UInt) -> Bool:
