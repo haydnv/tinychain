@@ -1389,8 +1389,9 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let schema = seq.next_element(()).await?;
+        let schema = seq.next_element::<Schema>(()).await?;
         let schema = schema.ok_or_else(|| de::Error::invalid_length(0, "tensor schema"))?;
+        schema.validate("load Sparse").map_err(de::Error::custom)?;
 
         let txn_id = *self.txn.id();
         let table = SparseTable::create(self.txn.context(), schema, txn_id)

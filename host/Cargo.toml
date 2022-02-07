@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "A next-gen database + application server"
@@ -44,15 +44,15 @@ serde_json = { version = "1.0" }
 sha2 = "0.10"
 structopt = "0.3"
 tbon = "~0.3.5"
-tc-btree = { path = "btree" }
+tc-btree = "0.4"
 tc-error = "0.4"
-tc-math = { path = "math", optional = true }
-tc-tensor = { path = "tensor", optional = true }
-tc-transact = { path = "transact", features = ["tensor"] }
-tc-value = { path = "value" }
-tc-table = { path = "table" }
-tcgeneric = { path = "generic" }
-tokio = { version = "1.14", features = ["macros", "rt-multi-thread", "signal"] }
+tc-math = { version = "0.2", optional = true }
+tc-tensor = { version = "0.4", optional = true }
+tc-transact = { version = "0.11", features = ["tensor"] }
+tc-value = "0.4"
+tc-table = "0.3"
+tcgeneric = "0.3"
+tokio = { version = "1.16", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uuid = "0.8"
 url = { version = "2.2" }

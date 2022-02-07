@@ -1,7 +1,5 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-import math
-
 from tinychain.ref import If, Ref
 from tinychain.state import Scalar
 from tinychain.util import form_of, to_json, uri, URI
@@ -16,10 +14,14 @@ class Value(Scalar):
 
     @classmethod
     def max(cls, l, r):
+        """Return `l`, or `r`, whichever is greater."""
+
         return cls(If(l >= r, l, r))
 
     @classmethod
     def min(cls, l, r):
+        """Return `l`, or `r`, whichever is lesser."""
+
         return cls(If(l <= r, l, r))
 
     def __eq__(self, other):
@@ -395,10 +397,14 @@ class Int(Number):
 
     @classmethod
     def max_value(cls):
+        """Return the maximum allowed value of this `Int` type."""
+
         return cls(2**(cls.size() - 1) - 1)
 
     @classmethod
     def min_value(cls):
+        """Return the minimum allowed value of this `Int` type."""
+
         return cls(-2**(cls.size() - 1) + 1)
 
     @staticmethod
@@ -451,10 +457,14 @@ class UInt(Number):
 
     @classmethod
     def max_value(cls):
+        """Return the maximum allowed value of this `Int` type."""
+
         return cls(2**cls.size() - 1)
 
     @classmethod
     def min_value(cls):
+        """Return the minimum allowed value of this `Int` type."""
+
         return cls(0)
 
     @staticmethod

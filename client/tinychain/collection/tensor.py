@@ -81,6 +81,9 @@ class Tensor(Collection):
     def __add__(self, other):
         return self.add(other)
 
+    def __abs__(self):
+        return self.abs()
+
     def __radd__(self, other):
         return self.add(other)
 
@@ -382,7 +385,7 @@ class Tensor(Collection):
         `self.shape[axis]` then a `BadRequest` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), self.__class__)
+        return self._get("split", (num_or_size_splits, axis), Tuple)
 
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
@@ -519,7 +522,7 @@ class Dense(Tensor):
 
     @classmethod
     def random_normal(cls, shape, mean=0.0, std=1.0):
-        """Return a `Dense` tensor filled with a random normal distribution of `F64`s."""
+        """Return a `Dense` tensor filled with a random normal distribution of `F64` s."""
 
         schema = Schema(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
@@ -527,7 +530,7 @@ class Dense(Tensor):
 
     @classmethod
     def random_uniform(cls, shape):
-        """Return a `Dense` tensor filled with a uniform random distribution of `F64`s."""
+        """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
 
         schema = Schema(shape, F64)
         return cls(Create(uri(cls) + "/random/uniform", shape, schema))

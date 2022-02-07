@@ -50,8 +50,11 @@ pub struct Schema {
 }
 
 impl Schema {
-    pub fn validate(&self) -> TCResult<()> {
-        self.shape.validate()
+    /// Raise an error if this schema is invalid.
+    ///
+    /// `debug_info` should be the name of the calling Op, as a user would understand it.
+    pub fn validate(&self, debug_info: &'static str) -> TCResult<()> {
+        self.shape.validate(debug_info)
     }
 }
 
@@ -552,6 +555,7 @@ where
     D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
 {
+    /// Get the [`Schema`] of this [`Tensor`]
     pub fn schema(&self) -> Schema {
         Schema {
             dtype: self.dtype(),

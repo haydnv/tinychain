@@ -12,6 +12,7 @@ Modules
    cluster
    decorators
    graph
+   ml
    ref
    state
    table

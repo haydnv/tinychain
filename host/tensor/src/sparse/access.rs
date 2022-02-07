@@ -1822,7 +1822,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     pub fn new(source: A, shape: Shape) -> TCResult<Self> {
-        let rebase = transform::Reshape::new(source.shape().clone(), shape)?;
+        let rebase = transform::Reshape::new(source.shape().clone(), shape, "reshape")?;
         Ok(Self {
             source,
             rebase,
