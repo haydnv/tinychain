@@ -2,22 +2,10 @@ import inspect
 
 from pydoc import locate
 
-from tinychain.util import deanonymize, form_of, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
+from tinychain.state import State
 
-from .meta import gen_headers, Meta
-
-
-def _get_rtype(fn, default_rtype):
-    if is_op(fn):
-        return fn.rtype
-
-    rtype = default_rtype
-
-    if inspect.isfunction(fn):
-        annotation = inspect.signature(fn).return_annotation
-        rtype = resolve_class(fn, annotation, rtype)
-
-    return rtype
+from .meta import gen_headers, header, Meta
 
 
 def is_conditional(state):
@@ -79,3 +67,16 @@ def resolve_class(subject, annotation, default):
         raise ValueError(f"unable to resolve class {classpath}")
     else:
         return resolved
+
+
+def _get_rtype(fn, default_rtype):
+    if is_op(fn):
+        return fn.rtype
+
+    rtype = default_rtype
+
+    if inspect.isfunction(fn):
+        annotation = inspect.signature(fn).return_annotation
+        rtype = resolve_class(fn, annotation, rtype)
+
+    return rtype

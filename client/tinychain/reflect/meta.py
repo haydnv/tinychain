@@ -5,6 +5,51 @@ from tinychain.state import State
 from tinychain.util import form_of, get_ref, to_json, uri, URI
 
 
+class MethodStub(object):
+    def __init__(self, dtype, form):
+        self.dtype = dtype
+        self.form = form
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(f"cannot call a MethodStub; use tc.use(<class>) for callable method references")
+
+    def method(self, header, name):
+        return self.dtype(header, self.form, name)
+
+
+def header(cls):
+    instance_uri = URI("self")
+
+    class Header(cls):
+        pass
+
+    header = Header(instance_uri)
+    instance = cls(instance_uri)
+
+    for name, attr in inspect.getmembers(instance):
+        if name.startswith('_') or isinstance(attr, URI):
+            continue
+        elif inspect.ismethod(attr) and attr.__self__ is cls:
+            # it's a @classmethod
+            continue
+
+        if isinstance(attr, MethodStub):
+            setattr(header, name, attr.method(instance, name))
+        elif isinstance(attr, State):
+            member_uri = instance_uri.append(name)
+            attr_ref = get_ref(attr, member_uri)
+
+            if not uri(attr_ref) == member_uri:
+                raise RuntimeError(f"failed to assign URI {member_uri} to instance attribute {attr_ref} "
+                                   + f"(assigned URI is {uri(attr_ref)})")
+
+            setattr(header, name, attr_ref)
+        else:
+            setattr(header, name, attr)
+
+    return instance, header
+
+
 def gen_headers(instance):
     for name, attr in inspect.getmembers(instance):
         if name.startswith('_'):
@@ -22,36 +67,9 @@ class Meta(type):
         if len(mro) < 2:
             raise ValueError("TinyChain class must extend a subclass of State")
 
-        instance_uri = URI("self")
+        parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
 
-        parent_members = dict(inspect.getmembers(mro[1](instance_uri)))
-
-        class Header(cls):
-            pass
-
-        header = Header(instance_uri)
-        instance = cls(instance_uri)
-
-        for name, attr in inspect.getmembers(instance):
-            if name.startswith('_') or isinstance(attr, URI):
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is cls:
-                # it's a @classmethod
-                continue
-
-            if isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(instance, name))
-            elif isinstance(attr, State):
-                member_uri = instance_uri.append(name)
-                attr_ref = get_ref(attr, member_uri)
-
-                if not uri(attr_ref) == member_uri:
-                    raise RuntimeError(f"failed to assign URI {member_uri} to instance attribute {attr_ref} "
-                                       + f"(assigned URI is {uri(attr_ref)})")
-
-                setattr(header, name, attr_ref)
-            else:
-                setattr(header, name, attr)
+        instance, instance_header = header(cls)
 
         form = {}
         for name, attr in inspect.getmembers(instance):
@@ -72,7 +90,7 @@ class Meta(type):
                 continue
 
             if isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(header, name))
+                form[name] = to_json(attr.method(instance_header, name))
             else:
                 form[name] = attr
 
@@ -85,15 +103,3 @@ class Meta(type):
 
         parent = mro[1]
         return {str(uri(parent)): to_json(form_of(cls))}
-
-
-class MethodStub(object):
-    def __init__(self, dtype, form):
-        self.dtype = dtype
-        self.form = form
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"cannot call a MethodStub; use tc.use(<class>) for callable method references")
-
-    def method(self, header, name):
-        return self.dtype(header, self.form, name)
