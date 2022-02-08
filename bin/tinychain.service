@@ -1,0 +1,13 @@
+# Example systemd config file for TinyChain
+[Unit]
+Description=TinyChain
+Requires=network.target
+After=network.target
+
+[Service]
+User=tinychain  # change this as needed
+ExecStart=/usr/local/bin/tinychain  # change this as needed
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
