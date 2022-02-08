@@ -1,4 +1,5 @@
 import inspect
+import logging
 
 from tinychain.state import State
 from tinychain.util import form_of, get_ref, to_json, uri, URI
@@ -57,11 +58,15 @@ class Meta(type):
             if name.startswith('_') or isinstance(attr, URI):
                 continue
             elif name in parent_members:
-                if attr is parent_members[name]:
+                if attr is parent_members[name] or attr == parent_members[name]:
+                    logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
                     continue
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
+                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
                         continue
+
+                logging.info(f"{attr} ({name}) overrides a parent method and will be explicitly defined in {cls}")
             elif inspect.ismethod(attr) and attr.__self__ is cls:
                 # it's a @classmethod
                 continue

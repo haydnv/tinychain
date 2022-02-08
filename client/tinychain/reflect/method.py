@@ -22,6 +22,12 @@ class Method(object):
         self.form = form
         self.name = name
 
+    def __eq__(self, other):
+        if isinstance(other, Method):
+            return self.form == other.form
+
+        return False
+
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
 
