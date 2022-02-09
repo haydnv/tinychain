@@ -1,12 +1,18 @@
-use safecast::CastInto;
+use std::convert::TryInto;
+
+use futures::TryFutureExt;
+use safecast::{CastInto, TryCastInto};
 
 use tc_btree::BTreeInstance;
+use tc_error::TCError;
 use tc_table::TableInstance;
+use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{PathSegment, Tuple};
 
 use crate::collection::{Collection, CollectionMap, CollectionType};
-use crate::route::GetHandler;
+use crate::route::{GetHandler, PutHandler};
+use crate::state::State;
 
 use super::{Handler, Route};
 
@@ -69,9 +75,61 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
     }
 }
 
+struct CollectionMapHandler {
+    collection: CollectionMap,
+}
+
+impl<'a> Handler<'a> for CollectionMapHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    return Ok(State::Collection(self.collection.clone().into()));
+                }
+
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for CollectionMap", v))?;
+
+                self.collection
+                    .get(*txn.id(), &id)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, state| {
+            Box::pin(async move {
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for CollectionMap", v))?;
+
+                let collection = state.try_into()?;
+                self.collection.put(*txn.id(), id, collection).await
+            })
+        }))
+    }
+}
+
+impl From<CollectionMap> for CollectionMapHandler {
+    fn from(collection: CollectionMap) -> Self {
+        Self { collection }
+    }
+}
+
 impl Route for CollectionMap {
-    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        unimplemented!()
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CollectionMapHandler::from(self.clone())))
+        } else {
+            unimplemented!()
+        }
     }
 }
 

@@ -197,6 +197,12 @@ impl From<BTreeFile> for Collection {
     }
 }
 
+impl From<CollectionMap> for Collection {
+    fn from(map: CollectionMap) -> Self {
+        Self::Map(map)
+    }
+}
+
 impl From<Table> for Collection {
     fn from(table: Table) -> Self {
         Self::Table(table)

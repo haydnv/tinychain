@@ -702,6 +702,20 @@ where
     }
 }
 
+impl TryFrom<State> for Collection {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Collection> {
+        match state {
+            State::Collection(collection) => Ok(collection),
+            other => Err(TCError::bad_request(
+                "expected a Collection but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl TryFrom<State> for Map<State> {
     type Error = TCError;
 

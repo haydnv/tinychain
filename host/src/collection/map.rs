@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use destream::de;
 use sha2::digest::Output;
 use sha2::Sha256;
-use tokio::sync::{OwnedRwLockReadGuard, RwLock};
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
-use tc_transact::lock::{TxnLock, TxnLockReadGuard};
+use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{Id, Map};
 
@@ -37,6 +37,40 @@ impl CollectionMap {
         let ids = self.ids.read(txn_id).await?;
         let collections = self.collections.read_owned().await;
         Ok((ids, collections))
+    }
+
+    async fn write(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<(
+        TxnLockWriteGuard<BTreeSet<Id>>,
+        OwnedRwLockWriteGuard<Map<Collection>>,
+    )> {
+        let ids = self.ids.write(txn_id).await?;
+        let collections = self.collections.write_owned().await;
+        Ok((ids, collections))
+    }
+
+    pub async fn get(self, txn_id: TxnId, id: &Id) -> TCResult<Option<Collection>> {
+        let (ids, collections) = self.read(txn_id).await?;
+        if ids.contains(id) {
+            Ok(collections.get(id).cloned())
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn put(self, txn_id: TxnId, id: Id, collection: Collection) -> TCResult<()> {
+        let (ids, mut collections) = self.write(txn_id).await?;
+        if ids.contains(&id) {
+            Err(TCError::bad_request(
+                "CollectionMap already contains an entry called",
+                id,
+            ))
+        } else {
+            collections.insert(id, collection);
+            Ok(())
+        }
     }
 
     pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
