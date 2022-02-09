@@ -223,6 +223,19 @@ impl SubjectCollection {
         })
     }
 
+    pub async fn into_state(self, _txn_id: TxnId) -> TCResult<State> {
+        let collection = match self {
+            Self::BTree(btree) => btree.into(),
+            Self::Table(table) => table.into(),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.into(),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => sparse.into(),
+        };
+
+        Ok(State::Collection(collection))
+    }
+
     pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
         Box::pin(async move {
             // TODO: should this be consolidated with Collection::hash?
@@ -565,6 +578,30 @@ impl Subject {
         })
     }
 
+    pub fn into_state<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            match self {
+                Self::Collection(subject) => subject.into_state(txn_id).await,
+                Self::Map(subject) => {
+                    let mut state = Map::new();
+                    for (id, subject) in subject.into_iter() {
+                        let subject = subject.into_state(txn_id).await?;
+                        state.insert(id, subject);
+                    }
+                    Ok(State::Map(state))
+                }
+                Self::Tuple(subject) => {
+                    let mut state = Vec::with_capacity(subject.len());
+                    for subject in subject.into_iter() {
+                        let subject = subject.into_state(txn_id).await?;
+                        state.push(subject);
+                    }
+                    Ok(State::Tuple(state.into()))
+                }
+            }
+        })
+    }
+
     pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
         Box::pin(async move {
             // TODO: should this be consolidated with Collection::hash?
@@ -696,20 +733,6 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
 
                 try_join_all(views).map_ok(StateView::Tuple).await
             }
-        }
-    }
-}
-
-impl From<Subject> for State {
-    fn from(subject: Subject) -> Self {
-        match subject {
-            Subject::Collection(subject) => State::Collection(subject.into()),
-            Subject::Map(map) => State::Map(
-                map.into_iter()
-                    .map(|(name, subject)| (name, State::from(subject)))
-                    .collect(),
-            ),
-            Subject::Tuple(tuple) => State::Tuple(tuple.into_iter().map(State::from).collect()),
         }
     }
 }

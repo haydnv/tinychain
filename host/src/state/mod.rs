@@ -21,7 +21,7 @@ use tc_transact::Transaction;
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{self, Chain, ChainInstance, ChainType, ChainVisitor};
+use crate::chain::{Chain, ChainInstance, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -519,16 +519,6 @@ impl From<Map<Scalar>> for State {
     }
 }
 
-impl From<Map<chain::Subject>> for State {
-    fn from(map: Map<chain::Subject>) -> Self {
-        Self::Map(
-            map.into_iter()
-                .map(|(name, subject)| (name, Self::from(subject)))
-                .collect(),
-        )
-    }
-}
-
 impl From<Number> for State {
     fn from(n: Number) -> Self {
         Self::Scalar(n.into())
@@ -600,12 +590,6 @@ impl From<Tuple<State>> for State {
 impl From<Tuple<Scalar>> for State {
     fn from(tuple: Tuple<Scalar>) -> Self {
         Self::Scalar(tuple.into())
-    }
-}
-
-impl From<Tuple<chain::Subject>> for State {
-    fn from(tuple: Tuple<chain::Subject>) -> Self {
-        Self::Tuple(tuple.into_iter().map(Self::from).collect())
     }
 }
 
