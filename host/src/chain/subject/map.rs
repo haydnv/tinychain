@@ -13,26 +13,27 @@ use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{Id, Map};
 
+use crate::collection::{Collection, CollectionView};
 use crate::fs;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{Collection, CollectionView};
+use super::SubjectCollection;
 
 #[derive(Clone)]
-pub struct CollectionMap {
+pub struct SubjectMap {
     // TODO: is there a way to avoid storing each `Id` twice?
     ids: TxnLock<BTreeSet<Id>>,
-    collections: Arc<RwLock<Map<Collection>>>,
+    collections: Arc<RwLock<Map<SubjectCollection>>>,
 }
 
-impl CollectionMap {
+impl SubjectMap {
     async fn read(
         self,
         txn_id: TxnId,
     ) -> TCResult<(
         TxnLockReadGuard<BTreeSet<Id>>,
-        OwnedRwLockReadGuard<Map<Collection>>,
+        OwnedRwLockReadGuard<Map<SubjectCollection>>,
     )> {
         let ids = self.ids.read(txn_id).await?;
         let collections = self.collections.read_owned().await;
@@ -44,14 +45,14 @@ impl CollectionMap {
         txn_id: TxnId,
     ) -> TCResult<(
         TxnLockWriteGuard<BTreeSet<Id>>,
-        OwnedRwLockWriteGuard<Map<Collection>>,
+        OwnedRwLockWriteGuard<Map<SubjectCollection>>,
     )> {
         let ids = self.ids.write(txn_id).await?;
         let collections = self.collections.write_owned().await;
         Ok((ids, collections))
     }
 
-    pub async fn get(self, txn_id: TxnId, id: &Id) -> TCResult<Option<Collection>> {
+    pub async fn get(self, txn_id: TxnId, id: &Id) -> TCResult<Option<SubjectCollection>> {
         let (ids, collections) = self.read(txn_id).await?;
         if ids.contains(id) {
             Ok(collections.get(id).cloned())
@@ -60,16 +61,15 @@ impl CollectionMap {
         }
     }
 
-    pub async fn put(self, txn_id: TxnId, id: Id, collection: Collection) -> TCResult<()> {
-        let (ids, mut collections) = self.write(txn_id).await?;
+    pub async fn put(self, txn_id: TxnId, id: Id, _collection: Collection) -> TCResult<()> {
+        let (ids, _collections) = self.write(txn_id).await?;
         if ids.contains(&id) {
             Err(TCError::bad_request(
-                "CollectionMap already contains an entry called",
+                "SubjectMap already contains an entry called",
                 id,
             ))
         } else {
-            collections.insert(id, collection);
-            Ok(())
+            unimplemented!()
         }
     }
 
@@ -79,7 +79,7 @@ impl CollectionMap {
         let collections = collections
             .iter()
             .map(|(id, collection)| {
-                let collection = State::Collection(Collection::clone(&*collection));
+                let collection = State::Collection(Collection::from((&*collection).clone()));
                 (id.clone(), collection)
             })
             .collect();
@@ -88,12 +88,9 @@ impl CollectionMap {
     }
 }
 
-impl From<Map<Collection>> for CollectionMap {
-    fn from(collections: Map<Collection>) -> Self {
-        let ids = TxnLock::new(
-            "CollectionMap key set",
-            collections.keys().cloned().collect(),
-        );
+impl From<Map<SubjectCollection>> for SubjectMap {
+    fn from(collections: Map<SubjectCollection>) -> Self {
+        let ids = TxnLock::new("SubjectMap key set", collections.keys().cloned().collect());
 
         let collections = Arc::new(RwLock::new(collections));
         Self { ids, collections }
@@ -101,24 +98,24 @@ impl From<Map<Collection>> for CollectionMap {
 }
 
 #[async_trait]
-impl de::FromStream for CollectionMap {
+impl de::FromStream for SubjectMap {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(
         txn: Self::Context,
         decoder: &mut D,
     ) -> Result<Self, D::Error> {
-        decoder.decode_map(CollectionMapVisitor { txn }).await
+        decoder.decode_map(SubjectMapVisitor { txn }).await
     }
 }
 
-struct CollectionMapVisitor {
+struct SubjectMapVisitor {
     txn: Txn,
 }
 
 #[async_trait]
-impl de::Visitor for CollectionMapVisitor {
-    type Value = CollectionMap;
+impl de::Visitor for SubjectMapVisitor {
+    type Value = SubjectMap;
 
     fn expecting() -> &'static str {
         "a Map of Collections"
@@ -132,12 +129,12 @@ impl de::Visitor for CollectionMapVisitor {
             collections.insert(key, collection);
         }
 
-        Ok(CollectionMap::from(collections))
+        Ok(SubjectMap::from(collections))
     }
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for CollectionMap {
+impl<'en> IntoView<'en, fs::Dir> for SubjectMap {
     type Txn = Txn;
     type View = Map<CollectionView<'en>>;
 
@@ -146,7 +143,7 @@ impl<'en> IntoView<'en, fs::Dir> for CollectionMap {
 
         let mut map = Map::new();
         for (id, collection) in collections.iter() {
-            let view = Collection::clone(&*collection)
+            let view = Collection::from((&*collection).clone())
                 .into_view(txn.clone())
                 .await?;
 
@@ -157,13 +154,13 @@ impl<'en> IntoView<'en, fs::Dir> for CollectionMap {
     }
 }
 
-impl fmt::Debug for CollectionMap {
+impl fmt::Debug for SubjectMap {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
 
-impl fmt::Display for CollectionMap {
+impl fmt::Display for SubjectMap {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Map of Collections")
     }

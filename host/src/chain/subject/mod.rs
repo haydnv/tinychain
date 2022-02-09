@@ -32,6 +32,10 @@ use crate::txn::Txn;
 
 use super::{CollectionSchema, Schema};
 
+pub use map::SubjectMap;
+
+mod map;
+
 const DYNAMIC: Label = label("dynamic");
 const SUBJECT: Label = label("subject");
 
@@ -47,6 +51,30 @@ pub enum SubjectCollection {
 }
 
 impl SubjectCollection {
+    fn from_collection<E: de::Error>(collection: Collection) -> Result<Self, E> {
+        const ERR_INVALID: &str =
+            "a Chain subject (must be a collection like a BTree, Table, or Tensor";
+
+        match collection {
+            Collection::BTree(BTree::File(btree)) => Ok(SubjectCollection::BTree(btree)),
+            Collection::Table(Table::Table(table)) => Ok(SubjectCollection::Table(table)),
+
+            #[cfg(feature = "tensor")]
+            Collection::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => dense
+                    .as_persistent()
+                    .map(SubjectCollection::Dense)
+                    .ok_or_else(|| de::Error::invalid_type("a Dense tensor view", ERR_INVALID)),
+
+                Tensor::Sparse(sparse) => sparse
+                    .as_persistent()
+                    .map(SubjectCollection::Sparse)
+                    .ok_or_else(|| de::Error::invalid_type("a Sparse tensor view", ERR_INVALID)),
+            },
+            other => Err(de::Error::invalid_type(other, ERR_INVALID)),
+        }
+    }
+
     /// Create a new [`SubjectCollection`] with the given [`Schema`].
     pub fn create<'a>(
         schema: CollectionSchema,
@@ -267,6 +295,16 @@ impl Transact for SubjectCollection {
 }
 
 #[async_trait]
+impl de::FromStream for SubjectCollection {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let collection = Collection::from_stream(txn, decoder).await?;
+        Self::from_collection(collection)
+    }
+}
+
+#[async_trait]
 impl<'en> IntoView<'en, fs::Dir> for SubjectCollection {
     type Txn = Txn;
     type View = StateView<'en>;
@@ -283,15 +321,15 @@ impl<'en> IntoView<'en, fs::Dir> for SubjectCollection {
     }
 }
 
-impl From<SubjectCollection> for State {
+impl From<SubjectCollection> for Collection {
     fn from(subject: SubjectCollection) -> Self {
         match subject {
-            SubjectCollection::BTree(btree) => State::Collection(btree.into()),
-            SubjectCollection::Table(table) => State::Collection(table.into()),
+            SubjectCollection::BTree(btree) => Collection::BTree(btree.into()),
+            SubjectCollection::Table(table) => Collection::Table(table.into()),
             #[cfg(feature = "tensor")]
-            SubjectCollection::Dense(dense) => State::Collection(dense.into()),
+            SubjectCollection::Dense(dense) => Collection::Tensor(dense.into()),
             #[cfg(feature = "tensor")]
-            SubjectCollection::Sparse(sparse) => State::Collection(sparse.into()),
+            SubjectCollection::Sparse(sparse) => Collection::Tensor(sparse.into()),
         }
     }
 }
@@ -318,6 +356,36 @@ pub enum Subject {
 }
 
 impl Subject {
+    fn from_state<E: de::Error>(state: State) -> Result<Subject, E> {
+        const ERR_INVALID: &str =
+            "a Chain subject (must be a collection like a BTree, Table, or Tensor";
+
+        match state {
+            State::Collection(collection) => {
+                SubjectCollection::from_collection(collection).map(Self::Collection)
+            }
+
+            State::Map(map) => {
+                let subject = map
+                    .into_iter()
+                    .map(|(name, state)| Subject::from_state(state).map(|subject| (name, subject)))
+                    .collect::<Result<Map<Subject>, E>>()?;
+
+                Ok(Subject::Map(subject))
+            }
+            State::Tuple(tuple) => {
+                let subject = tuple
+                    .into_iter()
+                    .map(Subject::from_state)
+                    .collect::<Result<Tuple<Subject>, E>>()?;
+
+                Ok(Subject::Tuple(subject))
+            }
+
+            other => Err(de::Error::invalid_type(other.class(), ERR_INVALID)),
+        }
+    }
+
     /// Create a new `Subject` with the given `Schema`.
     pub fn create<'a>(schema: Schema, dir: &'a fs::Dir, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
@@ -594,58 +662,13 @@ impl de::FromStream for Subject {
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let state = State::from_stream(txn, decoder).await?;
-        from_state(state)
+        Self::from_state(state)
     }
 }
 
 impl From<SubjectCollection> for Subject {
     fn from(subject: SubjectCollection) -> Self {
         Self::Collection(subject)
-    }
-}
-
-fn from_state<E: de::Error>(state: State) -> Result<Subject, E> {
-    const ERR_INVALID: &str =
-        "a Chain subject (must be a collection like a BTree, Table, or Tensor";
-
-    match state {
-        State::Collection(collection) => match collection {
-            Collection::BTree(BTree::File(btree)) => Ok(SubjectCollection::BTree(btree).into()),
-            Collection::Table(Table::Table(table)) => Ok(SubjectCollection::Table(table).into()),
-
-            #[cfg(feature = "tensor")]
-            Collection::Tensor(tensor) => match tensor {
-                Tensor::Dense(dense) => dense
-                    .as_persistent()
-                    .map(SubjectCollection::Dense)
-                    .map(Subject::Collection)
-                    .ok_or_else(|| de::Error::invalid_type("a Dense tensor view", ERR_INVALID)),
-
-                Tensor::Sparse(sparse) => sparse
-                    .as_persistent()
-                    .map(SubjectCollection::Sparse)
-                    .map(Subject::Collection)
-                    .ok_or_else(|| de::Error::invalid_type("a Sparse tensor view", ERR_INVALID)),
-            },
-            other => Err(de::Error::invalid_type(other, ERR_INVALID)),
-        },
-        State::Map(map) => {
-            let subject = map
-                .into_iter()
-                .map(|(name, state)| from_state(state).map(|subject| (name, subject)))
-                .collect::<Result<Map<Subject>, E>>()?;
-
-            Ok(Subject::Map(subject))
-        }
-        State::Tuple(tuple) => {
-            let subject = tuple
-                .into_iter()
-                .map(from_state)
-                .collect::<Result<Tuple<Subject>, E>>()?;
-
-            Ok(Subject::Tuple(subject))
-        }
-        other => Err(de::Error::invalid_type(other.class(), ERR_INVALID)),
     }
 }
 
@@ -680,7 +703,7 @@ impl<'en> IntoView<'en, fs::Dir> for Subject {
 impl From<Subject> for State {
     fn from(subject: Subject) -> Self {
         match subject {
-            Subject::Collection(subject) => subject.into(),
+            Subject::Collection(subject) => State::Collection(subject.into()),
             Subject::Map(map) => State::Map(
                 map.into_iter()
                     .map(|(name, subject)| (name, State::from(subject)))

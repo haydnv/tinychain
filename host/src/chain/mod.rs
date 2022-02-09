@@ -19,9 +19,9 @@ use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
-use crate::collection::{CollectionType, TableType};
 #[cfg(feature = "tensor")]
 use crate::collection::TensorType;
+use crate::collection::{CollectionType, TableType};
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::{State, StateView};
@@ -29,7 +29,7 @@ use crate::txn::Txn;
 
 pub use block::BlockChain;
 pub use data::ChainBlock;
-pub use subject::{Subject, SubjectCollection};
+pub use subject::{Subject, SubjectCollection, SubjectMap};
 pub use sync::SyncChain;
 
 mod block;
@@ -78,7 +78,6 @@ impl CollectionSchema {
 
                             Ok(Self::BTree(schema))
                         }
-                        CollectionType::Map => unimplemented!(),
                         CollectionType::Table(_) => {
                             let schema = expect_value(schema)?;
 

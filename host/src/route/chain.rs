@@ -1,10 +1,14 @@
+use std::convert::TryInto;
+
 use log::debug;
+use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, ChainType, Subject, SubjectCollection};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject, SubjectCollection, SubjectMap};
+use crate::state::State;
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, COPY};
 
@@ -25,6 +29,59 @@ impl Route for SubjectCollection {
             Self::Dense(dense) => dense.route(path),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.route(path),
+        }
+    }
+}
+
+struct SubjectMapHandler {
+    collection: SubjectMap,
+}
+
+impl<'a> Handler<'a> for SubjectMapHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
+
+                let subject = self.collection.get(*txn.id(), &id).await?;
+                let subject = subject.ok_or_else(|| TCError::not_found(id))?;
+                Ok(State::Collection(subject.into()))
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, state| {
+            Box::pin(async move {
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
+
+                let collection = state.try_into()?;
+                self.collection.put(*txn.id(), id, collection).await
+            })
+        }))
+    }
+}
+
+impl From<SubjectMap> for SubjectMapHandler {
+    fn from(collection: SubjectMap) -> Self {
+        Self { collection }
+    }
+}
+
+impl Route for SubjectMap {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(SubjectMapHandler::from(self.clone())))
+        } else {
+            unimplemented!()
         }
     }
 }

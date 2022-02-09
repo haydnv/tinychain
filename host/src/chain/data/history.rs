@@ -34,7 +34,6 @@ use crate::txn::Txn;
 use super::{ChainBlock, Mutation};
 
 const DATA: Label = label("data");
-const ERR_COLLECTION_MAP: &str = "cannot overwrite a CollectionMap";
 
 #[derive(Clone)]
 pub struct History {
@@ -127,7 +126,7 @@ impl History {
                     ))
                     .into())
                 }
-                Collection::Map(_map) => Err(TCError::unsupported(ERR_COLLECTION_MAP)),
+
                 Collection::Table(table) => {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
@@ -430,7 +429,7 @@ impl History {
                 let btree = BTreeFile::load(txn, schema, file).await?;
                 Ok(Collection::BTree(btree.into()))
             }
-            CollectionType::Map => Err(TCError::unsupported(ERR_COLLECTION_MAP)),
+
             CollectionType::Table(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
                     TCError::internal(format!(

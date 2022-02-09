@@ -50,7 +50,6 @@ impl FileEntry {
         match StateType::from(class) {
             StateType::Collection(ct) => match ct {
                 CollectionType::BTree(_) => File::new(cache).map_ok(Self::BTree).await,
-                CollectionType::Map => Err(err(CollectionType::Map)),
                 CollectionType::Table(tt) => Err(err(tt)),
 
                 #[cfg(feature = "tensor")]
@@ -76,7 +75,6 @@ impl FileEntry {
         match StateType::from(class) {
             StateType::Collection(ct) => match ct {
                 CollectionType::BTree(_) => File::load(cache, txn_id).map_ok(Self::BTree).await,
-                CollectionType::Map => Err(err(CollectionType::Map)),
                 CollectionType::Table(tt) => Err(err(tt)),
 
                 #[cfg(feature = "tensor")]
