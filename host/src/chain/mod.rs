@@ -7,7 +7,7 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use sha2::digest::generic_array::GenericArray;
 use sha2::digest::Output;
 use sha2::Sha256;
@@ -133,6 +133,32 @@ impl<'en> en::IntoStream<'en> for CollectionSchema {
                 map.end()
             }
         }
+    }
+}
+
+impl CastFrom<CollectionSchema> for Scalar {
+    fn cast_from(schema: CollectionSchema) -> Scalar {
+        let class: CollectionType = match schema {
+            CollectionSchema::BTree(_) => BTreeType::default().into(),
+            CollectionSchema::Table(_) => TableType::default().into(),
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Dense(_) => TensorType::Dense.into(),
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Sparse(_) => TensorType::Sparse.into(),
+        };
+
+        let schema = match schema {
+            CollectionSchema::BTree(schema) => {
+                Value::Tuple(schema.into_iter().map(Value::from).collect())
+            }
+            CollectionSchema::Table(schema) => schema.cast_into(),
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Dense(schema) => schema.cast_into(),
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Sparse(schema) => schema.cast_into(),
+        };
+
+        Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((class.path().into(), schema.into())))))
     }
 }
 

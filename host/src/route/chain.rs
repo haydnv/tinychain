@@ -196,6 +196,7 @@ impl Route for Subject {
 
         match self {
             Self::Collection(subject) => subject.route(path),
+            Self::Dynamic(subject) => subject.route(path),
             Self::Map(map) => map.route(path),
             Self::Tuple(tuple) => tuple.route(path),
         }
