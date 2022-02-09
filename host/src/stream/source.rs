@@ -42,6 +42,7 @@ impl Source for Collection {
 
                 Ok(keys)
             }
+            Map(_map) => Err(TCError::not_implemented("CollectionMap stream")),
             Table(table) => {
                 let rows = table.rows(*txn.id()).await?;
                 let rows: TCBoxTryStream<'static, State> =

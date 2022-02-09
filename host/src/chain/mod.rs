@@ -1,6 +1,6 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
 
@@ -79,19 +79,36 @@ impl Schema {
                             TCError::bad_request("invalid Collection type", class)
                         })?;
 
-                        let schema = Value::try_cast_from(schema, |s| {
-                            TCError::bad_request("expected a Value for chain schema, not", s)
-                        })?;
+                        fn expect_value(scalar: Scalar) -> TCResult<Value> {
+                            Value::try_cast_from(scalar, |s| {
+                                TCError::bad_request("expected a Value for chain schema, not", s)
+                            })
+                        }
 
                         match class {
                             CollectionType::BTree(_) => {
+                                let schema = expect_value(schema)?;
+
                                 let schema = schema.try_cast_into(|s| {
                                     TCError::bad_request("invalid BTree schema", s)
                                 })?;
 
                                 Ok(Self::BTree(schema))
                             }
+                            CollectionType::Map => {
+                                let schema: Map<Scalar> = schema.try_into()?;
+
+                                schema
+                                    .into_iter()
+                                    .map(|(id, scalar)| {
+                                        Schema::from_scalar(scalar).map(|schema| (id, schema))
+                                    })
+                                    .collect::<TCResult<Map<Schema>>>()
+                                    .map(Self::Map)
+                            }
                             CollectionType::Table(_) => {
+                                let schema = expect_value(schema)?;
+
                                 let schema = schema.try_cast_into(|s| {
                                     TCError::bad_request("invalid Table schema", s)
                                 })?;
@@ -101,9 +118,7 @@ impl Schema {
 
                             #[cfg(feature = "tensor")]
                             CollectionType::Tensor(tt) => {
-                                let schema: Value = schema.try_cast_into(|s| {
-                                    TCError::bad_request("invalid Tensor schema", s)
-                                })?;
+                                let schema = expect_value(schema)?;
                                 let schema = schema.try_cast_into(|v| {
                                     TCError::bad_request("invalid Tensor schema", v)
                                 })?;

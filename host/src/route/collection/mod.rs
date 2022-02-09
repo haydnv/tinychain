@@ -5,7 +5,7 @@ use tc_table::TableInstance;
 use tc_value::Value;
 use tcgeneric::{PathSegment, Tuple};
 
-use crate::collection::{Collection, CollectionType};
+use crate::collection::{Collection, CollectionMap, CollectionType};
 use crate::route::GetHandler;
 
 use super::{Handler, Route};
@@ -20,6 +20,7 @@ impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
             Self::BTree(btt) => btt.route(path),
+            Self::Map => None,
             Self::Table(tt) => tt.route(path),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.route(path),
@@ -48,6 +49,8 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                         .collect::<Tuple<Value>>()
                         .into(),
 
+                    Collection::Map(_map) => unimplemented!(),
+
                     Collection::Table(table) => table.schema().clone().cast_into(),
 
                     #[cfg(feature = "tensor")]
@@ -66,10 +69,17 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
     }
 }
 
+impl Route for CollectionMap {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        unimplemented!()
+    }
+}
+
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
             Self::BTree(btree) => btree.route(path),
+            Self::Map(map) => map.route(path),
             Self::Table(table) => table.route(path),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.route(path),
