@@ -4,7 +4,7 @@ use tc_error::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, ChainType, Subject};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject, SubjectCollection};
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, COPY};
 
@@ -14,20 +14,29 @@ impl Route for ChainType {
     }
 }
 
-impl Route for Subject {
+impl Route for SubjectCollection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Subject::route {}", TCPath::from(path));
 
         match self {
             Self::BTree(btree) => btree.route(path),
-            Self::Map(map) => map.route(path),
             Self::Table(table) => table.route(path),
-            Self::Tuple(tuple) => tuple.route(path),
-
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.route(path),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.route(path),
+        }
+    }
+}
+
+impl Route for Subject {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Subject::route {}", TCPath::from(path));
+
+        match self {
+            Self::Collection(subject) => subject.route(path),
+            Self::Map(map) => map.route(path),
+            Self::Tuple(tuple) => tuple.route(path),
         }
     }
 }
