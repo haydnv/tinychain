@@ -19,7 +19,7 @@ use tc_error::*;
 use tc_table::TableStream;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
-use tc_transact::fs::{Dir, Persist, Restore, Store};
+use tc_transact::fs::{Dir, File, Persist, Restore, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -33,7 +33,7 @@ use crate::collection::{
     TensorType,
 };
 use crate::fs;
-use crate::scalar::{OpRef, Scalar, TCRef};
+use crate::scalar::{OpRef, Scalar, ScalarType, TCRef};
 use crate::state::{State, StateType, StateView};
 use crate::txn::Txn;
 
@@ -50,6 +50,7 @@ const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+const DYNAMIC: Label = label("dynamic");
 const SUBJECT: Label = label("subject");
 
 /// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
@@ -62,6 +63,7 @@ pub enum Schema {
 
     #[cfg(feature = "tensor")]
     Dense(tc_tensor::Schema),
+
     #[cfg(feature = "tensor")]
     Sparse(tc_tensor::Schema),
 }
@@ -155,12 +157,15 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.encode_entry(BTreeType::default().path(), (schema,))?;
                 map.end()
             }
+
             Self::Map(map) => map.into_stream(encoder),
+
             Self::Table(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(TableType::default().path(), (schema,))?;
                 map.end()
             }
+
             Self::Tuple(tuple) => tuple.into_stream(encoder),
 
             #[cfg(feature = "tensor")]
@@ -272,16 +277,42 @@ impl Subject {
 
     fn load<'a>(txn: &'a Txn, schema: Schema, dir: &'a fs::Dir) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
+            let txn_id = *txn.id();
+
             match schema {
                 Schema::BTree(schema) => {
-                    if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
+                    if let Some(file) = dir.get_file(txn_id, &SUBJECT.into()).await? {
                         BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                     } else {
-                        Self::create(Schema::BTree(schema), dir, *txn.id()).await
+                        Self::create(Schema::BTree(schema), dir, txn_id).await
+                    }
+                }
+                Schema::Map(schema) if schema.is_empty() => {
+                    if let Some(file) = dir
+                        .get_file::<fs::File<Scalar>, Scalar>(txn_id, &DYNAMIC.into())
+                        .await?
+                    {
+                        let mut map = Map::new();
+                        for id in file.block_ids(txn_id).await? {
+                            let schema = file.read_block(txn_id, id.clone()).await?;
+                            let schema = Schema::from_scalar(Scalar::clone(&*schema))?;
+                            let subject = Self::load(txn, schema, dir).await?;
+                            map.insert(id, subject);
+                        }
+
+                        Ok(Self::Map(map))
+                    } else {
+                        let file: fs::File<Scalar> = dir
+                            .create_file(txn_id, DYNAMIC.into(), ScalarType::default())
+                            .await?;
+
+                        let schema = Scalar::Map(Map::default());
+                        file.create_block(txn_id, DYNAMIC.into(), schema, 2).await?;
+
+                        Ok(Self::Map(Map::default()))
                     }
                 }
                 Schema::Map(schema) => {
-                    let txn_id = *txn.id();
                     try_join_all(schema.into_iter().map(|(name, schema)| async move {
                         if let Some(dir) = dir.get_dir(txn_id, &name).await? {
                             Self::load(txn, schema, &dir)
@@ -299,8 +330,8 @@ impl Subject {
                     .await
                 }
                 Schema::Table(schema) => {
-                    if dir.is_empty(*txn.id()).await? {
-                        Self::create(Schema::Table(schema), dir, *txn.id()).await
+                    if dir.is_empty(txn_id).await? {
+                        Self::create(Schema::Table(schema), dir, txn_id).await
                     } else {
                         TableIndex::load(txn, schema, dir.clone())
                             .map_ok(Self::Table)
@@ -308,7 +339,6 @@ impl Subject {
                     }
                 }
                 Schema::Tuple(schema) => {
-                    let txn_id = *txn.id();
                     try_join_all(
                         schema
                             .into_iter()
@@ -329,22 +359,22 @@ impl Subject {
 
                 #[cfg(feature = "tensor")]
                 Schema::Dense(schema) => {
-                    if let Some(file) = dir.get_file(*txn.id(), &SUBJECT.into()).await? {
+                    if let Some(file) = dir.get_file(txn_id, &SUBJECT.into()).await? {
                         DenseTensor::load(txn, schema, file)
                             .map_ok(Self::Dense)
                             .await
                     } else {
-                        Self::create(Schema::Dense(schema), dir, *txn.id()).await
+                        Self::create(Schema::Dense(schema), dir, txn_id).await
                     }
                 }
                 #[cfg(feature = "tensor")]
                 Schema::Sparse(schema) => {
-                    if let Some(dir) = dir.get_dir(*txn.id(), &SUBJECT.into()).await? {
+                    if let Some(dir) = dir.get_dir(txn_id, &SUBJECT.into()).await? {
                         SparseTensor::load(txn, schema, dir)
                             .map_ok(Self::Sparse)
                             .await
                     } else {
-                        Self::create(Schema::Sparse(schema), dir, *txn.id()).await
+                        Self::create(Schema::Sparse(schema), dir, txn_id).await
                     }
                 }
             }

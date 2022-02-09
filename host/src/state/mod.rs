@@ -131,6 +131,12 @@ impl From<ChainType> for StateType {
     }
 }
 
+impl From<ScalarType> for StateType {
+    fn from(st: ScalarType) -> Self {
+        Self::Scalar(st)
+    }
+}
+
 impl From<TableType> for StateType {
     fn from(tt: TableType) -> Self {
         Self::Collection(tt.into())

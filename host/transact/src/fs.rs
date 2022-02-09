@@ -27,12 +27,6 @@ impl BlockData for afarray::Array {
     }
 }
 
-impl BlockData for tc_value::Value {
-    fn ext() -> &'static str {
-        "value"
-    }
-}
-
 /// A transactional persistent data store.
 #[async_trait]
 pub trait Store: Clone + Send + Sync {
