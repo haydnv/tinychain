@@ -15,10 +15,10 @@ use tc_error::*;
 use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorView};
-use tc_transact::fs::Dir;
+use tc_transact::fs::{CopyFrom, Dir};
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
-    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
+    path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
 };
 
 use crate::fs;
@@ -150,6 +150,50 @@ impl Instance for Collection {
 }
 
 impl Collection {
+    pub async fn copy_from(
+        txn: &Txn,
+        container: &fs::Dir,
+        name: Id,
+        source: Collection,
+    ) -> TCResult<Collection> {
+        let txn_id = *txn.id();
+
+        match source {
+            Collection::BTree(source) => {
+                let class = BTreeType::default();
+                let file = container.create_file(txn_id, name, class).await?;
+                BTreeFile::copy_from(source, file, txn)
+                    .map_ok(BTree::from)
+                    .map_ok(Collection::BTree)
+                    .await
+            }
+            Collection::Table(source) => {
+                let dir = container.create_dir(txn_id, name).await?;
+                TableIndex::copy_from(source, dir, txn)
+                    .map_ok(Table::from)
+                    .map_ok(Collection::Table)
+                    .await
+            }
+            #[cfg(feature = "tensor")]
+            Collection::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => {
+                    let file = container.create_file(txn_id, name, dense.class()).await?;
+                    DenseTensor::copy_from(dense, file, txn)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::Tensor)
+                        .await
+                }
+                Tensor::Sparse(sparse) => {
+                    let dir = container.create_dir(txn_id, name).await?;
+                    SparseTensor::copy_from(sparse, dir, txn)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::Tensor)
+                        .await
+                }
+            },
+        }
+    }
+
     pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
         match self {
             Self::BTree(btree) => {

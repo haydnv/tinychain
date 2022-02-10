@@ -6,12 +6,13 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::TryStreamExt;
+use log::warn;
 use safecast::{CastFrom, CastInto, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
-use crate::chain::subject::DYNAMIC;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Store};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
@@ -24,7 +25,7 @@ use crate::scalar::{Scalar, ScalarType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{CollectionSchema, SubjectCollection};
+use super::{CollectionSchema, SubjectCollection, DYNAMIC};
 
 const BLOCK_SIZE_HINT: usize = 4096;
 const LOCK_NAME: &str = "SubjectMap keys";
@@ -118,13 +119,38 @@ impl SubjectMap {
         })
     }
 
-    pub(super) fn restore<'a>(&'a self, _txn: &'a Txn, _backup: State) -> TCBoxTryFuture<()> {
+    pub(super) fn restore<'a>(
+        &'a self,
+        txn: &'a Txn,
+        backups: Map<Collection>,
+    ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
-            // TODO:
-            // calculate deleted subjects & delete them from this subject
-            // calculate added subjects, copy them, add them to this subject
-            // with all other subjects, restore from backup
-            Err(TCError::not_implemented("restore SubjectMap from backup"))
+            let txn_id = *txn.id();
+            let container = self.dir.clone();
+            let schema = container.get_file(txn_id, &DYNAMIC.into()).await?;
+            let schema: fs::File<Scalar> =
+                schema.ok_or_else(|| TCError::internal("missing schema file"))?;
+
+            let (ids, mut collections) = self.clone().write(*txn.id()).await?;
+
+            for id in collections.keys() {
+                if !backups.contains_key(id) {
+                    warn!("backup of dynamic Chain is missing collection {}", id);
+                }
+            }
+
+            let restores = FuturesUnordered::new();
+            for (id, backup) in backups.into_iter() {
+                if let Some(collection) = collections.get(&id).cloned() {
+                    assert!(ids.contains(&id));
+                    restores.push(async move { collection.restore(txn, backup).await });
+                } else {
+                    // TODO: parallelize
+                    put(txn, &schema, &container, &mut collections, id, backup).await?;
+                }
+            }
+
+            restores.try_fold((), |(), ()| future::ready(Ok(()))).await
         })
     }
 
@@ -137,7 +163,9 @@ impl SubjectMap {
         }
     }
 
-    pub async fn put(self, txn_id: TxnId, id: Id, collection: Collection) -> TCResult<()> {
+    pub async fn put(self, txn: &Txn, id: Id, collection: Collection) -> TCResult<()> {
+        let container = self.dir.clone();
+        let txn_id = *txn.id();
         let file = self
             .dir
             .get_file::<fs::File<Scalar>, Scalar>(txn_id, &DYNAMIC.into())
@@ -152,17 +180,7 @@ impl SubjectMap {
                 id,
             ))
         } else {
-            let collection = SubjectCollection::from_collection(collection)?;
-            file.create_block(
-                txn_id,
-                id.clone(),
-                collection.schema().cast_into(),
-                BLOCK_SIZE_HINT,
-            ).await?;
-
-            collections.insert(id, collection);
-
-            Ok(())
+            put(txn, &file, &container, &mut collections, id, collection).await
         }
     }
 
@@ -302,4 +320,30 @@ impl fmt::Display for SubjectMap {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Map of Collections")
     }
+}
+
+async fn put(
+    txn: &Txn,
+    schema: &fs::File<Scalar>,
+    container: &fs::Dir,
+    collections: &mut Map<SubjectCollection>,
+    id: Id,
+    collection: Collection,
+) -> TCResult<()> {
+    let txn_id = *txn.id();
+    let collection = Collection::copy_from(txn, container, id.clone(), collection).await?;
+
+    let collection = SubjectCollection::from_collection(collection)?;
+    schema
+        .create_block(
+            txn_id,
+            id.clone(),
+            collection.schema().cast_into(),
+            BLOCK_SIZE_HINT,
+        )
+        .await?;
+
+    collections.insert(id, collection);
+
+    Ok(())
 }

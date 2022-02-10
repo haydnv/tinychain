@@ -168,27 +168,23 @@ impl SubjectCollection {
         })
     }
 
-    pub(super) fn restore<'a>(&'a self, txn: &'a Txn, backup: State) -> TCBoxTryFuture<()> {
+    pub(super) fn restore<'a>(&'a self, txn: &'a Txn, backup: Collection) -> TCBoxTryFuture<()> {
         Box::pin(async move {
             let txn_id = *txn.id();
 
             match self {
                 Self::BTree(btree) => match backup {
-                    State::Collection(Collection::BTree(BTree::File(backup))) => {
-                        btree.restore(&backup, txn_id).await
-                    }
+                    Collection::BTree(BTree::File(backup)) => btree.restore(&backup, txn_id).await,
                     other => Err(TCError::bad_request("cannot restore a BTree from", other)),
                 },
                 Self::Table(table) => match backup {
-                    State::Collection(Collection::Table(Table::Table(backup))) => {
-                        table.restore(&backup, txn_id).await
-                    }
+                    Collection::Table(Table::Table(backup)) => table.restore(&backup, txn_id).await,
                     other => Err(TCError::bad_request("cannot restore a Table from", other)),
                 },
 
                 #[cfg(feature = "tensor")]
                 Self::Dense(tensor) => match backup {
-                    State::Collection(Collection::Tensor(Tensor::Dense(backup))) => {
+                    Collection::Tensor(Tensor::Dense(backup)) => {
                         let file = txn
                             .context()
                             .create_file_unique(txn_id, TensorType::Dense)
@@ -207,7 +203,7 @@ impl SubjectCollection {
 
                 #[cfg(feature = "tensor")]
                 Self::Sparse(tensor) => match backup {
-                    State::Collection(Collection::Tensor(Tensor::Sparse(backup))) => {
+                    Collection::Tensor(Tensor::Sparse(backup)) => {
                         let dir = txn.context().create_dir_unique(txn_id).await?;
                         let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
                         tensor.restore(&backup, txn_id).await

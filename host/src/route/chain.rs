@@ -94,10 +94,16 @@ impl<'a> Handler<'a> for SubjectMapHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                let txn_id = *txn.id();
+
+                if key.is_none() {
+                    return self.collection.into_state(txn_id).await;
+                }
+
                 let id =
                     key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
 
-                let subject = self.collection.get(*txn.id(), &id).await?;
+                let subject = self.collection.get(txn_id, &id).await?;
                 let subject = subject.ok_or_else(|| TCError::not_found(id))?;
                 Ok(State::Collection(subject.into()))
             })
@@ -114,7 +120,7 @@ impl<'a> Handler<'a> for SubjectMapHandler {
                     key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
 
                 let collection = state.try_into()?;
-                self.collection.put(*txn.id(), id, collection).await
+                self.collection.put(txn, id, collection).await
             })
         }))
     }

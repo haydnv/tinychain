@@ -1,5 +1,6 @@
 //! The [`Subject`] of a [`Chain`]
 
+use std::convert::TryInto;
 use std::fmt;
 
 use async_hash::Hash;
@@ -15,6 +16,7 @@ use tc_transact::fs::Dir;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
+use crate::collection::Collection;
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -173,9 +175,25 @@ impl Subject {
     pub(super) fn restore<'a>(&'a self, txn: &'a Txn, backup: State) -> TCBoxTryFuture<()> {
         Box::pin(async move {
             match self {
-                Self::Collection(subject) => subject.restore(txn, backup).await,
+                Self::Collection(subject) => {
+                    let backup = backup.try_into()?;
+                    subject.restore(txn, backup).await
+                }
 
-                Self::Dynamic(subject) => subject.restore(txn, backup).await,
+                Self::Dynamic(subject) => match backup {
+                    State::Map(collections) => {
+                        let backups = collections
+                            .into_iter()
+                            .map(|(id, c)| c.try_into().map(|c| (id, c)))
+                            .collect::<TCResult<Map<Collection>>>()?;
+
+                        subject.restore(txn, backups).await
+                    }
+                    other => Err(TCError::bad_request(
+                        "cannot restore dynamic Chain from",
+                        other,
+                    )),
+                },
 
                 Self::Map(map) => match backup {
                     State::Map(mut backups) => {
@@ -199,6 +217,7 @@ impl Subject {
                             .map(|(subject, backup)| subject.restore(txn, backup));
 
                         try_join_all(restores).await?;
+
                         Ok(())
                     }
                     backup => Err(TCError::unsupported(format!(

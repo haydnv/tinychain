@@ -5,7 +5,6 @@ from testutils import DEFAULT_PORT, PersistenceTest
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):
-    NUM_HOSTS = 1
     NAME = "chain"
 
     def cluster(self, chain_type):
@@ -18,7 +17,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         return Persistent
 
     def execute(self, hosts):
-        print(hosts[0].put("/test/chain/map", "one", tc.tensor.Dense.load([1, 2], tc.F32, [0., 0.])))
+        print(hosts[1].put("/test/chain/map", "one", tc.tensor.Dense.load([1, 2], tc.F32, [0., 0.])))
 
 
 if __name__ == "__main__":
