@@ -30,6 +30,7 @@ mod collection;
 mod map;
 
 const DYNAMIC: Label = label("dynamic");
+const SUBJECT: Label = label("subject");
 
 /// The state whose transactional integrity is protected by a [`Chain`]
 #[derive(Clone)]
@@ -72,11 +73,11 @@ impl Subject {
     }
 
     /// Create a new `Subject` with the given `Schema`.
-    pub fn create<'a>(schema: Schema, dir: &'a fs::Dir, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
+    pub fn create(schema: Schema, dir: &fs::Dir, txn_id: TxnId) -> TCBoxTryFuture<Self> {
         Box::pin(async move {
             match schema {
                 Schema::Collection(schema) => {
-                    SubjectCollection::create(schema, dir, txn_id)
+                    SubjectCollection::create(schema, dir, txn_id, SUBJECT.into())
                         .map_ok(Self::Collection)
                         .await
                 }
@@ -119,7 +120,7 @@ impl Subject {
 
             match schema {
                 Schema::Collection(schema) => {
-                    SubjectCollection::load(txn, schema, dir)
+                    SubjectCollection::load(txn, schema, dir, SUBJECT.into())
                         .map_ok(Self::Collection)
                         .await
                 }

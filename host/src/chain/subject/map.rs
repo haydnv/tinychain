@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
+use futures::join;
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::TryStreamExt;
 use log::{debug, warn};
@@ -82,7 +83,7 @@ impl SubjectMap {
         })
     }
 
-    pub(super) fn load<'a>(txn: &'a Txn, dir: fs::Dir) -> TCBoxTryFuture<'a, Self> {
+    pub(super) fn load(txn: &Txn, dir: fs::Dir) -> TCBoxTryFuture<Self> {
         Box::pin(async move {
             let txn_id = *txn.id();
 
@@ -99,16 +100,9 @@ impl SubjectMap {
                     TCError::internal(format!("invalid schema for dynamic Chain subject: {}", s))
                 })?;
 
-                let dir = dir.get_dir(txn_id, &id).await?;
-                let dir = dir.ok_or_else(|| {
-                    TCError::internal(format!(
-                        "missing directory for dynamic Chain subject Collection {}",
-                        id
-                    ))
-                })?;
-
                 let schema = CollectionSchema::from_scalar(schema)?;
-                let subject = SubjectCollection::load(txn, schema, &dir).await?;
+                let subject = SubjectCollection::load(txn, schema, &dir, id.clone()).await?;
+
                 map.insert(id, subject);
             }
 
@@ -223,17 +217,19 @@ impl SubjectMap {
 #[async_trait]
 impl Transact for SubjectMap {
     async fn commit(&self, txn_id: &TxnId) {
-        self.ids.commit(txn_id).await;
+        join!(self.dir.commit(txn_id), self.ids.commit(txn_id));
+
         let collections = self.collections.read().await;
         let commits: FuturesUnordered<_> = collections.values().map(|c| c.commit(txn_id)).collect();
         commits.fold((), |(), ()| future::ready(())).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.ids.commit(txn_id).await;
+        join!(self.dir.finalize(txn_id), self.ids.finalize(txn_id));
+
         let collections = self.collections.read().await;
         let finalized: FuturesUnordered<_> =
-            collections.values().map(|c| c.commit(txn_id)).collect();
+            collections.values().map(|c| c.finalize(txn_id)).collect();
 
         finalized.fold((), |(), ()| future::ready(())).await
     }
