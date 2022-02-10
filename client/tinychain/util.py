@@ -11,6 +11,7 @@ class Context(object):
     """A transaction context."""
 
     def __init__(self, context=None):
+        object.__setattr__(self, "_procedural", False)
         object.__setattr__(self, "_form", OrderedDict())
 
         if context:
@@ -79,6 +80,10 @@ class Context(object):
 
         if name in self.form:
             raise ValueError(f"Context already has a value named {name} (contents are {self.form}")
+        elif self._procedural:
+            from tinychain.ref import after
+            last = next(reversed(self.form.values()))
+            self.form[name] = after(last, state)
         else:
             self.form[name] = state
 
@@ -98,6 +103,20 @@ class Context(object):
     @property
     def form(self):
         return self._form
+
+    def procedural(self, value=None):
+        """
+        Set whether this :`Context` will execute procedurally, one step at a time.
+
+        In a `Context` where `procedural()` is `True`, every state which is set in the `Context` will be resolved
+        only `After` the previous state, regardless of its explicit dependencies. There are examples where
+        this is useful in the `tinychain.ml.linalg` package.
+        """
+
+        if value is None:
+            return self._procedural
+        else:
+            self._procedural = value
 
 
 def debug(state):

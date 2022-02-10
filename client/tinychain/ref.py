@@ -6,6 +6,7 @@ Reference types.
 import logging
 
 from tinychain.reflect import is_conditional, is_op, is_ref
+from tinychain.state import State
 from tinychain.util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
@@ -46,6 +47,11 @@ class After(Ref):
 
         if is_conditional(self.when):
             self.when = reference(cxt, self.when)
+
+
+def after(when, then):
+    rtype = type(then) if isinstance(then, State) else State
+    return rtype(After(when, then))
 
 
 class Case(Ref):

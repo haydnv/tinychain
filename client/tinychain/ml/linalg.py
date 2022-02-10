@@ -238,7 +238,7 @@ def det(cxt, x: Tensor) -> F32:
 
 
 @post_op
-def slogdet(cxt, x: Dense) -> Tuple:
+def slogdet(txn, x: Dense) -> Tuple:
     """Compute the sign and log of the absolute value of the determinant of one or more square matrices.
 
     Args:
@@ -251,22 +251,23 @@ def slogdet(cxt, x: Dense) -> Tuple:
     """
 
     n = x.shape[0]
-    cxt.sign_result = Dense.create([n])
-    cxt.logdet_result = Dense.create([n])
-    cxt.det = det
+    txn.sign_result = Dense.create([n])
+    txn.logdet_result = Dense.create([n])
+    txn.det = det
 
-    @closure(x, cxt.det, cxt.sign_result, cxt.logdet_result)
+    @closure(x, txn.det, txn.sign_result, txn.logdet_result)
     @get_op
-    def step(i: UInt):
-        d = cxt.det(x=x[i])
-        logdet = F32(d.abs().log())
-        sign = Int(If(d > 0, 1, -1))*1
+    def step(cxt, i: UInt):
+        cxt.procedural(True)
+        cxt.d = txn.det(x=x[i])
+        cxt.logdet = F32(cxt.d.abs().log())
+        cxt.sign = Int(If(cxt.d > 0, 1, -1))*1
         return [
-            cxt.sign_result[i].write(sign),
-            cxt.logdet_result[i].write(logdet),
+            txn.sign_result[i].write(cxt.sign),
+            txn.logdet_result[i].write(cxt.logdet),
         ]
 
-    return After(Stream.range((0, n)).for_each(step), Tuple([cxt.sign_result, cxt.logdet_result]))
+    return After(Stream.range((0, n)).for_each(step), Tuple([txn.sign_result, txn.logdet_result]))
 
 
 def svd(matrix: Tensor) -> Tuple:
