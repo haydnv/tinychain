@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use safecast::{CastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
@@ -137,15 +137,32 @@ impl SubjectMap {
         }
     }
 
-    pub async fn put(self, txn_id: TxnId, id: Id, _collection: Collection) -> TCResult<()> {
-        let (ids, _collections) = self.write(txn_id).await?;
+    pub async fn put(self, txn_id: TxnId, id: Id, collection: Collection) -> TCResult<()> {
+        let file = self
+            .dir
+            .get_file::<fs::File<Scalar>, Scalar>(txn_id, &DYNAMIC.into())
+            .await?;
+
+        let file = file.ok_or_else(|| TCError::internal("dynamic Chain missing schema file"))?;
+
+        let (ids, mut collections) = self.write(txn_id).await?;
         if ids.contains(&id) {
             Err(TCError::bad_request(
                 "SubjectMap already contains an entry called",
                 id,
             ))
         } else {
-            unimplemented!()
+            let collection = SubjectCollection::from_collection(collection)?;
+            file.create_block(
+                txn_id,
+                id.clone(),
+                collection.schema().cast_into(),
+                BLOCK_SIZE_HINT,
+            ).await?;
+
+            collections.insert(id, collection);
+
+            Ok(())
         }
     }
 

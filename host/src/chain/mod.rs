@@ -158,7 +158,10 @@ impl CastFrom<CollectionSchema> for Scalar {
             CollectionSchema::Sparse(schema) => schema.cast_into(),
         };
 
-        Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((class.path().into(), schema.into())))))
+        Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
+            class.path().into(),
+            schema.into(),
+        )))))
     }
 }
 

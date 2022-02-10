@@ -45,10 +45,7 @@ pub enum SubjectCollection {
 }
 
 impl SubjectCollection {
-    pub(super) fn from_collection<E: de::Error>(collection: Collection) -> Result<Self, E> {
-        const ERR_INVALID: &str =
-            "a Chain subject (must be a collection like a BTree, Table, or Tensor";
-
+    pub(super) fn from_collection(collection: Collection) -> TCResult<Self> {
         match collection {
             Collection::BTree(BTree::File(btree)) => Ok(SubjectCollection::BTree(btree)),
             Collection::Table(Table::Table(table)) => Ok(SubjectCollection::Table(table)),
@@ -58,14 +55,21 @@ impl SubjectCollection {
                 Tensor::Dense(dense) => dense
                     .as_persistent()
                     .map(SubjectCollection::Dense)
-                    .ok_or_else(|| de::Error::invalid_type("a Dense tensor view", ERR_INVALID)),
+                    .ok_or_else(|| {
+                        TCError::unsupported("Chain expected a Dense tensor, not a view")
+                    }),
 
                 Tensor::Sparse(sparse) => sparse
                     .as_persistent()
                     .map(SubjectCollection::Sparse)
-                    .ok_or_else(|| de::Error::invalid_type("a Sparse tensor view", ERR_INVALID)),
+                    .ok_or_else(|| {
+                        TCError::unsupported("Chain expected a Sparse tensor, not a view")
+                    }),
             },
-            other => Err(de::Error::invalid_type(other, ERR_INVALID)),
+            other => Err(TCError::bad_request(
+                "Chain expected a Collection, not",
+                other,
+            )),
         }
     }
 
@@ -303,7 +307,7 @@ impl de::FromStream for SubjectCollection {
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let collection = Collection::from_stream(txn, decoder).await?;
-        Self::from_collection(collection)
+        Self::from_collection(collection).map_err(de::Error::custom)
     }
 }
 

@@ -39,10 +39,7 @@ pub enum Subject {
 }
 
 impl Subject {
-    fn from_state<E: de::Error>(state: State) -> Result<Subject, E> {
-        const ERR_INVALID: &str =
-            "a Chain subject (must be a collection like a BTree, Table, or Tensor";
-
+    fn from_state(state: State) -> TCResult<Subject> {
         match state {
             State::Collection(collection) => {
                 SubjectCollection::from_collection(collection).map(Self::Collection)
@@ -52,7 +49,7 @@ impl Subject {
                 let subject = map
                     .into_iter()
                     .map(|(name, state)| Subject::from_state(state).map(|subject| (name, subject)))
-                    .collect::<Result<Map<Subject>, E>>()?;
+                    .collect::<TCResult<Map<Subject>>>()?;
 
                 Ok(Subject::Map(subject))
             }
@@ -60,12 +57,15 @@ impl Subject {
                 let subject = tuple
                     .into_iter()
                     .map(Subject::from_state)
-                    .collect::<Result<Tuple<Subject>, E>>()?;
+                    .collect::<TCResult<Tuple<Subject>>>()?;
 
                 Ok(Subject::Tuple(subject))
             }
 
-            other => Err(de::Error::invalid_type(other.class(), ERR_INVALID)),
+            other => Err(TCError::bad_request(
+                "Chain expected a Collection, Map, or Tuple, not",
+                other,
+            )),
         }
     }
 
@@ -347,7 +347,7 @@ impl de::FromStream for Subject {
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let state = State::from_stream(txn, decoder).await?;
-        Self::from_state(state)
+        Self::from_state(state).map_err(de::Error::custom)
     }
 }
 
