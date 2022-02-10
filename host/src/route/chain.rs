@@ -4,7 +4,7 @@ use log::debug;
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{Transaction, TxnId};
 use tc_value::Number;
 use tcgeneric::{Id, Map, PathSegment, TCPath, Tuple};
 
@@ -132,12 +132,81 @@ impl From<SubjectMap> for SubjectMapHandler {
     }
 }
 
+struct SubjectMapForwardHandler<'a> {
+    subject: &'a SubjectMap,
+    path: &'a [PathSegment],
+}
+
+impl<'a> SubjectMapForwardHandler<'a> {
+    fn new(subject: &'a SubjectMap, path: &'a [PathSegment]) -> Self {
+        debug_assert!(!path.is_empty());
+
+        Self { subject, path }
+    }
+
+    async fn forward(&'a self, txn_id: TxnId) -> TCResult<SubjectCollection> {
+        let subject = SubjectMap::get(self.subject.clone(), txn_id, &self.path[0]).await?;
+        debug_assert!(subject.is_some());
+        subject.ok_or_else(|| TCError::not_found(&self.path[0]))
+    }
+}
+
+impl<'a> Handler<'a> for SubjectMapForwardHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::get(&subject, txn, &self.path[1..], key).await
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, state| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::put(&subject, txn, &self.path[1..], key, state).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, params| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::post(&subject, txn, &self.path[1..], params).await
+            })
+        }))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::delete(&subject, txn, &self.path[1..], key).await
+            })
+        }))
+    }
+}
+
 impl Route for SubjectMap {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             Some(Box::new(SubjectMapHandler::from(self.clone())))
         } else {
-            unimplemented!()
+            Some(Box::new(SubjectMapForwardHandler::new(self, path)))
         }
     }
 }

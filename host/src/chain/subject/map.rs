@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
+use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use destream::de;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::TryStreamExt;
-use log::warn;
+use log::{debug, warn};
 use safecast::{CastFrom, CastInto, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
@@ -17,7 +18,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File, Store};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{Id, Map, TCBoxTryFuture};
+use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
 
 use crate::collection::Collection;
 use crate::fs;
@@ -131,7 +132,7 @@ impl SubjectMap {
             let schema: fs::File<Scalar> =
                 schema.ok_or_else(|| TCError::internal("missing schema file"))?;
 
-            let (ids, mut collections) = self.clone().write(*txn.id()).await?;
+            let (mut ids, mut collections) = self.clone().write(*txn.id()).await?;
 
             for id in collections.keys() {
                 if !backups.contains_key(id) {
@@ -146,6 +147,7 @@ impl SubjectMap {
                     restores.push(async move { collection.restore(txn, backup).await });
                 } else {
                     // TODO: parallelize
+                    ids.insert(id.clone());
                     put(txn, &schema, &container, &mut collections, id, backup).await?;
                 }
             }
@@ -156,6 +158,12 @@ impl SubjectMap {
 
     pub async fn get(self, txn_id: TxnId, id: &Id) -> TCResult<Option<SubjectCollection>> {
         let (ids, collections) = self.read(txn_id).await?;
+        debug!(
+            "get {} from SubjectMap with members {}",
+            id,
+            Tuple::<&Id>::from_iter(ids.iter())
+        );
+
         if ids.contains(id) {
             Ok(collections.get(id).cloned())
         } else {
@@ -173,13 +181,14 @@ impl SubjectMap {
 
         let file = file.ok_or_else(|| TCError::internal("dynamic Chain missing schema file"))?;
 
-        let (ids, mut collections) = self.write(txn_id).await?;
+        let (mut ids, mut collections) = self.write(txn_id).await?;
         if ids.contains(&id) {
             Err(TCError::bad_request(
                 "SubjectMap already contains an entry called",
                 id,
             ))
         } else {
+            ids.insert(id.clone());
             put(txn, &file, &container, &mut collections, id, collection).await
         }
     }

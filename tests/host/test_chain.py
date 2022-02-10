@@ -17,7 +17,18 @@ class ChainTests(PersistenceTest, unittest.TestCase):
         return Persistent
 
     def execute(self, hosts):
-        print(hosts[1].put("/test/chain/map", "one", tc.tensor.Dense.load([1, 2], tc.F32, [0., 0.])))
+        hosts[0].put("/test/chain/map", "one", tc.tensor.Dense.load([1, 2], tc.F32, [0., 0.]))
+
+        for i in range(len(hosts)):
+            host = hosts[i]
+            sum = host.get("/test/chain/map/one/sum")
+            self.assertEqual(sum, 0)
+
+        hosts[2].put("/test/chain/map/one", value=tc.tensor.Dense.load([1, 2], tc.F32, [1., 1.]))
+
+        for host in hosts:
+            sum = host.get("/test/chain/map/one/sum")
+            self.assertEqual(sum, 2)
 
 
 if __name__ == "__main__":
