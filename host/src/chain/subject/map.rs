@@ -177,6 +177,7 @@ impl SubjectMap {
 
         let (mut ids, mut collections) = self.write(txn_id).await?;
         if ids.contains(&id) {
+            // TODO: allow overwriting a Collection with the same type & schema
             Err(TCError::bad_request(
                 "SubjectMap already contains an entry called",
                 id,

@@ -82,29 +82,36 @@ impl Subject {
                         .await
                 }
                 Schema::Tuple(schema) => {
-                    try_join_all(
-                        schema
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, schema)| async move {
-                                let dir = dir.create_dir(txn_id, i.into()).await?;
-                                Self::create(schema, &dir, txn_id).await
-                            }),
-                    )
-                    .map_ok(Tuple::from)
-                    .map_ok(Self::Tuple)
-                    .await
+                    let creates = schema
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, schema)| async move {
+                            let dir = dir.create_dir(txn_id, i.into()).await?;
+                            Self::create(schema, &dir, txn_id).await
+                        });
+
+                    try_join_all(creates)
+                        .map_ok(Tuple::from)
+                        .map_ok(Self::Tuple)
+                        .await
+                }
+                Schema::Map(schema) if schema.is_empty() => {
+                    SubjectMap::create(dir.clone(), txn_id)
+                        .map_ok(Self::Dynamic)
+                        .await
                 }
                 Schema::Map(schema) => {
-                    try_join_all(schema.into_iter().map(|(name, schema)| async move {
+                    let creates = schema.into_iter().map(|(name, schema)| async move {
                         let dir = dir.create_dir(txn_id, name.clone()).await?;
                         Self::create(schema, &dir, txn_id)
                             .map_ok(|subject| (name, subject))
                             .await
-                    }))
-                    .map_ok(|schemata| schemata.into_iter().collect())
-                    .map_ok(Self::Map)
-                    .await
+                    });
+
+                    try_join_all(creates)
+                        .map_ok(|schemata| schemata.into_iter().collect())
+                        .map_ok(Self::Map)
+                        .await
                 }
             }
         })

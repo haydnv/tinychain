@@ -462,10 +462,7 @@ impl fs::Dir for Dir {
         let contents = self.contents.read(txn_id).await?;
         match contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
-            Some(other) => {
-                panic!("expected a directory, not {}", other);
-                // Err(TCError::bad_request("expected a directory, not", other))
-            },
+            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
             None => Ok(None),
         }
     }
