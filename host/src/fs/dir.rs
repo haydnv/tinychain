@@ -18,12 +18,11 @@ use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
-use tc_value::{Value, ValueType};
 use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
 use crate::chain::{ChainBlock, ChainType};
 use crate::collection::CollectionType;
-use crate::scalar::ScalarType;
+use crate::scalar::{Scalar, ScalarType};
 use crate::state::StateType;
 
 use super::{io_err, CacheBlock, File};
@@ -33,7 +32,7 @@ use super::{io_err, CacheBlock, File};
 pub enum FileEntry {
     BTree(File<Node>),
     Chain(File<ChainBlock>),
-    Value(File<Value>),
+    Scalar(File<Scalar>),
 
     #[cfg(feature = "tensor")]
     Tensor(File<Array>),
@@ -60,10 +59,7 @@ impl FileEntry {
                 },
             },
             StateType::Chain(_) => File::new(cache).map_ok(Self::Chain).await,
-            StateType::Scalar(st) => match st {
-                ScalarType::Value(_) => File::new(cache).map_ok(Self::Value).await,
-                other => Err(err(other)),
-            },
+            StateType::Scalar(_) => File::new(cache).map_ok(Self::Scalar).await,
             other => Err(err(other)),
         }
     }
@@ -88,10 +84,7 @@ impl FileEntry {
                 },
             },
             StateType::Chain(_) => File::load(cache, txn_id).map_ok(Self::Chain).await,
-            StateType::Scalar(st) => match st {
-                ScalarType::Value(_) => File::load(cache, txn_id).map_ok(Self::Value).await,
-                other => Err(err(other)),
-            },
+            StateType::Scalar(_) => File::load(cache, txn_id).map_ok(Self::Scalar).await,
             other => Err(err(other)),
         }
     }
@@ -176,25 +169,25 @@ impl AsType<File<Array>> for FileEntry {
     }
 }
 
-impl AsType<File<Value>> for FileEntry {
-    fn as_type(&self) -> Option<&File<Value>> {
-        if let Self::Value(file) = self {
+impl AsType<File<Scalar>> for FileEntry {
+    fn as_type(&self) -> Option<&File<Scalar>> {
+        if let Self::Scalar(file) = self {
             Some(file)
         } else {
             None
         }
     }
 
-    fn as_type_mut(&mut self) -> Option<&mut File<Value>> {
-        if let Self::Value(file) = self {
+    fn as_type_mut(&mut self) -> Option<&mut File<Scalar>> {
+        if let Self::Scalar(file) = self {
             Some(file)
         } else {
             None
         }
     }
 
-    fn into_type(self) -> Option<File<Value>> {
-        if let Self::Value(file) = self {
+    fn into_type(self) -> Option<File<Scalar>> {
+        if let Self::Scalar(file) = self {
             Some(file)
         } else {
             None
@@ -221,9 +214,9 @@ impl From<File<Array>> for FileEntry {
     }
 }
 
-impl From<File<Value>> for FileEntry {
-    fn from(file: File<Value>) -> Self {
-        Self::Value(file)
+impl From<File<Scalar>> for FileEntry {
+    fn from(file: File<Scalar>) -> Self {
+        Self::Scalar(file)
     }
 }
 
@@ -232,7 +225,7 @@ impl fmt::Display for FileEntry {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
-            Self::Value(value) => fmt::Display::fmt(value, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
 
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
@@ -506,7 +499,7 @@ impl Transact for Dir {
             DirEntry::File(file) => match file {
                 FileEntry::BTree(file) => file.commit(txn_id),
                 FileEntry::Chain(file) => file.commit(txn_id),
-                FileEntry::Value(file) => file.commit(txn_id),
+                FileEntry::Scalar(file) => file.commit(txn_id),
 
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.commit(txn_id),
@@ -523,7 +516,7 @@ impl Transact for Dir {
                 DirEntry::File(file) => match file {
                     FileEntry::BTree(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
-                    FileEntry::Value(file) => file.finalize(txn_id),
+                    FileEntry::Scalar(file) => file.finalize(txn_id),
 
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => file.finalize(txn_id),
@@ -597,7 +590,7 @@ fn ext_class(name: &str) -> Option<StateType> {
         "chain_block" => Some(ChainType::default().into()),
         #[cfg(feature = "tensor")]
         "array" => Some(TensorType::Dense.into()),
-        "value" => Some(ValueType::default().into()),
+        "scalar" => Some(ScalarType::default().into()),
         _ => None,
     }
 }

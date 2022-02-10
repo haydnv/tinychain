@@ -95,6 +95,12 @@ impl NativeClass for ScalarType {
     }
 }
 
+impl Default for ScalarType {
+    fn default() -> Self {
+        Self::Value(ValueType::default())
+    }
+}
+
 impl From<ValueType> for ScalarType {
     fn from(vt: ValueType) -> Self {
         Self::Value(vt)
@@ -538,6 +544,12 @@ impl<'a, D: Digest> Hash<D> for &'a Scalar {
             Scalar::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
             Scalar::Value(value) => Hash::<D>::hash(value),
         }
+    }
+}
+
+impl tc_transact::fs::BlockData for Scalar {
+    fn ext() -> &'static str {
+        "scalar"
     }
 }
 

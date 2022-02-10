@@ -1,10 +1,15 @@
+use std::convert::TryInto;
+
 use log::debug;
+use safecast::{CastFrom, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::Transaction;
-use tcgeneric::{PathSegment, TCPath};
+use tc_transact::{Transaction, TxnId};
+use tc_value::Number;
+use tcgeneric::{Id, Map, PathSegment, TCPath, Tuple};
 
-use crate::chain::{Chain, ChainInstance, ChainType, Subject};
+use crate::chain::{Chain, ChainInstance, ChainType, Subject, SubjectCollection, SubjectMap};
+use crate::state::State;
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, COPY};
 
@@ -14,20 +19,261 @@ impl Route for ChainType {
     }
 }
 
-impl Route for Subject {
+impl Route for SubjectCollection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Subject::route {}", TCPath::from(path));
 
         match self {
             Self::BTree(btree) => btree.route(path),
-            Self::Map(map) => map.route(path),
             Self::Table(table) => table.route(path),
-            Self::Tuple(tuple) => tuple.route(path),
-
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.route(path),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.route(path),
+        }
+    }
+}
+
+struct MapHandler<'a> {
+    map: &'a Map<Subject>,
+}
+
+impl<'a> Handler<'a> for MapHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    return Subject::Map(self.map.clone()).into_state(*txn.id()).await;
+                }
+
+                let key = Id::try_cast_from(key, |v| TCError::bad_request("invalid Id", v))?;
+                let subject = self
+                    .map
+                    .get(&key)
+                    .cloned()
+                    .ok_or_else(|| TCError::not_found(format!("chain subject {}", key)))?;
+
+                subject.into_state(*txn.id()).await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Map<Subject>> for MapHandler<'a> {
+    fn from(map: &'a Map<Subject>) -> Self {
+        Self { map }
+    }
+}
+
+impl Route for Map<Subject> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Map<Subject> route {}", TCPath::from(path));
+
+        if path.is_empty() {
+            Some(Box::new(MapHandler::from(self)))
+        } else if let Some(subject) = self.get(&path[0]) {
+            debug!("Map<Subject> found {} at {}", subject, &path[0]);
+            subject.route(&path[1..])
+        } else {
+            None
+        }
+    }
+}
+
+struct SubjectMapHandler {
+    collection: SubjectMap,
+}
+
+impl<'a> Handler<'a> for SubjectMapHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let txn_id = *txn.id();
+
+                if key.is_none() {
+                    return self.collection.into_state(txn_id).await;
+                }
+
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
+
+                let subject = self.collection.get(txn_id, &id).await?;
+                let subject = subject.ok_or_else(|| TCError::not_found(id))?;
+                Ok(State::Collection(subject.into()))
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, state| {
+            Box::pin(async move {
+                let id =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Id for SubjectMap", v))?;
+
+                let collection = state.try_into()?;
+                self.collection.put(txn, id, collection).await
+            })
+        }))
+    }
+}
+
+impl From<SubjectMap> for SubjectMapHandler {
+    fn from(collection: SubjectMap) -> Self {
+        Self { collection }
+    }
+}
+
+struct SubjectMapForwardHandler<'a> {
+    subject: &'a SubjectMap,
+    path: &'a [PathSegment],
+}
+
+impl<'a> SubjectMapForwardHandler<'a> {
+    fn new(subject: &'a SubjectMap, path: &'a [PathSegment]) -> Self {
+        debug_assert!(!path.is_empty());
+
+        Self { subject, path }
+    }
+
+    async fn forward(&'a self, txn_id: TxnId) -> TCResult<SubjectCollection> {
+        let subject = SubjectMap::get(self.subject.clone(), txn_id, &self.path[0]).await?;
+        debug_assert!(subject.is_some());
+        subject.ok_or_else(|| TCError::not_found(&self.path[0]))
+    }
+}
+
+impl<'a> Handler<'a> for SubjectMapForwardHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::get(&subject, txn, &self.path[1..], key).await
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, state| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::put(&subject, txn, &self.path[1..], key, state).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, params| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::post(&subject, txn, &self.path[1..], params).await
+            })
+        }))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let subject = self.forward(*txn.id()).await?;
+                super::Public::delete(&subject, txn, &self.path[1..], key).await
+            })
+        }))
+    }
+}
+
+impl Route for SubjectMap {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(SubjectMapHandler::from(self.clone())))
+        } else {
+            Some(Box::new(SubjectMapForwardHandler::new(self, path)))
+        }
+    }
+}
+
+struct TupleHandler<'a> {
+    tuple: &'a Tuple<Subject>,
+}
+
+impl<'a> Handler<'a> for TupleHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    return Subject::Tuple(self.tuple.clone())
+                        .into_state(*txn.id())
+                        .await;
+                }
+
+                let i =
+                    Number::try_cast_from(key, |v| TCError::bad_request("invalid tuple index", v))?;
+
+                let i = usize::cast_from(i);
+
+                let subject = self
+                    .tuple
+                    .get(i)
+                    .cloned()
+                    .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))?;
+
+                subject.into_state(*txn.id()).await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Tuple<Subject>> for TupleHandler<'a> {
+    fn from(tuple: &'a Tuple<Subject>) -> Self {
+        Self { tuple }
+    }
+}
+
+impl Route for Tuple<Subject> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(TupleHandler::from(self)));
+        } else if let Some(i) = usize::opt_cast_from(path[0].clone()) {
+            if i < self.len() {
+                return self[i].route(&path[1..]);
+            }
+        }
+
+        None
+    }
+}
+
+impl Route for Subject {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Subject {} route {}", self, TCPath::from(path));
+
+        match self {
+            Self::Collection(subject) => subject.route(path),
+            Self::Dynamic(subject) => subject.route(path),
+            Self::Map(map) => map.route(path),
+            Self::Tuple(tuple) => tuple.route(path),
         }
     }
 }

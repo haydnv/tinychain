@@ -126,6 +126,7 @@ impl History {
                     ))
                     .into())
                 }
+
                 Collection::Table(table) => {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
@@ -301,6 +302,8 @@ impl History {
             ));
         }
 
+        let mut latest_txn_id = None;
+
         const ERR_DIVERGENT: &str = "chain to replicate diverges at block";
         for i in 0u64..*latest {
             let block = self.read_block(txn_id, i.into()).await?;
@@ -309,6 +312,10 @@ impl History {
 
             if &*block != &*other {
                 return Err(TCError::bad_request(ERR_DIVERGENT, i));
+            }
+
+            if let Some(txn_id) = block.mutations().keys().last() {
+                latest_txn_id = Some(*txn_id);
             }
         }
 
@@ -319,8 +326,28 @@ impl History {
             let source = other.read_block(txn_id, i).await?;
             let mut dest = self.write_block(txn_id, i).await?;
 
+            let mut mutation_ids = source.mutations().keys();
+            for past_txn_id in dest.mutations().keys() {
+                if mutation_ids.next() != Some(past_txn_id) {
+                    return Err(TCError::bad_request(
+                        "error replicating Chain",
+                        format!("block {} diverges at txn {}", i, past_txn_id),
+                    ));
+                }
+
+                latest_txn_id = Some(*past_txn_id);
+            }
+
             for (past_txn_id, ops) in source.mutations() {
-                let append = !dest.mutations().contains_key(past_txn_id);
+                let append = if let Some(latest) = &latest_txn_id {
+                    if past_txn_id < latest {
+                        continue;
+                    }
+
+                    past_txn_id > latest
+                } else {
+                    true
+                };
 
                 for op in ops.iter().cloned() {
                     debug!("replicating mutation at {}: {}", past_txn_id, op);
@@ -330,7 +357,6 @@ impl History {
                             if append {
                                 dest.append_delete(*past_txn_id, path.clone(), key.clone());
                             }
-
                             subject.delete(txn, &path, key).await
                         }
                         Mutation::Put(path, key, value) => {
@@ -340,14 +366,13 @@ impl History {
                             if append {
                                 dest.append_put(*past_txn_id, path.clone(), key.clone(), value_ref);
                             }
-
                             subject.put(txn, &path, key, value).await
                         }
                     };
 
                     if let Err(cause) = result {
                         return Err(TCError::bad_request(
-                            format!("error at {} while replicating chain", past_txn_id),
+                            format!("error at {} while replicating Chain", past_txn_id),
                             cause,
                         ));
                     }
@@ -356,7 +381,7 @@ impl History {
 
             if source.hash() != dest.hash() {
                 return Err(TCError::bad_request(
-                    "error replicating chain",
+                    "error replicating Chain",
                     format!("hashes diverge at block {}", i),
                 ));
             }
@@ -428,6 +453,7 @@ impl History {
                 let btree = BTreeFile::load(txn, schema, file).await?;
                 Ok(Collection::BTree(btree.into()))
             }
+
             CollectionType::Table(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
                     TCError::internal(format!(

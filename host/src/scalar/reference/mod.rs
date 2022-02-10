@@ -449,8 +449,8 @@ impl<'en> ToStream<'en> for TCRef {
 
         map.encode_key(self.class().path().to_string())?;
         match self {
-            Self::Id(_) => unimplemented!("this should not be possible"),
-            Self::Op(_) => unimplemented!("this should not be possible"),
+            Self::Id(_) => unreachable!("TCRef::Id to_stream"),
+            Self::Op(_) => unreachable!("TCRef::Op to_stream"),
 
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
@@ -475,8 +475,8 @@ impl<'en> IntoStream<'en> for TCRef {
 
         map.encode_key(self.class().path().to_string())?;
         match self {
-            Self::Id(_) => unimplemented!("this should not be possible"),
-            Self::Op(_) => unimplemented!("this should not be possible"),
+            Self::Id(_) => unreachable!("TCRef::Id into_stream"),
+            Self::Op(_) => unreachable!("TCRef::Op into_stream"),
 
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),

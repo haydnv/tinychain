@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Persist, Store};
+use tc_transact::fs::{Dir, Persist, Store};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;
@@ -202,7 +202,10 @@ async fn validate(txn: Txn, schema: Schema, history: History) -> TCResult<BlockC
 
     let txn_id = txn.id();
 
-    let subject = Subject::create(schema.clone(), txn.context(), *txn.id()).await?;
+    // it's ok to give the Subject a temporary Dir here because this
+    // validation is only run by the deserialization code
+    let dir = txn.context().create_dir_unique(*txn.id()).await?;
+    let subject = Subject::create(schema.clone(), &dir, *txn.id()).await?;
 
     let mut i = 0u64;
     while history.contains_block(*txn_id, i).await? {

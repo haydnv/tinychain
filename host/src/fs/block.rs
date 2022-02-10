@@ -13,9 +13,9 @@ use tokio_util::io::StreamReader;
 use tc_btree::Node;
 #[cfg(feature = "tensor")]
 use tc_tensor::Array;
-use tc_value::Value;
 
 use crate::chain::ChainBlock;
+use crate::scalar::Scalar;
 
 use super::file_ext;
 
@@ -26,7 +26,7 @@ pub enum CacheBlock {
     Chain(ChainBlock),
     #[cfg(feature = "tensor")]
     Tensor(Array),
-    Value(Value),
+    Scalar(Scalar),
 }
 
 #[async_trait]
@@ -55,9 +55,9 @@ impl freqfs::FileLoad for CacheBlock {
                     .await
             }
 
-            Some("value") => {
+            Some("scalar") => {
                 tbon::de::read_from((), file)
-                    .map_ok(Self::Value)
+                    .map_ok(Self::Scalar)
                     .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
                     .await
             }
@@ -79,7 +79,7 @@ impl freqfs::FileLoad for CacheBlock {
             Self::Chain(block) => persist(block, file).await,
             #[cfg(feature = "tensor")]
             Self::Tensor(array) => persist(array, file).await,
-            Self::Value(value) => persist(value, file).await,
+            Self::Scalar(scalar) => persist(scalar, file).await,
         }
     }
 }
@@ -163,26 +163,26 @@ impl AsType<Array> for CacheBlock {
     }
 }
 
-impl AsType<Value> for CacheBlock {
-    fn as_type(&self) -> Option<&Value> {
-        if let Self::Value(value) = self {
-            Some(value)
+impl AsType<Scalar> for CacheBlock {
+    fn as_type(&self) -> Option<&Scalar> {
+        if let Self::Scalar(scalar) = self {
+            Some(scalar)
         } else {
             None
         }
     }
 
-    fn as_type_mut(&mut self) -> Option<&mut Value> {
-        if let Self::Value(value) = self {
-            Some(value)
+    fn as_type_mut(&mut self) -> Option<&mut Scalar> {
+        if let Self::Scalar(scalar) = self {
+            Some(scalar)
         } else {
             None
         }
     }
 
-    fn into_type(self) -> Option<Value> {
-        if let Self::Value(value) = self {
-            Some(value)
+    fn into_type(self) -> Option<Scalar> {
+        if let Self::Scalar(scalar) = self {
+            Some(scalar)
         } else {
             None
         }
@@ -208,9 +208,9 @@ impl From<Array> for CacheBlock {
     }
 }
 
-impl From<Value> for CacheBlock {
-    fn from(value: Value) -> Self {
-        Self::Value(value)
+impl From<Scalar> for CacheBlock {
+    fn from(scalar: Scalar) -> Self {
+        Self::Scalar(scalar)
     }
 }
 
