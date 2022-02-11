@@ -123,7 +123,6 @@ class LinearAlgebraTests(ClientTest):
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
-    @unittest.skip
     def testSVD(self):
         m = 4
         n = 3
@@ -131,9 +130,15 @@ class LinearAlgebraTests(ClientTest):
 
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
-        cxt.result = tc.linalg.svd(cxt.matrix)
+        cxt.svd = tc.linalg.svd
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=1000)
+        svd_result = self.host.post(ENDPOINT, cxt)
+        U, s, V = svd_result
+        U = _load_dense_tensor_from_json_to_numpy(U)
+        s = _load_dense_tensor_from_json_to_numpy(s)
+        V = _load_dense_tensor_from_json_to_numpy(V)
 
-        self.assertRaises(tc.error.NotImplemented, lambda: self.host.post(ENDPOINT, cxt))
+        self.assertTrue(((U @ (np.eye(n, n) * s) @ V) - matrix).sum() < 1e-5)
 
 
 def expect_dense(x, dtype):
