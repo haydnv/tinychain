@@ -9,10 +9,6 @@ from testutils import ClientTest
 ENDPOINT = "/transact/hypothetical"
 TENSOR_URI = str(tc.uri(tc.tensor.Dense))
 
-def _load_dense_tensor_from_json_to_numpy(jsn: t.Dict[str, t.Any]) -> np.ndarray:
-    return np.array(jsn[TENSOR_URI][1], dtype=np.float32)\
-        .reshape(jsn[TENSOR_URI][0][0])
-
 
 class LinearAlgebraTests(ClientTest):
     def testDiagonal(self):
@@ -97,9 +93,9 @@ class LinearAlgebraTests(ClientTest):
         cxt.plu_factorization = cxt.plu(x=cxt.x)
         plu = self.host.post(ENDPOINT, cxt)
 
-        p = _load_dense_tensor_from_json_to_numpy(plu['p'])
-        l = _load_dense_tensor_from_json_to_numpy(plu['l'])
-        u = _load_dense_tensor_from_json_to_numpy(plu['u'])
+        p = load_np(plu['p'])
+        l = load_np(plu['l'])
+        u = load_np(plu['u'])
 
         self.assertTrue((p @ l @ u == x).all())
         self.assertTrue([
@@ -117,13 +113,14 @@ class LinearAlgebraTests(ClientTest):
         cxt.result_slogdet = cxt.slogdet(x=cxt.x)
 
         actual_sign, actual_logdet = self.host.post(ENDPOINT, cxt)
-        actual_sign = _load_dense_tensor_from_json_to_numpy(actual_sign)
-        actual_logdet = _load_dense_tensor_from_json_to_numpy(actual_logdet)
+        actual_sign = load_np(actual_sign)
+        actual_logdet = load_np(actual_logdet)
         expected_sign, expected_logdet = np.linalg.slogdet(x)
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
     def testSVD(self):
+        THRESHOLD = 1e-5
         m = 4
         n = 3
         matrix = np.arange(1, 1 + m * n).reshape(m, n)
@@ -131,18 +128,23 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
         cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=1000)
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
         svd_result = self.host.post(ENDPOINT, cxt)
         U, s, V = svd_result
-        U = _load_dense_tensor_from_json_to_numpy(U)
-        s = _load_dense_tensor_from_json_to_numpy(s)
-        V = _load_dense_tensor_from_json_to_numpy(V)
+        U = load_np(U)
+        s = load_np(s)
+        V = load_np(V)
 
-        self.assertTrue(((U @ (np.eye(n, n) * s) @ V) - matrix).sum() < 1e-5)
+        self.assertTrue(abs((U @ (np.eye(n, n) * s) @ V) - matrix).sum() < THRESHOLD)
 
 
 def expect_dense(x, dtype):
     return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}
+
+
+def load_np(as_json: t.Dict[str, t.Any], dtype=np.float32) -> np.ndarray:
+    shape = as_json[TENSOR_URI][0][0]
+    return np.array(as_json[TENSOR_URI][1], dtype).reshape(shape)
 
 
 if __name__ == "__main__":
