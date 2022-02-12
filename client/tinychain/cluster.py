@@ -57,29 +57,6 @@ class Cluster(object, metaclass=Meta):
 
         return subject
 
-    def authorize(self, scope):
-        """Raise an error if the current transaction has not been granted the given scope."""
-
-        return ref.Get(uri(self) + "/authorize", scope)
-
-    def grant(self, scope, op: Op, context={}):
-        """Execute the given `op` after granting it the given `scope`."""
-
-        params = {
-            "scope": scope,
-            "op": op,
-        }
-
-        if context:
-            params["context"] = context
-
-        return ref.Post(uri(self) + "/grant", params)
-
-    @put_method
-    def install(self, txn, cluster_link: URI, scopes: Tuple):
-        """Trust the cluster at the given link to grant the given scopes."""
-        pass
-
 
 def write_cluster(cluster, config_path, overwrite=False):
     """Write the configuration of the given :class:`Cluster` to the given path."""

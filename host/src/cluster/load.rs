@@ -121,7 +121,6 @@ pub async fn instantiate(
         classes,
         confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
-        installed: TxnLock::new(format!("Cluster {} installed deps", link), HashMap::new()),
         replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
     };
 

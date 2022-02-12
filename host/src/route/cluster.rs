@@ -1,47 +1,18 @@
 use std::iter::FromIterator;
 
 use bytes::Bytes;
-use futures::future::{self, TryFutureExt};
+use futures::future;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Id, Tuple};
+use tcgeneric::{Id, Tuple};
 
 use crate::cluster::Cluster;
 use crate::route::*;
 use crate::state::State;
-
-struct AuthorizeHandler<'a> {
-    cluster: &'a Cluster,
-}
-
-impl<'a> Handler<'a> for AuthorizeHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, scope| {
-            Box::pin(async move {
-                let scope = scope
-                    .try_cast_into(|v| TCError::bad_request("expected an auth scope, not", v))?;
-
-                self.cluster
-                    .authorize(&txn, &scope)
-                    .map_ok(State::from)
-                    .await
-            })
-        }))
-    }
-}
-
-impl<'a> From<&'a Cluster> for AuthorizeHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
-        Self { cluster }
-    }
-}
 
 pub struct ClusterHandler<'a> {
     cluster: &'a Cluster,
@@ -146,67 +117,6 @@ impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
     }
 }
 
-struct GrantHandler<'a> {
-    cluster: &'a Cluster,
-}
-
-impl<'a> Handler<'a> for GrantHandler<'a> {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, mut params| {
-            Box::pin(async move {
-                let scope = params.require(&label("scope").into())?;
-                let op = params.require(&label("op").into())?;
-                let context = params.or_default(&label("context").into())?;
-                params.expect_empty()?;
-
-                self.cluster.grant(txn, scope, op, context).await
-            })
-        }))
-    }
-}
-
-impl<'a> From<&'a Cluster> for GrantHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
-        Self { cluster }
-    }
-}
-
-struct InstallHandler<'a> {
-    cluster: &'a Cluster,
-}
-
-impl<'a> Handler<'a> for InstallHandler<'a> {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, link, scopes| {
-            Box::pin(async move {
-                let link = link.try_cast_into(|v| {
-                    TCError::bad_request("install requires a Link to a Cluster, not", v)
-                })?;
-
-                let scopes = Tuple::try_cast_from(scopes, |v| {
-                    TCError::bad_request("expected a list of authorization scopes, not", v)
-                })?;
-
-                self.cluster
-                    .install(*txn.id(), link, scopes.into_iter().collect())
-                    .await
-            })
-        }))
-    }
-}
-
-impl<'a> From<&'a Cluster> for InstallHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
-        Self { cluster }
-    }
-}
-
 struct ReplicaHandler<'a> {
     cluster: &'a Cluster,
 }
@@ -278,9 +188,6 @@ impl Route for Cluster {
             class.route(&path[1..])
         } else if path.len() == 1 {
             match path[0].as_str() {
-                "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
-                "grant" => Some(Box::new(GrantHandler::from(self))),
-                "install" => Some(Box::new(InstallHandler::from(self))),
                 "replicas" => Some(Box::new(ReplicaHandler::from(self))),
                 _ => None,
             }
