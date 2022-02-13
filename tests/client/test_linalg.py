@@ -123,12 +123,12 @@ class LinearAlgebraTests(ClientTest):
         THRESHOLD = 1e-5
         m = 4
         n = 3
-        matrix = np.arange(1, 1 + m * n).reshape(m, n)
+        matrix = np.random.random(m * n).reshape(m, n)
 
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
         cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=2)
         svd_result = self.host.post(ENDPOINT, cxt)
         U, s, V = svd_result
         U = load_np(U)
