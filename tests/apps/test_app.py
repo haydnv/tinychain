@@ -19,16 +19,29 @@ class Foo(tc.app.Model):
         return tc.String("my name is {{name}}").render(name=self.name)
 
 
+class Bar(Foo):
+    __uri__ = URI.append("Bar")
+
+    @tc.get_method
+    def greet(self):
+        return tc.String("their name is {{name}}").render(name=self.name)
+
+
 class TestLib(tc.app.Library):
     __uri__ = URI
 
     def exports(self):
-        return [Foo]
+        return [Foo, Bar]
 
     @tc.get_method
-    def check_model(self, cxt) -> Foo:
+    def check_foo(self, cxt) -> Foo:
         cxt.foo = self.Foo("foo")
         return cxt.foo.greet()
+
+    @tc.get_method
+    def check_bar(self, cxt) -> Foo:
+        cxt.bar = self.Bar("bar")
+        return cxt.bar.greet()
 
 
 class LibraryTests(unittest.TestCase):
@@ -38,7 +51,11 @@ class LibraryTests(unittest.TestCase):
 
     def testApp(self):
         expected = "my name is foo"
-        actual = self.host.get("/test/lib/check_model")
+        actual = self.host.get("/test/lib/check_foo")
+        self.assertEqual(expected, actual)
+
+        expected = "their name is bar"
+        actual = self.host.get("/test/lib/check_bar")
         self.assertEqual(expected, actual)
 
 

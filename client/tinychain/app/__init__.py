@@ -16,18 +16,15 @@ class _Meta(type):
 
     def parents(cls):
         parents = []
-        for parent in cls.mro():
+        for parent in cls.mro()[1:]:
             if issubclass(parent, State):
-                if issubclass(parent, Model):
-                    if issubclass(parent, _Model):
-                        parents.append(parent)
-                else:
+                if uri(parent) != uri(cls):
                     parents.append(parent)
 
         return parents
 
     def __form__(cls):
-        parents = cls.parents()
+        parents = [c for c in cls.parents() if not issubclass(c, Model)]
         if not parents:
             raise ValueError("TinyChain class must extend a subclass of State")
 
@@ -66,16 +63,15 @@ class _Meta(type):
             else:
                 form[name] = attr
 
-            print(f"{name} is {attr}")
-
         return form
 
     def __json__(cls):
-        parents = [c for c in cls.parents() if not uri(c).startswith(uri(State))]
-        if parents:
-            return {str(uri(parents[0])): to_json(form_of(cls))}
-        else:
+        parents = cls.parents()
+
+        if uri(parents[0]).startswith(uri(State)):
             return {str(uri(Class)): to_json(form_of(cls))}
+        else:
+            return {str(uri(parents[0])): to_json(form_of(cls))}
 
 
 class Model(Object, metaclass=_Meta):
@@ -131,10 +127,10 @@ def model(cls):
                 return _Model.__new__(cls)
 
         def __init__(self, *args, **kwargs):
-            if "form" in kwargs:
-                for name in attrs:
-                    setattr(self, name, attrs[name])
+            for name in attrs:
+                setattr(self, name, attrs[name])
 
+            if "form" in kwargs:
                 return Instance.__init__(self, form=kwargs["form"])
 
             params = {}
@@ -245,7 +241,7 @@ def write_config(app_or_library, config_path, overwrite=False):
             os.makedirs(config_path.parent)
 
         with open(config_path, 'w') as config_file:
-            print(f"write config for {app_or_library} tp {config_path}")
+            logging.info(f"write config for {app_or_library} tp {config_path}")
             config_file.write(json.dumps(config, indent=4))
 
 
