@@ -1,17 +1,18 @@
-import typing as t
+import typing
+
 from abc import abstractmethod
 
 from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
 from tinychain.ml import DiffedParameter, Parameter
+from tinychain.new_state.generic import Map
 from tinychain.new_state.ref import After, While
-from tinychain.state import Map
 from tinychain.new_state.value import F32, UInt
 
 
 class Optimizer(Map):
     @abstractmethod
-    def optimize(self, param_list: t.List[Parameter]):
+    def optimize(self, param_list: typing.List[Parameter]):
         """Update the given `gradient` by computing deltas for the given `loss`."""
 
     @property
@@ -29,14 +30,14 @@ class GradientDescent(Optimizer):
 
         return cls({"lr": lr})
 
-    def optimize(self, i, param_list: t.List[Parameter]):
+    def optimize(self, i, param_list: typing.List[Parameter]):
         return [param.value.write(param.value - (param.grad * self.lr)) for param in param_list]
 
 
 class Adam(Optimizer):
 
     @classmethod
-    def create(cls, param_list: t.List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
+    def create(cls, param_list: typing.List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
         """Create a new `Adam` optimizer with the given hyperparameters.
         Args:
             'lr': learning rate;
@@ -51,7 +52,7 @@ class Adam(Optimizer):
 
         return cls({"beta1": beta1, "beta2": beta2, "eps": eps, "lr": lr, "m": m, "v": v})
 
-    def optimize(self, i, param_list: t.List[DiffedParameter]):
+    def optimize(self, i, param_list: typing.List[DiffedParameter]):
         beta1 = self["beta1"]
         beta2 = self["beta2"]
         lr = self["lr"]

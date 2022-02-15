@@ -1,8 +1,9 @@
 """An n-dimensional array of numbers."""
 
+from tinychain.new_state.generic import Tuple
 from tinychain.new_state import ref
 from tinychain.reflect import is_ref
-from tinychain.state import State, Tuple
+from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, URI
 from tinychain.new_state.value import Bool, I16, F32, F64, Number, UInt
 from tinychain.new_state import Class ,Stream
