@@ -59,3 +59,33 @@ class Stream(State):
         """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream`."""
 
         return self._post("map", {"op": op}, Stream)
+
+
+
+# User-defined object types
+
+class Class(State):
+    """A TinyChain class (possibly a user-defined class)."""
+
+    __uri__ = uri(State) + "/object/class"
+
+    def __call__(self, *args, **kwargs):
+        from .ref import MethodSubject, Get
+
+        if args and kwargs:
+            raise ValueError("Class.__call__ accepts args or kwargs but not both")
+
+        subject = MethodSubject(self)
+        if args:
+            return Get(subject, args)
+        else:
+            return Get(subject, kwargs)
+
+
+class Instance(State):
+    """An instance of a user-defined :class:`Class`."""
+
+    __uri__ = uri(State) + "/object/instance"
+
+    def copy(self):
+        raise NotImplementedError("abstract method")

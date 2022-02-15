@@ -316,33 +316,6 @@ class Scalar(State):
         return to_json(form_of(self))
 
 
-# User-defined object types
-
-class Class(State):
-    """A TinyChain class (possibly a user-defined class)."""
-
-    __uri__ = uri(State) + "/object/class"
-
-    def __call__(self, *args, **kwargs):
-        if args and kwargs:
-            raise ValueError("Class.__call__ accepts args or kwargs but not both")
-
-        subject = ref.MethodSubject(self)
-        if args:
-            return ref.Get(subject, args)
-        else:
-            return ref.Get(subject, kwargs)
-
-
-class Instance(State):
-    """An instance of a user-defined :class:`Class`."""
-
-    __uri__ = uri(State) + "/object/instance"
-
-    def copy(self):
-        raise NotImplementedError("abstract method")
-
-
 # Private helper classes
 
 class TypeForm(object):
