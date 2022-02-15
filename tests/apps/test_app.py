@@ -28,6 +28,16 @@ class Bar(Foo):
         return tc.String("their name is {{name}}").render(name=self.name)
 
 
+class Baz(Bar, tc.app.Dynamic):
+    def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
+        Bar.__init__(self, name)
+        self.greetings = greetings
+
+    @tc.get_method
+    def greet(self):
+        return tc.String("hello {{name}} x{{number}}").render(name=self.name, number=len(self.greetings))
+
+
 class TestLib(tc.app.Library):
     __uri__ = URI
 
@@ -47,6 +57,11 @@ class TestLib(tc.app.Library):
         cxt.bar = self.Bar("bar")
         return cxt.bar.greet()
 
+    @tc.get_method
+    def check_baz(self, cxt) -> tc.String:
+        cxt.baz = Baz("baz", ["one", "two", "three"])
+        return cxt.baz.greet()
+
 
 class LibraryTests(unittest.TestCase):
     @classmethod
@@ -60,6 +75,10 @@ class LibraryTests(unittest.TestCase):
 
         expected = "their name is bar"
         actual = self.host.get("/test/lib/check_bar")
+        self.assertEqual(expected, actual)
+
+        expected = "hello baz x3"
+        actual = self.host.get("/test/lib/check_baz")
         self.assertEqual(expected, actual)
 
 

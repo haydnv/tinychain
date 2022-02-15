@@ -111,6 +111,39 @@ class Model(Object, metaclass=_Meta):
             return {str(uri(self)): to_json(form_of(self))}
 
 
+class Dynamic(Instance):
+    def __form__(self):
+        parent_members = dict(inspect.getmembers(Instance))
+
+        form = {}
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+            elif name in parent_members:
+                if attr is parent_members[name] or attr == parent_members[name]:
+                    continue
+                elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
+                    if attr.__code__ is parent_members[name].__code__:
+                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
+                        continue
+
+            if isinstance(attr, MethodStub):
+                form[name] = attr.method(self, name)
+            else:
+                form[name] = attr
+
+        return form
+
+    def __json__(self):
+        return {str(uri(self)): to_json(form_of(self))}
+
+    def __ref__(self, name):
+        return ModelRef(self, name)
+
+    def __repr__(self):
+        return f"a Dynamic model {self.__class__.__name__}"
+
+
 class ModelRef(object):
     def __init__(self, instance, name):
         self.instance = instance
@@ -138,6 +171,10 @@ def model(cls):
         def __init__(self, *args, **kwargs):
             if "form" in kwargs:
                 form = kwargs["form"]
+
+                if isinstance(cls, Dynamic):
+                    raise RuntimeError(f"Dynamic model cannot be instantiated by reference (got {form})")
+
                 Model.__init__(self, form)
             else:
                 params = _parse_init_args(inspect.signature(cls.__init__), args, kwargs)
