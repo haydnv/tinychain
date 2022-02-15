@@ -1,5 +1,20 @@
 from tinychain.state import State
-from tinychain.util import uri
+from tinychain.util import form_of, to_json, uri
+
+
+# Scalar types
+
+class Scalar(State):
+    """
+    An immutable `State` which always resides entirely in the host's memory.
+
+    Do not subclass `Scalar` directly. Use :class:`Value` instead.
+    """
+
+    __uri__ = uri(State) + "/scalar"
+
+    def __json__(self):
+        return to_json(form_of(self))
 
 
 # A stream of `State` s

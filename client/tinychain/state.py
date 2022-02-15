@@ -301,21 +301,6 @@ class Tuple(State):
         return self._get("zip", other, Tuple)
 
 
-# Scalar types
-
-class Scalar(State):
-    """
-    An immutable `State` which always resides entirely in the host's memory.
-
-    Do not subclass `Scalar` directly. Use :class:`Value` instead.
-    """
-
-    __uri__ = uri(State) + "/scalar"
-
-    def __json__(self):
-        return to_json(form_of(self))
-
-
 # Private helper classes
 
 class TypeForm(object):
