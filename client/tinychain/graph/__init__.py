@@ -94,7 +94,7 @@ class Graph(Map):
 
             form[name] = graph_table(self, schema, name)
 
-        return Map.__init__(self, form)
+        self.__form__ = form
 
     def add_edge(self, label, from_node, to_node):
         """Mark `from_node` -> `to_node` as `True` in the edge :class:`Tensor` with the given `label`."""

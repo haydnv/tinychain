@@ -15,16 +15,24 @@ class State(object):
     __uri__ = URI("/state")
 
     def __init__(self, form):
-        from tinychain import reflect
+        from tinychain.decorators import MethodStub
+        from tinychain.reflect import is_ref
+        from .ref import Ref
 
         self.__form__ = form
 
         if isinstance(form, URI):
             self.__uri__ = form
-        elif reflect.is_ref(form):
+        elif is_ref(form) and hasattr(form, "__uri__"):
             self.__uri__ = uri(form)
 
-        reflect.meta.gen_headers(self)
+        # TODO: is there a better place for this?
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(self, name, attr.method(self, name))
 
     def __dbg__(self):
         return [form_of(self)]
@@ -33,11 +41,12 @@ class State(object):
         raise NotImplementedError("State does not support equality; use a more specific type")
 
     def __json__(self):
-        from tinychain import reflect
+        from tinychain.reflect import is_ref
+        from .ref import MethodSubject, Ref
 
         form = form_of(self)
 
-        if reflect.is_ref(form):
+        if is_ref(form):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}

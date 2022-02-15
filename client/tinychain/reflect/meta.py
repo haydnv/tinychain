@@ -50,15 +50,6 @@ def header(cls):
     return instance, header
 
 
-def gen_headers(instance):
-    for name, attr in inspect.getmembers(instance):
-        if name.startswith('_'):
-            continue
-
-        if isinstance(attr, MethodStub):
-            setattr(instance, name, attr.method(instance, name))
-
-
 class Meta(type):
     """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
 

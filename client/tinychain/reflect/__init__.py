@@ -4,7 +4,7 @@ from pydoc import locate
 
 from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
 
-from .meta import gen_headers, header, Meta
+from .meta import header, Meta
 
 
 def is_conditional(state):

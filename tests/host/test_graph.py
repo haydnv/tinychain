@@ -38,6 +38,7 @@ class TestService(tc.Cluster):
 
     def _configure(self):
         self.graph = tc.chain.Sync(TestGraph.create())
+        print(f"graph spec is {self.graph.__spec__}")
 
     @tc.put_method
     def create_user(self, user_id: tc.U32, data: tc.Map):
@@ -45,6 +46,7 @@ class TestService(tc.Cluster):
 
     @tc.put_method
     def add_friend(self, user_id: tc.U32, friend: tc.U32):
+        print(self.graph)
         return self.graph.add_edge("friends", user_id, friend), self.graph.add_edge("friends", friend, user_id)
 
     @tc.put_method
@@ -72,6 +74,7 @@ class TestService(tc.Cluster):
         return self.graph["products"].read_vector(txn.product_ids)
 
 
+@unittest.skip  # TODO: reimplement Graph as an App
 class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

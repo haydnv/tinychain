@@ -184,7 +184,7 @@ def plu(x: Tensor) -> PLUFactorization:
 
         @post_op
         def cond(x: Tensor, k: UInt):
-            return (k < UInt(Tuple(x.shape)[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
+            return (k < UInt(x.shape[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
 
         return Map(While(cond, step, Map(
             p=p.copy(),
