@@ -168,7 +168,7 @@ def start_host(name, libs=[], overwrite=True, host_uri=None, cache_size="5K", wa
         port = tc.uri(libs[0]).port()
 
     config_dir = os.getcwd()
-    config_dir += f"{CONFIG}/{name}/{port}"
+    config_dir += f"/{CONFIG}/{name}/{port}"
     maybe_create_dir(config_dir, overwrite)
 
     app_configs = []

@@ -15,8 +15,7 @@ class State(object):
     __uri__ = URI("/state")
 
     def __init__(self, form):
-        from tinychain.decorators import MethodStub
-        from tinychain.reflect import is_ref
+        from tinychain.reflect import is_ref, MethodStub
         from .ref import Ref
 
         self.__form__ = form
@@ -62,12 +61,15 @@ class State(object):
 
     def __ref__(self, name):
         if hasattr(form_of(self), "__ref__"):
-            return self.__class__(get_ref(form_of(self), name))
+            return self.__class__(form=get_ref(form_of(self), name))
         else:
-            return self.__class__(URI(name))
+            return self.__class__(form=URI(name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({form_of(self)})"
+        if hasattr(self, "__form__") and self.__form__:
+            return f"{self.__class__.__name__}({form_of(self)})"
+        else:
+            return f"instance of {self.__class__.__name__}"
 
     def _get(self, name, key=None, rtype=None):
         from tinychain.state.ref import MethodSubject, Get
@@ -75,7 +77,7 @@ class State(object):
         subject = MethodSubject(self, name)
         op_ref = Get(subject, key)
         rtype = State if rtype is None or not issubclass(rtype, State) else rtype
-        return rtype(op_ref)
+        return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
         from tinychain.state.ref import MethodSubject, Put
@@ -90,7 +92,7 @@ class State(object):
         subject = MethodSubject(self, name)
         op_ref = Post(subject, params)
         rtype = State if rtype is None or not issubclass(rtype, State) else rtype
-        return rtype(op_ref)
+        return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
         from tinychain.state.ref import MethodSubject, Delete
@@ -217,10 +219,16 @@ class Stream(State):
 
 # User-defined object types
 
-class Class(State):
+class Object(State):
+    """A user-defined type"""
+
+    __uri__ = uri(State) + "/object"
+
+
+class Class(Object):
     """A TinyChain class (possibly a user-defined class)."""
 
-    __uri__ = uri(State) + "/object/class"
+    __uri__ = uri(Object) + "/class"
 
     def __call__(self, *args, **kwargs):
         from .ref import MethodSubject, Get
@@ -235,10 +243,10 @@ class Class(State):
             return Get(subject, kwargs)
 
 
-class Instance(State):
+class Instance(Object):
     """An instance of a user-defined :class:`Class`."""
 
-    __uri__ = uri(State) + "/object/instance"
+    __uri__ = uri(Object) + "/instance"
 
     def copy(self):
         raise NotImplementedError("abstract method")

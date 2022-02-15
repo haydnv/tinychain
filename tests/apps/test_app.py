@@ -3,12 +3,32 @@ import testutils
 import tinychain as tc
 
 
-class TestLib(tc.app.Library):
-    __uri__ = tc.URI("/test/lib")
+URI = tc.URI("/test/lib")
+
+
+class Foo(tc.app.Model):
+    __uri__ = URI.append("Foo")
+
+    name = tc.String
+
+    def __init__(self, name):
+        self.name = name
 
     @tc.get_method
-    def up(self) -> tc.Bool:
-        return True
+    def greet(self):
+        return tc.String("my name is {{name}}").render(name=self.name)
+
+
+class TestLib(tc.app.Library):
+    __uri__ = URI
+
+    def exports(self):
+        return [Foo]
+
+    @tc.get_method
+    def check_model(self, cxt) -> Foo:
+        cxt.foo = self.Foo("foo")
+        return cxt.foo.greet()
 
 
 class LibraryTests(unittest.TestCase):
@@ -17,7 +37,9 @@ class LibraryTests(unittest.TestCase):
         cls.host = testutils.start_host("test_lib", [TestLib()])
 
     def testApp(self):
-        self.assertTrue(self.host.get("/test/lib/up"))
+        expected = "my name is foo"
+        actual = self.host.get("/test/lib/check_model")
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

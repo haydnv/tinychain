@@ -35,7 +35,7 @@ class Chain(State):
         from tinychain.state.value import Nil
         op_ref = ref.Get(uri(self).append(name), key)
         rtype = Nil if rtype is None else rtype
-        return rtype(op_ref)
+        return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
         from tinychain.state.value import Nil
@@ -45,7 +45,7 @@ class Chain(State):
         from tinychain.state.value import Nil
         op_ref = ref.Post(uri(self).append(name), params)
         rtype = Nil if rtype is None else rtype
-        return rtype(op_ref)
+        return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
         from tinychain.state.value import Nil

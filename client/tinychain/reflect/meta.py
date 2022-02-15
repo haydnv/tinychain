@@ -23,8 +23,11 @@ def header(cls):
     class Header(cls):
         pass
 
-    header = Header(instance_uri)
-    instance = cls(instance_uri)
+    try:
+        header = Header(form=instance_uri)
+        instance = cls(form=instance_uri)
+    except Exception as e:
+        raise RuntimeError(f"unable to generate headers for {cls}", e)
 
     for name, attr in inspect.getmembers(instance):
         if name.startswith('_') or isinstance(attr, URI):
@@ -54,11 +57,11 @@ class Meta(type):
     """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
 
     def __form__(cls):
-        mro = cls.mro()
-        if len(mro) < 2:
+        mro = [c for c in cls.mro()[1:] if issubclass(c, State)]
+        if not mro:
             raise ValueError("TinyChain class must extend a subclass of State")
 
-        parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
+        parent_members = dict(inspect.getmembers(mro[0](form=URI("self"))))
 
         instance, instance_header = header(cls)
 
