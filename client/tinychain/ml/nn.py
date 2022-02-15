@@ -2,7 +2,7 @@ import functools
 import operator
 from typing import List
 
-from tinychain.value import Int
+from tinychain.new_state.value import Int
 from tinychain.collection.tensor import Dense, Tensor, einsum
 from tinychain.ml import DiffedParameter, Identity, Layer, NeuralNet, Parameter
 from tinychain.ref import After

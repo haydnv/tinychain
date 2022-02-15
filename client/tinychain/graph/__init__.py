@@ -6,7 +6,7 @@ from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.ref import After, Get, If, MethodSubject, Put, While, With
 from tinychain.state import Map, Tuple
 from tinychain.util import uri
-from tinychain.value import Bool, Nil, U32, String
+from tinychain.new_state.value import Bool, Nil, U32, String
 
 from .edge import DIM, Edge, ForeignKey
 

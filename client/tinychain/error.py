@@ -1,7 +1,7 @@
 """Generic error types."""
 
 from tinychain.util import deanonymize, to_json, uri, URI
-from tinychain.value import String
+from tinychain.new_state.value import String
 
 
 class TinyChainError(Exception):

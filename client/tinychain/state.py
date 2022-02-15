@@ -1,6 +1,6 @@
 """TinyChain `State` s, like `Map`, `Tuple`, and `Op`."""
+
 import inspect
-import logging
 
 from tinychain import ref, reflect
 from tinychain.util import *
@@ -64,7 +64,7 @@ class State(object):
         return rtype(op_ref)
 
     def _put(self, name, key=None, value=None):
-        from .value import Nil
+        from tinychain.new_state.value import Nil
 
         subject = ref.MethodSubject(self, name)
         return Nil(ref.Put(subject, key, value))
@@ -76,7 +76,7 @@ class State(object):
         return rtype(op_ref)
 
     def _delete(self, name, key=None):
-        from .value import Nil
+        from tinychain.new_state.value import Nil
 
         subject = ref.MethodSubject(self, name)
         return Nil(ref.Delete(subject, key))
@@ -102,13 +102,13 @@ class State(object):
     def hash(self):
         """Return the SHA256 hash of this `State` as an :class:`Id`."""
 
-        from .value import Id
+        from tinychain.new_state.value import Id
         return self._get("hash", rtype=Id)
 
     def is_none(self):
         """Return `Bool(true)` if this `State` is :class:`Nil`."""
 
-        from .value import Bool
+        from tinychain.new_state.value import Bool
         return self._get("is_none", rtype=Bool)
 
     def is_some(self):
@@ -181,7 +181,7 @@ class Map(State):
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
 
-        from .value import Bool
+        from tinychain.new_state.value import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -192,7 +192,7 @@ class Map(State):
     def len(self):
         """Return the number of elements in this `Map`."""
 
-        from .value import UInt
+        from tinychain.new_state.value import UInt
         return self._get("len", rtype=UInt)
 
 
@@ -246,7 +246,7 @@ class Tuple(State):
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
 
-        from .value import Bool
+        from tinychain.new_state.value import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -262,7 +262,7 @@ class Tuple(State):
     def len(self):
         """Return the number of elements in this `Tuple`."""
 
-        from .value import UInt
+        from tinychain.new_state.value import UInt
         return self._get("len", rtype=UInt)
 
     def fold(self, item_name, initial_state, op):

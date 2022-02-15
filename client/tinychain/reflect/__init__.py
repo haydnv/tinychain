@@ -19,7 +19,7 @@ def is_conditional(state):
 
 
 def is_none(state):
-    from tinychain.value import Nil
+    from tinychain.new_state.value import Nil
 
     return state is None or state == Nil
 

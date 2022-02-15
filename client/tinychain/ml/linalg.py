@@ -2,7 +2,7 @@ from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
-from tinychain.value import Bool, F64, UInt, F32, Int, Value, Number
+from tinychain.new_state.value import Bool, F64, UInt, F32, Int, Value, Number
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6

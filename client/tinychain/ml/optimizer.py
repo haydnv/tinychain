@@ -6,7 +6,7 @@ from tinychain.decorators import closure, post_op
 from tinychain.ml import DiffedParameter, Parameter
 from tinychain.ref import After, While
 from tinychain.state import Map
-from tinychain.value import F32, UInt
+from tinychain.new_state.value import F32, UInt
 
 
 class Optimizer(Map):
