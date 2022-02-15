@@ -4,7 +4,7 @@ from abc import abstractmethod
 from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
 from tinychain.ml import DiffedParameter, Parameter
-from tinychain.ref import After, While
+from tinychain.new_state.ref import After, While
 from tinychain.state import Map
 from tinychain.new_state.value import F32, UInt
 

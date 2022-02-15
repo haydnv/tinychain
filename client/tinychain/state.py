@@ -2,8 +2,9 @@
 
 import inspect
 
-from tinychain import ref, reflect
+from tinychain.new_state import ref
 from tinychain.util import *
+from tinychain import reflect
 
 
 class State(object):

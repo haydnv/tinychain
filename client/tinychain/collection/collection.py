@@ -1,4 +1,4 @@
-from tinychain.ref import Post, Put
+from tinychain.new_state.ref import Post, Put
 from tinychain.reflect import is_ref
 from tinychain.state import Map, State, Tuple
 from tinychain.util import form_of, uri, URI

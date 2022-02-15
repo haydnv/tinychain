@@ -1,8 +1,8 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
-from tinychain.ref import Ref
 from tinychain.state import Map, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI
+from tinychain.new_state.ref import Ref
 from tinychain.new_state.value import UInt
 
 from .collection import Collection

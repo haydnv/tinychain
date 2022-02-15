@@ -3,13 +3,12 @@ import inspect
 from pydoc import locate
 
 from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
-from tinychain.state import State
 
 from .meta import gen_headers, header, Meta
 
 
 def is_conditional(state):
-    from tinychain.ref import Case, If
+    from tinychain.new_state.ref import Case, If
     from tinychain.state import State
 
     if isinstance(state, State):
@@ -41,7 +40,7 @@ def is_op(fn):
 
 
 def is_ref(state):
-    from tinychain.ref import MethodSubject, Ref
+    from tinychain.new_state.ref import MethodSubject, Ref
 
     if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
         return True

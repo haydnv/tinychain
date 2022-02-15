@@ -1,4 +1,4 @@
-from tinychain.ref import After, If, With
+from tinychain.new_state.ref import After, If, With
 from tinychain.reflect.meta import MethodStub
 from tinychain.reflect import method, op
 

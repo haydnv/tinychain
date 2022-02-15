@@ -1,7 +1,7 @@
 import inspect
 import logging
 
-from tinychain import ref
+from tinychain.new_state import ref
 from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
 from tinychain.new_state.value import Nil, Value

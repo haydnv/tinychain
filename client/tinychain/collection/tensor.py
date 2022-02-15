@@ -1,6 +1,6 @@
 """An n-dimensional array of numbers."""
 
-from tinychain import ref
+from tinychain.new_state import ref
 from tinychain.reflect import is_ref
 from tinychain.state import Class, State, Stream, Tuple
 from tinychain.util import form_of, to_json, uri, URI

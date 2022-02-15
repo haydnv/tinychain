@@ -1,8 +1,9 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from tinychain.ref import If, Ref
 from tinychain.state import Scalar
 from tinychain.util import form_of, to_json, uri, URI
+
+from .ref import If, Ref
 
 
 # Scalar value types

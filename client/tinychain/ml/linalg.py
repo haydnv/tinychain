@@ -1,6 +1,6 @@
 from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
-from tinychain.ref import After, Get, If, MethodSubject, While
+from tinychain.new_state.ref import After, Get, If, MethodSubject, While
 from tinychain.state import Map, Stream, Tuple
 from tinychain.new_state.value import Bool, F64, UInt, F32, Int, Value, Number
 

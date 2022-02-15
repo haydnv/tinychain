@@ -1,6 +1,6 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from tinychain import ref
+from tinychain.new_state import ref
 from tinychain.reflect import is_ref
 from tinychain.state import State
 from tinychain.util import uri
