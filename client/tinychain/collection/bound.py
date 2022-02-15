@@ -1,5 +1,5 @@
 from tinychain.util import to_json
-from tinychain.new_state.value import Nil
+from tinychain.state.value import Nil
 
 
 class Bound(object):

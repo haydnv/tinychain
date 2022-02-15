@@ -6,7 +6,7 @@ import urllib.parse
 
 from tinychain.error import *
 from tinychain.util import to_json, uri, URI
-from tinychain.new_state.value import Nil
+from tinychain.state.value import Nil
 
 
 DEFAULT_PORT = 8702

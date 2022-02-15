@@ -3,10 +3,10 @@ from tinychain.collection.table import Table
 from tinychain.collection.tensor import Sparse
 from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
-from tinychain.new_state.generic import Map, Tuple
-from tinychain.new_state.ref import After, Get, If, MethodSubject, Put, While, With
+from tinychain.state.generic import Map, Tuple
+from tinychain.state.ref import After, Get, If, MethodSubject, Put, While, With
 from tinychain.util import uri
-from tinychain.new_state.value import Bool, Nil, U32, String
+from tinychain.state.value import Bool, Nil, U32, String
 
 from .edge import DIM, Edge, ForeignKey
 

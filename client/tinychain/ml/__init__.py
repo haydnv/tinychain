@@ -1,7 +1,7 @@
 from abc import abstractmethod, ABC
 
 from tinychain.collection.tensor import Tensor
-from tinychain.new_state.generic import Map, Tuple
+from tinychain.state.generic import Map, Tuple
 
 EPS = 10**-6
 

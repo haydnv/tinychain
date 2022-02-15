@@ -5,9 +5,9 @@ from abc import abstractmethod
 from tinychain.collection.tensor import Dense
 from tinychain.decorators import closure, post_op
 from tinychain.ml import DiffedParameter, Parameter
-from tinychain.new_state.generic import Map
-from tinychain.new_state.ref import After, While
-from tinychain.new_state.value import F32, UInt
+from tinychain.state.generic import Map
+from tinychain.state.ref import After, While
+from tinychain.state.value import F32, UInt
 
 
 class Optimizer(Map):

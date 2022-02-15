@@ -1,6 +1,6 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from tinychain.new_state import ref
+from tinychain.state import ref
 from tinychain.reflect import is_ref
 from tinychain.state import State
 from tinychain.util import uri
@@ -33,23 +33,23 @@ class Chain(State):
 
     # TODO: delete these overrides and make MethodSubject compatible with Chain
     def _get(self, name, key=None, rtype=State):
-        from tinychain.new_state.value import Nil
+        from tinychain.state.value import Nil
         op_ref = ref.Get(uri(self).append(name), key)
         rtype = Nil if rtype is None else rtype
         return rtype(op_ref)
 
     def _put(self, name, key=None, value=None):
-        from tinychain.new_state.value import Nil
+        from tinychain.state.value import Nil
         return Nil(ref.Put(uri(self).append(name), key, value))
 
     def _post(self, name, params, rtype=State):
-        from tinychain.new_state.value import Nil
+        from tinychain.state.value import Nil
         op_ref = ref.Post(uri(self).append(name), params)
         rtype = Nil if rtype is None else rtype
         return rtype(op_ref)
 
     def _delete(self, name, key=None):
-        from tinychain.new_state.value import Nil
+        from tinychain.state.value import Nil
         return Nil(ref.Delete(uri(self).append(name), key))
 
 

@@ -8,7 +8,7 @@ from .meta import gen_headers, header, Meta
 
 
 def is_conditional(state):
-    from tinychain.new_state.ref import Case, If
+    from tinychain.state.ref import Case, If
     from tinychain.state import State
 
     if isinstance(state, State):
@@ -18,7 +18,7 @@ def is_conditional(state):
 
 
 def is_none(state):
-    from tinychain.new_state.value import Nil
+    from tinychain.state.value import Nil
 
     return state is None or state == Nil
 
@@ -40,7 +40,7 @@ def is_op(fn):
 
 
 def is_ref(state):
-    from tinychain.new_state.ref import MethodSubject, Ref
+    from tinychain.state.ref import MethodSubject, Ref
 
     if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
         return True
