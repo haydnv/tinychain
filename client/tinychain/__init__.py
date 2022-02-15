@@ -14,6 +14,7 @@ from tinychain.decorators import closure, delete_method, get_method, post_method
 from tinychain.ml import linalg
 from tinychain.new_state.ref import After, Case, If, While
 from tinychain.new_state.value import *
+from tinychain.new_state import Stream
 from tinychain.reflect import Meta
-from tinychain.state import Class, Instance, Map, State, Scalar, Stream, Tuple
+from tinychain.state import Class, Instance, Map, State, Scalar, Tuple
 from tinychain.util import form_of, print_json, to_json, uri, use, Context, URI
