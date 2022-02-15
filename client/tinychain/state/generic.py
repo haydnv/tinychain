@@ -139,6 +139,9 @@ class Tuple(State):
 
     @classmethod
     def expect(cls, spec):
+        if typing.get_args(spec):
+            spec = typing.get_args(spec)
+
         class _Tuple(cls):
             __spec__ = spec
 

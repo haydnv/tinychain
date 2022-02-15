@@ -1,13 +1,17 @@
+"""A hosted :class:`App` or :class:`Library`."""
+
 import inspect
 import logging
+import typing
 
 from collections import OrderedDict
 
-from tinychain.chain import Chain
-from tinychain.reflect import header, MethodStub
+from tinychain.decorators import MethodStub
+from tinychain.reflect import header, is_ref
+from tinychain.state.generic import Tuple
 from tinychain.state.ref import Ref
 from tinychain.state import Class, Instance, Object, Scalar, State
-from tinychain.util import deanonymize, form_of, to_json, uri, URI
+from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
 
 
 # TODO: deduplicate with reflect.Meta
@@ -25,10 +29,7 @@ class _Meta(type):
 
     def __form__(cls):
         parents = [c for c in cls.parents() if not issubclass(c, Model)]
-        if not parents:
-            raise ValueError("TinyChain class must extend a subclass of State")
-
-        parent_members = dict(inspect.getmembers(parents[0](form=URI("self"))))
+        parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
         instance, instance_header = header(cls)
 
@@ -68,15 +69,40 @@ class _Meta(type):
     def __json__(cls):
         parents = cls.parents()
 
-        if uri(parents[0]).startswith(uri(State)):
+        if not parents or uri(parents[0]).startswith(uri(State)):
             return {str(uri(Class)): to_json(form_of(cls))}
         else:
             return {str(uri(parents[0])): to_json(form_of(cls))}
 
 
 class Model(Object, metaclass=_Meta):
-    def __init__(self, *args, **kwargs):
-        raise RuntimeError("cannot initialize a Model itself")
+    def __new__(cls, *args, **kwargs):
+        if "form" in kwargs:
+            return Instance.__new__(cls)
+        else:
+            return Class.__new__(cls)
+
+    def __init__(self, form):
+        Object.__init__(self, form)  # this will generate method headers
+
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+
+            if inspect.isclass(attr):
+                if issubclass(attr, Model):
+                    raise NotImplementedError("Model with Model attribute")
+                elif issubclass(attr, State):
+                    setattr(self, name, attr(form=URI("self").append(name)))
+                else:
+                    raise TypeError(f"Model does not support attributes of type {attr}")
+            elif typing.get_origin(attr) is tuple:
+                setattr(self, name, Tuple.expect(attr)(URI("self").append(name)))
+            else:
+                pass  # self.name is already set to attr, just leave it along
 
     def __json__(self):
         if isinstance(form_of(self), URI) or isinstance(form_of(self), Ref):
@@ -85,106 +111,55 @@ class Model(Object, metaclass=_Meta):
             return {str(uri(self)): to_json(form_of(self))}
 
 
-class _Model(Model):
-    pass
+class ModelRef(object):
+    def __init__(self, instance, name):
+        self.instance = instance
+        self.__uri__ = URI(name)
+
+    def __getattr__(self, name):
+        if not hasattr(self.instance, name):
+            raise AttributeError(f"{self.instance} has no attribute {name}")
+
+        attr = getattr(self.instance, name)
+        if isinstance(attr, MethodStub):
+            return attr.method(self, name)
+        else:
+            return get_ref(attr, uri(self).append(name))
+
+    def __json__(self):
+        return to_json(uri(self))
+
+    def __ref__(self, name):
+        return ModelRef(self.instance, name)
 
 
 def model(cls):
-    if not issubclass(cls, Model):
-        raise ValueError("not a Model: {cls}")
-
-    attrs = {}
-    for name, attr in inspect.getmembers(cls):
-        if name.startswith('_'):
-            continue
-        elif hasattr(attr, "hidden") and attr.hidden:
-            continue
-        elif isinstance(attr, MethodStub):
-            continue
-        elif hasattr(Model, name):
-            continue
-        elif inspect.ismethod(attr) and attr.__self__ is cls:
-            # it's a @classmethod
-            continue
-
-        if not inspect.isclass(attr):
-            raise TypeError(f"model attribute must be a type of State, not {attr}")
-
-        if issubclass(attr, Model):
-            attr = model(attr)
-        elif not issubclass(attr, State):
-            raise TypeError(f"unknown model attribute type: {attr}")
-
-        attrs[name] = attr(form=URI("self").append(name))
-
-    class __Model(cls):
-        def __new__(*args, **kwargs):
-            cls = args[0]
-
-            if "form" in kwargs:
-                return Instance.__new__(cls)
-            else:
-                return _Model.__new__(cls)
-
+    class _Model(cls, metaclass=_Meta):
         def __init__(self, *args, **kwargs):
-            for name in attrs:
-                setattr(self, name, attrs[name])
-
             if "form" in kwargs:
-                return Instance.__init__(self, form=kwargs["form"])
+                form = kwargs["form"]
+                Model.__init__(self, form)
+            else:
+                params = _parse_init_args(inspect.signature(cls.__init__), args, kwargs)
+                cls.__init__(self, *args, **kwargs)
+                Instance.__init__(self, params)
 
-            params = {}
-            sig = OrderedDict(inspect.signature(cls.__init__).parameters)
-            if list(sig.keys())[0] != "self":
-                raise TypeError(f"{cls}.__init__ signature must begin with a 'self' parameter")
-
-            i = 0
-            for name, param in list(sig.items())[1:]:
-                if param.kind == inspect.Parameter.VAR_POSITIONAL:
-                    if args:
-                        raise TypeError("Model does not support positional arguments in __init__; " +
-                                        f"use keyword arguments in {cls} instead")
-                elif param.kind == inspect.Parameter.POSITIONAL_ONLY:
-                    params[name] = args[i]
-                    i += 1
-                elif param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
-                    if name in kwargs:
-                        params[name] = kwargs[name]
-                    elif i < len(args):
-                        params[name] = args[i]
-                        i += 1
-                    elif param.default != inspect.Parameter.empty:
-                        params[name] = param.default
-                    else:
-                        raise ValueError(
-                            f"no value specified for parameter {name} in {self.__class__.__name__}.__init__")
-                elif param.kind == inspect.Parameter.VAR_KEYWORD:
-                    params.update(kwargs)
-
-            params = params if params else None
-            Instance.__init__(self, form=params)
-
-    return __Model
+    return _Model
 
 
 class Library(object):
+    @staticmethod
+    def exports():
+        return []
+
     def __init__(self, form=None):
         if form is not None:
             self.__uri__ = form
 
         for cls in self.exports():
-            if not uri(cls).startswith(uri(self.__class__)):
-                raise ValueError(f"the library at {uri(self)} cannot export a class at {uri(cls)}")
-
-            expected_uri = uri(self.__class__).append(cls.__name__)
-            if uri(cls) != expected_uri:
-                raise ValueError(f"class {cls.__name__} at {uri(cls)} does not match the expected URI {expected_uri}")
-
             setattr(self, cls.__name__, model(cls))
 
-        self._allow_mutable = False
-
-    def __form__(self):
+    def __json__(self):
         form = {}
 
         for cls in self.exports():
@@ -197,10 +172,8 @@ class Library(object):
 
             _, instance_header = header(type(self))
 
-            if not self._allow_mutable and _is_mutable(attr):
+            if _is_mutable(attr):
                 raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
-            if self._allow_mutable and _is_mutable(attr) and not isinstance(attr, Chain):
-                raise RuntimeError("mutable state must be in a Chain")
             elif hasattr(attr, "hidden") and attr.hidden:
                 continue
             elif isinstance(attr, MethodStub):
@@ -208,22 +181,29 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return form
-
-    def __json__(self):
-        return {str(uri(self)): to_json(form_of(self))}
+        return {str(uri(self)): form}
 
 
-def write_config(app_or_library, config_path, overwrite=False):
+def _is_mutable(state):
+    if not isinstance(state, State):
+        return False
+
+    if isinstance(state, Scalar):
+        return False,
+
+    return True
+
+
+def write_config(lib, config_path, overwrite=False):
     """Write the configuration of the given :class:`tc.App` or :class:`Library` to the given path."""
 
-    if inspect.isclass(app_or_library):
-        raise ValueError(f"write_app expects an instance of App, not a class: {app_or_library}")
+    if inspect.isclass(lib):
+        raise ValueError(f"write_app expects an instance of App, not a class: {lib}")
 
     import json
     import pathlib
 
-    config = to_json(app_or_library)
+    config = to_json(lib)
     config_path = pathlib.Path(config_path)
     if config_path.exists() and not overwrite:
         with open(config_path) as f:
@@ -241,15 +221,39 @@ def write_config(app_or_library, config_path, overwrite=False):
             os.makedirs(config_path.parent)
 
         with open(config_path, 'w') as config_file:
-            logging.info(f"write config for {app_or_library} tp {config_path}")
             config_file.write(json.dumps(config, indent=4))
 
 
-def _is_mutable(state):
-    if not isinstance(state, State):
-        return False
+def _parse_init_args(sig, args, kwargs):
+    params = {}
+    sig = OrderedDict(sig.parameters)
+    if list(sig.keys())[0] != "self":
+        raise TypeError(f"__init__ signature {sig} must begin with a 'self' parameter")
 
-    if isinstance(state, Scalar):
-        return False
+    i = 0
+    for name, param in list(sig.items())[1:]:
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            if args:
+                raise TypeError("Model does not support variable positional arguments (*args) in __init__; " +
+                                f"use keyword arguments instead")
 
-    return True
+        elif param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            params[name] = args[i]
+            i += 1
+
+        elif param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            if name in kwargs:
+                params[name] = kwargs[name]
+            elif i < len(args):
+                params[name] = args[i]
+                i += 1
+            elif param.default != inspect.Parameter.empty:
+                params[name] = param.default
+            else:
+                raise ValueError(
+                    f"no value specified for parameter {name} in {self.__class__.__name__}.__init__")
+
+        elif param.kind == inspect.Parameter.VAR_KEYWORD:
+            params.update(kwargs)
+
+    return params

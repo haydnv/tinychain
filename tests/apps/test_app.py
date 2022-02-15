@@ -1,3 +1,4 @@
+import typing
 import unittest
 import testutils
 import tinychain as tc
@@ -31,15 +32,18 @@ class TestLib(tc.app.Library):
     __uri__ = URI
 
     def exports(self):
-        return [Foo, Bar]
+        return [
+            Foo,
+            Bar,
+        ]
 
     @tc.get_method
-    def check_foo(self, cxt) -> Foo:
+    def check_foo(self, cxt) -> tc.String:
         cxt.foo = self.Foo("foo")
         return cxt.foo.greet()
 
     @tc.get_method
-    def check_bar(self, cxt) -> Foo:
+    def check_bar(self, cxt) -> tc.String:
         cxt.bar = self.Bar("bar")
         return cxt.bar.greet()
 
