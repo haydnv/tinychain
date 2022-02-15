@@ -3,11 +3,9 @@
 import inspect
 import logging
 
-from tinychain import ref
 from tinychain.decorators import *
-from tinychain.op import Op
 from tinychain.reflect.meta import Meta
-from tinychain.state import State, Tuple
+from tinychain.state import State
 from tinychain.util import form_of, uri, URI, to_json
 
 

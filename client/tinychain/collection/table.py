@@ -1,10 +1,11 @@
 from tinychain.collection.btree import BTree
 from tinychain.decorators import closure, delete_op, get_op, post_op
 from tinychain.error import BadRequest
-from tinychain.ref import Delete, If, Ref
-from tinychain.state import Map, Tuple, State, Stream
+from tinychain.state.generic import Map, Tuple
+from tinychain.state.ref import Delete, If, Ref
+from tinychain.state.value import Bool, UInt, Nil
+from tinychain.state import State, Stream
 from tinychain.util import form_of, to_json, uri, Context, URI
-from tinychain.value import Bool, UInt, Nil
 
 from .collection import Collection
 from .bound import Range

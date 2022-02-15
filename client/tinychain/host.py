@@ -1,12 +1,13 @@
 """Utilities for communicating with a TinyChain host."""
+
 import abc
 import json
 import requests
 import urllib.parse
 
 from tinychain.error import *
+from tinychain.state.value import Nil
 from tinychain.util import to_json, uri, URI
-from tinychain.value import Nil
 
 
 DEFAULT_PORT = 8702

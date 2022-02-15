@@ -1,9 +1,10 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
-from tinychain.ref import Ref
-from tinychain.state import Map, State, Stream, Tuple
+from tinychain.state.generic import Map, Tuple
+from tinychain.state.ref import Ref
+from tinychain.state.value import UInt
+from tinychain.state import State, Stream
 from tinychain.util import form_of, to_json, uri, URI
-from tinychain.value import UInt
 
 from .collection import Collection
 from .bound import Range
