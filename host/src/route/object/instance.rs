@@ -42,6 +42,7 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
 
 struct GetMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,
+    name: &'a Id,
     method: GetOp,
     path: &'a [PathSegment],
 }
@@ -56,7 +57,12 @@ where
         let mut context = Map::new();
         context.insert(key_name, key.into());
 
-        call_method(txn, self.subject, self.path, context, op_def).await
+        match call_method(txn, self.subject, self.path, context, op_def).await {
+            Ok(state) => Ok(state),
+            Err(cause) => {
+                Err(cause.consume(format!("in call to GET {} /{}", self.subject, self.name)))
+            }
+        }
     }
 }
 
@@ -74,6 +80,7 @@ where
 
 struct PutMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,
+    name: &'a Id,
     method: PutOp,
     path: &'a [PathSegment],
 }
@@ -89,8 +96,12 @@ where
         context.insert(key_name, key.into());
         context.insert(value_name, value);
 
-        call_method(txn, self.subject, self.path, context, op_def).await?;
-        Ok(())
+        match call_method(txn, self.subject, self.path, context, op_def).await {
+            Ok(_) => Ok(()),
+            Err(cause) => {
+                Err(cause.consume(format!("in call to PUT {} /{}", self.subject, self.name)))
+            }
+        }
     }
 }
 
@@ -110,6 +121,7 @@ where
 
 struct PostMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,
+    name: &'a Id,
     method: PostOp,
     path: &'a [PathSegment],
 }
@@ -119,7 +131,12 @@ where
     InstanceExt<T>: ToState,
 {
     async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
-        call_method(txn, self.subject, self.path, params, self.method).await
+        match call_method(txn, self.subject, self.path, params, self.method).await {
+            Ok(state) => Ok(state),
+            Err(cause) => {
+                Err(cause.consume(format!("in call to POST {} /{}", self.subject, self.name)))
+            }
+        }
     }
 }
 
@@ -139,6 +156,7 @@ where
 
 struct DeleteMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,
+    name: &'a Id,
     method: DeleteOp,
     path: &'a [PathSegment],
 }
@@ -153,8 +171,12 @@ where
         let mut context = Map::new();
         context.insert(key_name, key.into());
 
-        call_method(txn, self.subject, self.path, context, op_def).await?;
-        Ok(())
+        match call_method(txn, self.subject, self.path, context, op_def).await {
+            Ok(_) => Ok(()),
+            Err(cause) => {
+                Err(cause.consume(format!("in call to DELETE {} /{}", self.subject, self.name)))
+            }
+        }
     }
 }
 
@@ -199,32 +221,17 @@ where
                 );
                 None
             }
+        } else if let Some(attr) = self.members().get(&path[0]) {
+            debug!("{} found in instance members", &path[0]);
+
+            if let State::Scalar(attr) = attr {
+                route_attr(self, &path[0], attr, &path[1..])
+            } else {
+                attr.route(&path[1..])
+            }
         } else if let Some(attr) = self.proto().get(&path[0]) {
             debug!("{} found in instance proto", &path[0]);
-
-            match attr {
-                Scalar::Op(OpDef::Get(get_op)) => Some(Box::new(GetMethod {
-                    subject: self,
-                    method: get_op.clone(),
-                    path: &path[1..],
-                })),
-                Scalar::Op(OpDef::Put(put_op)) => Some(Box::new(PutMethod {
-                    subject: self,
-                    method: put_op.clone(),
-                    path: &path[1..],
-                })),
-                Scalar::Op(OpDef::Post(post_op)) => Some(Box::new(PostMethod {
-                    subject: self,
-                    method: post_op.clone(),
-                    path: &path[1..],
-                })),
-                Scalar::Op(OpDef::Delete(delete_op)) => Some(Box::new(DeleteMethod {
-                    subject: self,
-                    method: delete_op.clone(),
-                    path: &path[1..],
-                })),
-                other => other.route(&path[1..]),
-            }
+            route_attr(self, &path[0], attr, &path[1..])
         } else if let Some(handler) = self.parent().route(path) {
             debug!("{} found in parent", TCPath::from(path));
             Some(handler)
@@ -270,4 +277,60 @@ where
     Executor::with_context(txn, Some(subject), context.into(), form)
         .capture(capture)
         .await
+}
+
+#[inline]
+fn route_attr<'a, T>(
+    subject: &'a InstanceExt<T>,
+    name: &'a Id,
+    attr: &'a Scalar,
+    path: &'a [PathSegment],
+) -> Option<Box<dyn Handler<'a> + 'a>>
+where
+    T: Instance + Route + fmt::Display + 'a,
+    InstanceExt<T>: ToState,
+{
+    match attr {
+        Scalar::Op(OpDef::Get(get_op)) => {
+            debug!("call GET method");
+
+            Some(Box::new(GetMethod {
+                subject,
+                name,
+                method: get_op.clone(),
+                path,
+            }))
+        }
+        Scalar::Op(OpDef::Put(put_op)) => {
+            debug!("call PUT method");
+
+            Some(Box::new(PutMethod {
+                subject,
+                name,
+                method: put_op.clone(),
+                path,
+            }))
+        }
+        Scalar::Op(OpDef::Post(post_op)) => {
+            debug!("call POST method");
+
+            Some(Box::new(PostMethod {
+                subject,
+                name,
+                method: post_op.clone(),
+                path,
+            }))
+        }
+        Scalar::Op(OpDef::Delete(delete_op)) => {
+            debug!("call DELETE method");
+
+            Some(Box::new(DeleteMethod {
+                subject,
+                name,
+                method: delete_op.clone(),
+                path,
+            }))
+        }
+        other => other.route(path),
+    }
 }

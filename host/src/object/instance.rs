@@ -29,6 +29,7 @@ use super::{InstanceClass, Object};
 pub struct InstanceExt<T: tcgeneric::Instance> {
     parent: Box<T>,
     class: InstanceClass,
+    members: Map<State>,
 }
 
 impl<T: tcgeneric::Instance> InstanceExt<T> {
@@ -37,7 +38,22 @@ impl<T: tcgeneric::Instance> InstanceExt<T> {
         InstanceExt {
             parent: Box::new(parent),
             class,
+            members: Map::default(),
         }
+    }
+
+    /// Construct a new instance of an anonymous class.
+    pub fn anonymous(parent: T, class: InstanceClass, members: Map<State>) -> InstanceExt<T> {
+        InstanceExt {
+            parent: Box::new(parent),
+            class,
+            members,
+        }
+    }
+
+    /// Borrow the members of this instance.
+    pub fn members(&self) -> &Map<State> {
+        &self.members
     }
 
     /// Borrow the parent of this instance.
@@ -60,6 +76,7 @@ impl<T: tcgeneric::Instance> InstanceExt<T> {
         Ok(InstanceExt {
             parent: Box::new(parent),
             class,
+            members: self.members,
         })
     }
 }
@@ -76,6 +93,12 @@ impl<'en, T: tcgeneric::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en
     for InstanceExt<T>
 {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        if !self.members.is_empty() {
+            return Err(en::Error::custom(TCError::not_implemented(
+                "encode an instance of an anonymous class",
+            )));
+        }
+
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.class.extends().to_string(), self.parent)?;
         map.end()
@@ -107,6 +130,12 @@ impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     type View = InstanceView<'en>;
 
     async fn into_view(self, txn: Txn) -> TCResult<InstanceView<'en>> {
+        if !self.members.is_empty() {
+            return Err(TCError::not_implemented(
+                "encode an instance of an anonymous class",
+            ));
+        }
+
         Ok(InstanceView {
             class: self.class,
             parent: self.parent.into_view(txn).await?,
@@ -148,7 +177,12 @@ impl<T: tcgeneric::Instance + ToState> ToState for InstanceExt<T> {
     fn to_state(&self) -> State {
         let parent = Box::new(self.parent.to_state());
         let class = self.class.clone();
-        let instance = InstanceExt { parent, class };
+        let members = self.members.clone();
+        let instance = InstanceExt {
+            parent,
+            class,
+            members,
+        };
         State::Object(Object::Instance(instance))
     }
 }
