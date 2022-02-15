@@ -3,7 +3,7 @@ use tcgeneric::PathSegment;
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
 use crate::state::State;
 
-use super::{AttributeHandler, GetHandler, Handler, Route, COPY};
+use super::{AttributeHandler, GetHandler, Handler, PostHandler, Route, COPY};
 
 mod instance;
 
@@ -26,6 +26,20 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
             Box::pin(async move {
                 let parent = State::from(key);
                 let instance = InstanceExt::new(parent, self.class.clone());
+                Ok(State::Object(instance.into()))
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, members| {
+            Box::pin(async move {
+                let instance =
+                    InstanceExt::anonymous(State::default(), self.class.clone(), members);
+
                 Ok(State::Object(instance.into()))
             })
         }))

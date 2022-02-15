@@ -1,3 +1,4 @@
+import tinychain.app
 import tinychain.chain
 import tinychain.collection.bound as bound
 import tinychain.error

@@ -1,73 +1,85 @@
-import math
-import numpy as np
+import typing
 import unittest
 import testutils
 import tinychain as tc
 
-LAYER_CONFIG = [(2, 2, tc.ml.ReLU()), (2, 1, tc.ml.Sigmoid())]
-LEARNING_RATE = 0.1
-BATCH_SIZE = 25
+
+URI = tc.URI("/test/lib")
 
 
-class App(tc.Cluster):
-    __uri__ = tc.URI("/test/app")
+class Foo(tc.app.Model):
+    __uri__ = URI.append("Foo")
 
-    def _configure(self):
-        dnn = tc.ml.dnn.DNN.create(LAYER_CONFIG)
-        self.net = tc.chain.Sync(dnn)
+    name = tc.String
+
+    def __init__(self, name):
+        self.name = name
 
     @tc.get_method
-    def up(self) -> tc.Bool:
-        return True
-
-    @tc.post_method
-    def reset(self, new_layers: tc.Tuple):
-        return self.net.write(new_layers)
-
-    @tc.post_method
-    def train(self, inputs: tc.tensor.Dense, labels: tc.tensor.Dense):
-        # TODO: implement this using a background task
-        pass
+    def greet(self):
+        return tc.String("my name is {{name}}").render(name=self.name)
 
 
-class AppTests(unittest.TestCase):
+class Bar(Foo):
+    __uri__ = URI.append("Bar")
+
+    @tc.get_method
+    def greet(self):
+        return tc.String("their name is {{name}}").render(name=self.name)
+
+
+class Baz(Bar, tc.app.Dynamic):
+    def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
+        Bar.__init__(self, name)
+        self.greetings = greetings
+
+    @tc.get_method
+    def greet(self):
+        return tc.String("hello {{name}} x{{number}}").render(name=self.name, number=len(self.greetings))
+
+
+class TestLib(tc.app.Library):
+    __uri__ = URI
+
+    def exports(self):
+        return [
+            Foo,
+            Bar,
+        ]
+
+    @tc.get_method
+    def check_foo(self, cxt) -> tc.String:
+        cxt.foo = self.Foo("foo")
+        return cxt.foo.greet()
+
+    @tc.get_method
+    def check_bar(self, cxt) -> tc.String:
+        cxt.bar = self.Bar("bar")
+        return cxt.bar.greet()
+
+    @tc.get_method
+    def check_baz(self, cxt) -> tc.String:
+        cxt.baz = Baz("baz", ["one", "two", "three"])
+        return cxt.baz.greet()
+
+
+class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_host("test_app", [App])
+        cls.host = testutils.start_host("test_lib", [TestLib()])
 
     def testApp(self):
-        self.assertTrue(self.host.get("/test/app/up"))
+        expected = "my name is foo"
+        actual = self.host.get("/test/lib/check_foo")
+        self.assertEqual(expected, actual)
 
-    def testTrain(self):
-        np.random.seed()
+        expected = "their name is bar"
+        actual = self.host.get("/test/lib/check_bar")
+        self.assertEqual(expected, actual)
 
-        new_layers = []
-        for i, o, _ in LAYER_CONFIG:
-            weights = load(truncated_normal(i * o).reshape([i, o]))
-            bias = load(truncated_normal(o))
-            new_layers.append((weights, bias))
-
-        self.host.post("/test/app/reset", {"new_layers": new_layers})
-
-        # TODO
-
-
-def truncated_normal(size, mean=0., std=None):
-    std = std if std else math.sqrt(size)
-
-    while True:
-        dist = np.random.normal(mean, std, size)
-        truncate = np.abs(dist) > mean + (std * 2)
-        if truncate.any():
-            new_dist = np.random.normal(mean, std, size) * truncate
-            dist *= np.logical_not(truncate)
-            dist += new_dist
-        else:
-            return dist
-
-
-def load(nparray, dtype=tc.F64):
-    return tc.tensor.Dense.load(nparray.shape, dtype, nparray.flatten().tolist())
+        expected = "hello baz x3"
+        actual = self.host.get("/test/lib/check_baz")
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

@@ -23,8 +23,11 @@ def header(cls):
     class Header(cls):
         pass
 
-    header = Header(instance_uri)
-    instance = cls(instance_uri)
+    try:
+        header = Header(form=instance_uri)
+        instance = cls(form=instance_uri)
+    except Exception as e:
+        raise RuntimeError(f"unable to generate headers for {cls}", e)
 
     for name, attr in inspect.getmembers(instance):
         if name.startswith('_') or isinstance(attr, URI):
@@ -50,24 +53,12 @@ def header(cls):
     return instance, header
 
 
-def gen_headers(instance):
-    for name, attr in inspect.getmembers(instance):
-        if name.startswith('_'):
-            continue
-
-        if isinstance(attr, MethodStub):
-            setattr(instance, name, attr.method(instance, name))
-
-
 class Meta(type):
     """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
 
     def __form__(cls):
-        mro = cls.mro()
-        if len(mro) < 2:
-            raise ValueError("TinyChain class must extend a subclass of State")
-
-        parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
+        parents = [c for c in cls.mro()[1:] if issubclass(c, State)]
+        parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
         instance, instance_header = header(cls)
 
@@ -97,9 +88,10 @@ class Meta(type):
         return form
 
     def __json__(cls):
-        mro = cls.mro()
-        if len(mro) < 2:
-            raise ValueError("TinyChain class must extend a subclass of State")
+        mro = [c for c in cls.mro()[1:] if issubclass(c, State)]
 
-        parent = mro[1]
-        return {str(uri(parent)): to_json(form_of(cls))}
+        if mro:
+            parent = mro[0]
+            return {str(uri(parent)): to_json(form_of(cls))}
+        else:
+            return to_json(form_of(cls))
