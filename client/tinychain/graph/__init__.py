@@ -5,8 +5,8 @@ from tinychain.error import BadRequest
 from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
 from tinychain.state.generic import Map, Tuple
 from tinychain.state.ref import After, Get, If, MethodSubject, Put, While, With
-from tinychain.util import uri
 from tinychain.state.value import Bool, Nil, U32, String
+from tinychain.util import uri
 
 from .edge import DIM, Edge, ForeignKey
 

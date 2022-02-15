@@ -1,5 +1,6 @@
-from tinychain.state import State
 from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
+
+from . import State
 
 
 class Map(State):

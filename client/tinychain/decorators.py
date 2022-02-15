@@ -1,6 +1,6 @@
-from tinychain.state.ref import After, If, With
 from tinychain.reflect.meta import MethodStub
 from tinychain.reflect import method, op
+from tinychain.state.ref import After, If, With
 
 
 def closure(*deps):

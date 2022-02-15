@@ -3,8 +3,7 @@
 from tinychain.state.generic import Map, Tuple
 from tinychain.state.ref import Ref
 from tinychain.state.value import UInt
-from tinychain.state import Stream
-from tinychain.state import State
+from tinychain.state import State, Stream
 from tinychain.util import form_of, to_json, uri, URI
 
 from .collection import Collection

@@ -1,6 +1,6 @@
+from tinychain.reflect import is_ref
 from tinychain.state.generic import Map, Tuple
 from tinychain.state.ref import Post, Put
-from tinychain.reflect import is_ref
 from tinychain.state import State
 from tinychain.util import form_of, uri, URI
 

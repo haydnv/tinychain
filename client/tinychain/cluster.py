@@ -4,7 +4,6 @@ import inspect
 import logging
 
 from tinychain.decorators import *
-from tinychain.state.generic import Tuple
 from tinychain.reflect.meta import Meta
 from tinychain.state import State
 from tinychain.util import form_of, uri, URI, to_json
