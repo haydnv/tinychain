@@ -67,23 +67,58 @@ class LinearAlgebraTests(ClientTest):
 
         self.assertEqual(actual, expected)
 
-    def testQR(self):
-        THRESHOLD = 1.
+    def testQR_1(self):
+        THRESHOLD = 1e-6
 
-        m = 4
         n = 3
-        matrix = np.arange(1, 1 + m * n).reshape(m, n)
+        m = 4
+        matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
         cxt.qr = tc.linalg.qr
-        cxt.result = cxt.qr(x=cxt.matrix)
-        cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", cxt.result)
-        cxt.threshold = ((cxt.reconstruction - cxt.matrix) < THRESHOLD).all()
-
+        cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
+        cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
+        cxt.threshold = ((cxt.reconstruction - cxt.matrix).abs().sum() < THRESHOLD)
+        cxt.error = (cxt.reconstruction - cxt.matrix)
         response = self.host.post(ENDPOINT, cxt)
+
         self.assertTrue(response)
-    
+
+    def testQR_2(self):
+        THRESHOLD = 5e-4
+
+        n = 5
+        m = 5
+        matrix = np.random.random(n * m).reshape(n, m)
+
+        cxt = tc.Context()
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.qr = tc.linalg.qr
+        cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
+        cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
+        cxt.threshold = ((cxt.reconstruction - cxt.matrix).abs().sum() < THRESHOLD)
+        response = self.host.post(ENDPOINT, cxt)
+
+        self.assertTrue(response)
+
+    def testQR_3(self):
+        THRESHOLD = 5e-4
+
+        n = 6
+        m = 5
+        matrix = np.random.random(n * m).reshape(n, m)
+
+        cxt = tc.Context()
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.qr = tc.linalg.qr
+        cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
+        cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
+        cxt.error = ((cxt.reconstruction - cxt.matrix).abs().sum() < THRESHOLD)
+        response = self.host.post(ENDPOINT, cxt)
+
+        self.assertTrue(response)
+
     def testPLU(self):
         x = np.array([1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 12.0, 6.0, 7.0], dtype=np.float32).reshape((3, 3))
 
@@ -119,23 +154,41 @@ class LinearAlgebraTests(ClientTest):
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
-    def testSVD(self):
-        THRESHOLD = 1e-5
-        m = 4
-        n = 3
-        matrix = np.random.random(m * n).reshape(m, n)
+    def testSVD_1(self):
+        THRESHOLD = 5e-5
+        n = 4
+        m = 5
+        matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((m, n), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
         cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=2)
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=200)
         svd_result = self.host.post(ENDPOINT, cxt)
         U, s, V = svd_result
         U = load_np(U)
         s = load_np(s)
         V = load_np(V)
 
-        self.assertTrue(abs((U @ (np.eye(n, n) * s) @ V) - matrix).sum() < THRESHOLD)
+        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < THRESHOLD)
+
+    def testSVD_2(self):
+        THRESHOLD = 5e-5
+        n = 4
+        m = 3
+        matrix = np.random.random(n * m).reshape(n, m)
+
+        cxt = tc.Context()
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.svd = tc.linalg.svd
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=200)
+        svd_result = self.host.post(ENDPOINT, cxt)
+        U, s, V = svd_result
+        U = load_np(U)
+        s = load_np(s)
+        V = load_np(V)
+
+        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < THRESHOLD)
 
 
 def expect_dense(x, dtype):

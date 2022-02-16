@@ -84,37 +84,53 @@ def norm(tensor: Tensor) -> Tensor:
 
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
-def qr(cxt, x: Tensor) -> Tuple:
-    """Compute the QR factorization of the given `matrix`.
+def qr(cxt, a: Tensor) -> Tuple:
+    cxt.shape = a.shape
+    cxt.n, cxt.m = cxt.shape.unpack(2)
 
-    Args:
-        `a`: a matrix with shape `[M, N]`
+    cxt.q_init = Dense.zeros([cxt.n, cxt.n])
+    cxt.u_init = Dense.zeros([cxt.n, cxt.n])
 
-    Returns:
-        A `Tuple` of `Tensor`s `(Q, R)` where `A ~= QR` and `Q.transpose() == Q**-1`
-    """
+    cxt.u = Tensor(After(cxt.u_init[:, 0].write(a[:, 0]), cxt.u_init)).copy()
+    cxt.q = Tensor(
+        After(
+            After(cxt.u, cxt.q_init[:, 0].write(cxt.u_init[:, 0] / norm(cxt.u_init[:, 0]))),
+            cxt.q_init
+        )).copy()
 
-    cxt.m = UInt(x.shape[0])
-    cxt.n = UInt(x.shape[1])
-    cxt.householder = householder
-
-    outer_cxt = cxt
-
-    @closure(outer_cxt.m, cxt.householder)
+    @closure(a)
     @post_op
-    def qr_step(cxt, Q: Tensor, R: Tensor, k: UInt) -> Map:
-        cxt.v, cxt.tau = Tuple(outer_cxt.householder(x=R[k:, k])).unpack(2)
-        cxt.v_outer = Tensor(einsum("i,j->ij", [Tensor(cxt.v), Tensor(cxt.v)]))
-        cxt.H = identity(outer_cxt.m, F64).as_dense().copy()
-        cxt.H_sub = Tensor(cxt.H[k:, k:] - (Tensor(cxt.v_outer) * cxt.tau))
-        return After(cxt.H[k:, k:].write(cxt.H_sub), {
-            "Q": matmul(cxt.H, Q),
-            "R": matmul(cxt.H, R),
-        })
+    def q_step(cxt, q: Tensor, u:  Tensor, i: UInt) -> Map:
 
-    state = Map(Q=identity(cxt.m, F64).as_dense(), R=x.copy())
-    QR = Stream.range(cxt.n).fold("k", state, qr_step)
-    return Tensor(QR['Q'])[:cxt.n].transpose(), Tensor(QR['R'])[:cxt.n]
+        @closure(a)
+        @post_op
+        def u_step(q: Tensor, u: Tensor, i: UInt, j: UInt) -> Map:
+            return After(u[:, i].write(u[:, i].copy() - q[:, j].mul(a[:, i].mul(q[:, j]).sum())), Map(q=q, u=u, i=i))
+
+        state_u_step = Map(q=q, u=Tensor(After(u[:, i].write(a[:, i]), u)), i=i)
+        cxt.update_u = Stream.range(i).fold('j', state_u_step, u_step)
+
+        return After(cxt.update_u, Map(q=Tensor(After(q[:, i].write(u[:, i] / F32(norm(u[:, i]))), q)), u=Tensor(cxt.update_u['u'])))
+
+    state_q_step = Map(q=cxt.q, u=cxt.u)
+    cxt.update_q = Stream.range((1, UInt(cxt.n))).fold('i', state_q_step, q_step)
+    cxt._q = Tensor(After(cxt.update_q, cxt.update_q['q']))
+    cxt._r = Tensor(After(cxt._q, Dense.zeros([cxt.n, cxt.m])))
+
+    @closure(cxt._r, a, cxt._q, cxt.m)
+    @get_op
+    def r_step(i: UInt):
+
+        @closure(cxt._r, a, cxt._q, i, cxt.m)
+        @get_op
+        def r_step_2(j: UInt):
+            return cxt._r[i, j].write(a[:, j].mul(cxt._q[:, i]).sum())
+        return Stream.range((i, cxt.m)).for_each(r_step_2)
+
+    update_r = Stream.range(cxt.n).for_each(r_step)
+    qr_factorization = Map(After(update_r, Map(q=cxt._q, r=cxt._r)))
+
+    return Tensor(qr_factorization['q']), Tensor(qr_factorization['r'])
 
 
 class PLUFactorization(Map):
@@ -273,7 +289,7 @@ def slogdet(cxt, x: Dense) -> Tuple:
 def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(1000)) -> Tuple:
     cxt.shape = A.shape
     cxt.n_orig, cxt.m_orig = [UInt(dim) for dim in cxt.shape.unpack(2)]
-    k = Int(If(l == UInt(0), Value.min(Int(cxt.n_orig), Int(cxt.m_orig)), l))
+    k = Number(Int(If(l == UInt(0), Value.min(Int(cxt.n_orig), Int(cxt.m_orig)), l)))
     A_orig = Tensor(A).copy()
     cxt.A1, n, m = Tuple(If(
         UInt(cxt.n_orig) > UInt(cxt.m_orig),
@@ -287,13 +303,13 @@ def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(1000)) -> Tu
 
     Q = Dense.random_uniform([n, k]).abs()
     cxt.qr = qr
-    Q, R = cxt.qr(x=Q).unpack(2)
+    Q, R = cxt.qr(a=Q).unpack(2)
 
     @closure(cxt.qr, cxt.A1)
     @post_op
     def step(i: UInt, Q_prev: Tensor, Q: Tensor, R: Tensor, err: F32):
         Z = Tensor(matmul(Tensor(cxt.A1), Tensor(Q)))
-        _Q, _R = cxt.qr(x=Z).unpack(2)
+        _Q, _R = Tuple(cxt.qr(a=Z)).unpack(2)
         _err = F32(Tensor(_Q).sub(Q_prev).pow(2).sum())
         _Q_prev = Tensor(_Q).copy()
         return Map(i=i + 1, Q_prev=_Q_prev, Q=Tensor(_Q), R=Tensor(_R), err=_err)
