@@ -10,7 +10,7 @@ class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
     __uri__ = uri(State) + "/map"
-    __spec__ = dict[Id, State]
+    __spec__ = typing.Dict[Id, State]
 
     @staticmethod
     def _parse_args(args, kwargs):
