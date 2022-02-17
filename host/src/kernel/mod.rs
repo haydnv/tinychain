@@ -177,16 +177,15 @@ impl Kernel {
             let proto = proto
                 .into_iter()
                 .map(|(key, state)| {
-                    state
-                        .try_cast_into(|s| {
-                            TCError::bad_request("Class prototype member must be a Scalar, not", s)
-                        })
-                        .map(|scalar| (key, scalar))
+                    Scalar::try_cast_from(state, |s| {
+                        TCError::bad_request("Class prototype member must be a Scalar, not", s)
+                    })
+                    .map(|scalar| (key, scalar))
                 })
-                .collect::<TCResult<_>>()?;
+                .collect::<TCResult<Map<Scalar>>>()?;
 
             Ok(State::Object(
-                InstanceClass::new(Some(extends), proto).into(),
+                InstanceClass::extend(extends, None, proto).into(),
             ))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params: Map<State> = data.try_into()?;

@@ -28,6 +28,6 @@ rand = "0.8"
 safecast = "~0.1.2"
 sha2 = "0.10"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
-tcgeneric = "0.3"
+tcgeneric = { path = "../generic" }
 tc-error = "0.4"
-tc-value = "0.4"
+tc-value = { path = "../value" }

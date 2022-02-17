@@ -7,6 +7,8 @@ use std::ops::Deref;
 use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{en, EncodeMap};
+use futures::future::TryFutureExt;
+use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
 use safecast::TryCastFrom;
 use sha2::digest::{Digest, Output};
@@ -14,7 +16,7 @@ use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tc_value::Value;
+use tc_value::{Link, Value};
 use tcgeneric::Map;
 
 use crate::fs::Dir;
@@ -89,22 +91,6 @@ impl<T: tcgeneric::Instance> tcgeneric::Instance for InstanceExt<T> {
     }
 }
 
-impl<'en, T: tcgeneric::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en>
-    for InstanceExt<T>
-{
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        if !self.members.is_empty() {
-            return Err(en::Error::custom(TCError::not_implemented(
-                "encode an instance of an anonymous class",
-            )));
-        }
-
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.class.extends().to_string(), self.parent)?;
-        map.end()
-    }
-}
-
 impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
     type Target = T;
 
@@ -130,15 +116,29 @@ impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     type View = InstanceView<'en>;
 
     async fn into_view(self, txn: Txn) -> TCResult<InstanceView<'en>> {
-        if !self.members.is_empty() {
-            return Err(TCError::not_implemented(
-                "encode an instance of an anonymous class",
-            ));
+        let mut members = if self.class.is_anonymous() {
+            self.class.proto().clone().into_iter().collect()
+        } else {
+            Map::<State>::new()
+        };
+
+        for (id, state) in self.members {
+            members.insert(id, state);
+        }
+
+        let mut into_view: FuturesUnordered<_> = members
+            .into_iter()
+            .map(|(id, member)| member.into_view(txn.clone()).map_ok(|view| (id, view)))
+            .collect();
+
+        let mut members = Map::new();
+        while let Some((id, view)) = into_view.try_next().await? {
+            members.insert(id, view);
         }
 
         Ok(InstanceView {
-            class: self.class,
-            parent: self.parent.into_view(txn).await?,
+            class: self.class.link(),
+            members,
         })
     }
 }
@@ -211,14 +211,14 @@ impl<T: tcgeneric::Instance + fmt::Display> fmt::Display for InstanceExt<T> {
 
 /// A view of an [`InstanceExt`] at a specific [`Txn`], used for serialization.
 pub struct InstanceView<'en> {
-    class: InstanceClass,
-    parent: StateView<'en>,
+    class: Link,
+    members: Map<StateView<'en>>,
 }
 
 impl<'en> en::IntoStream<'en> for InstanceView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.class.extends().to_string(), self.parent)?;
+        map.encode_entry(self.class.to_string(), self.members)?;
         map.end()
     }
 }

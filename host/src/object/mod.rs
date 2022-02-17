@@ -214,7 +214,7 @@ impl ObjectVisitor {
                 let proto =
                     state.try_cast_into(|s| de::Error::invalid_value(s, "a Class prototype"))?;
 
-                Ok(Object::Class(InstanceClass::new(None, proto)))
+                Ok(Object::Class(InstanceClass::anonymous(None, proto)))
             }
             ObjectType::Instance => Ok(Object::Instance(InstanceExt::new(
                 state,

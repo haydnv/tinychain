@@ -22,5 +22,5 @@ safecast = "0.1"
 tc-btree = { path = "../btree" }
 tc-error = "0.4"
 tc-transact = { path = "../transact" }
-tc-value = "0.4"
-tcgeneric = "0.3"
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

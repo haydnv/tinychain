@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use tc_error::*;
@@ -131,9 +131,15 @@ impl<T> IntoIterator for Map<T> {
     }
 }
 
-impl<T> FromIterator<(Id, T)> for Map<T> {
-    fn from_iter<I: IntoIterator<Item = (Id, T)>>(iter: I) -> Self {
-        let inner = BTreeMap::from_iter(iter);
+impl<F, T> FromIterator<(Id, F)> for Map<T>
+where
+    T: CastFrom<F>,
+{
+    fn from_iter<I: IntoIterator<Item = (Id, F)>>(iter: I) -> Self {
+        let mut inner = BTreeMap::new();
+        for (id, f) in iter {
+            inner.insert(id, f.cast_into());
+        }
         Map { inner }
     }
 }

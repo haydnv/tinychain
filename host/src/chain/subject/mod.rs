@@ -1,6 +1,6 @@
 //! The [`Subject`] of a [`Chain`]
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use async_hash::Hash;
@@ -192,7 +192,7 @@ impl Subject {
                     State::Map(collections) => {
                         let backups = collections
                             .into_iter()
-                            .map(|(id, c)| c.try_into().map(|c| (id, c)))
+                            .map(|(id, c)| Collection::try_from(c).map(|c| (id, c)))
                             .collect::<TCResult<Map<Collection>>>()?;
 
                         subject.restore(txn, backups).await

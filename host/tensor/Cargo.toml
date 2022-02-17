@@ -26,6 +26,6 @@ strided = "~0.2.9"
 tc-btree = { path = "../btree" }
 tc-error = "0.4"
 tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = "0.4"
+tc-value = { path = "../value" }
 tc-table = { path = "../table" }
-tcgeneric = "0.3"
+tcgeneric = { path = "../generic" }

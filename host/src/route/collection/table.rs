@@ -274,9 +274,10 @@ where
                     let values = values
                         .into_iter()
                         .map(|(id, state)| {
-                            state
-                                .try_cast_into(|s| TCError::bad_request("invalid column value", s))
-                                .map(|value| (id, value))
+                            Value::try_cast_from(state, |s| {
+                                TCError::bad_request("invalid column value", s)
+                            })
+                            .map(|value| (id, value))
                         })
                         .collect::<TCResult<Map<Value>>>()?;
 

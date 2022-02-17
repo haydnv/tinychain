@@ -16,7 +16,7 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 tc-btree = "0.4"
 tc-error = "0.4"
 tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = "0.4"
-tc-table = "0.3"
-tc-tensor = "0.4"
-tcgeneric = "0.3"
+tc-value = { path = "../value" }
+tc-table = { path = "../table" }
+tc-tensor = { path = "../tensor" }
+tcgeneric = { path = "../generic" }

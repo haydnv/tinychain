@@ -77,7 +77,8 @@ pub async fn instantiate(
                     }
                     OpRef::Post((extends, proto)) => {
                         let extends = extends.try_into()?;
-                        classes.insert(id, InstanceClass::new(Some(extends), proto));
+                        let link = link.clone().append(id.clone());
+                        classes.insert(id, InstanceClass::extend(extends, Some(link), proto));
                     }
                     other => {
                         return Err(TCError::bad_request(
@@ -88,7 +89,11 @@ pub async fn instantiate(
                 }
             }
             Scalar::Value(Value::Link(extends)) => {
-                classes.insert(id, InstanceClass::new(Some(extends), Map::default()));
+                let link = link.clone().append(id.clone());
+                classes.insert(
+                    id,
+                    InstanceClass::extend(extends, Some(link), Map::default()),
+                );
             }
             other => {
                 let err_msg = format!("Cluster member must be a Class, Chain (for mutable data), or an OpDef, not {:?}", other);

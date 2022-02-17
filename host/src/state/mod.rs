@@ -978,7 +978,7 @@ impl TryCastFrom<State> for InstanceClass {
                     .map(|(id, state)| Scalar::opt_cast_from(state).map(|scalar| (id, scalar)))
                     .collect::<Option<Map<Scalar>>>()?;
 
-                Some(InstanceClass::new(None, proto))
+                Some(InstanceClass::anonymous(None, proto))
             }
             State::Object(Object::Class(class)) => Some(class),
             _ => None,

@@ -238,7 +238,10 @@ impl<'a, T: BTreeInstance> Handler<'a> for FirstHandler<'a, T> {
                 let mut keys = self.btree.clone().keys(*txn.id()).await?;
                 if let Some(values) = keys.try_next().await? {
                     let names = self.btree.schema().iter().map(|col| col.name()).cloned();
-                    Ok(Map::from_iter(names.zip(values.into_iter().map(State::from))).into())
+                    Ok(
+                        Map::<State>::from_iter(names.zip(values.into_iter().map(State::from)))
+                            .into(),
+                    )
                 } else {
                     Err(TCError::not_found("this BTree is empty"))
                 }

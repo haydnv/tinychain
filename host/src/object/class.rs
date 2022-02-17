@@ -24,18 +24,41 @@ const PATH: PathLabel = path_label(&["state", "class"]);
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
     extends: Option<Link>,
+    link: Option<Link>,
     proto: Map<Scalar>,
 }
 
 impl InstanceClass {
-    /// Construct a new subclass of the class at `extends` with the given instance data.
-    pub fn new(extends: Option<Link>, proto: Map<Scalar>) -> Self {
-        Self { extends, proto }
+    /// Construct a new class.
+    pub fn new(link: Option<Link>, proto: Map<Scalar>) -> Self {
+        Self {
+            extends: None,
+            link,
+            proto,
+        }
     }
 
-    /// Return the parent class of this class.
-    pub fn extends(&self) -> Link {
-        if let Some(link) = &self.extends {
+    /// Extend an existing class.
+    pub fn extend(extends: Link, link: Option<Link>, proto: Map<Scalar>) -> Self {
+        Self {
+            extends: Some(extends),
+            link,
+            proto,
+        }
+    }
+
+    /// Construct a new anonymous class.
+    pub fn anonymous(extends: Option<Link>, proto: Map<Scalar>) -> Self {
+        Self {
+            extends,
+            link: None,
+            proto,
+        }
+    }
+
+    /// Return the link to this class, if any.
+    pub fn link(&self) -> Link {
+        if let Some(link) = &self.link {
             link.clone()
         } else {
             TCPathBuf::from(PATH).into()
@@ -45,6 +68,11 @@ impl InstanceClass {
     /// Consume this class and return its data.
     pub fn into_inner(self) -> (Option<Link>, Map<Scalar>) {
         (self.extends, self.proto)
+    }
+
+    /// Return `false` if this class has a self-`Link`
+    pub fn is_anonymous(&self) -> bool {
+        self.link.is_none()
     }
 
     /// Return the instance data of this class.
@@ -81,10 +109,7 @@ impl tcgeneric::Instance for InstanceClass {
 
 impl From<StateType> for InstanceClass {
     fn from(st: StateType) -> Self {
-        Self {
-            extends: Some(st.path().into()),
-            proto: Map::default(),
-        }
+        Self::extend(st.path().into(), None, Map::default())
     }
 }
 
@@ -191,10 +216,7 @@ impl de::Visitor for InstanceClassVisitor {
                 log::debug!("Class extends {}", extends);
                 let proto = access.next_value(()).await?;
                 log::debug!("prototype is {}", proto);
-                return Ok(InstanceClass {
-                    extends: Some(extends),
-                    proto,
-                });
+                return Ok(InstanceClass::extend(extends, None, proto));
             }
 
             let mut proto = Map::new();
@@ -206,15 +228,9 @@ impl de::Visitor for InstanceClassVisitor {
                 proto.insert(id, value);
             }
 
-            Ok(InstanceClass {
-                extends: None,
-                proto: proto.into(),
-            })
+            Ok(InstanceClass::anonymous(None, proto.into()))
         } else {
-            Ok(InstanceClass {
-                extends: None,
-                proto: Map::default(),
-            })
+            Ok(InstanceClass::anonymous(None, Map::default()))
         }
     }
 }

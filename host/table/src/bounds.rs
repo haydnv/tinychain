@@ -230,6 +230,6 @@ impl<V: Into<ColumnBound>> FromIterator<(Id, V)> for Bounds {
 
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&Map::from_iter(self.inner.clone()), f)
+        fmt::Display::fmt(&Map::<ColumnBound>::from_iter(self.inner.clone()), f)
     }
 }
