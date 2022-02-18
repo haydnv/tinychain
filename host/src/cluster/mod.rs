@@ -99,11 +99,9 @@ impl Cluster {
     /// Claim ownership of the given [`Txn`].
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
         self.validate_txn_id(txn.id()).await?;
+        debug_assert!(!txn.has_owner(), "tried to claim an owned transaction");
 
         let mut owned = self.owned.write().await;
-        if owned.contains_key(txn.id()) {
-            return Err(TCError::bad_request("received an unclaimed transaction, but there is a record of an owner for this transaction at cluster", self.link.path()));
-        }
 
         let txn = txn
             .clone()
