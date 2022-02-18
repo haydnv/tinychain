@@ -190,7 +190,7 @@ impl Cluster {
 
     async fn validate_txn_id(&self, txn_id: &TxnId) -> TCResult<()> {
         let last_commit = self.confirmed.read().await;
-        if txn_id <= &*last_commit {
+        if txn_id < &*last_commit {
             Err(TCError::unsupported(format!(
                 "cluster at {} cannot claim transaction {} because the last commit is at {}",
                 self.link, txn_id, *last_commit
