@@ -3,6 +3,7 @@ Reference types.
 :class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
 """
 
+import abc
 import logging
 
 from ..reflect import is_conditional, is_ref
@@ -31,6 +32,9 @@ class After(Ref):
     __uri__ = uri(Ref) + "/after"
 
     def __init__(self, when, then):
+        if is_conditional(then):
+            raise ValueError(f"After does not support a conditional clause: {then}")
+
         self.when = when
         self.then = then
 
@@ -103,6 +107,9 @@ class If(Ref):
     __uri__ = uri(Ref) + "/if"
 
     def __init__(self, cond, then, or_else=None):
+        if is_conditional(cond):
+            raise ValueError(f"If does not support nested conditionals: {cond}")
+
         self.cond = cond
         self.then = then
         self.or_else = or_else
@@ -118,7 +125,7 @@ class If(Ref):
         deanonymize(self.then, cxt)
         deanonymize(self.or_else, cxt)
 
-        if is_conditional(self.cond):
+        if is_conditional(self.cond) or is_op_ref(self.cond):
             self.cond = reference(cxt, self.cond)
 
 
@@ -208,6 +215,9 @@ class Op(Ref):
             subject = form_of(self.subject)
         else:
             subject = self.subject
+
+        if uri(subject) is None:
+            raise ValueError(f"Op subject {subject} has no URI")
 
         return {str(uri(subject)): to_json(self.args)}
 
@@ -424,7 +434,7 @@ class MethodSubject(object):
 
 
 def is_op_ref(fn):
-    if isinstance(fn, Op):
+    if isinstance(fn, Op) or isinstance(fn, Operator):
         return True
     elif hasattr(fn, "__form__"):
         return is_op_ref(form_of(fn))
@@ -462,4 +472,4 @@ def reference(cxt, state):
         logging.debug(f"assigned name {name} to {state} in {cxt}")
         setattr(cxt, name, state)
 
-    return URI(name)
+    return getattr(cxt, name)

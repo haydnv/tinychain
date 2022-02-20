@@ -70,8 +70,22 @@ class Context(object):
         return len(self.form)
 
     def __setattr__(self, name, state):
+        from .state import State
+
         if state is self:
             raise ValueError(f"cannot assign transaction Context to itself")
+        elif isinstance(state, dict):
+            from .state.generic import Map
+            state = Map(state)
+        elif isinstance(state, tuple) or isinstance(state, list):
+            from .state.generic import Tuple
+            state = Tuple(state)
+        elif isinstance(state, str):
+            from .state.value import String
+            state = String(state)
+        elif not isinstance(state, State) and hasattr(state, "__iter__"):
+            logging.warning(f"state {name} is set to {state}, which does not support URI assignment; " +
+                            "consider a Map or Tuple instead")
 
         name = self._get_name(name)
 
@@ -130,6 +144,10 @@ def get_ref(subject, name):
         return ctr
     elif hasattr(subject, "__ref__"):
         return subject.__ref__(name)
+    elif isinstance(subject, dict):
+        return {k: get_ref(v) for k, v in subject.items()}
+    elif isinstance(subject, list) or isinstance(subject, tuple):
+        return tuple(get_ref(item, i) for i, item in enumerate(subject))
     else:
         return subject
 
@@ -168,13 +186,16 @@ class URI(object):
     """
 
     def __init__(self, root, path=[]):
+        root = str(root)
         if not root:
             raise ValueError(f"invalid URI root: {root}")
 
         if root.startswith("$$"):
             raise ValueError(f"invalid reference: {root}")
+        elif root.startswith('$'):
+            root = root[1:]
 
-        self._root = str(root)
+        self._root = root
         self._path = path
 
     def __add__(self, other):
@@ -199,8 +220,8 @@ class URI(object):
         return str(self)
 
     def __str__(self):
-        root = str(self._root)
-        if root.startswith('/') or root.startswith('$') or "://" in root:
+        root = self._root
+        if root.startswith('/') or "://" in root:
             pass
         else:
             root = f"${root}"
@@ -213,8 +234,8 @@ class URI(object):
 
     def append(self, name):
         """
-        Append a segment to this `URI`.
-        
+        Construct a new `URI` beginning with this `URI` and ending with the given `name` segment.
+
         Example:
             .. highlight:: python
             .. code-block:: python

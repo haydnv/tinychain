@@ -2,23 +2,27 @@ import inspect
 
 from pydoc import locate
 
-from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
+from ..util import form_of, URI
 
 from .meta import header, Meta, MethodStub
 
 
 def is_conditional(state):
-    from tinychain.state.ref import Case, If
-    from tinychain.state import State
+    from ..state.ref import Case, If
+    from ..state import State
 
     if isinstance(state, State):
         return is_conditional(form_of(state))
+    elif isinstance(state, dict):
+        return any(is_conditional(value) for value in state.values())
+    elif isinstance(state, list) or isinstance(state, tuple):
+        return any(is_conditional(item) for item in state)
 
     return isinstance(state, Case) or isinstance(state, If)
 
 
 def is_none(state):
-    from tinychain.state.value import Nil
+    from ..state.value import Nil
 
     return state is None or state == Nil
 
@@ -40,7 +44,7 @@ def is_op(fn):
 
 
 def is_ref(state):
-    from tinychain.state.ref import MethodSubject, Ref
+    from ..state.ref import MethodSubject, Ref
 
     if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
         return True
