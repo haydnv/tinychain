@@ -1,8 +1,8 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
 from ..state.generic import Map, Tuple
+from ..state.number import UInt
 from ..state.ref import Ref
-from ..state.value import UInt
 from ..state import State, Stream
 from ..util import form_of, to_json, uri, URI
 

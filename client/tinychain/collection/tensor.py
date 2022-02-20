@@ -2,7 +2,7 @@
 
 from ..reflect import is_ref
 from ..state.generic import Tuple
-from ..state.value import Bool, F32, F64, Number, UInt
+from ..state.number import Bool, F32, F64, Number, UInt
 from ..state import ref, Class, State, Stream
 from ..util import form_of, get_ref, to_json, uri, URI
 

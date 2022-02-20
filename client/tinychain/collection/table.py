@@ -1,8 +1,8 @@
 from ..decorators import closure, delete_op, get_op
 from ..error import BadRequest
 from ..state.generic import Map, Tuple
+from ..state.number import Bool, UInt
 from ..state.ref import If, Ref
-from ..state.value import Bool, UInt
 from ..state import State, Stream
 from ..util import form_of, to_json, uri, URI
 

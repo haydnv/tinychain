@@ -3,7 +3,8 @@ import typing
 from ..util import form_of, get_ref, to_json, uri, URI
 
 from .base import State
-from .value import Bool, Id, UInt
+from .number import Bool, UInt
+from .value import Id
 
 
 class Map(State):

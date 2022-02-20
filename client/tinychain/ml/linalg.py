@@ -1,8 +1,9 @@
 from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.state.generic import Map, Tuple
+from tinychain.state.number import Number, Bool, F64, UInt, F32, Int
 from tinychain.state.ref import After, Get, If, MethodSubject, While
-from tinychain.state.value import Bool, F64, UInt, F32, Int, Value, Number
+from tinychain.state.value import Value
 from tinychain.state import Stream
 
 # from "Numerical Recipes in C" p. 65

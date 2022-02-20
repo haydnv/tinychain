@@ -6,7 +6,7 @@ from typing import List
 from tinychain.collection.tensor import Dense, Tensor, einsum
 from tinychain.ml import DiffedParameter, Identity, Layer, NeuralNet, Parameter
 from tinychain.state.ref import After
-from tinychain.state.value import Int
+from tinychain.state.number import Int
 
 
 class DNNLayer(Layer):
