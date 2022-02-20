@@ -124,14 +124,17 @@ class TensorTests(ClientTest):
         self.assertTrue(abs(std - 1) < tolerance)
 
 
-# Example of a matrix transpose implemented using a nested loop.
-# This is not intended to be performant. Use `Tensor.transpose` to transpose any `Tensor`.
 @tc.post_op
 def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
+    """
+    Example of a matrix transpose implemented using a nested loop.
+    This is not intended to be performant. Use `Tensor.transpose` to transpose a `Tensor`.
+    """
+
     m, n = a.shape.unpack(2)
 
     # this creates one `Tensor` in this `Op` context, to write to
-    cxt.transposed = tc.tensor.Dense.zeros([n, m])
+    cxt.transposed = tc.tensor.Dense.zeros(tc.Tuple([n, m]))
 
     # this is a tensor creation `Op` itself, i.e. each usage of `transposed` would create a new tensor
     # transposed = tc.tensor.Dense.zeros([n, m])
