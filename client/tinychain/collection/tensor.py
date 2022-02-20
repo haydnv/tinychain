@@ -2,7 +2,7 @@
 
 from ..reflect import is_ref
 from ..state.generic import Tuple
-from ..state.number import Bool, F32, F64, Number, UInt
+from ..state.number import Add, Div, Mul, Sub, Pow, Numeric, Number, Bool, F32, F64, UInt
 from ..state import ref, Class, State, Stream
 from ..util import form_of, get_ref, to_json, uri, URI
 
@@ -36,14 +36,18 @@ class Schema(object):
         return f"tensor schema with shape {self.shape} and dtype {self.dtype}"
 
 
-class Tensor(Collection):
+class Tensor(Collection, Numeric):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
 
     @classmethod
     def create(cls, shape, dtype=F32):
-        """Create a new, empty `Tensor`. Call this method to initialize a persistent `Tensor` in a `Chain`."""
+        """
+        Create a new, empty :class:`Tensor`.
+
+        Call this method to initialize a persistent :class:`Tensor` in a :class:`Chain`.
+        """
 
         schema = Schema(shape, dtype)
         return cls(Create(cls, schema, schema))
@@ -65,28 +69,6 @@ class Tensor(Collection):
 
         return super().load(Schema(shape, dtype), data)
 
-    def __getitem__(self, bounds):
-        parent = self
-        bounds = _handle_bounds(bounds)
-
-        class Slice(self.__class__):
-            def write(self, value):
-                return parent._put("", bounds, value)
-
-        return self._get("", bounds, Slice)
-
-    def __setitem__(self, bounds, value):
-        raise NotImplementedError("use Tensor.write instead")
-
-    def __add__(self, other):
-        return self.add(other)
-
-    def __abs__(self):
-        return self.abs()
-
-    def __radd__(self, other):
-        return self.add(other)
-
     def __eq__(self, other):
         return self.eq(other)
 
@@ -102,32 +84,27 @@ class Tensor(Collection):
     def __le__(self, other):
         return self.lte(other)
 
-    def __mul__(self, other):
-        return self.mul(other)
-
-    def __rmul__(self, other):
-        return self.mul(other)
-
     def __ne__(self, other):
         return self.ne(other)
 
-    def __neg__(self):
-        return self * -1
+    def __getitem__(self, bounds):
+        parent = self
+        bounds = _handle_bounds(bounds)
 
-    def __pow__(self, other):
-        return self.pow(other)
+        class Slice(self.__class__):
+            def write(self, value):
+                return parent._put("", bounds, value)
 
-    def __sub__(self, other):
-        return self.sub(other)
+        return self._get("", bounds, Slice)
 
-    def __rsub__(self, other):
-        return -(self - other)
+    def __setitem__(self, bounds, value):
+        raise NotImplementedError("use Tensor.write instead")
 
-    def __truediv__(self, other):
-        return self.div(other)
+    def __rdiv__(self, other):
+        return (self**-1) * other
 
     def __rtruediv__(self, other):
-        return other * (self.pow(-1))
+        return (self**-1) * other
 
     def __ref__(self, name):
         form = form_of(self)
@@ -139,25 +116,10 @@ class Tensor(Collection):
         else:
             return self.__class__(URI(name))
 
-    def abs(self):
-        """Return the element-wise absolute value of this `Tensor`."""
-
-        return self._get("abs", rtype=self.__class__)
-
-    def acos(self):
-        """Return the element-wise arccosine of this `Tensor`."""
-
-        return self._get("acos", rtype=self.__class__)
-
-    def acosh(self):
-        """Return the element-wise hyperbolic arccosine of this `Tensor`."""
-
-        return self._get("acosh", rtype=self.__class__)
-
     def add(self, other):
         """Return the element-wise sum of this `Tensor` and another `Tensor` or `Number`."""
 
-        return self._post("add", {"r": other}, Tensor)
+        return Tensor(Add(self, other))
 
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""
@@ -177,26 +139,6 @@ class Tensor(Collection):
 
         return self._get("argmax", axis, self.__class__)
 
-    def asin(self):
-        """Return the element-wise arcsine of this `Tensor`."""
-
-        return self._get("asin", rtype=self.__class__)
-
-    def asinh(self):
-        """Return the element-wise hyperbolic arcsine of this `Tensor`."""
-
-        return self._get("asinh", rtype=self.__class__)
-
-    def atan(self):
-        """Return the element-wise arctangent of this `Tensor`."""
-
-        return self._get("atan", rtype=self.__class__)
-
-    def atanh(self):
-        """Return the element-wise hyperbolic arctangent of this `Tensor`."""
-
-        return self._get("atanh", rtype=self.__class__)
-
     def cast(self, number_type):
         """Cast the data type of `Tensor` into the given `number_type`."""
 
@@ -207,20 +149,10 @@ class Tensor(Collection):
 
         return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
 
-    def cos(self):
-        """Return the element-wise cosine of this `Tensor`."""
-
-        return self._get("cos", rtype=self.__class__)
-
-    def cosh(self):
-        """Return the element-wise hyperbolic cosine of this `Tensor`."""
-
-        return self._get("cosh", rtype=self.__class__)
-
     def div(self, other):
         """Divide this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
-        return self._post("div", {"r": other}, Tensor)
+        return Tensor(Div(self, other))
 
     @property
     def dtype(self):
@@ -248,6 +180,20 @@ class Tensor(Collection):
 
         return self._get("expand_dims", axis, self.__class__)
 
+    def log(self, base=None):
+        """Logarithm with respect to `base`, or `e` if no `base` is given"""
+
+        return self._get("log", base, self.__class__)
+
+    def lt(self, other):
+        """Return a boolean `Tensor` with element-wise less-than values."""
+        return self._post("lt", {"r": other}, self.__class__)
+
+    def lte(self, other):
+        """Return a boolean `Tensor` with element-wise less-or-equal values."""
+
+        return self._post("lte", {"r": other}, Tensor)
+
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
@@ -257,25 +203,6 @@ class Tensor(Collection):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
         return self._post("gte", {"r": other}, Tensor)
-
-    def log(self, base=None):
-        """
-        Return the logarithm of this `Tensor`.
-
-        If no `base` is specified, this will return the natural logarithm (base e).
-        """
-
-        return self._get("log", base, self.__class__)
-
-    def lt(self, other):
-        """Return a boolean `Tensor` with element-wise less-than values."""
-
-        return self._post("lt", {"r": other}, self.__class__)
-
-    def lte(self, other):
-        """Return a boolean `Tensor` with element-wise less-or-equal values."""
-
-        return self._post("lte", {"r": other}, Tensor)
 
     def logical_and(self, other):
         """Return a boolean `Tensor` with element-wise logical and values."""
@@ -317,7 +244,7 @@ class Tensor(Collection):
     def mul(self, other):
         """Multiply this `Tensor` by another `Tensor` or `Number`, broadcasting if necessary."""
 
-        return self._post("mul", {"r": other}, self.__class__)
+        return self.__class__(Mul(self, other))
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
@@ -327,7 +254,7 @@ class Tensor(Collection):
     def pow(self, other):
         """Raise this `Tensor` to the given power."""
 
-        return self._post("pow", {"r": other}, self.__class__)
+        return self.__class__(Pow(self, other))
 
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
@@ -357,16 +284,6 @@ class Tensor(Collection):
         else:
             return self._get("shape", rtype=Tuple)
 
-    def sin(self):
-        """Return the element-wise sine of this `Tensor`."""
-
-        return self._get("sin", rtype=self.__class__)
-
-    def sinh(self):
-        """Return the element-wise hyperbolic sine of this `Tensor`."""
-
-        return self._get("sinh", rtype=self.__class__)
-
     @property
     def size(self):
         """Return the size of this `Tensor` (the product of its `shape`)."""
@@ -390,23 +307,13 @@ class Tensor(Collection):
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
-        return self._post("sub", {"r": other}, Tensor)
+        return Tensor(Sub(self, other))
 
     def sum(self, axis=None):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else self.__class__
         return self._get("sum", axis, rtype)
-
-    def tan(self):
-        """Return the element-wise tangent of this `Tensor`."""
-
-        return self._get("tan", rtype=self.__class__)
-
-    def tanh(self):
-        """Return the element-wise hyperbolic tangent of this `Tensor`."""
-
-        return self._get("tanh", rtype=self.__class__)
 
     def transpose(self, permutation=None):
         """
@@ -461,7 +368,7 @@ class Dense(Tensor):
 
         dtype = type(value) if isinstance(value, Number) else Number
         schema = Schema(shape, dtype)
-        return cls(Create(uri(cls) + "/constant", (shape, value), schema))
+        return cls(Create(uri(cls) + "/constant", Tuple((shape, value)), schema))
 
     @classmethod
     def load(cls, shape, dtype, data):

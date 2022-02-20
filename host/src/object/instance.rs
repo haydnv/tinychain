@@ -16,7 +16,7 @@ use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
-use tc_value::{Link, Value};
+use tc_value::{Link, Number, Value};
 use tcgeneric::Map;
 
 use crate::fs::Dir;
@@ -164,6 +164,21 @@ where
 {
     fn can_cast_from(instance: &InstanceExt<T>) -> bool {
         debug!("Value::can_cast_from {}?", instance);
+
+        Self::can_cast_from(&(*instance).parent)
+    }
+
+    fn opt_cast_from(instance: InstanceExt<T>) -> Option<Self> {
+        Self::opt_cast_from(*instance.parent)
+    }
+}
+
+impl<T: tcgeneric::Instance + fmt::Display> TryCastFrom<InstanceExt<T>> for Number
+where
+    Number: TryCastFrom<T>,
+{
+    fn can_cast_from(instance: &InstanceExt<T>) -> bool {
+        debug!("Number::can_cast_from {}?", instance);
 
         Self::can_cast_from(&(*instance).parent)
     }
