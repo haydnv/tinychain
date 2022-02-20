@@ -33,7 +33,7 @@ class Number(Value):
         return self.mul(other)
 
     def __neg__(self):
-        return self * self.__class__(-1)
+        return self * Bool(False)
 
     def __rmul__(self, other):
         return self.mul(other)
@@ -74,6 +74,10 @@ class Number(Value):
     def add(self, other):
         """Return the sum of `self` and `other`."""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.add(self)
+
         return self._get("add", other, self.__class__)
 
     def asin(self):
@@ -109,6 +113,10 @@ class Number(Value):
     def div(self, other):
         """Return the quotient of `self` and `other`."""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.mul(1 / self)
+
         return self._get("div", other, self.__class__)
 
     def log(self, base=None):
@@ -123,15 +131,29 @@ class Number(Value):
     def modulo(self, other):
         """Return the remainder of `self` divided by `other`."""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            raise NotImplementedError("Number % Tensor is not supported; " +
+                                      f"construct a constant Tensor from {self} instead")
+
         return self._get("mod", other, self.__class__)
 
     def mul(self, other):
         """Return the product of `self` and `other`."""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.mul(self)
+
         return self._get("mul", other, self.__class__)
 
     def pow(self, other):
         """Raise `self` to the power of `other`."""
+
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            raise NotImplementedError("Number**Tensor is not supported; " +
+                                      f"construct a constant Tensor from {self} instead")
 
         return self._get("pow", other, self.__class__)
 
@@ -182,6 +204,10 @@ class Bool(Number):
     def logical_and(self, other):
         """Boolean AND"""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.logical_and(self)
+
         return self._get("and", other, Bool)
 
     def logical_not(self):
@@ -192,10 +218,18 @@ class Bool(Number):
     def logical_or(self, other):
         """Boolean OR"""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.logical_or(self)
+
         return self._get("or", other, Bool)
 
     def logical_xor(self, other):
         """Boolean XOR"""
+
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return other.logical_xor(self)
 
         return self._get("xor", other, Bool)
 

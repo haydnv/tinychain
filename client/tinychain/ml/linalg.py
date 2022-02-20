@@ -134,6 +134,7 @@ def qr(cxt, a: Tensor) -> Tuple:
     return Tensor(qr_factorization['q']), Tensor(qr_factorization['r'])
 
 
+# TODO: replace this helper class with a `typing.TypedDict`
 class PLUFactorization(Map):
     """
     PLU factorization of a given `[N, N]` matrix.
@@ -141,31 +142,27 @@ class PLUFactorization(Map):
 
     @property
     def p(self) -> Tensor:
-        """
-        Permutation matrix as an `[N, N]` `Tensor`.
-        """
+        """Permutation matrix as an `[N, N]` `Tensor`"""
+
         return Tensor(self['p'])
 
     @property
     def l(self) -> Tensor:
-        """
-        Lower-triangular matrix as an `[N, N]` `Tensor`.
-        """
+        """Lower-triangular matrix as an `[N, N]` `Tensor`"""
+
         return Tensor(self['l'])
 
     @property
     def u(self) -> Tensor:
-        """
-        Upper-triangular matrix as an `[N, N]` `Tensor`.
-        """
+        """Upper-triangular matrix as an `[N, N]` `Tensor`"""
+
         return Tensor(self['u'])
 
     @property
-    def num_permutations(self) -> Tensor:
-        """
-        Upper-triangular matrix as an `[N, N]` `Tensor`.
-        """
-        return Tensor(self['num_permutations'])
+    def num_permutations(self) -> UInt:
+        """The number of permutations calculated during the factorization"""
+
+        return UInt(self['num_permutations'])
 
 
 @post_op
@@ -224,15 +221,15 @@ def plu(x: Tensor) -> PLUFactorization:
             then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n)))
 
     @post_op
-    def cond(p: Tensor, l: Tensor, u: Tensor, i: UInt):
+    def cond(u: Tensor, i: UInt):
         return i < UInt(u.shape[0]) - 1
 
     return PLUFactorization(Map(While(cond, step, Map(
-        p=identity(x.shape[0], F32).as_dense().copy(),
-        l=identity(x.shape[0], F32).as_dense().copy(),
-        u=x.copy(),
-        i=0,
-        num_permutations=0,
+            p=identity(x.shape[0], F32).as_dense().copy(),
+            l=identity(x.shape[0], F32).as_dense().copy(),
+            u=x.copy(),
+            i=0,
+            num_permutations=0,
         ))))
 
 
