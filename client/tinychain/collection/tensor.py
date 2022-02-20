@@ -1,13 +1,13 @@
 """An n-dimensional array of numbers."""
 
-from tinychain.reflect import is_ref
-from tinychain.state.generic import Tuple
-from tinychain.state.value import Bool, I16, F32, F64, Number, UInt
-from tinychain.state import ref, Class, State, Stream
-from tinychain.util import form_of, to_json, uri, URI
+from ..reflect import is_ref
+from ..state.generic import Tuple
+from ..state.value import Bool, F32, F64, Number, UInt
+from ..state import ref, Class, State, Stream
+from ..util import form_of, get_ref, to_json, uri, URI
 
 from .bound import Range
-from .collection import Collection
+from .base import Collection
 
 
 class Schema(object):

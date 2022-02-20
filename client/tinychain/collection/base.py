@@ -1,8 +1,32 @@
-from tinychain.reflect import is_ref
-from tinychain.state.generic import Map, Tuple
-from tinychain.state.ref import Post, Put
-from tinychain.state import State
-from tinychain.util import form_of, uri, URI
+from ..reflect import is_ref
+from ..state.generic import Tuple
+from ..state.ref import Post, Put
+from ..state import State
+from ..util import form_of, to_json, uri, URI
+
+
+class Column(object):
+    """A column in the schema of a :class:`BTree` or :class:`Table`."""
+
+    def __init__(self, name, dtype, max_size=None):
+        self.name = name
+        self.dtype = dtype
+        self.max_size = max_size
+
+    def __eq__(self, other):
+        return self.name == other.name and self.dtype == other.dtype and self.max_size == other.max_size
+
+    def __json__(self):
+        if self.max_size is None:
+            return to_json((self.name, self.dtype))
+        else:
+            return to_json((self.name, self.dtype, self.max_size))
+
+    def __repr__(self):
+        if self.max_size is None:
+            return f"{self.name}: column type {self.dtype}"
+        else:
+            return f"{self.name}: column type {self.dtype}, max size {self.max_size}"
 
 
 class Collection(State):

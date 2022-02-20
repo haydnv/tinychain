@@ -1,12 +1,12 @@
-from tinychain.collection import Column
-from tinychain.collection.table import Table
-from tinychain.collection.tensor import Sparse
-from tinychain.error import BadRequest
-from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
-from tinychain.state.generic import Map, Tuple
-from tinychain.state.ref import After, Get, If, MethodSubject, Put, While, With
-from tinychain.state.value import Bool, Nil, U32, String
-from tinychain.util import uri
+from ..collection import Column
+from ..collection.table import Table
+from ..collection.tensor import Sparse
+from ..error import BadRequest
+from ..decorators import closure, get_op, put_op
+from ..state.generic import Map, Tuple
+from ..state.ref import After, If, Put
+from ..state.value import Bool, U32
+from ..util import uri
 
 from .edge import DIM, Edge, ForeignKey
 
