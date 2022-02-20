@@ -1,8 +1,9 @@
 """User-defined ops"""
 
-from tinychain.util import uri
+from ..util import uri
 
-from . import ref, Scalar
+from . import ref
+from .base import Scalar
 
 
 class Op(Scalar):

@@ -5,8 +5,8 @@ Reference types.
 
 import logging
 
-from tinychain.reflect import is_conditional, is_op, is_ref
-from tinychain.util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from ..reflect import is_conditional, is_ref
+from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
 class Ref(object):

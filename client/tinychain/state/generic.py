@@ -1,8 +1,8 @@
 import typing
 
-from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
+from ..util import form_of, get_ref, to_json, uri, URI
 
-from . import State
+from .base import State
 from .value import Bool, Id, UInt
 
 
