@@ -1,6 +1,7 @@
 """A discrete :class:`State`."""
 
 import inspect
+import logging
 
 from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
@@ -16,6 +17,36 @@ class _Base(object):
 
             if isinstance(attr, MethodStub):
                 setattr(self, name, attr.method(self, name))
+
+    def _get(self, name, key=None, rtype=None):
+        from .ref import MethodSubject, Get
+
+        subject = MethodSubject(self, name)
+        op_ref = Get(subject, key)
+        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
+        return rtype(form=op_ref)
+
+    def _put(self, name, key=None, value=None):
+        from .ref import MethodSubject, Put
+        from .value import Nil
+
+        subject = MethodSubject(self, name)
+        return Nil(Put(subject, key, value))
+
+    def _post(self, name, params, rtype):
+        from .ref import MethodSubject, Post
+
+        subject = MethodSubject(self, name)
+        op_ref = Post(subject, params)
+        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
+        return rtype(form=op_ref)
+
+    def _delete(self, name, key=None):
+        from .ref import MethodSubject, Delete
+        from .value import Nil
+
+        subject = MethodSubject(self, name)
+        return Nil(Delete(subject, key))
 
 
 class Interface(_Base):
@@ -65,7 +96,9 @@ class State(_Base):
         return hex_id(form_of(self))
 
     def __ns__(self, cxt):
-        deanonymize(form_of(self), cxt)
+        form = form_of(self)
+
+        deanonymize(form, cxt)
 
         if isinstance(self.__form__, URI):
             self.__uri__ = self.__form__
@@ -81,36 +114,6 @@ class State(_Base):
             return f"{self.__class__.__name__}({form_of(self)})"
         else:
             return f"instance of {self.__class__.__name__}"
-
-    def _get(self, name, key=None, rtype=None):
-        from .ref import MethodSubject, Get
-
-        subject = MethodSubject(self, name)
-        op_ref = Get(subject, key)
-        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
-        return rtype(form=op_ref)
-
-    def _put(self, name, key=None, value=None):
-        from .ref import MethodSubject, Put
-        from .value import Nil
-
-        subject = MethodSubject(self, name)
-        return Nil(Put(subject, key, value))
-
-    def _post(self, name, params, rtype):
-        from .ref import MethodSubject, Post
-
-        subject = MethodSubject(self, name)
-        op_ref = Post(subject, params)
-        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
-        return rtype(form=op_ref)
-
-    def _delete(self, name, key=None):
-        from .ref import MethodSubject, Delete
-        from .value import Nil
-
-        subject = MethodSubject(self, name)
-        return Nil(Delete(subject, key))
 
     def cast(self, dtype):
         """Attempt to cast this `State` into the given `dtype`."""
