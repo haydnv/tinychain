@@ -1,7 +1,5 @@
-import functools
 import itertools
 import math
-import operator
 
 import numpy as np
 import tinychain as tc
@@ -122,6 +120,16 @@ class DenseTests(unittest.TestCase):
         self.assertEqual(expected.shape, tuple(actual[tc.uri(tc.tensor.Dense)][0][0]))
         self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
 
+    def testPow(self):
+        cxt = tc.Context()
+        cxt.left = tc.tensor.Dense.load([1, 2], tc.I32, [1, 2])
+        cxt.result = cxt.left**2
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_dense(tc.I32, [1, 2], [1, 4])
+
+        self.assertEqual(actual, expected)
+
     def testSub(self):
         shape = [1, 3]
 
@@ -189,7 +197,7 @@ class DenseTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.mean(x, axis)
-        self.assertTrue(allClose(actual, expected))
+        self.assertTrue(all_close(actual, expected))
 
     def testProduct(self):
         shape = [2, 3, 4]
@@ -694,7 +702,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             self.assertEqual(actual, eq)
 
 
-def allClose(actual, expected):
+def all_close(actual, expected):
     return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
 
 

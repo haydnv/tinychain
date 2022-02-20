@@ -58,13 +58,15 @@ class DemoTests(unittest.TestCase):
     def testCache(self):
         self.hosts[1].post("/app/web/add_movie", {"name": "Up", "year": 2009, "description": "Pixar, balloons"})
 
-        for host in self.hosts:
-            self.assertTrue(host.get("/app/db/has_movie", "Up"))
+        for i in range(len(self.hosts)):
+            self.assertTrue(self.hosts[i].get("/app/db/has_movie", "Up"), f"host {i} failed to update")
 
         self.assertEqual(self.hosts[0].get("/app/web/views", "Up"), 0)
 
         self.hosts[0].put("/app/web/add_view", "Up")
-        self.assertEqual(self.hosts[1].get("/app/web/views", "Up"), 1)
+
+        for i in range(len(self.hosts)):
+            self.assertEqual(self.hosts[i].get("/app/web/views", "Up"), 1, f"host {i} failed to update")
 
     def tearDown(self):
         for host in self.hosts:
