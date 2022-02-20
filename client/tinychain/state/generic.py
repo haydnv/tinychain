@@ -1,9 +1,10 @@
 import typing
 
-from ..util import form_of, get_ref, to_json, uri, URI
+from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 from .base import State
 from .number import Bool, UInt
+from .ref import Ref
 from .value import Id
 
 
@@ -107,13 +108,7 @@ class Map(State):
         return self.ne(other)
 
     def __ref__(self, name):
-        if hasattr(form_of(self), "__ref__"):
-            r = self.__class__(form=get_ref(form_of(self), name))
-        else:
-            r = self.__class__(form=URI(name))
-
-        assert r.__spec__ == self.__spec__
-        return r
+        return self.__class__(MapRef(self, name))
 
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
@@ -131,6 +126,24 @@ class Map(State):
         return self._get("len", rtype=UInt)
 
 
+class MapRef(Ref):
+    def __init__(self, map, name):
+        self.map = map
+        self.__uri__ = URI(name)
+
+    def __hex__(self):
+        return hex_id(self.map)
+
+    def __json__(self):
+        return to_json(uri(self))
+
+    def __getitem__(self, key):
+        return self.map[key]
+
+    def __ns__(self, cxt):
+        deanonymize(self.map, cxt)
+
+
 class Tuple(State):
     """A tuple of `State` s."""
 
@@ -144,6 +157,15 @@ class Tuple(State):
 
         class _Tuple(cls):
             __spec__ = spec
+
+            def __len__(self):
+                if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
+                    raise RuntimeError(f"the length of {self} is not known at compile-time")
+                else:
+                    return len(self.__spec__)
+
+            def __iter__(self):
+                return (self[i] for i in range(len(self)))
 
         return _Tuple
 
@@ -183,23 +205,11 @@ class Tuple(State):
 
         return self._get("", i, rtype)
 
-    def __len__(self):
-        if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
-            raise RuntimeError(f"the length of {self} is not known at compile-time")
-        else:
-            return len(self.__spec__)
-
-    def __iter__(self):
-        return (self[i] for i in range(len(self)))
-
     def __ne__(self, other):
         return self.ne(other)
 
     def __ref__(self, name):
-        if hasattr(form_of(self), "__ref__"):
-            return self.__class__(form=get_ref(form_of(self), name))
-        else:
-            return self.__class__(form=URI(name))
+        return self.__class__(TupleRef(self, name))
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
@@ -244,3 +254,21 @@ class Tuple(State):
         """Construct a new `Tuple` of 2-tuples of the form `(self[i], other[i]) for i in self.len()`."""
 
         return self._get("zip", other, Tuple)
+
+
+class TupleRef(Ref):
+    def __init__(self, tuple, name):
+        self.tuple = tuple
+        self.__uri__ = URI(name)
+
+    def __hex__(self):
+        return hex_id(self.tuple)
+
+    def __json__(self):
+        return to_json(uri(self))
+
+    def __getitem__(self, i):
+        return self.tuple[i]
+
+    def __ns__(self, cxt):
+        deanonymize(self.tuple, cxt)
