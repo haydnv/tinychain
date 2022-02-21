@@ -387,6 +387,19 @@ class Tensor(Collection):
 
         return self._get("split", (num_or_size_splits, axis), Tuple)
 
+    def std(self, axis=None):
+        """
+        Return the standard deviation of this `Tensor` along the given `axis`,
+        or the standard deviation of the entire `Tensor` if no axis is given.
+        """
+
+        if axis is None:
+            average = self.mean()
+            size = self.size
+            return (((self - average)**2).sum() / size)**0.5
+        else:
+            raise NotImplementedError("Tensor.std with axis")
+
     def sub(self, other):
         """Subtract another `Tensor` or `Number` from this one, broadcasting if necessary."""
 
