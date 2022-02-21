@@ -689,8 +689,10 @@ impl Transpose {
 
         let mut inverse_permutation = vec![0; ndim];
         for (i, x) in permutation.iter().enumerate() {
+            debug!("transpose axis {} to {}", i, x);
             inverse_permutation[*x] = i;
         }
+        debug!("resulting shape is {}", shape);
 
         Ok(Transpose {
             source_shape,

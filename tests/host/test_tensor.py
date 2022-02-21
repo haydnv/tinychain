@@ -254,6 +254,27 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, sum(range(10)))
 
+    def testExpandAndTranspose(self):
+        input_shape = (5, 8)
+        permutation = (0, 3, 1, 2)
+        x = np.arange(np.product(input_shape)).reshape(input_shape)
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.load(input_shape, tc.I64, x.flatten().tolist())
+        cxt.expanded = cxt.x.expand_dims(0).expand_dims(0).transpose(permutation)
+        # cxt.reshaped = cxt.x.reshape((1, 1) + input_shape).transpose(permutation)
+        # cxt.result = [cxt.reshaped, cxt.expanded]
+        # reshaped, expanded = self.host.post(ENDPOINT, cxt)
+        expanded = self.host.post(ENDPOINT, cxt)
+
+        expected = np.transpose(x.reshape((1, 1) + input_shape), permutation)
+        expected = expected.flatten().tolist()
+        expected = expect_dense(tc.I64, (1, 8, 1, 5), expected)
+        print(expected)
+        print(expanded)
+        # self.assertEqual(reshaped, expected)
+        self.assertEqual(expanded, expected)
+
     def testSliceAndTransposeAndSliceAndSlice(self):
         self.maxDiff = None
         shape = [2, 3, 4, 5]

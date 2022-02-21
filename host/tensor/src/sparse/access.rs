@@ -1419,7 +1419,11 @@ where
                 )));
             }
 
-            permutation[self.rebase.expand_axis()]
+            if permutation[self.rebase.expand_axis()] > self.rebase.expand_axis() {
+                permutation[self.rebase.expand_axis()] - 1
+            } else {
+                permutation[self.rebase.expand_axis()]
+            }
         } else {
             self.ndim() - self.rebase.expand_axis()
         };

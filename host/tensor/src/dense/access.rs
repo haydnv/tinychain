@@ -1032,15 +1032,27 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!(
+            "BlockListExpand::transpose {} {:?}",
+            self.shape(),
+            permutation
+        );
+
         let expand_axis = if let Some(permutation) = &permutation {
-            permutation[self.rebase.expand_axis()]
+            if permutation[self.rebase.expand_axis()] > self.rebase.expand_axis() {
+                permutation[self.rebase.expand_axis()] - 1
+            } else {
+                permutation[self.rebase.expand_axis()]
+            }
         } else {
             self.ndim() - self.rebase.expand_axis()
         };
 
         let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
+
         let source = self.source.transpose(permutation)?;
         let rebase = transform::Expand::new(source.shape().clone(), expand_axis)?;
+
         Ok(BlockListExpand {
             source,
             rebase,
@@ -1419,7 +1431,9 @@ where
             permutation
         );
 
-        BlockListTranspose::new(self, permutation)
+        let transpose = BlockListTranspose::new(self, permutation)?;
+        debug!("BlockListReduce::transpose shape is {}", transpose.shape());
+        Ok(transpose)
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
@@ -1558,12 +1572,14 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         debug!(
-            "BlockListReduce::transpose {} {:?}",
+            "BlockListReshape::transpose {} {:?}",
             self.shape(),
             permutation
         );
 
-        BlockListTranspose::new(self, permutation)
+        let transpose = BlockListTranspose::new(self, permutation)?;
+        debug!("BlockListReshape::transpose shape is {}", transpose.shape());
+        Ok(transpose)
     }
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
