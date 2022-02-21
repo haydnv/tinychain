@@ -65,11 +65,15 @@ class Get(Method):
             key_name = list(sig.parameters.keys())[-1]
             param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            args.append(dtype(URI(key_name)))
+            args.append(dtype(form=URI(key_name)))
         else:
             raise ValueError(f"{self.dtype()} takes 0-3 parameters: (self, cxt, key)")
 
+        if key_name in cxt:
+            raise RuntimeError(f"namespace collision: {key_name} in {self.form}")
+
         cxt._return = self.form(*args)  # populate the Context
+
         return key_name, cxt
 
 
@@ -106,10 +110,10 @@ class Put(Method):
             param = sig.parameters[name]
             if name == key_name:
                 dtype = resolve_class(self.form, param.annotation, Value)
-                args.append(dtype(URI(key_name)))
+                args.append(dtype(form=URI(key_name)))
             elif name == value_name:
                 dtype = resolve_class(self.form, param.annotation, State)
-                args.append(dtype(URI(value_name)))
+                args.append(dtype(form=URI(value_name)))
             else:
                 raise ValueError(f"{self.dtype()} with three parameters requires 'key' or 'value', not '{name}'")
         elif len(sig.parameters) - len(args) == 2:
@@ -117,15 +121,20 @@ class Put(Method):
 
             param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            args.append(dtype(URI(key_name)))
+            args.append(dtype(form=URI(key_name)))
 
             param = sig.parameters[value_name]
             dtype = resolve_class(self.form, param.annotation, State)
-            args.append(dtype(URI(value_name)))
+            args.append(dtype(form=URI(value_name)))
         else:
             raise ValueError(f"{self.dtype()} requires 0-4 parameters: (self, cxt, key, value)")
 
         cxt._return = self.form(*args)
+
+        for name in [key_name, value_name]:
+            if name in cxt:
+                raise RuntimeError(f"namespace collision: {name} in {self.form}")
+
         return key_name, value_name, cxt
 
 
@@ -153,9 +162,16 @@ class Post(Method):
         for name in list(sig.parameters.keys())[len(args):]:
             param = sig.parameters[name]
             dtype = resolve_class(self.form, param.annotation, State)
-            kwargs[name] = dtype(URI(name))
+            kwargs[name] = dtype(form=URI(name))
 
         cxt._return = self.form(*args, **kwargs)
+
+        for name in kwargs.keys():
+            if name in cxt:
+                raise RuntimeError(f"namespace collision: {name} in {self.form}")
+            else:
+                print(f"{name} not in {cxt}")
+
         return cxt
 
 

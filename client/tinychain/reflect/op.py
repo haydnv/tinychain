@@ -52,7 +52,7 @@ class Get(Op):
             key_name = list(sig.parameters.keys())[len(args)]
             param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            args.append(dtype(URI(key_name)))
+            args.append(dtype(form=URI(key_name)))
 
         cxt._return = self.form(*args)  # populate the Context
 
@@ -97,7 +97,7 @@ class Put(Op):
             param = sig.parameters[param_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             if param_name in set(["key", "value"]):
-                args.append(dtype(URI(param_name)))
+                args.append(dtype(form=URI(param_name)))
             else:
                 raise ValueError(f"{self.dtype()} argument {param_name} is ambiguous--use 'key' or 'value' instead")
         elif len(sig.parameters) - len(args) == 2:
@@ -105,7 +105,7 @@ class Put(Op):
             key_name = param_names[-2]
             param = sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
-            args.append(dtype(URI(key_name)))
+            args.append(dtype(form=URI(key_name)))
 
             value_name = param_names[-1]
             param = sig.parameters[value_name]
@@ -150,7 +150,7 @@ class Post(Op):
         kwargs = {}
         for name, param in list(sig.parameters.items())[len(args):]:
             dtype = resolve_class(self.form, param.annotation, State)
-            kwargs[name] = dtype(URI(name))
+            kwargs[name] = dtype(form=URI(name))
 
         cxt._return = self.form(*args, **kwargs)
 
@@ -221,6 +221,10 @@ def _maybe_first_arg(op):
 
 def validate(cxt, provided):
     defined = set(provided)
+    for name in provided:
+        if name in cxt:
+            raise RuntimeError(f"namespace collision: {name} in {cxt}")
+
     for name in cxt.form:
         def validate_ref(ref):
             if not hasattr(ref, "__uri__") and not isinstance(ref, URI):
