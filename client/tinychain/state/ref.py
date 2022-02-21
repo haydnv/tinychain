@@ -246,12 +246,14 @@ class Get(Op):
         if isinstance(self.subject, Ref):
             subject = uri(self.subject)
             is_scalar = False
-        else:
+        elif isinstance(self.subject, URI) or hasattr(self.subject, "__uri__"):
             subject = uri(self.subject)
             if subject is None:
                 raise ValueError(f"subject of Get op ref {self.subject} ({type(self.subject)}) has no URI")
 
             is_scalar = subject.startswith("/state/scalar")
+        else:
+            raise ValueError(f"subject of {self} has no URI")
 
         if is_scalar and not is_ref(self.args):
             (value,) = self.args

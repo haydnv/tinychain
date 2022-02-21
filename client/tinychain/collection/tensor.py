@@ -1,8 +1,10 @@
 """An n-dimensional array of numbers."""
 
+import typing
+
 from ..reflect import is_ref
 from ..state.generic import Tuple
-from ..state.number import Bool, F32, F64, Number, UInt
+from ..state.number import Bool, F32, F64, Number, UInt, U64
 from ..state import ref, Class, State, Stream
 from ..util import form_of, get_ref, to_json, uri, URI
 
@@ -10,43 +12,45 @@ from .bound import Range
 from .base import Collection
 
 
-class Schema(object):
-    """
-    A `Tensor` schema which comprises a shape and data type.
-
-    The data type must be a subclass of `Number` and defaults to `F32`.
-    """
-
-    def __init__(self, shape, dtype=F32):
-        self.shape = shape
-        self.dtype = dtype
-
-    def __getitem__(self, i):
-        if i == 0:
-            return self.shape
-        elif i == 1:
-            return self.dtype
-        else:
-            raise KeyError(f"Tensor schema (shape, dtype) has no element {i}")
-
-    def __json__(self):
-        return to_json([self.shape, self.dtype])
-
-    def __repr__(self):
-        return f"tensor schema with shape {self.shape} and dtype {self.dtype}"
-
-
 class Tensor(Collection):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
+    __spec__ = (typing.Tuple[U64, ...], Number)
+
+    @classmethod
+    def expect(cls, shape, dtype):
+        spec = (shape, dtype)
+
+        if not isinstance(shape, Tuple):
+            shape = Tuple(shape)
+
+        class _Tensor(cls):
+            __spec__ = spec
+
+            @classmethod
+            def create(cls):
+                return cls(ref.Get(cls, (shape, dtype)))
+
+            @property
+            def dtype(self):
+                return dtype
+
+            @property
+            def schema(self):
+                return shape, dtype
+
+            @property
+            def shape(self):
+                return shape
+
+        return _Tensor
 
     @classmethod
     def create(cls, shape, dtype=F32):
         """Create a new, empty `Tensor`. Call this method to initialize a persistent `Tensor` in a `Chain`."""
 
-        schema = Schema(shape, dtype)
-        return cls(Create(cls, schema, schema))
+        return cls.expect(shape, dtype).create()
 
     @classmethod
     def load(cls, shape, dtype, data):
@@ -63,7 +67,7 @@ class Tensor(Collection):
                 dense = tc.tensor.Dense.load([2, 3, 4], tc.i32, values)
         """
 
-        return super().load(Schema(shape, dtype), data)
+        return super().load((shape, dtype), data)
 
     def __getitem__(self, bounds):
         parent = self
@@ -128,16 +132,6 @@ class Tensor(Collection):
 
     def __rtruediv__(self, other):
         return other * (self.pow(-1))
-
-    def __ref__(self, name):
-        form = form_of(self)
-        if hasattr(form, "schema"):
-            ref_form = TypeRef(URI(name), form.schema)
-            return self.__class__(ref_form)
-        elif hasattr(form, "__ref__"):
-            return self.__class__(get_ref(form, name))
-        else:
-            return self.__class__(URI(name))
 
     def abs(self):
         """Return the element-wise absolute value of this `Tensor`."""
@@ -349,13 +343,7 @@ class Tensor(Collection):
     def shape(self):
         """Return the shape of this `Tensor`."""
 
-        form = form_of(self)
-        if hasattr(form, "schema"):
-            shape = form.schema[0]
-            shape = shape if isinstance(shape, Tuple) else Tuple(shape)
-            return shape
-        else:
-            return self._get("shape", rtype=Tuple)
+        return self._get("shape", rtype=Tuple.expect(typing.Tuple[U64, ...]))
 
     def sin(self):
         """Return the element-wise sine of this `Tensor`."""
@@ -455,8 +443,7 @@ class Dense(Tensor):
         """
 
         dtype = type(start) if isinstance(start, Number) else Number
-        schema = Schema(shape, dtype)
-        return cls(Create(uri(cls) + "/range", (shape, start, stop), schema))
+        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
     def concatenate(cls, tensors, axis=None):
@@ -473,8 +460,7 @@ class Dense(Tensor):
         """Return a `Dense` tensor filled with the given `value`."""
 
         dtype = type(value) if isinstance(value, Number) else Number
-        schema = Schema(shape, dtype)
-        return cls(Create(uri(cls) + "/constant", (shape, value), schema))
+        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
     def load(cls, shape, dtype, data):
@@ -490,25 +476,11 @@ class Dense(Tensor):
         if is_ref(data):
             raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
 
-        schema = Schema(shape, dtype)
-
-        class Load(cls):
-            @property
-            def dtype(self):
-                return schema[1]
-
-            @property
-            def schema(self):
-                return schema
-
-            @property
-            def shape(self):
-                return schema[0]
-
+        class Load(cls.expect(shape, dtype)):
             def __ref__(self, name):
                 return cls(URI(name))
 
-        return Load(ref.Put(cls, schema, data))
+        return Load(ref.Put(cls, (shape, dtype), data))
 
     @classmethod
     def ones(cls, shape, dtype=F32):
@@ -518,7 +490,7 @@ class Dense(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls.constant(shape, Number(1).cast(dtype))
+        return cls.expect(shape, dtype).constant(shape, Number(1).cast(dtype))
 
     @classmethod
     def zeros(cls, shape, dtype=F32):
@@ -528,22 +500,20 @@ class Dense(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls.constant(shape, Number(0).cast(dtype))
+        return cls.expect(shape, dtype).constant(shape, Number(0).cast(dtype))
 
     @classmethod
     def random_normal(cls, shape, mean=0.0, std=1.0):
         """Return a `Dense` tensor filled with a random normal distribution of `F64` s."""
 
-        schema = Schema(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
-        return cls(Distribution(uri(cls) + "/random/normal", args, schema))
+        return cls.expect(shape, F64)(ref.Post(uri(cls) + "/random/normal", args))
 
     @classmethod
     def random_uniform(cls, shape):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
 
-        schema = Schema(shape, F64)
-        return cls(Create(uri(cls) + "/random/uniform", shape, schema))
+        return cls.expect(shape, F64)(ref.Get(uri(cls) + "/random/uniform", shape))
 
     def argsort(self):
         """Return the coordinates needed to sort this `Tensor`."""
@@ -584,7 +554,7 @@ class Sparse(Tensor):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        return cls(Schema(shape, dtype))
+        return cls.expect(shape, dtype)(ref.Get(cls, (shape, dtype)))
 
     def elements(self, bounds=None):
         """Return a :class:`Stream` of this tensor's (:class:`Tuple`, :class:`Number`) coordinate-value elements."""
@@ -637,7 +607,10 @@ def _handle_bounds(bounds):
         return bounds
 
     if isinstance(bounds, State):
-        form = form_of(bounds)
+        form = bounds
+        while hasattr(form, "__form__"):
+            form = form_of(form)
+
         if isinstance(form, tuple) or isinstance(form, list):
             bounds = form
         else:
@@ -648,27 +621,4 @@ def _handle_bounds(bounds):
     else:
         bounds = (bounds,)
 
-    return [
-        Range.from_slice(x) if isinstance(x, slice)
-        else x for x in bounds]
-
-
-class Create(ref.Get):
-    def __init__(self, subject, args, schema):
-        ref.Get.__init__(self, subject, args)
-        self.schema = schema
-
-
-class Distribution(ref.Get):
-    def __init__(self, subject, args, schema):
-        ref.Post.__init__(self, subject, args)
-        self.schema = schema
-
-
-class TypeRef(ref.Ref):
-    def __init__(self, name, schema):
-        self.__uri__ = name
-        self.schema = schema
-
-    def __json__(self):
-        return to_json(self.__uri__)
+    return [Range.from_slice(x) if isinstance(x, slice) else x for x in bounds]

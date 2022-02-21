@@ -1,4 +1,4 @@
-from tinychain.collection.tensor import einsum, Dense, Schema, Sparse, Tensor
+from tinychain.collection.tensor import einsum, Dense, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.state.generic import Map, Tuple
 from tinychain.state.number import Number, Bool, F64, UInt, F32, Int
@@ -21,7 +21,7 @@ def diagonal(matrix):
 def identity(size, dtype=Bool):
     """Return an identity matrix with dimensions `[size, size]`."""
 
-    schema = Schema([size, size], dtype)
+    schema = ([size, size], dtype)
     elements = Stream.range((0, size)).map(get_op(lambda i: ((i, i), 1)))
     return Sparse.copy_from(schema, elements)
 

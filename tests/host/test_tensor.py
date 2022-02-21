@@ -666,7 +666,7 @@ class ChainTests(PersistenceTest, unittest.TestCase):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
 
             def _configure(self):
-                schema = tc.tensor.Schema([2, 3], tc.I32)
+                schema = ([2, 3], tc.I32)
                 self.dense = chain_type(tc.tensor.Dense(schema))
                 self.sparse = chain_type(tc.tensor.Sparse(schema))
 
