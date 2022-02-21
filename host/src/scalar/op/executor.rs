@@ -64,6 +64,11 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
 
                     if deps.contains(&id) {
                         return Err(TCError::bad_request("circular dependency", id));
+                    } else if deps.contains(&capture) {
+                        return Err(TCError::unsupported(format!(
+                            "circular dependency between {} and {}",
+                            capture, id
+                        )));
                     }
 
                     let mut ready = true;
@@ -85,7 +90,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                 }
             }
 
-            if pending.is_empty() && self.scope.resolve_id(&capture)?.is_ref() {
+            if pending.is_empty() {
                 return Err(TCError::bad_request(
                     "cannot resolve all dependencies of",
                     capture,
@@ -96,15 +101,13 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
             {
                 let mut providers = FuturesUnordered::new();
                 for id in pending.into_iter() {
-                    debug!("enqueue {}", id);
                     let state = self.scope.resolve_id(&id)?;
-                    debug!("provider for {} is {}", id, state);
-                    providers.push(
-                        state
-                            .clone()
-                            .resolve(&self.scope, &self.txn)
-                            .map(|r| (id, r)),
-                    );
+                    let provider = state
+                        .clone()
+                        .resolve(&self.scope, &self.txn)
+                        .map(|r| (id, r));
+
+                    providers.push(provider);
                 }
 
                 while let Some((id, r)) = providers.next().await {

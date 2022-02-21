@@ -431,8 +431,6 @@ impl Refer for OpRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("OpRef::resolve {} from context {:?}", self, context);
-
         #[inline]
         fn invalid_key<'a, T>(subject: &'a T) -> impl FnOnce(&State) -> TCError + 'a
         where
