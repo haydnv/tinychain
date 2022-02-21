@@ -2,11 +2,12 @@
 
 import typing
 
+from ..decorators import post_op
 from ..reflect import is_ref
-from ..state.generic import Tuple
+from ..state.generic import Map, Tuple
 from ..state.number import Bool, F32, F64, Number, UInt, U64
 from ..state import ref, Class, State, Stream
-from ..util import form_of, get_ref, to_json, uri, URI
+from ..util import form_of, uri, URI
 
 from .bound import Range
 from .base import Collection
@@ -514,6 +515,38 @@ class Dense(Tensor):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
 
         return cls.expect(shape, F64)(ref.Get(uri(cls) + "/random/uniform", shape))
+
+    @classmethod
+    def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None):
+        """
+        Return a `Dense` tensor filled with a random normal distribution of `F64` s.
+
+        Any value `x` outside the range `minval <= x <= maxval` will be replaced by a value drawn from a new
+        random normal distribution.
+
+        `minval` and `maxval` default to two standard deviations.
+        """
+
+        if not std:
+            return cls.constant(shape, mean)
+
+        minval = std * -2 if minval is None else minval
+        maxval = std * 2 if maxval is None else maxval
+
+        @post_op
+        def cond(cxt, tensor: Dense) -> Bool:
+            cxt.too_small = (tensor < minval).any()
+            cxt.too_big = (tensor > maxval).any()
+            return cxt.too_small.logical_or(cxt.too_big)
+
+        @post_op
+        def step(cxt, tensor: Dense) -> Map:
+            cxt.new_dist = Dense.random_normal(shape, mean, std)
+            cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
+            return Map(tensor=cxt.new_tensor.copy())
+
+        truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
+        return cls(truncated)
 
     def argsort(self):
         """Return the coordinates needed to sort this `Tensor`."""

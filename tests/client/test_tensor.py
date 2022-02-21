@@ -6,7 +6,6 @@ from testutils import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
 SIZE = 10
-EXPECTED = np.array([i if i % 2 == 0 else i * 10 for i in range(1, SIZE + 1)])
 
 
 # in this case, we know the `size` of the Tensor at compile time,
@@ -52,7 +51,7 @@ def example3(x: tc.tensor.Dense):  # without this type annotation, TinyChain won
     return tc.While(cond, step, tc.Map(i=0))
 
 
-class TensorTests(ClientTest):
+class ExampleTests(ClientTest):
     @staticmethod
     def context():
         cxt = tc.Context()
@@ -80,6 +79,13 @@ class TensorTests(ClientTest):
 
         self.execute(cxt)
 
+    def execute(self, cxt):
+        expected = np.array([i if i % 2 == 0 else i * 10 for i in range(1, SIZE + 1)])
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, expect_dense(expected))
+
+
+class TensorTests(ClientTest):
     def testWhere(self):
         size = 5
         x = np.random.random(size).astype(np.bool)
@@ -96,9 +102,16 @@ class TensorTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertTrue(all_close(actual, expected))
 
-    def execute(self, cxt):
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect_dense(EXPECTED))
+    def testTruncatedNormal(self):
+        tolerance = 0.5
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.truncated_normal([10, 20])
+        cxt.result = cxt.x.mean(), cxt.x.std()
+
+        mean, std = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(abs(mean) < tolerance)
+        self.assertTrue(abs(std - 1) < tolerance)
 
 
 # Example of a matrix transpose implemented using a nested loop.
