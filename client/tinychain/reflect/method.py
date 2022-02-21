@@ -169,8 +169,6 @@ class Post(Method):
         for name in kwargs.keys():
             if name in cxt:
                 raise RuntimeError(f"namespace collision: {name} in {self.form}")
-            else:
-                print(f"{name} not in {cxt}")
 
         return cxt
 

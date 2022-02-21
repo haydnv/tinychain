@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 from tinychain.decorators import MethodStub
 from tinychain.reflect import header, is_ref
+from tinychain.state.chain import Chain
 from tinychain.state.generic import Tuple
 from tinychain.state.ref import Ref
 from tinychain.state import Class, Instance, Object, Scalar, State
@@ -36,6 +37,8 @@ class _Meta(type):
         form = {}
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or isinstance(attr, URI):
+                continue
+            elif hasattr(attr, "hidden") and attr.hidden:
                 continue
             elif name in parent_members:
                 if attr is parent_members[name] or attr == parent_members[name]:
@@ -105,19 +108,49 @@ class Model(Object, metaclass=_Meta):
                 pass  # self.name is already set to attr, just leave it along
 
     def __json__(self):
-        if isinstance(form_of(self), URI) or isinstance(form_of(self), Ref):
-            return to_json(form_of(self))
+        form = form_of(self)
+        form = form if form else [None]
+
+        if isinstance(form, URI) or isinstance(form, Ref):
+            return to_json(form)
         else:
-            return {str(uri(self)): to_json(form_of(self))}
+            return {str(uri(self)): to_json(form)}
+
+
+class Header(object):
+    pass
 
 
 class Dynamic(Instance):
+    # TODO: deduplicate with Meta.__form__
     def __form__(self):
         parent_members = dict(inspect.getmembers(Instance))
+
+        header = Header()
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+            elif hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(header, name, attr.method(self, name))
+            elif hasattr(attr, "__ref__"):
+                setattr(header, name, get_ref(attr, f"self/{name}"))
+            else:
+                setattr(header, name, attr)
 
         form = {}
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
+                continue
+            elif hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
                 continue
             elif name in parent_members:
                 if attr is parent_members[name] or attr == parent_members[name]:
@@ -128,14 +161,16 @@ class Dynamic(Instance):
                         continue
 
             if isinstance(attr, MethodStub):
-                form[name] = attr.method(self, name)
+                form[name] = attr.method(header, name)
             else:
                 form[name] = attr
 
         return form
 
     def __json__(self):
-        return {str(uri(self)): to_json(form_of(self))}
+        form = form_of(self)
+        form = form if form else [None]
+        return {str(uri(self)): to_json(form)}
 
     def __ref__(self, name):
         return ModelRef(self, name)
@@ -176,10 +211,11 @@ def model(cls):
                     raise RuntimeError(f"Dynamic model cannot be instantiated by reference (got {form})")
 
                 Model.__init__(self, form)
+            elif cls.__init__ is Model.__init__:
+                cls.__init__(self, None)
             else:
-                params = _parse_init_args(inspect.signature(cls.__init__), args, kwargs)
-                cls.__init__(self, *args, **kwargs)
-                Instance.__init__(self, params)
+                params = _parse_init_args(cls, inspect.signature(cls.__init__), args, kwargs)
+                Instance.__init__(self, params if params else None)
 
     return _Model
 
@@ -187,34 +223,116 @@ def model(cls):
 class Library(object):
     @staticmethod
     def exports():
+        """A list of :class:`Model` s provided by this `Library`"""
+
         return []
+
+    @staticmethod
+    def provides():
+        """A list of :class:`Dynamic` models provided by this `Library`"""
+
+        return []
+
+    @staticmethod
+    def uses():
+        return {}
 
     def __init__(self, form=None):
         if form is not None:
             self.__uri__ = form
 
+        for name, cls in self.uses().items():
+            setattr(self, name, cls())
+
         for cls in self.exports():
+            expected_uri = uri(self).append(cls.__name__)
+            if uri(cls) != expected_uri:
+                raise ValueError(f"the URI of {cls} should be {expected_uri}")
+
             setattr(self, cls.__name__, model(cls))
 
-    def __json__(self):
-        form = {}
+        for cls in self.provides():
+            setattr(self, cls.__name__, cls)
+
+    def validate(self):
+        name = self.__class__.__name__
+
+        for cls in self.uses().values():
+            if not inspect.isclass(cls) or not issubclass(cls, Library):
+                raise ValueError(f"{name} can only use a Library or App, not {cls}")
 
         for cls in self.exports():
-            if not issubclass(cls, Model):
-                raise ValueError(f"Library can only export a Model class, not {cls}")
+            if not inspect.isclass(cls) or not issubclass(cls, Model):
+                raise ValueError(f"{name} can only export a Model class, not {cls}")
 
+        for cls in self.provides():
+            if not inspect.isclass(cls) or not issubclass(cls, Dynamic):
+                raise ValueError(f"{name} can only provide a Dynamic model, not {cls}")
+
+    def __json__(self):
+        self.validate()
+
+        # TODO: deduplicate with Meta.__json__
+        form = {}
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name == "exports":
+            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
                 continue
 
-            _, instance_header = header(type(self))
+            if inspect.isclass(attr):
+                if issubclass(attr, Library) or issubclass(attr, Dynamic):
+                    continue
+            elif isinstance(attr, Library):
+                continue
 
-            if _is_mutable(attr):
+            if hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+            elif _is_mutable(attr):
                 raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
-            elif hasattr(attr, "hidden") and attr.hidden:
+            elif isinstance(attr, MethodStub):
+                form[name] = to_json(attr.method(self, name))
+            else:
+                form[name] = to_json(attr)
+
+        return {str(uri(self)): form}
+
+
+class App(Library):
+    def __json__(self):
+        self.validate()
+
+        header = Header()
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
                 continue
             elif isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(instance_header, name))
+                setattr(header, name, attr.method(self, name))
+            else:
+                setattr(header, name, attr)
+
+        # TODO: deduplicate with Library.__json__ and Meta.__json__
+        form = {}
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
+                continue
+
+            if inspect.isclass(attr):
+                if issubclass(attr, Library) or issubclass(attr, Dynamic):
+                    continue
+            elif isinstance(attr, Library):
+                continue
+
+            if hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+            elif _is_mutable(attr) and not isinstance(attr, Chain):
+                raise RuntimeError(f"{self.__class__.__name__} must be managed by a Chain")
+            elif isinstance(attr, MethodStub):
+                form[name] = to_json(attr.method(header, name))
             else:
                 form[name] = to_json(attr)
 
@@ -226,7 +344,7 @@ def _is_mutable(state):
         return False
 
     if isinstance(state, Scalar):
-        return False,
+        return False
 
     return True
 
@@ -261,7 +379,7 @@ def write_config(lib, config_path, overwrite=False):
             config_file.write(json.dumps(config, indent=4))
 
 
-def _parse_init_args(sig, args, kwargs):
+def _parse_init_args(cls, sig, args, kwargs):
     params = {}
     sig = OrderedDict(sig.parameters)
     if list(sig.keys())[0] != "self":
@@ -288,7 +406,7 @@ def _parse_init_args(sig, args, kwargs):
                 params[name] = param.default
             else:
                 raise ValueError(
-                    f"no value specified for parameter {name} in {self.__class__.__name__}.__init__")
+                    f"no value specified for parameter {name} in {cls.__name__}.__init__")
 
         elif param.kind == inspect.Parameter.VAR_KEYWORD:
             params.update(kwargs)
