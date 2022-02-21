@@ -80,6 +80,22 @@ class TensorTests(ClientTest):
 
         self.execute(cxt)
 
+    def testWhere(self):
+        size = 5
+        x = np.random.random(size).astype(np.bool)
+        a = np.random.random(size)
+        b = np.random.random(size)
+        expected = np.where(x, a, b)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.Bool)
+        cxt.a = load_dense(a)
+        cxt.b = load_dense(b)
+        cxt.result = tc.tensor.where(cxt.x, cxt.a, cxt.b)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
+
     def execute(self, cxt):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(EXPECTED))
@@ -126,8 +142,16 @@ class NestedLoopTests(ClientTest):
         self.assertTrue(self.host.post(ENDPOINT, cxt))
 
 
+def all_close(actual, expected):
+    return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
+
+
 def expect_dense(x, dtype=tc.I64):
     return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}
+
+
+def load_dense(x, dtype=tc.F32):
+    return tc.tensor.Dense.load(x.shape, dtype, x.flatten().tolist())
 
 
 if __name__ == "__main__":
