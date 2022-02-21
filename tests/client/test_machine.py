@@ -1,7 +1,6 @@
 import numpy as np
 import tinychain as tc
 import unittest
-from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
 from testutils import ClientTest
@@ -36,10 +35,21 @@ class Logistic_Regression():
 class MLTests(ClientTest):
     def test_logistic(self):
         cxt=tc.Context()
-        cancer_dataset=load_breast_cancer()
-        x_train,x_test,y_train,y_test=train_test_split(cancer_dataset['data'],cancer_dataset['target'],random_state=0)
+        data= np.array([[11,-2,1],
+               [3,-4,0],
+               [2,-10,0],
+               [10,-5,1],
+               [1,-3,0],
+               [6,-5,1],
+               [2,-7,0],
+               [6,-1,1]])
+        X=data[:,:-1]
+        y=data[:,-1]
         
-        cxt.inputs=load(x_train)
+        X_train,X_test,y_train,y_test=train_test_split(X,y,random_state=0,test_size=0.2)
+
+        
+        cxt.inputs=load(X_train)
         cxt.labels=load(y_train)
         
         cxt.logistic = Logistic_Regression.create(cxt.inputs)
