@@ -3,7 +3,6 @@ Reference types.
 :class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
 """
 
-import abc
 import logging
 
 from ..reflect import is_conditional, is_ref
@@ -223,7 +222,6 @@ class Op(Ref):
 
     def __ns__(self, cxt):
         deanonymize(self.subject, cxt)
-        deanonymize(self.args, cxt)
 
 
 class Get(Op):
@@ -267,10 +265,13 @@ class Get(Op):
     def __ns__(self, cxt):
         super().__ns__(cxt)
 
+        deanonymize(self.args, cxt)
+
         if is_op_ref(self.args):
             (key,) = self.args
             log_anonymous(key)
-            self.args = (reference(cxt, key),)
+            key = reference(cxt, key)
+            self.args = (key,)
 
 
 class Put(Op):
@@ -296,16 +297,19 @@ class Put(Op):
     def __ns__(self, cxt):
         super().__ns__(cxt)
 
-        if is_op_ref(self.args):
-            key, value = self.args
+        key, value = self.args
+        deanonymize(key, cxt)
+        deanonymize(value, cxt)
 
+        if is_op_ref(key):
             log_anonymous(key)
             key = reference(cxt, key)
 
+        if is_op_ref(value):
             log_anonymous(value)
             value = reference(cxt, value)
 
-            self.args = (key, value)
+        self.args = (key, value)
 
 
 class Post(Op):
@@ -337,6 +341,8 @@ class Post(Op):
 
         args = {}
         for name, arg in self.args.items():
+            deanonymize(arg, cxt)
+
             if is_op_ref(arg):
                 log_anonymous(arg)
                 args[name] = reference(cxt, arg)
@@ -369,6 +375,7 @@ class Delete(Op):
 
     def __ns__(self, cxt):
         super().__ns__(cxt)
+        deanonymize(self.args, cxt)
 
         if is_op_ref(self.args):
             log_anonymous(self.args)
