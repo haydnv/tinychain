@@ -434,7 +434,7 @@ class MethodSubject(object):
 
 
 def is_op_ref(fn):
-    if isinstance(fn, Op) or isinstance(fn, Operator):
+    if isinstance(fn, Op):
         return True
     elif hasattr(fn, "__form__"):
         return is_op_ref(form_of(fn))
