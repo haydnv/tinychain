@@ -1,7 +1,6 @@
 """A discrete :class:`State`."""
 
 import inspect
-import logging
 
 from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
@@ -64,7 +63,6 @@ class State(_Base):
 
     def __init__(self, form):
         from ..reflect import is_ref
-        from .ref import Ref
 
         self.__form__ = form
 
@@ -83,7 +81,6 @@ class State(_Base):
 
     def __json__(self):
         from ..reflect import is_ref
-        from .ref import MethodSubject, Ref
 
         form = form_of(self)
 

@@ -480,8 +480,14 @@ class Dense(Tensor):
         schema = Schema(shape, dtype)
 
         class Load(cls):
-            def __init__(self, put_op):
-                cls.__init__(self, put_op)
+            def __new__(cls, form):
+                if isinstance(form, ref.Put):
+                    return Dense.__new__(cls)
+                else:
+                    return Tensor.__new__(Dense)
+
+            def __init__(self, form):
+                cls.__init__(self, form)
 
             @property
             def dtype(self):
