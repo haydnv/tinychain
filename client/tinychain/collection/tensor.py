@@ -511,10 +511,20 @@ class Dense(Tensor):
         return cls.expect(shape, F64)(ref.Post(uri(cls) + "/random/normal", args))
 
     @classmethod
-    def random_uniform(cls, shape):
+    def random_uniform(cls, shape, minval=0, maxval=1):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
 
-        return cls.expect(shape, F64)(ref.Get(uri(cls) + "/random/uniform", shape))
+        if minval == maxval:
+            return cls.constant(shape, minval)
+
+        assert maxval > minval
+
+        random = cls(ref.Get(uri(cls) + "/random/uniform", shape))
+        if minval == 0 and maxval == 1:
+            return random
+        else:
+            range = maxval - minval
+            return (random * range) + minval
 
     @classmethod
     def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None):

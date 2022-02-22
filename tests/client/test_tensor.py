@@ -102,6 +102,16 @@ class TensorTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertTrue(all_close(actual, expected))
 
+    def testRandomUniform(self):
+        minval = -1
+        maxval = 3
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.random_uniform([5, 1], minval, maxval)
+        cxt.result = (cxt.x > -1).all().logical_and((cxt.x < 3).all()).logical_and(cxt.x.mean() > 0)
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
+
     def testTruncatedNormal(self):
         tolerance = 0.5
 
