@@ -89,8 +89,11 @@ class Map(State):
         return self.eq(other)
 
     def __getitem__(self, key):
-        if isinstance(form_of(self), dict):
-            return get_ref(form_of(self)[key], uri(self).append(key))
+        if hasattr(form_of(self), "__getitem__"):
+            if uri(self) == uri(self.__class__):
+                return form_of(self)[key]
+            else:
+                return get_ref(form_of(self)[key], uri(self).append(key))
         elif isinstance(self.__spec__, dict):
             if key in self.__spec__:
                 rtype = self.__spec__[key]
@@ -194,8 +197,11 @@ class Tuple(State):
         return to_json(form_of(self))
 
     def __getitem__(self, i):
-        if isinstance(form_of(self), list) or isinstance(form_of(self), tuple):
-            return get_ref(form_of(self)[i], uri(self).append(i))
+        if hasattr(form_of(self), "__getitem__"):
+            if uri(self) == uri(self.__class__):
+                return form_of(self)[i]
+            else:
+                return get_ref(form_of(self)[i], uri(self).append(i))
         elif len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
             rtype = self.__spec__[0]
         elif i < len(self.__spec__):

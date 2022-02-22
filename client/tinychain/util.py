@@ -246,7 +246,7 @@ class URI(object):
         if not str(name):
             return self
 
-        return URI(str(self), [name])
+        return URI(str(self), [str(name)])
 
     def id(self):
         """Return the ID segment of this `URI`, if present."""
