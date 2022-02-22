@@ -1,3 +1,5 @@
+import math
+
 from ..util import form_of, uri
 
 from .base import Interface
@@ -101,6 +103,19 @@ class Numeric(Interface):
 
         return self._post("div", {'r': other}, self.__class__)
 
+    def exp(self):
+        """Raise `e` to the power of `self`."""
+
+        return self._get("exp", rtype=self.__class__)
+
+    def log(self, base=None):
+        """Logarithm with respect to `base`, or `e` if no `base` is given"""
+
+        if base is None or base is math.e:
+            return self._get("log", rtype=self.__class__)
+        else:
+            return self._post("log", {"r": base}, self.__class__)
+
     def modulo(self, other):
         """The remainder of `self` divided by `other`"""
 
@@ -172,7 +187,7 @@ class Mul(Operator):
         return Numeric.mul(self.param, self.input)
 
     def backward(self):
-        return differentiate(self.param) * differentiate(self.input)
+        return (differentiate(self.param) * self.param) + (differentiate(self.input) * self.input)
 
 
 class Pow(Operator):
@@ -215,8 +230,6 @@ class Number(Value, Numeric):
             raise TypeError(f"there is no implementation for {other}**{self}")
 
     def add(self, other):
-        """Return the sum of `self` and `other`."""
-
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other.add(self)
@@ -229,8 +242,6 @@ class Number(Value, Numeric):
         return self.__class__(Add(self, other))
 
     def div(self, other):
-        """Return the quotient of `self` and `other`."""
-
         from ..collection.tensor import Tensor
 
         if isinstance(other, Tensor):
@@ -265,11 +276,6 @@ class Number(Value, Numeric):
 
         return Value.gte(self, other)
 
-    def log(self, base=None):
-        """Logarithm with respect to `base`, or `e` if no `base` is given"""
-
-        return self._post("log", {"r": base}, F64)
-
     def lt(self, other):
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
@@ -284,9 +290,16 @@ class Number(Value, Numeric):
 
         return Value.lte(self, other)
 
-    def mul(self, other):
-        """Return the product of `self` and `other`."""
+    def log(self, other):
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            raise ValueError(f"{self.__class__.__name__}.log({other.__class__.__name__} is not supported; " +
+                             "use a constant Tensor instead")
 
+        # TODO: return an Operator
+        return Numeric.log(self, other)
+
+    def mul(self, other):
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other.mul(self)
@@ -299,7 +312,6 @@ class Number(Value, Numeric):
         return self.__class__(Mul(self, other))
 
     def pow(self, other):
-        """Raise `self` to the power of `other`."""
         from ..collection.tensor import Tensor
 
         if isinstance(other, Tensor):
@@ -316,8 +328,6 @@ class Number(Value, Numeric):
         return self.__class__(Pow(self, other))
 
     def sub(self, other):
-        """Return the difference between `self` and `other`."""
-
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other.add(-self)
