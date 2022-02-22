@@ -32,6 +32,8 @@ def header(cls):
     for name, attr in inspect.getmembers(instance):
         if name.startswith('_') or isinstance(attr, URI):
             continue
+        elif hasattr(attr, "hidden") and attr.hidden:
+            continue
         elif inspect.ismethod(attr) and attr.__self__ is cls:
             # it's a @classmethod
             continue
@@ -65,6 +67,8 @@ class Meta(type):
         form = {}
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or isinstance(attr, URI):
+                continue
+            elif hasattr(attr, "hidden") and attr.hidden:
                 continue
             elif name in parent_members:
                 if attr is parent_members[name] or attr == parent_members[name]:

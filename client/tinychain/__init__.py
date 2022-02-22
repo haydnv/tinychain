@@ -4,6 +4,10 @@ import tinychain.error
 import tinychain.graph
 import tinychain.graph.edge
 import tinychain.host
+# TODO: move ml.linalg into hosted_ml and rename hosted_ml -> ml
+import tinychain.hosted_ml
+import tinychain.hosted_ml.nn
+import tinychain.hosted_ml.service
 import tinychain.ml.nn
 import tinychain.ml.optimizer
 
