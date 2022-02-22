@@ -14,7 +14,7 @@ use sha2::digest::{Digest, Output};
 use tcgeneric::*;
 
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use crate::scalar::{Executor, Refer, Scalar};
+use crate::scalar::{Executor, Refer, Scalar, TCRef};
 use crate::state::State;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
@@ -433,7 +433,26 @@ impl fmt::Display for OpDef {
 
 fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scalar)> {
     form.into_iter()
-        .map(|(id, scalar)| (id, scalar.dereference_self(path)))
+        .map(|(id, scalar)| {
+            let dereferenced = match scalar {
+                Scalar::Ref(tc_ref) => {
+                    let tc_ref = match *tc_ref {
+                        // this OpRef could be a constructor with its own $self,
+                        // so don't dereference the arguments
+                        TCRef::Op(op_ref) => TCRef::Op(op_ref.dereference_subject(path)),
+                        tc_ref => tc_ref.dereference_self(path),
+                    };
+
+                    Scalar::Ref(Box::new(tc_ref))
+                }
+                scalar => {
+                    debug!("dereference Op form {}: {}", id, scalar);
+                    scalar.dereference_self(path)
+                }
+            };
+
+            (id, dereferenced)
+        })
         .collect()
 }
 

@@ -183,29 +183,20 @@ impl<T: tcgeneric::Instance + ToState> ToState for InstanceExt<T> {
             class,
             members,
         };
+
         State::Object(Object::Instance(instance))
     }
 }
 
 impl<T: tcgeneric::Instance + fmt::Debug> fmt::Debug for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:?} instance: {:?}",
-            tcgeneric::Instance::class(self),
-            self.parent
-        )
+        write!(f, "{:?} instance", tcgeneric::Instance::class(self))
     }
 }
 
 impl<T: tcgeneric::Instance + fmt::Display> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} instance: {}",
-            tcgeneric::Instance::class(self),
-            self.parent
-        )
+        write!(f, "{} instance", tcgeneric::Instance::class(self))
     }
 }
 

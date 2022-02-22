@@ -192,10 +192,12 @@ impl fmt::Debug for InstanceClass {
 
 impl fmt::Display for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(link) = &self.extends {
+        if let Some(link) = &self.link {
             write!(f, "class {}", link)
+        } else if let Some(link) = &self.extends {
+            write!(f, "anonymous subclass of {}", link)
         } else {
-            f.write_str("generic Object type")
+            f.write_str("Object")
         }
     }
 }

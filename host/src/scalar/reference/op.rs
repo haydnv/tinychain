@@ -337,6 +337,19 @@ impl Instance for OpRef {
     }
 }
 
+impl OpRef {
+    pub(crate) fn dereference_subject(self, path: &TCPathBuf) -> Self {
+        match self {
+            Self::Get((subject, key)) => Self::Get((subject.dereference_self(path), key)),
+            Self::Put((subject, key, value)) => {
+                Self::Put((subject.dereference_self(path), key, value))
+            }
+            Self::Post((subject, params)) => Self::Post((subject.dereference_self(path), params)),
+            Self::Delete((subject, key)) => Self::Delete((subject.dereference_self(path), key)),
+        }
+    }
+}
+
 #[async_trait]
 impl Refer for OpRef {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
@@ -431,6 +444,8 @@ impl Refer for OpRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
+        debug!("OpRef::resolve {} from context {:?}", self, context);
+
         #[inline]
         fn invalid_key<'a, T>(subject: &'a T) -> impl FnOnce(&State) -> TCError + 'a
         where

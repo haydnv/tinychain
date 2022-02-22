@@ -198,8 +198,9 @@ where
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!(
-            "{} route {} (parent is {} {})",
+            "{} with members {} route {} (parent is {} {})",
             self,
+            self.members(),
             TCPath::from(path),
             std::any::type_name::<T>(),
             self.parent()
@@ -222,7 +223,7 @@ where
                 None
             }
         } else if let Some(attr) = self.members().get(&path[0]) {
-            debug!("{} found in instance members", &path[0]);
+            debug!("{} found in {} members", &path[0], self);
 
             if let State::Scalar(attr) = attr {
                 route_attr(self, &path[0], attr, &path[1..])
@@ -239,7 +240,13 @@ where
             debug!("{} found in class proto", path[0]);
             attr.route(&path[1..])
         } else {
-            debug!("not found in {}: {}", self, TCPath::from(path));
+            debug!(
+                "not found in {}: {} (while resolving {})",
+                self,
+                &path[0],
+                TCPath::from(path)
+            );
+
             None
         }
     }
@@ -292,7 +299,7 @@ where
 {
     match attr {
         Scalar::Op(OpDef::Get(get_op)) => {
-            debug!("call GET method");
+            debug!("call GET method with subject {}", subject);
 
             Some(Box::new(GetMethod {
                 subject,
@@ -302,7 +309,7 @@ where
             }))
         }
         Scalar::Op(OpDef::Put(put_op)) => {
-            debug!("call PUT method");
+            debug!("call PUT method with subject {}", subject);
 
             Some(Box::new(PutMethod {
                 subject,
@@ -312,7 +319,7 @@ where
             }))
         }
         Scalar::Op(OpDef::Post(post_op)) => {
-            debug!("call POST method");
+            debug!("call POST method with subject {}", subject);
 
             Some(Box::new(PostMethod {
                 subject,
@@ -322,7 +329,7 @@ where
             }))
         }
         Scalar::Op(OpDef::Delete(delete_op)) => {
-            debug!("call DELETE method");
+            debug!("call DELETE method with subject {}", subject);
 
             Some(Box::new(DeleteMethod {
                 subject,
