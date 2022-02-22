@@ -520,7 +520,7 @@ class Dense(Tensor):
         assert maxval > minval
 
         random = cls(ref.Get(uri(cls) + "/random/uniform", shape))
-        if minval == 0 and maxval == 1:
+        if (minval, maxval) == (0, 1):
             return random
         else:
             range = maxval - minval

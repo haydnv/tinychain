@@ -1,7 +1,7 @@
 from tinychain.app import Library
 
 from .activation import Activation, Sigmoid
-from .nn import Layer, DNNLayer, NeuralNet, Sequential
+from .nn import Layer, ConvLayer, DNNLayer, NeuralNet, Sequential
 from . import LIB_URI
 
 
@@ -19,4 +19,4 @@ class ML(Library):
 
     @staticmethod
     def provides():
-        return [DNNLayer, Sequential]
+        return [ConvLayer, DNNLayer, Sequential]
