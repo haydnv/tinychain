@@ -170,20 +170,10 @@ class Tensor(Collection, Numeric):
 
         return self._post("eq", {"r": other}, Tensor)
 
-    def exp(self):
-        """Raise `e` to the power of this `Tensor`."""
-
-        return self._get("exp", rtype=self.__class__)
-
     def expand_dims(self, axis=None):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
         return self._get("expand_dims", axis, self.__class__)
-
-    def log(self, base=None):
-        """Logarithm with respect to `base`, or `e` if no `base` is given"""
-
-        return self._get("log", base, self.__class__)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
