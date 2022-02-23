@@ -412,6 +412,11 @@ class Operator(Ref):
             log_anonymous(self.input)
             self.input = reference(cxt, self.input)
 
+    def __ref__(self, name):
+        copy = self.__class__(self.param, self.input)
+        copy.__uri__ = URI(name)
+        return copy
+
     @abc.abstractmethod
     def forward(self):
         pass
@@ -419,6 +424,14 @@ class Operator(Ref):
     @abc.abstractmethod
     def backward(self):
         pass
+
+
+def operator(state):
+    form = form_of(state, True)
+    if isinstance(form, Operator):
+        return form
+    else:
+        raise ValueError(f"{state} is not differentiable")
 
 
 class MethodSubject(object):

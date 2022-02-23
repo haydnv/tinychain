@@ -547,9 +547,7 @@ def _handle_bounds(bounds):
         return bounds
 
     if isinstance(bounds, State):
-        form = bounds
-        while hasattr(form, "__form__"):
-            form = form_of(form)
+        form = form_of(bounds, True)
 
         if isinstance(form, tuple) or isinstance(form, list):
             bounds = form

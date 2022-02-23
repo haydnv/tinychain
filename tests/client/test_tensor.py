@@ -123,6 +123,16 @@ class TensorTests(ClientTest):
         self.assertTrue(abs(mean) < tolerance)
         self.assertTrue(abs(std - 1) < tolerance)
 
+    def testOperator(self):
+        cxt = tc.Context()
+        cxt.a = tc.tensor.Dense.ones([2])
+        cxt.b = tc.tensor.Dense.ones([2]) * 2
+        cxt.sum = cxt.a + cxt.b
+        cxt.derivative = tc.operator(cxt.sum).backward()
+        cxt.result = (cxt.derivative == 0).all()
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
+
 
 # Example of a matrix transpose implemented using a nested loop.
 # This is not intended to be performant. Use `Tensor.transpose` to transpose any `Tensor`.

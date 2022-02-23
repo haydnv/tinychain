@@ -1,5 +1,6 @@
 import math
 
+from ..reflect import is_ref
 from ..util import form_of, uri
 
 from .base import Interface
@@ -212,19 +213,19 @@ class Number(Value, Numeric):
     __uri__ = uri(Value) + "/number"
 
     def __rdiv__(self, other):
-        if is_constant(other):
+        if _constant(other):
             return Number(other) / self
         else:
             return (1 / self) * other
 
     def __rtruediv__(self, other):
-        if is_constant(other):
+        if _constant(other):
             return Number(other) / self
         else:
             return (1 / self) * other
 
     def __rpow__(self, other):
-        if is_constant(other):
+        if _constant(other):
             return Number(other)**self
         else:
             raise TypeError(f"there is no implementation for {other}**{self}")
@@ -234,9 +235,9 @@ class Number(Value, Numeric):
         if isinstance(other, Tensor):
             return other.add(self)
 
-        if is_constant(other) and _constant(other) == 0:
+        if _constant(other) == 0:
             return self
-        elif is_constant(self) and _constant(self) == 0:
+        elif _constant(self) == 0:
             return other
 
         return self.__class__(Add(self, other))
@@ -247,7 +248,7 @@ class Number(Value, Numeric):
         if isinstance(other, Tensor):
             return other.mul(1 / self)
 
-        if is_constant(other):
+        if _constant(other):
             if _constant(other) == 1:
                 return self
             elif not _constant(other):
@@ -304,9 +305,9 @@ class Number(Value, Numeric):
         if isinstance(other, Tensor):
             return other.mul(self)
 
-        if is_constant(other) and _constant(other) == 1:
+        if _constant(other) == 1:
             return self
-        elif is_constant(self) and _constant(self) == 1:
+        elif _constant(self) == 1:
             return other
 
         return self.__class__(Mul(self, other))
@@ -318,11 +319,11 @@ class Number(Value, Numeric):
             raise NotImplementedError("Number**Tensor is not supported; " +
                                       f"construct a constant Tensor from {self} instead")
 
-        if is_constant(other) and _constant(other) == 0:
+        if _constant(other) == 0:
             return self.__class__(1)
-        elif is_constant(other) and _constant(other) == 1:
+        elif _constant(other) == 1:
             return self
-        elif is_constant(self) and _constant(self) == 1:
+        elif _constant(self) == 1:
             return self
 
         return self.__class__(Pow(self, other))
@@ -332,7 +333,7 @@ class Number(Value, Numeric):
         if isinstance(other, Tensor):
             return other.add(-self)
 
-        if is_constant(other) and _constant(other) == 0:
+        if _constant(other) == 0:
             return self
 
         return self.__class__(Sub(self, other))
@@ -565,24 +566,21 @@ class U64(UInt):
 
 
 def _constant(form):
-    while hasattr(form, "__form__"):
-        form = form_of(form)
-
+    form = form_of(form, True)
     if isinstance(form, int) or isinstance(form, float):
         return form
 
 
-def differentiate(form):
-    while hasattr(form, "__form__"):
-        form = form_of(form)
+def differentiate(state):
+    form = form_of(state, True)
 
     if isinstance(form, Operator):
         return form.backward()
-    elif is_constant(form):
+    elif isinstance(form, int) or isinstance(form, float):
+        # `state` is obviously a numeric constant
         return 0
-    else:
-        raise ValueError(f"the derivative of {form} is not defined--maybe it should be an Operator?")
+    elif isinstance(state, Numeric) and is_ref(form):
+        # assume `state` is a numeric constant
+        return 0
 
-
-def is_constant(form):
-    return _constant(form) is not None
+    raise ValueError(f"the derivative of {form} is not defined--maybe it should be an Operator?")
