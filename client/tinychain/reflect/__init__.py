@@ -1,4 +1,5 @@
 import inspect
+import typing
 
 from pydoc import locate
 
@@ -61,6 +62,14 @@ def is_ref(state):
 def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:
         return default
+    elif typing.get_origin(annotation) is tuple:
+        from ..state.generic import Tuple
+
+        return Tuple.expect(annotation)
+    elif typing.get_origin(annotation) is dict:
+        from ..state.generic import Map
+
+        return Map.expect(annotation)
     elif inspect.isclass(annotation):
         return annotation
 

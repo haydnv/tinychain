@@ -269,10 +269,26 @@ class Library(object):
             if not inspect.isclass(cls) or not issubclass(cls, Dynamic):
                 raise ValueError(f"{name} can only provide a Dynamic model, not {cls}")
 
+    # TODO: deduplicate with Meta.__json__
     def __json__(self):
         self.validate()
 
-        # TODO: deduplicate with Meta.__json__
+        header = Header()
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
+                continue
+
+            if hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(header, name, attr.method(self, name))
+            else:
+                setattr(header, name, attr)
+
         form = {}
         for name, attr in inspect.getmembers(self):
             if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
@@ -292,7 +308,7 @@ class Library(object):
             elif _is_mutable(attr):
                 raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
             elif isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(self, name))
+                form[name] = to_json(attr.method(header, name))
             else:
                 form[name] = to_json(attr)
 
