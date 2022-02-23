@@ -3,6 +3,7 @@ Reference types.
 :class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
 """
 
+import abc
 import logging
 
 from ..reflect import is_conditional, is_ref
@@ -382,6 +383,42 @@ class Delete(Op):
         if is_op_ref(self.args):
             log_anonymous(self.args)
             self.args = reference(cxt, self.args)
+
+
+class Operator(Ref):
+    """A differentiable :class:`Operator` for use in a machine learning model"""
+
+    def __init__(self, param, input):
+        self.param = param
+        self.input = input
+        self._op = self.forward()
+
+    def __id__(self):
+        return hex_id(self._op)
+
+    def __json__(self):
+        return to_json(self._op)
+
+    def __ns__(self, cxt):
+        deanonymize(self.param, cxt)
+        deanonymize(self.input, cxt)
+        deanonymize(self._op, cxt)
+
+        if is_op_ref(self.param):
+            log_anonymous(self.param)
+            self.param = reference(cxt, self.param)
+
+        if is_op_ref(self.input):
+            log_anonymous(self.input)
+            self.input = reference(cxt, self.input)
+
+    @abc.abstractmethod
+    def forward(self):
+        pass
+
+    @abc.abstractmethod
+    def backward(self):
+        pass
 
 
 class MethodSubject(object):
