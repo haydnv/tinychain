@@ -1125,6 +1125,7 @@ impl TryCastFrom<State> for Float {
 impl TryCastFrom<State> for Number {
     fn can_cast_from(state: &State) -> bool {
         match state {
+            State::Object(Object::Instance(instance)) => Self::can_cast_from(instance),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
@@ -1132,6 +1133,7 @@ impl TryCastFrom<State> for Number {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
+            State::Object(Object::Instance(instance)) => Self::opt_cast_from(instance),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
