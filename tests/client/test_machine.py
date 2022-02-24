@@ -1,7 +1,6 @@
 import numpy as np
 import tinychain as tc
 import unittest
-from sklearn.model_selection import train_test_split
 from testutils import ClientTest
 
 Dense = tc.tensor.Dense
@@ -12,8 +11,8 @@ NUM_EXAMPLES = 20
 
 
 @tc.post_op
-def fit_logistic(inputs ,labels):
-    layer0= tc.ml.nn.DNNLayer.create('layer0', inputs.shape[1], 1, tc.ml.Sigmoid())
+def fit_logistic(inputs:tc.tensor.Dense ,labels:tc.tensor.Dense ):
+    layer0= tc.ml.nn.DNNLayer.create('layer0', 5, 1, tc.ml.Sigmoid())
     logistic = tc.ml.nn.Sequential.load([layer0])
     def train_while(i: tc.UInt, output: tc.tensor.Dense):
         return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != labels).any())
@@ -45,8 +44,9 @@ class MLTests(ClientTest):
         y_test=data[-3:,-1]
         
         cxt.inputs=load(X_train)
-        cxt.labels=load(y_train)        
-        cxt.result = fit_logistic(cxt.inputs,cxt.labels)                
+        cxt.labels=load(y_train)    
+        cxt.fit=fit_logistic
+        cxt.result = cxt.fit(inputs=cxt.inputs,labels=cxt.labels)                
         response = self.host.post(ENDPOINT, cxt)
         self.assertEqual(response["i"], MAX_ITERATIONS + 1)
 
