@@ -12,7 +12,7 @@ NUM_EXAMPLES = 20
 
 @tc.post_op
 def fit_logistic(inputs:tc.tensor.Dense ,labels:tc.tensor.Dense ):
-    layer0= tc.ml.nn.DNNLayer.create('layer0', 5, 1, tc.ml.Sigmoid())
+    layer0= tc.ml.nn.DNNLayer.create('layer0', 2, 1, tc.ml.Sigmoid()) # 2 should be replaced by inputs.shape[1]
     logistic = tc.ml.nn.Sequential.load([layer0])
     def train_while(i: tc.UInt, output: tc.tensor.Dense):
         return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != labels).any())
