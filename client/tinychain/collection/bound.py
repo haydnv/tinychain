@@ -52,4 +52,7 @@ class Range(object):
             self.end = end
 
     def __json__(self):
-        return to_json((self.start, self.end))
+        if self.start is None and self.end is None:
+            return None
+        else:
+            return to_json((self.start, self.end))
