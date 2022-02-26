@@ -58,7 +58,7 @@ class ConvLayer(Layer, Dynamic):
         Dynamic.__init__(self)
 
     @post_method
-    def forward(self, cxt, inputs: Dense):
+    def forward(self, cxt, inputs: Tensor) -> Tensor:
         padding = self.padding
         stride = self.stride
 
@@ -70,7 +70,9 @@ class ConvLayer(Layer, Dynamic):
         w_out = int((w_i - w_f + 2 * padding) / (stride + 1))
 
         _pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-        cxt.pad_matrix = Tensor(After(_pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs), _pad_matrix))
+        cxt.pad_matrix = Tensor(After(
+            _pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            _pad_matrix))
 
         _im2col_matrix = []
         for i in range(h_out):
