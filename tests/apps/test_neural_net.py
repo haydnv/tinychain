@@ -30,6 +30,12 @@ class TestLibrary(tc.app.Library):
     def create_dnn_layer(self) -> tc.hosted_ml.nn.Layer:
         return tc.hosted_ml.nn.DNNLayer.create(2, 2, tc.ml.Sigmoid())
 
+    @tc.get_method
+    def load_dnn_layer(self, cxt) -> tc.hosted_ml.nn.Layer:
+        cxt.weights = tc.tensor.Dense.create(DNN_SHAPE[0])
+        cxt.bias = tc.tensor.Dense.create(DNN_SHAPE[0][1:]) + 1
+        return tc.hosted_ml.nn.DNNLayer(cxt.weights, cxt.bias)
+
     @tc.post_method
     def check_dnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.layer = self.create_dnn_layer()
@@ -61,7 +67,7 @@ class TestLibrary(tc.app.Library):
         return cxt.nn.forward(inputs=inputs)
 
 
-class LibraryTests(unittest.TestCase):
+class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = testutils.start_docker("test_neural_net", [tc.hosted_ml.service.ML(), TestLibrary()])
@@ -95,6 +101,15 @@ class LibraryTests(unittest.TestCase):
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
         output = self.host.post(URI.append("check_dnn_layer"), {"inputs": load_dense(inputs)})
         self.assertEqual(output_shape(output), [BATCH_SIZE, 2])
+
+    def testLoadFromOuterContext(self):
+        layer = self.host.get(URI.append("load_dnn_layer"))
+        bias = layer[tc.uri(tc.Instance)][tc.uri(tc.hosted_ml.nn.Layer)]["bias"]
+        self.assertTrue(tc.uri(tc.tensor.Dense) in bias)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.host.stop()
 
 
 def load_dense(nparray):

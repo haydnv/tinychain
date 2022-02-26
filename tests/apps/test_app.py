@@ -81,6 +81,10 @@ class LibraryTests(unittest.TestCase):
         actual = self.host.get("/test/lib/check_baz")
         self.assertEqual(expected, actual)
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.host.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

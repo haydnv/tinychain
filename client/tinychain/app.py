@@ -174,9 +174,6 @@ class Dynamic(Instance):
                 form[name] = stub.method(header, name)
             elif isinstance(attr, ModelRef):
                 form[name] = attr.instance
-            elif isinstance(form_of(attr, True), URI):
-                # TODO: how to avoid this awkward hack?
-                form[name] = {uri(attr.__class__): []}
             else:
                 form[name] = attr
 
@@ -360,7 +357,7 @@ class App(Library):
                 # it's a @classmethod
                 continue
             elif _is_mutable(attr) and not isinstance(attr, Chain):
-                raise RuntimeError(f"{self.__class__.__name__} must be managed by a Chain")
+                raise RuntimeError(f"{attr} must be managed by a Chain")
             elif isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(header, name))
             else:
