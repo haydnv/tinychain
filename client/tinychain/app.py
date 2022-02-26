@@ -258,13 +258,8 @@ class Library(object):
         return []
 
     @staticmethod
-    def provides():
-        """A list of :class:`Dynamic` models provided by this `Library`"""
-
-        return []
-
-    @staticmethod
     def uses():
+        """A list of other :class:`Library` and :class:`App` services referenced by this `Library`"""
         return {}
 
     def __init__(self, form=None):
@@ -277,9 +272,6 @@ class Library(object):
         for cls in self.exports():
             setattr(self, cls.__name__, model(cls))
 
-        for cls in self.provides():
-            setattr(self, cls.__name__, cls)
-
     def validate(self):
         name = self.__class__.__name__
 
@@ -291,17 +283,13 @@ class Library(object):
             if not inspect.isclass(cls) or not issubclass(cls, Model):
                 raise ValueError(f"{name} can only export a Model class, not {cls}")
 
-        for cls in self.provides():
-            if not inspect.isclass(cls) or not issubclass(cls, Dynamic):
-                raise ValueError(f"{name} can only provide a Dynamic model, not {cls}")
-
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
         self.validate()
 
         header = Header()
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
+            if name.startswith('_') or name in ["exports", "uses", "validate"]:
                 continue
 
             if hasattr(attr, "hidden") and attr.hidden:
