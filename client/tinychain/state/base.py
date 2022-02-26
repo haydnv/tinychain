@@ -15,7 +15,8 @@ class _Base(object):
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(self, name, attr.method(self, name))
+                method = attr.method(self, name)
+                setattr(self, name, method)
 
     def _get(self, name, key=None, rtype=None):
         from .ref import MethodSubject, Get
@@ -61,15 +62,19 @@ class State(_Base):
 
     __uri__ = URI("/state")
 
-    def __init__(self, form):
+    def __init__(self, form=None):
         from ..reflect import is_ref
 
-        self.__form__ = form
+        if form is None:
+            if not hasattr(self, "__form__") or self.__form__ is None:
+                raise ValueError(f"instance of {self.__class__.__name__} has no form")
+        else:
+            self.__form__ = form
 
-        if isinstance(form, URI):
-            self.__uri__ = form
-        elif is_ref(form) and hasattr(form, "__uri__"):
-            self.__uri__ = uri(form)
+            if isinstance(form, URI):
+                self.__uri__ = form
+            elif is_ref(form) and hasattr(form, "__uri__"):
+                self.__uri__ = uri(form)
 
         _Base.__init__(self)
 
@@ -226,9 +231,6 @@ class Stream(State):
 
         return self._post("map", {"op": op}, Stream)
 
-
-
-# User-defined object types
 
 class Object(State):
     """A user-defined type"""

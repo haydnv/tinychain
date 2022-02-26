@@ -26,15 +26,19 @@ class TestLibrary(tc.app.Library):
             "ML": tc.hosted_ml.service.ML
         }
 
-    @tc.post_method
-    def check_conv_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
-        input_shape, output_shape = CNN_SHAPE[0]
-        cxt.layer = self.ML.ConvLayer.create(input_shape, output_shape, PADDING, STRIDE)
-        return cxt.layer.forward(inputs=inputs)
+    @tc.get_method
+    def create_dnn_layer(self) -> tc.hosted_ml.nn.Layer:
+        return tc.hosted_ml.nn.DNNLayer.create(2, 2, tc.ml.Sigmoid())
 
     @tc.post_method
     def check_dnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
-        cxt.layer = self.ML.DNNLayer.create(2, 2, self.ML.Sigmoid())
+        cxt.layer = self.create_dnn_layer()
+        return cxt.layer.forward(inputs=inputs)
+
+    @tc.post_method
+    def check_conv_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
+        input_shape, output_shape = CNN_SHAPE[0]
+        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, PADDING, STRIDE)
         return cxt.layer.forward(inputs=inputs)
 
     @tc.post_method
@@ -44,18 +48,17 @@ class TestLibrary(tc.app.Library):
 
     @tc.get_method
     def create_cnn(self) -> tc.hosted_ml.nn.NeuralNet:
-        layers = tc.Tuple([self.ML.ConvLayer.create(i, o, PADDING, STRIDE) for i, o in CNN_SHAPE])
-        return self.ML.Sequential(layers)
+        layers = tc.Tuple([tc.hosted_ml.nn.ConvLayer.create(i, o, PADDING, STRIDE) for i, o in CNN_SHAPE])
+        return tc.hosted_ml.nn.Sequential(layers)
+
+    @tc.get_method
+    def create_dnn(self) -> tc.hosted_ml.nn.NeuralNet:
+        return tc.hosted_ml.nn.DNN.create([(i, o, tc.ml.Sigmoid()) for i, o in DNN_SHAPE])
 
     @tc.post_method
     def check_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_dnn()
         return cxt.nn.forward(inputs=inputs)
-
-    @tc.get_method
-    def create_dnn(self) -> tc.hosted_ml.nn.NeuralNet:
-        layers = tc.Tuple([self.ML.DNNLayer.create(i, o, self.ML.Sigmoid()) for i, o in DNN_SHAPE])
-        return self.ML.Sequential(layers)
 
 
 class LibraryTests(unittest.TestCase):
@@ -70,23 +73,28 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(output_shape(output), [BATCH_SIZE, 2, 3, 3])
 
     def testCNN(self):
+        # tc.print_json(self.host.get(URI.append("create_cnn")))
+
         input_shape = [BATCH_SIZE] + CNN_SHAPE[0][0]
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
-        tc.print_json(self.host.get(URI.append("create_cnn")))
         output = self.host.post(URI.append("check_cnn"), {"inputs": load_dense(inputs)})
-        self.assertEqual(output_shape(output), [BATCH_SIZE, 2, 1, 1])
+        self.assertEqual(output_shape(output), [BATCH_SIZE, 1, 1, 1])
 
     def testDNN(self):
+        # tc.print_json(self.host.get(URI.append("create_dnn")))
+
         input_shape = [BATCH_SIZE, DNN_SHAPE[0][0]]
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
         output = self.host.post(URI.append("check_dnn"), {"inputs": load_dense(inputs)})
-        self.assertEqual(output_shape(output), [BATCH_SIZE, 2])
+        self.assertEqual(output_shape(output), [BATCH_SIZE, 1])
 
     def testDNNLayer(self):
+        # tc.print_json(self.host.get(URI.append("create_dnn_layer")))
+
         input_shape = [BATCH_SIZE, DNN_SHAPE[0][0]]
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
         output = self.host.post(URI.append("check_dnn_layer"), {"inputs": load_dense(inputs)})
-        self.assertEqual(output_shape(output), [BATCH_SIZE, 1])
+        self.assertEqual(output_shape(output), [BATCH_SIZE, 2])
 
 
 def load_dense(nparray):

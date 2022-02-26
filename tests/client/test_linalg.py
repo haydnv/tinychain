@@ -155,7 +155,7 @@ class LinearAlgebraTests(ClientTest):
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
     def testSVD_1(self):
-        THRESHOLD = 5e-5
+        THRESHOLD = 5e-4
         n = 4
         m = 5
         matrix = np.random.random(n * m).reshape(n, m)
@@ -163,7 +163,7 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
         cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=200)
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
         svd_result = self.host.post(ENDPOINT, cxt)
         U, s, V = svd_result
         U = load_np(U)

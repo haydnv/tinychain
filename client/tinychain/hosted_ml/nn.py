@@ -3,9 +3,11 @@ import typing
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import post_method
+from ..ml import Activation
+from ..state.generic import Tuple
 from ..state.ref import After
+from ..util import uri
 
-from .activation import Activation
 from .interface import Differentiable
 from . import LIB_URI
 
@@ -19,8 +21,8 @@ class Layer(Model, Differentiable):
 class ConvLayer(Layer, Dynamic):
     @classmethod
     def create(cls, inputs_shape, filter_shape, stride=1, padding=1, activation=None):
-        """Create a new, empty `ConvLayer` with the given shape and activation function. Initializing `ConvLayer`
-        parameters by Xavier initialization for Sigmoid, Tanh activations, and Kaiming initialization for ReLU
+        """
+        Create a new, empty `ConvLayer` with the given shape and activation function.
 
         Args:
             `inputs_stape`: size of inputs [c_i, h_i, w_i] where
@@ -51,7 +53,9 @@ class ConvLayer(Layer, Dynamic):
         self.filter_shape = filter_shape
         self.stride = stride
         self.padding = padding
-        self.activation = activation
+        self._activation = activation
+
+        Dynamic.__init__(self)
 
     @post_method
     def forward(self, cxt, inputs: Dense):
@@ -83,8 +87,8 @@ class ConvLayer(Layer, Dynamic):
 
         output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])
 
-        if self.activation:
-            return self.activation.forward(output)
+        if self._activation:
+            return self._activation.forward(output)
         else:
             return output
 
@@ -101,15 +105,17 @@ class DNNLayer(Layer, Dynamic):
     def __init__(self, weights, bias, activation=None):
         self.weights = weights
         self.bias = bias
-        self.activation = activation
+        self._activation = activation
+
+        Dynamic.__init__(self)
 
     @post_method
     def forward(self, inputs: Tensor) -> Tensor:
         x = einsum("ki,ij->kj", [inputs, self.weights]) + self.bias
-        if self.activation is None:
+        if self._activation is None:
             return x
         else:
-            return self.activation.forward(inputs=x)
+            return self._activation.forward(x)
 
 
 class NeuralNet(Model, Differentiable):
@@ -120,12 +126,33 @@ class NeuralNet(Model, Differentiable):
 
 class Sequential(NeuralNet, Dynamic):
     def __init__(self, layers):
+        if not layers:
+            raise ValueError("Sequential requires at least one layer")
+
         self.layers = layers
+        Dynamic.__init__(self)
 
     @post_method
     def forward(self, inputs: typing.Tuple[Tensor]) -> Tensor:
+        if uri(self.layers[0]) != "$self/layers/0":
+            raise RuntimeError(f"{self.__class__.__name__}.forward must be called with a header (URI {uri(self.layers[0])} is not valid)")
+
         state = self.layers[0].forward(inputs=inputs)
         for i in range(1, len(self.layers)):
             state = self.layers[i].forward(inputs=state)
 
         return state
+
+
+class DNN(Sequential):
+    @classmethod
+    def create(cls, schema):
+        """
+        Create a new :class:`Sequential` neural net of :class:`DNNLayer` s.
+
+        `schema` should be a list of 2- or 3-tuples of the form `(input_size, output_size, activation)`
+        (the arguments to `DNNLayer.create`).
+        """
+
+        layers = Tuple([DNNLayer.create(*layer_schema) for layer_schema in schema])
+        return cls(layers)

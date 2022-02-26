@@ -223,7 +223,7 @@ where
                 None
             }
         } else if let Some(attr) = self.members().get(&path[0]) {
-            debug!("{} found in {} members", &path[0], self);
+            debug!("{} found in {} members: {:?}", &path[0], self, attr);
 
             if let State::Scalar(attr) = attr {
                 route_attr(self, &path[0], attr, &path[1..])

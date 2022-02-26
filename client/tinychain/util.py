@@ -120,16 +120,25 @@ def debug(state):
     return [dep for dep in state.__dbg__() if dep is not None] if hasattr(state, "__dbg__") else []
 
 
-def form_of(state):
-    """Return the form of the given `state`."""
+def form_of(state, recurse=False):
+    """
+    Return the form of the given `state`.
 
-    if hasattr(state, "__form__"):
-        if callable(state.__form__) and not inspect.isclass(state.__form__):
-            return state.__form__()
-        else:
-            return state.__form__
+    If `recurse` is `True`, this will proceed recursively through all intermediate type expectations.
+    """
+
+    if not hasattr(state, "__form__"):
+        return state
+
+    if callable(state.__form__) and not inspect.isclass(state.__form__):
+        form = state.__form__()
     else:
-        raise ValueError(f"{state} has no form")
+        form = state.__form__
+
+    if recurse:
+        return form_of(form)
+    else:
+        return form
 
 
 def get_ref(subject, name):

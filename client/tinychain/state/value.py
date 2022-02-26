@@ -88,6 +88,12 @@ class Nil(Value):
 
     __uri__ = uri(Value) + "/none"
 
+    def __init__(self, form=None):
+        if form is None:
+            Value.__init__(self, {})
+        else:
+            Value.__init__(self, form)
+
     def __json__(self):
         form = form_of(self)
 

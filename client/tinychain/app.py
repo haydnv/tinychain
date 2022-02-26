@@ -6,13 +6,13 @@ import typing
 
 from collections import OrderedDict
 
-from tinychain.decorators import MethodStub
-from tinychain.reflect import header, is_ref
-from tinychain.state.chain import Chain
-from tinychain.state.generic import Tuple
-from tinychain.state.ref import Ref
-from tinychain.state import Class, Instance, Object, Scalar, State
-from tinychain.util import deanonymize, form_of, get_ref, to_json, uri, URI
+from .reflect.meta import MethodStub
+from .state.chain import Chain
+from .state.generic import Tuple
+from .state.ref import Ref
+from .state.value import Nil
+from .state import Class, Instance, Object, Scalar, State
+from .util import form_of, get_ref, to_json, uri, URI
 
 
 # TODO: deduplicate with reflect.Meta
@@ -32,7 +32,8 @@ class _Meta(type):
         parents = [c for c in cls.parents() if not issubclass(c, Model)]
         parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
-        instance, instance_header = header(cls)
+        instance = cls(form=URI("self"))
+        instance_header = get_ref(instance, "self")
 
         form = {}
         for name, attr in inspect.getmembers(instance):
@@ -86,6 +87,9 @@ class Model(Object, metaclass=_Meta):
             return Class.__new__(cls)
 
     def __init__(self, form):
+        if form is None:
+            raise ValueError(f"form of {self} cannot be None; consider Nil instead")
+
         Object.__init__(self, form)  # this will generate method headers
 
         for name, attr in inspect.getmembers(self):
@@ -97,7 +101,7 @@ class Model(Object, metaclass=_Meta):
 
             if inspect.isclass(attr):
                 if issubclass(attr, Model):
-                    raise NotImplementedError("Model with Model attribute")
+                    raise NotImplementedError("Model with Model class as an attribute")
                 elif issubclass(attr, State):
                     setattr(self, name, attr(form=URI("self").append(name)))
                 else:
@@ -105,7 +109,7 @@ class Model(Object, metaclass=_Meta):
             elif typing.get_origin(attr) is tuple:
                 setattr(self, name, Tuple.expect(attr)(URI("self").append(name)))
             else:
-                pass  # self.name is already set to attr, just leave it along
+                pass  # self.name is already set to attr, just leave it alone
 
     def __json__(self):
         form = form_of(self)
@@ -122,11 +126,11 @@ class Header(object):
 
 
 class Dynamic(Instance):
-    # TODO: deduplicate with Meta.__form__
-    def __form__(self):
-        parent_members = dict(inspect.getmembers(Instance))
+    def __init__(self, form=None):
+        if form is not None:
+            raise ValueError(f"Dynamic model {self.__class__.__name__} does not support instantiation by reference")
 
-        header = Header()
+        # TODO: deduplicate with Meta.__form__
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
@@ -137,11 +141,16 @@ class Dynamic(Instance):
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(self, name))
-            elif hasattr(attr, "__ref__"):
-                setattr(header, name, get_ref(attr, f"self/{name}"))
+                setattr(self, name, attr.method(self, name))
+            elif isinstance(attr, Model):
+                setattr(self, name, get_ref(attr, f"$self/{name}"))
             else:
-                setattr(header, name, attr)
+                setattr(self, name, attr)
+
+    def __form__(self):
+        parent_members = dict(inspect.getmembers(Instance))
+
+        header = ModelRef(self, "self")
 
         form = {}
         for name, attr in inspect.getmembers(self):
@@ -160,8 +169,14 @@ class Dynamic(Instance):
                         logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
                         continue
 
-            if isinstance(attr, MethodStub):
-                form[name] = attr.method(header, name)
+            if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
+                stub = getattr(self.__class__, name)
+                form[name] = stub.method(header, name)
+            elif isinstance(attr, ModelRef):
+                form[name] = attr.instance
+            elif isinstance(form_of(attr, True), URI):
+                # TODO: how to avoid this awkward hack?
+                form[name] = {uri(attr.__class__): []}
             else:
                 form[name] = attr
 
@@ -181,18 +196,29 @@ class Dynamic(Instance):
 
 class ModelRef(object):
     def __init__(self, instance, name):
+        if hasattr(instance, "instance"):
+            raise RuntimeError(f"the attribute name 'instance' is reserved (use a different name in {instance})")
+
         self.instance = instance
         self.__uri__ = URI(name)
 
-    def __getattr__(self, name):
-        if not hasattr(self.instance, name):
-            raise AttributeError(f"{self.instance} has no attribute {name}")
+        # TODO: deduplicate with Meta.__form__
+        for name, attr in inspect.getmembers(self.instance):
+            if name.startswith('__'):
+                continue
+            elif hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
 
-        attr = getattr(self.instance, name)
-        if isinstance(attr, MethodStub):
-            return attr.method(self, name)
-        else:
-            return get_ref(attr, uri(self).append(name))
+            if hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
+                stub = getattr(instance.__class__, name)
+                setattr(self, name, stub.method(self, name))
+            elif hasattr(attr, "__ref__"):
+                setattr(self, name, get_ref(attr, uri(self).append(name)))
+            else:
+                setattr(self, name, attr)
 
     def __json__(self):
         return to_json(uri(self))
@@ -202,7 +228,7 @@ class ModelRef(object):
 
 
 def model(cls):
-    class _Model(cls, metaclass=_Meta):
+    class _Model(cls):
         def __init__(self, *args, **kwargs):
             if "form" in kwargs:
                 form = kwargs["form"]
@@ -212,11 +238,15 @@ def model(cls):
 
                 Model.__init__(self, form)
             elif cls.__init__ is Model.__init__:
-                cls.__init__(self, None)
+                cls.__init__(self, form=Nil())
             else:
                 params = _parse_init_args(cls, inspect.signature(cls.__init__), args, kwargs)
-                Instance.__init__(self, params if params else None)
+                Instance.__init__(self, params)
 
+        def __json__(self):
+            return Model.__json__(self)
+
+    _Model.__name__ = cls.__name__
     return _Model
 
 
@@ -245,10 +275,6 @@ class Library(object):
             setattr(self, name, cls())
 
         for cls in self.exports():
-            expected_uri = uri(self).append(cls.__name__)
-            if uri(cls) != expected_uri:
-                raise ValueError(f"the URI of {cls} should be {expected_uri}")
-
             setattr(self, cls.__name__, model(cls))
 
         for cls in self.provides():

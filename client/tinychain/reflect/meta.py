@@ -39,7 +39,7 @@ def header(cls):
             continue
 
         if isinstance(attr, MethodStub):
-            setattr(header, name, attr.method(instance, name))
+            setattr(header, name, attr.method(header, name))
         elif isinstance(attr, State):
             member_uri = instance_uri.append(name)
             attr_ref = get_ref(attr, member_uri)

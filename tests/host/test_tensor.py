@@ -230,7 +230,7 @@ class DenseTests(unittest.TestCase):
         cxt.result = cxt.x.round()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect_dense(tc.I32, shape, x.round().astype(np.int).flatten()))
+        self.assertEqual(actual, expect_dense(tc.I32, shape, x.round().astype(int).flatten()))
 
     def testSum(self):
         shape = [4, 2, 3, 5]
@@ -588,7 +588,7 @@ class TensorTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
-        r = np.zeros([3, 2], np.float)
+        r = np.zeros([3, 2], float)
         r[1] = 2.
         expected = r / l
         self.assertEqual(actual, expect_sparse(tc.F64, [30, 3, 2], expected))
@@ -619,7 +619,7 @@ class TensorTests(unittest.TestCase):
         self.assertEqual(actual, -(x * y * z))
 
     def testSparseAsDense(self):
-        matrix = np.eye(3).astype(np.bool)
+        matrix = np.eye(3).astype(bool)
         data = [(list(coord), bool(matrix[coord])) for coord in np.ndindex(matrix.shape) if matrix[coord] != 0]
 
         cxt = tc.Context()
@@ -631,7 +631,7 @@ class TensorTests(unittest.TestCase):
         self.assertEqual(actual, expected)
 
     def testDenseAsSparse(self):
-        matrix = np.eye(3).astype(np.int)
+        matrix = np.eye(3).astype(int)
 
         cxt = tc.Context()
         cxt.dense = load_dense(matrix, tc.I32)
@@ -642,8 +642,8 @@ class TensorTests(unittest.TestCase):
         self.assertEqual(actual, expected)
 
     def testConcatenate(self):
-        x1 = np.ones([5, 8], np.int)
-        x2 = np.ones([5, 4], np.int) * 2
+        x1 = np.ones([5, 8], int)
+        x2 = np.ones([5, 4], int) * 2
 
         cxt = tc.Context()
         cxt.result = tc.tensor.Dense.concatenate([load_dense(x1, tc.I32), load_dense(x2, tc.I32)], axis=1)

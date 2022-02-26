@@ -22,7 +22,7 @@ class DNNLayer(Layer):
             `activation`: activation function.
         """
 
-        std = activation.std_initializer(input_size, output_size)
+        std = activation.optimal_std(input_size, output_size)
         weights = Dense.random_normal(shape=[input_size, output_size], mean=0.0, std=std)
         bias = Dense.random_normal(shape=[output_size, ], mean=0.0, std=std)
 
@@ -88,7 +88,7 @@ class ConvLayer(Layer):
         c_i, h_i, w_i = inputs_shape
         out_c, h_f, w_f = filter_shape
 
-        std = activation.std_initializer(c_i * h_i * w_i, out_c * h_f * w_f)
+        std = activation.optimal_std(c_i * h_i * w_i, out_c * h_f * w_f)
         weights = Dense.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
         bias = Dense.random_normal([out_c, 1], mean=0.0, std=std)
 

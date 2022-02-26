@@ -88,7 +88,7 @@ class ExampleTests(ClientTest):
 class TensorTests(ClientTest):
     def testWhere(self):
         size = 5
-        x = np.random.random(size).astype(np.bool)
+        x = np.random.random(size).astype(bool)
         a = np.random.random(size)
         b = np.random.random(size)
         expected = np.where(x, a, b)
@@ -108,7 +108,7 @@ class TensorTests(ClientTest):
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.random_uniform([5, 1], minval, maxval)
-        cxt.result = (cxt.x > -1).all().logical_and((cxt.x < 3).all()).logical_and(cxt.x.mean() > 0)
+        cxt.result = (cxt.x >= -1).all().logical_and((cxt.x <= 3).all()).logical_and(cxt.x.mean() > 0)
 
         self.assertTrue(self.host.post(ENDPOINT, cxt))
 
