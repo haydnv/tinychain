@@ -64,7 +64,7 @@ class ConvLayer(Layer, Dynamic):
         if self._padding == 0:
             # TODO: is this correct?
             # return self.weights.shape, inputs.shape, self._filter_shape
-            output = einsum("ijkl,mjno->ikl", [self.weights, inputs])
+            output = einsum("ijkl,mjno->mkl", [self.weights, inputs])
             if self._activation:
                 return self._activation.forward(output)
             else:
