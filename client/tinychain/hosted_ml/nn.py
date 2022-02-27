@@ -25,11 +25,11 @@ class ConvLayer(Layer, Dynamic):
         Create a new, empty `ConvLayer` with the given shape and activation function.
 
         Args:
-            `inputs_stape`: size of inputs [c_i, h_i, w_i] where
+            `inputs_shape`: size of inputs [c_i, h_i, w_i] where
                 `c_i`: number of channels;
-                `h_i`: height's width  for each channel;
-                'w_i': matrix's width  for each channel.
-            `filter_shape`: size of filter [h, w, out_c] where
+                `h_i`: height's width for each channel;
+                'w_i': matrix's width for each channel.
+            `filter_shape`: size of filter [h_f, w_f, out_c] where
                 `out_c`: number of output channels;
                 `h_f`: height of the kernel;
                 'w_f`: width of the kernel.
@@ -54,6 +54,7 @@ class ConvLayer(Layer, Dynamic):
         self._padding = padding
         self._activation = activation
 
+        # run-time state
         self.weights = weights
         self.bias = bias
 
@@ -61,10 +62,11 @@ class ConvLayer(Layer, Dynamic):
 
     @post_method
     def forward(self, cxt, inputs: Tensor) -> Tensor:
+        b_i = inputs.shape[0]
+
         if self._padding == 0:
-            # TODO: is this correct?
-            # return self.weights.shape, inputs.shape, self._filter_shape
-            output = einsum("ijkl,mjno->mkl", [self.weights, inputs])
+            output = einsum("abcd,efgh->eacd", [self.weights, inputs])
+            output += self.bias.reshape([1, self._filter_shape[0], 1, 1])
             if self._activation:
                 return self._activation.forward(output)
             else:
@@ -75,10 +77,9 @@ class ConvLayer(Layer, Dynamic):
 
         c_i, h_i, w_i = self._inputs_shape
         out_c, h_f, w_f = self._filter_shape
-        b_i = inputs.shape[0]
 
-        h_out = int((h_i - h_f + 2 * padding) / (stride + 1))
-        w_out = int((w_i - w_f + 2 * padding) / (stride + 1))
+        h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
+        w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
 
         assert h_out
         assert w_out
@@ -104,7 +105,7 @@ class ConvLayer(Layer, Dynamic):
         shape = [out_c, h_out, w_out, b_i]
         cxt.in2col_multiply = (einsum("ij,jm->im", [cxt.w_col, cxt.im2col_matrix]) + self.bias).reshape(shape)
 
-        output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])
+        output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
 
         if self._activation:
             return self._activation.forward(output)

@@ -13,8 +13,6 @@ CNN_SHAPE = [
     [[3, 5, 5], [2, 1, 1]],
     [[2, 3, 3], [1, 3, 3]],
 ]
-PADDING = 1
-STRIDE = 1
 
 
 class TestLibrary(tc.app.Library):
@@ -44,14 +42,14 @@ class TestLibrary(tc.app.Library):
     @tc.post_method
     def check_conv_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape, output_shape = CNN_SHAPE[0]
-        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, PADDING, STRIDE)
+        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape)
         return cxt.layer.forward(inputs=inputs)
 
     @tc.post_method
     def check_conv_layer_zero_padded(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape = [20, 1, 2]
         output_shape = [4, 1, 1]
-        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, 0, STRIDE)
+        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, padding=0)
         return cxt.layer.forward(inputs=inputs)
 
     @tc.post_method
@@ -61,7 +59,7 @@ class TestLibrary(tc.app.Library):
 
     @tc.get_method
     def create_cnn(self) -> tc.hosted_ml.nn.NeuralNet:
-        layers = tc.Tuple([tc.hosted_ml.nn.ConvLayer.create(i, o, PADDING, STRIDE) for i, o in CNN_SHAPE])
+        layers = tc.Tuple([tc.hosted_ml.nn.ConvLayer.create(i, o) for i, o in CNN_SHAPE])
         return tc.hosted_ml.nn.Sequential(layers)
 
     @tc.get_method
@@ -89,7 +87,7 @@ class NeuralNetTests(unittest.TestCase):
         input_shape = [BATCH_SIZE, 20, 1, 2]
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
         output = self.host.post(URI.append("check_conv_layer_zero_padded"), {"inputs": load_dense(inputs)})
-        self.assertEqual(output_shape(output), [BATCH_SIZE, 4, 2, 3])
+        self.assertEqual(output_shape(output), [BATCH_SIZE, 4, 1, 1])
 
     def testCNN(self):
         # tc.print_json(self.host.get(URI.append("create_cnn")))
