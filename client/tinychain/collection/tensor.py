@@ -374,7 +374,7 @@ class Tensor(Collection):
         `self.shape[axis]` then a `BadRequest` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), Tuple)
+        return self._get("split", (num_or_size_splits, axis), typing.Tuple[self.__class__, ...])
 
     def std(self, axis=None):
         """

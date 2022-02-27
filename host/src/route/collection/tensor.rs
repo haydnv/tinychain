@@ -828,13 +828,6 @@ where
                     ))),
                 }?;
 
-                if sizes.iter().sum::<u64>() != dim {
-                    return Err(TCError::bad_request(
-                        "invalid split sizes",
-                        sizes.into_iter().collect::<Tuple<u64>>(),
-                    ));
-                }
-
                 let mut split = Vec::with_capacity(sizes.len());
                 let mut i = 0;
                 for size in sizes.into_iter() {

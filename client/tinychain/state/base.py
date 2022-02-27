@@ -1,6 +1,7 @@
 """A discrete :class:`State`."""
 
 import inspect
+import typing
 
 from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
@@ -23,7 +24,7 @@ class _Base(object):
 
         subject = MethodSubject(self, name)
         op_ref = Get(subject, key)
-        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
+        rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
@@ -38,7 +39,7 @@ class _Base(object):
 
         subject = MethodSubject(self, name)
         op_ref = Post(subject, params)
-        rtype = State if rtype is None or not issubclass(rtype, State) else rtype
+        rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
@@ -263,3 +264,16 @@ class Instance(Object):
 
     def copy(self):
         raise NotImplementedError("abstract method")
+
+
+def _resolve_rtype(rtype, default=State):
+    if typing.get_origin(rtype) is tuple:
+        from .generic import Tuple
+        return Tuple.expect(rtype)
+    elif typing.get_origin(rtype) is dict:
+        from .generic import Map
+        return Map.expect(rtype)
+    elif inspect.isclass(rtype) and issubclass(rtype, State):
+        return rtype
+    else:
+        return default
