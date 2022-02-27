@@ -48,6 +48,13 @@ class TestLibrary(tc.app.Library):
         return cxt.layer.forward(inputs=inputs)
 
     @tc.post_method
+    def check_conv_layer_zero_padded(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
+        input_shape = [20, 1, 2]
+        output_shape = [4, 1, 1]
+        cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, 0, STRIDE)
+        return cxt.layer.forward(inputs=inputs)
+
+    @tc.post_method
     def check_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_cnn()
         return cxt.nn.forward(inputs=inputs)
@@ -77,6 +84,12 @@ class NeuralNetTests(unittest.TestCase):
         inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
         output = self.host.post(URI.append("check_conv_layer"), {"inputs": load_dense(inputs)})
         self.assertEqual(output_shape(output), [BATCH_SIZE, 2, 3, 3])
+
+    def testConvLayerWithZeroPadding(self):
+        input_shape = [BATCH_SIZE, 20, 1, 2]
+        inputs = np.random.random(np.product(input_shape)).reshape(input_shape)
+        output = self.host.post(URI.append("check_conv_layer_zero_padded"), {"inputs": load_dense(inputs)})
+        self.assertEqual(output_shape(output), [BATCH_SIZE, 4, 2, 3])
 
     def testCNN(self):
         # tc.print_json(self.host.get(URI.append("create_cnn")))

@@ -47,27 +47,41 @@ class ConvLayer(Layer, Dynamic):
         return cls(weights, bias, inputs_shape, filter_shape, stride, padding, activation)
 
     def __init__(self, weights, bias, inputs_shape, filter_shape, stride, padding, activation):
+        # compile-time constants
+        self._inputs_shape = inputs_shape
+        self._filter_shape = filter_shape
+        self._stride = stride
+        self._padding = padding
+        self._activation = activation
+
         self.weights = weights
         self.bias = bias
-        self.inputs_shape = inputs_shape
-        self.filter_shape = filter_shape
-        self.stride = stride
-        self.padding = padding
-        self._activation = activation
 
         Dynamic.__init__(self)
 
     @post_method
     def forward(self, cxt, inputs: Tensor) -> Tensor:
-        padding = self.padding
-        stride = self.stride
+        if self._padding == 0:
+            # TODO: is this correct?
+            # return self.weights.shape, inputs.shape, self._filter_shape
+            output = einsum("ijkl,mjno->ikl", [self.weights, inputs])
+            if self._activation:
+                return self._activation.forward(output)
+            else:
+                return output
 
-        c_i, h_i, w_i = self.inputs_shape
-        out_c, h_f, w_f = self.filter_shape
+        padding = self._padding
+        stride = self._stride
+
+        c_i, h_i, w_i = self._inputs_shape
+        out_c, h_f, w_f = self._filter_shape
         b_i = inputs.shape[0]
 
         h_out = int((h_i - h_f + 2 * padding) / (stride + 1))
         w_out = int((w_i - w_f + 2 * padding) / (stride + 1))
+
+        assert h_out
+        assert w_out
 
         _pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
         cxt.pad_matrix = Tensor(After(
@@ -77,8 +91,11 @@ class ConvLayer(Layer, Dynamic):
         _im2col_matrix = []
         for i in range(h_out):
             for j in range(w_out):
-                _im2col = cxt.pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape([c_i * h_f * w_f, b_i])
+                shape = [c_i * h_f * w_f, b_i]
+                _im2col = cxt.pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
                 _im2col_matrix.append(_im2col)
+
+        assert _im2col_matrix
 
         shape = [b_i * h_out * w_out, c_i * h_f * w_f]
         cxt.im2col_matrix = Dense.concatenate(_im2col_matrix, 0).reshape(shape).transpose()
