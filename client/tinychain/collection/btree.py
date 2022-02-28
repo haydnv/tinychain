@@ -1,5 +1,6 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
+from ..state.bound import Range
 from ..state.generic import Map, Tuple
 from ..state.number import UInt
 from ..state.ref import Ref
@@ -7,7 +8,6 @@ from ..state import State, Stream
 from ..util import form_of, to_json, uri, URI
 
 from .base import Collection
-from .bound import Range
 
 
 class Schema(object):

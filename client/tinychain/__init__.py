@@ -1,5 +1,5 @@
 import tinychain.app
-import tinychain.collection.bound as bound
+import tinychain.state.bound as bound
 import tinychain.error
 import tinychain.graph
 import tinychain.graph.edge

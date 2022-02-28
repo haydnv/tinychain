@@ -200,9 +200,24 @@ class Tuple(State):
         if hasattr(form_of(self), "__getitem__"):
             if uri(self) == uri(self.__class__):
                 return form_of(self)[i]
-            else:
+            elif isinstance(i, int):
                 return get_ref(form_of(self)[i], uri(self).append(i))
-        elif len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
+
+        if isinstance(i, slice):
+            if i.step:
+                raise NotImplementedError(f"slice with step: {i}")
+
+            if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
+                from .bound import Range
+
+                rtype = self.__class__
+                return self._get("", Range.from_slice(i), rtype)
+            else:
+                start = _index_of(i.start, len(self), 0)
+                stop = _index_of(i.stop, len(self), len(self))
+                return Tuple([self[i] for i in range(start, stop)])
+
+        if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
             rtype = self.__spec__[0]
         elif i < len(self.__spec__):
             rtype = self.__spec__[i]
@@ -239,7 +254,8 @@ class Tuple(State):
 
     def fold(self, item_name, initial_state, op):
         """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results.
-        `op` must be a POST Op. The stream item to handle will be passed with the given `item_name` as its name.
+
+        `op` must be a POST Op. The item to handle will be passed with the given `item_name` as its name.
         """
 
         rtype = type(initial_state) if isinstance(initial_state, State) else State
@@ -278,3 +294,14 @@ class TupleRef(Ref):
 
     def __ns__(self, cxt):
         deanonymize(self.tuple, cxt)
+
+
+def _index_of(i, length, default):
+    if i is None:
+        idx = default
+    elif i < 0:
+        idx = length + i
+    else:
+        idx = i
+
+    return idx

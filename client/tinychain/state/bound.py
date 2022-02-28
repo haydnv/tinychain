@@ -1,5 +1,6 @@
-from ..state.value import Nil
 from ..util import to_json
+
+from .value import Nil
 
 
 class Bound(object):

@@ -4,12 +4,12 @@ import typing
 
 from ..decorators import post_op
 from ..reflect import is_ref
+from ..state.bound import Range
 from ..state.generic import Map, Tuple
 from ..state.number import Bool, F32, F64, Number, UInt, U64
 from ..state import ref, Class, State, Stream
 from ..util import form_of, uri, URI
 
-from .bound import Range
 from .base import Collection
 
 

@@ -1,5 +1,6 @@
 from ..decorators import closure, delete_op, get_op
 from ..error import BadRequest
+from ..state.bound import Range
 from ..state.generic import Map, Tuple
 from ..state.number import Bool, UInt
 from ..state.ref import If, Ref
@@ -7,7 +8,6 @@ from ..state import State, Stream
 from ..util import form_of, to_json, uri, URI
 
 from .base import Collection
-from .bound import Range
 from .btree import BTree
 
 

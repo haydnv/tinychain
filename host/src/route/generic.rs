@@ -11,7 +11,7 @@ use log::debug;
 use safecast::*;
 
 use tc_error::*;
-use tc_value::{Number, Value};
+use tc_value::{Bound, Number, Range, Value};
 use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::closure::Closure;
@@ -407,20 +407,31 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    Ok(State::from(self.tuple.clone()))
-                } else {
-                    let i = Number::try_cast_from(key, |v| {
-                        TCError::bad_request("invalid tuple index", v)
-                    })?;
+                match key {
+                    Value::None => Ok(State::from(self.tuple.clone())),
+                    Value::Tuple(range) if range.matches::<(Bound, Bound)>() => {
+                        let len = self.tuple.len();
+                        let range = Range::opt_cast_from(range).expect("range");
+                        let (start, end) = cast_range(range, len as i64)?;
+                        Ok(State::Tuple(
+                            self.tuple[start..end]
+                                .iter()
+                                .cloned()
+                                .map(State::from)
+                                .collect(),
+                        ))
+                    }
+                    i if i.matches::<Number>() => {
+                        let i = Number::opt_cast_from(i).expect("tuple index");
+                        let i = usize::cast_from(i);
 
-                    let i = usize::cast_from(i);
-
-                    self.tuple
-                        .get(i)
-                        .cloned()
-                        .map(State::from)
-                        .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
+                        self.tuple
+                            .get(i)
+                            .cloned()
+                            .map(State::from)
+                            .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
+                    }
+                    other => Err(TCError::bad_request("invalid tuple index", other)),
                 }
             })
         }))
@@ -507,5 +518,69 @@ where
         } else {
             None
         }
+    }
+}
+
+#[inline]
+fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
+    #[inline]
+    fn as_i64(v: Value) -> i64 {
+        let n = Number::opt_cast_from(v).expect("start index");
+        n.cast_into()
+    }
+
+    let start = match range.start {
+        Bound::In(v) if v.matches::<Number>() => {
+            let start = as_i64(v);
+            if start < 0 {
+                len + start
+            } else {
+                start
+            }
+        }
+        Bound::Ex(v) if v.matches::<Number>() => {
+            let start = as_i64(v);
+            let start = if start < 0 { len + start } else { start };
+            start + 1
+        }
+        Bound::Un => 0,
+        other => return Err(TCError::bad_request("invalid start index for Tuple", other)),
+    };
+
+    let end = match range.end {
+        Bound::In(v) if v.matches::<Number>() => {
+            let end = as_i64(v);
+            let end = if end < 0 { len + end } else { end };
+            end + 1
+        }
+        Bound::Ex(v) if v.matches::<Number>() => {
+            let end = as_i64(v);
+            if end < 0 {
+                len + end
+            } else {
+                end
+            }
+        }
+        Bound::Un => len,
+        other => return Err(TCError::bad_request("invalid end index for Tuple", other)),
+    };
+
+    if start >= len {
+        Err(TCError::unsupported(format!(
+            "start index {} is out of bounds for Tuple with length {}",
+            start, len
+        )))
+    } else if end > len {
+        Err(TCError::unsupported(format!(
+            "end index {} is out of bounds for Tuple with length {}",
+            end, len
+        )))
+    } else if start > end {
+        Err(TCError::bad_request(
+            "invalid range for Tuple",
+            Tuple::<i64>::from((start, end)),
+        ))
+    } else {
+        Ok((start as usize, end as usize))
     }
 }
