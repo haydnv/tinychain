@@ -1,3 +1,5 @@
+import typing
+
 from tinychain.collection.tensor import einsum, Dense, Sparse, Tensor
 from tinychain.decorators import closure, get_op, post_op
 from tinychain.state.generic import Map, Tuple
@@ -46,7 +48,7 @@ def householder(cxt, x: Tensor) -> Tuple:
 
     cxt.v = x.copy()
     cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
-    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero ** 2))
+    tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero**2))
     v = Tensor(If(Int(x.shape[0]) > 1, After(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero), cxt.v))
 
     return v, tau
@@ -85,7 +87,7 @@ def norm(tensor: Tensor) -> Tensor:
 
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
-def qr(cxt, a: Tensor) -> Tuple:
+def qr(cxt, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
     cxt.shape = a.shape
     cxt.n, cxt.m = cxt.shape.unpack(2)
 
@@ -101,8 +103,7 @@ def qr(cxt, a: Tensor) -> Tuple:
 
     @closure(a)
     @post_op
-    def q_step(cxt, q: Tensor, u:  Tensor, i: UInt) -> Map:
-
+    def q_step(cxt, q: Tensor, u: Tensor, i: UInt) -> Map:
         @closure(a)
         @post_op
         def u_step(q: Tensor, u: Tensor, i: UInt, j: UInt) -> Map:
@@ -111,7 +112,9 @@ def qr(cxt, a: Tensor) -> Tuple:
         state_u_step = Map(q=q, u=Tensor(After(u[:, i].write(a[:, i]), u)), i=i)
         cxt.update_u = Stream.range(i).fold('j', state_u_step, u_step)
 
-        return After(cxt.update_u, Map(q=Tensor(After(q[:, i].write(u[:, i] / F32(norm(u[:, i]))), q)), u=Tensor(cxt.update_u['u'])))
+        return After(
+            cxt.update_u,
+            Map(q=Tensor(After(q[:, i].write(u[:, i] / F32(norm(u[:, i]))), q)), u=Tensor(cxt.update_u['u'])))
 
     state_q_step = Map(q=cxt.q, u=cxt.u)
     cxt.update_q = Stream.range((1, UInt(cxt.n))).fold('i', state_q_step, q_step)
@@ -121,17 +124,17 @@ def qr(cxt, a: Tensor) -> Tuple:
     @closure(cxt._r, a, cxt._q, cxt.m)
     @get_op
     def r_step(i: UInt):
-
         @closure(cxt._r, a, cxt._q, i, cxt.m)
         @get_op
-        def r_step_2(j: UInt):
+        def r_step_inner(j: UInt):
             return cxt._r[i, j].write(a[:, j].mul(cxt._q[:, i]).sum())
-        return Stream.range((i, cxt.m)).for_each(r_step_2)
+
+        return Stream.range((i, cxt.m)).for_each(r_step_inner)
 
     update_r = Stream.range(cxt.n).for_each(r_step)
     qr_factorization = Map(After(update_r, Map(q=cxt._q, r=cxt._r)))
 
-    return Tensor(qr_factorization['q']), Tensor(qr_factorization['r'])
+    return qr_factorization['q'], qr_factorization['r']
 
 
 # TODO: replace this helper class with a `typing.TypedDict`
@@ -180,7 +183,6 @@ def plu(x: Tensor) -> PLUFactorization:
     """
 
     def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
-
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
             p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
@@ -225,12 +227,12 @@ def plu(x: Tensor) -> PLUFactorization:
         return i < UInt(u.shape[0]) - 1
 
     return PLUFactorization(Map(While(cond, step, Map(
-            p=identity(x.shape[0], F32).as_dense().copy(),
-            l=identity(x.shape[0], F32).as_dense().copy(),
-            u=x.copy(),
-            i=0,
-            num_permutations=0,
-        ))))
+        p=identity(x.shape[0], F32).as_dense().copy(),
+        l=identity(x.shape[0], F32).as_dense().copy(),
+        u=x.copy(),
+        i=0,
+        num_permutations=0,
+    ))))
 
 
 @post_op
@@ -248,20 +250,20 @@ def det(cxt, x: Tensor) -> F32:
     plu_result = cxt.plu(x=x)
     sign = Int(-1).pow(plu_result.num_permutations)
 
-    return diagonal(plu_result.u).product()*sign
+    return diagonal(plu_result.u).product() * sign
 
 
 @post_op
-def slogdet(cxt, x: Dense) -> Tuple:
+def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     """Compute the sign and log of the absolute value of the determinant of one or more square matrices.
 
     Args:
-        `x`: a `Tensor` of square `matrix`es with shape `[N, M, M]`
+        `x`: a `Tensor` of square matrices with shape `[N, M, M]`
 
     Returns:
-        The `Tuple` of `Tensor`s `(sign, logdet)` where:
-        `sign`: a `Tensor` of signs of determinants `{-1, +1}` with shape `[N,]`
-        `logdet`: a `Tensor` of the natural log of the absolute values of determinants with shape `[N,]`
+        `(sign, logdet)` where:
+            `sign` is a `Tensor` of signs of determinants `{-1, +1}` with shape `[N,]`
+            `logdet` is a `Tensor` of the natural log of the absolute values of determinants with shape `[N,]`
     """
 
     n = x.shape[0]
@@ -274,43 +276,43 @@ def slogdet(cxt, x: Dense) -> Tuple:
     def step(i: UInt):
         d = cxt.det(x=x[i])
         logdet = F32(d.abs().log())
-        sign = Int(If(d > 0, 1, -1))*1
+        sign = Int(If(d > 0, 1, -1)) * 1
         return [
             cxt.sign_result[i].write(sign),
             cxt.logdet_result[i].write(logdet),
         ]
 
-    return After(Stream.range((0, n)).for_each(step), Tuple([cxt.sign_result, cxt.logdet_result]))
+    return After(Stream.range((0, n)).for_each(step), [cxt.sign_result, cxt.logdet_result])
 
 
 @post_op
-def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(1000)) -> Tuple:
+def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    cxt.qr = qr
+
     cxt.shape = A.shape
-    cxt.n_orig, cxt.m_orig = [UInt(dim) for dim in cxt.shape.unpack(2)]
-    k = Number(Int(If(l == UInt(0), Value.min(Int(cxt.n_orig), Int(cxt.m_orig)), l)))
-    A_orig = Tensor(A).copy()
+    cxt.n_orig, cxt.m_orig = cxt.shape.unpack(2)
+    k = Int(If(l == UInt(0), Value.min(cxt.n_orig, cxt.m_orig), l))
+    A_orig = A.copy()
     cxt.A1, n, m = Tuple(If(
         UInt(cxt.n_orig) > UInt(cxt.m_orig),
-        Tuple([Tensor(matmul(Tensor(A).transpose(), A)), Number(Tensor(A).shape[1]), Number(Tensor(A).shape[1])]),
-        Tuple(If(
-            UInt(cxt.n_orig) < UInt(cxt.m_orig),
-            Tuple([Tensor(matmul(A, Tensor(A).transpose())), Number(Tensor(A).shape[0]), Number(Tensor(A).shape[0])]),
-            Tuple([A, cxt.n_orig, cxt.m_orig])
-        )),
+        [matmul(A.transpose(), A), Tensor(A).shape[1], Tensor(A).shape[1]],
+        If(
+            cxt.n_orig < cxt.m_orig,
+            [matmul(A, Tensor(A).transpose()), A.shape[0], A.shape[0]],
+            [A, cxt.n_orig, cxt.m_orig]
+        ),
     )).unpack(3)
 
-    Q = Dense.random_uniform([n, k]).abs()
-    cxt.qr = qr
-    Q, R = cxt.qr(a=Q).unpack(2)
+    Q, R = cxt.qr(a=Dense.random_uniform([n, k]).abs())
 
     @closure(cxt.qr, cxt.A1)
     @post_op
-    def step(i: UInt, Q_prev: Tensor, Q: Tensor, R: Tensor, err: F32):
-        Z = Tensor(matmul(Tensor(cxt.A1), Tensor(Q)))
-        _Q, _R = Tuple(cxt.qr(a=Z)).unpack(2)
-        _err = F32(Tensor(_Q).sub(Q_prev).pow(2).sum())
-        _Q_prev = Tensor(_Q).copy()
-        return Map(i=i + 1, Q_prev=_Q_prev, Q=Tensor(_Q), R=Tensor(_R), err=_err)
+    def step(i: UInt, Q_prev: Tensor, Q: Tensor):
+        Z = matmul(cxt.A1, Q)
+        _Q, _R = cxt.qr(a=Z)
+        _err = _Q.sub(Q_prev).pow(2).sum()
+        _Q_prev = _Q.copy()
+        return Map(i=i + 1, Q_prev=_Q_prev, Q=_Q, R=_R, err=_err)
 
     @closure(epsilon, max_iter)
     @post_op
@@ -322,28 +324,29 @@ def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(1000)) -> Tu
         Q_prev=Tensor(Q).copy(),
         Q=Tensor(Q).copy(),
         R=Tensor(R),
-        err=F32(1.0)
-        )))
-    Q, R = result_loop['Q'], result_loop['R']
+        err=F32(1.0))))
 
-    singular_values = Tensor(Tensor(diagonal(R)).pow(0.5))
+    Q, R = Tensor(result_loop['Q']), Tensor(result_loop['R'])
+
+    singular_values = diagonal(R).pow(0.5)
     cxt.eye = identity(singular_values.shape[0], F32).as_dense().copy()
     cxt.inv_matrix = (cxt.eye * singular_values.pow(-1))
-    cxt.Q_T = Tensor(Q).transpose()
+    cxt.Q_T = Q.transpose()
+
     cxt.vec_sing_values_upd = Map(If(
         cxt.n_orig == cxt.m_orig,
-        Map(left_vecs=cxt.Q_T, right_vecs=cxt.Q_T, singular_values=(singular_values).pow(2)),
+        Map(left_vecs=cxt.Q_T, right_vecs=cxt.Q_T, singular_values=singular_values.pow(2)),
         Map(
             left_vecs=einsum('ij,jk->ik', [einsum('ij,jk->ik', [A_orig, Q]), cxt.inv_matrix]),
             right_vecs=cxt.Q_T,
             singular_values=singular_values)))
+
     vec_sing_values = Map(If(
         cxt.n_orig < cxt.m_orig,
         Map(
             left_vecs=cxt.Q_T,
             right_vecs=einsum('ij,jk->ik', [einsum('ij,jk->ik', [cxt.inv_matrix, Q]), A_orig]),
             singular_values=singular_values),
-            cxt.vec_sing_values_upd
-            ))
+        cxt.vec_sing_values_upd))
 
     return vec_sing_values['left_vecs'], vec_sing_values['singular_values'], vec_sing_values['right_vecs']
