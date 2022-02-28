@@ -2,6 +2,7 @@ import typing
 
 from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get_op, post_op
+from ..error import BadRequest
 from ..state.generic import Map, Tuple
 from ..state.number import Number, Bool, F64, UInt, F32, Int
 from ..state.ref import After, Get, If, MethodSubject, While
@@ -202,10 +203,11 @@ def plu(txn, x: Tensor) -> PLUFactorization:
                 {'p': p, 'x': x, 'k': k + 1}
             )
 
-        @closure()
         @post_op
-        def cond(x: Tensor, k: UInt):
-            return (k < UInt(x.shape[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
+        def cond(cxt, x: Tensor, k: UInt):
+            cxt.valid_k = k < (x.shape[0] - 1)
+            cxt.valid_x_k_k = x[k, k].abs() < 1e-3
+            return cxt.valid_k.logical_and(cxt.valid_x_k_k)
 
         return While(cond, step, {
             'p': p.copy(),
@@ -223,27 +225,29 @@ def plu(txn, x: Tensor) -> PLUFactorization:
         p = Tensor(pu['p'])
         n = UInt(pu['k']) - i
         factor = Tensor(u[i + 1:, i] / u[i, i])
-        return Map(After(
+        return After(
             when=[
                 l[i + 1:, i].write(factor),
                 u[i + 1:].write(u[i + 1:] - factor.expand_dims() * u[i]),
             ],
-            then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n)))
-
-    txn.step = step
+            then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n))
 
     @post_op
     def cond(u: Tensor, i: UInt):
         return i < UInt(u.shape[0]) - 1
 
-    txn.cond = cond
-    return While(txn.cond, txn.step, {
+    txn.factorization = While(cond, step, {
         'p': identity(x.shape[0], F32).as_dense().copy(),
         'l': identity(x.shape[0], F32).as_dense().copy(),
         'u': x.copy(),
         'i': 0,
         "num_permutations": 0,
     })
+
+    return If(
+        (x.ndim == 2).logical_and(x.shape[0] == x.shape[1]),
+        txn.factorization,
+        BadRequest("PLU decomposition requires a square matrix, not {{x}}", x=x))
 
 
 @post_op
