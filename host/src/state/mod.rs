@@ -623,6 +623,18 @@ impl From<bool> for State {
     }
 }
 
+impl From<i64> for State {
+    fn from(n: i64) -> Self {
+        Self::Scalar(n.into())
+    }
+}
+
+impl From<usize> for State {
+    fn from(n: usize) -> Self {
+        Self::Scalar(n.into())
+    }
+}
+
 impl From<u64> for State {
     fn from(n: u64) -> Self {
         Self::Scalar(n.into())

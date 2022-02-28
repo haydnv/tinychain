@@ -625,6 +625,18 @@ impl From<bool> for Scalar {
     }
 }
 
+impl From<i64> for Scalar {
+    fn from(n: i64) -> Self {
+        Self::Value(n.into())
+    }
+}
+
+impl From<usize> for Scalar {
+    fn from(n: usize) -> Self {
+        Self::Value(n.into())
+    }
+}
+
 impl From<u64> for Scalar {
     fn from(n: u64) -> Self {
         Self::Value(n.into())

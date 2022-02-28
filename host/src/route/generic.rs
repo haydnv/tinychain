@@ -586,3 +586,99 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
         Ok((start as usize, end as usize))
     }
 }
+
+struct CreateMapHandler;
+
+impl<'a> Handler<'a> for CreateMapHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let value = Tuple::<(Id, Value)>::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid Map", v)
+                })?;
+
+                let map = value
+                    .into_iter()
+                    .map(|(id, value)| (id, State::from(value)))
+                    .collect();
+
+                Ok(State::Map(map))
+            })
+        }))
+    }
+}
+
+pub struct MapStatic;
+
+impl Route for MapStatic {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CreateMapHandler))
+        } else {
+            None
+        }
+    }
+}
+
+struct CreateTupleHandler;
+
+impl<'a> Handler<'a> for CreateTupleHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let value: Tuple<Value> = key.try_into()?;
+                Ok(State::Tuple(value.into_iter().map(State::from).collect()))
+            })
+        }))
+    }
+}
+
+struct CreateRangeHandler;
+
+impl<'a> Handler<'a> for CreateRangeHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.matches::<(i64, i64, usize)>() {
+                    let (start, stop, step): (i64, i64, usize) =
+                        key.opt_cast_into().expect("range");
+
+                    Ok(State::Tuple(
+                        (start..stop).step_by(step).into_iter().collect(),
+                    ))
+                } else if key.matches::<(i64, i64)>() {
+                    let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
+                    Ok(State::Tuple((start..stop).into_iter().collect()))
+                } else if key.matches::<usize>() {
+                    let stop: usize = key.opt_cast_into().expect("range stop");
+                    Ok(State::Tuple((0..stop).into_iter().collect()))
+                } else {
+                    Err(TCError::bad_request("invalid range", key))
+                }
+            })
+        }))
+    }
+}
+
+pub struct TupleStatic;
+
+impl Route for TupleStatic {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CreateTupleHandler))
+        } else if path.len() == 1 && path[0].as_str() == "range" {
+            Some(Box::new(CreateRangeHandler))
+        } else {
+            None
+        }
+    }
+}

@@ -172,6 +172,18 @@ class Tuple(State):
 
         return _Tuple
 
+    @classmethod
+    def range(cls, range):
+        """
+        Construct a new :class:`Tuple` of :class:`Number` s in the given `range`.
+
+        `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
+        """
+
+        from .ref import Get
+        from .number import Number
+        return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
+
     def __new__(cls, form):
         if isinstance(form, Tuple):
             return State.__new__(cls)

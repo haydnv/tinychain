@@ -1,11 +1,9 @@
-use std::convert::TryInto;
-
 use futures::TryFutureExt;
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::TryCastInto;
 use tc_error::*;
 use tc_value::{Link, Number};
-use tcgeneric::{label, Id, Instance, Label, NativeClass, PathSegment, Tuple};
+use tcgeneric::{label, Id, Instance, Label, NativeClass, PathSegment};
 
 use crate::object::{InstanceClass, Object};
 use crate::state::{State, StateType};
@@ -86,46 +84,6 @@ impl From<StateType> for ClassHandler {
     }
 }
 
-struct MapHandler;
-
-impl<'a> Handler<'a> for MapHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                let value = Tuple::<(Id, Value)>::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid Map", v)
-                })?;
-
-                let map = value
-                    .into_iter()
-                    .map(|(id, value)| (id, State::from(value)))
-                    .collect();
-
-                Ok(State::Map(map))
-            })
-        }))
-    }
-}
-
-struct TupleHandler;
-
-impl<'a> Handler<'a> for TupleHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                let value: Tuple<Value> = key.try_into()?;
-                Ok(State::Tuple(value.into_iter().map(State::from).collect()))
-            })
-        }))
-    }
-}
-
 impl Route for StateType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
@@ -197,9 +155,9 @@ impl Route for Static {
         match path[0].as_str() {
             "collection" => collection::Static.route(&path[1..]),
             "scalar" => scalar::Static.route(&path[1..]),
-            "map" => Some(Box::new(MapHandler)),
+            "map" => generic::MapStatic.route(&path[1..]),
             "stream" => stream::Static.route(&path[1..]),
-            "tuple" => Some(Box::new(TupleHandler)),
+            "tuple" => generic::TupleStatic.route(&path[1..]),
             _ => None,
         }
     }

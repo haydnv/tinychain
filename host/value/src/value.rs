@@ -744,6 +744,12 @@ impl From<Vec<Value>> for Value {
     }
 }
 
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Self::Number(n.into())
+    }
+}
+
 impl From<usize> for Value {
     fn from(n: usize) -> Self {
         Self::Number((n as u64).into())

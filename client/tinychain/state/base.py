@@ -183,9 +183,10 @@ class Stream(State):
 
     @classmethod
     def range(cls, range):
-        """Return a stream of numbers in the given `range`.
+        """
+        Construct a new :class:`Stream` of :class:`Number` s in the given `range`.
 
-        `range` can be a positive number, a 2-Tuple like `(start, stop)`, or a 3-Tuple like `(start, stop, step)`
+        `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
         """
 
         from .ref import Get

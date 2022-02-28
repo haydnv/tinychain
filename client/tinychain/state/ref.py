@@ -183,6 +183,9 @@ class With(Ref):
 
         self.op = op
 
+        if hasattr(op, "rtype"):
+            self.rtype = op.rtype
+
     def __dbg__(self):
         return [self.capture, self.op]
 
