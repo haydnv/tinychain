@@ -88,6 +88,8 @@ def norm(tensor: Tensor) -> Tensor:
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
 def qr(cxt, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
+    """Compute the QR decomposition of the given matrix `a`"""
+
     cxt.shape = a.shape
     cxt.n, cxt.m = cxt.shape.unpack(2)
 
@@ -182,40 +184,41 @@ def plu(txn, x: Tensor) -> PLUFactorization:
     """
 
     # TODO: use a TypedDict as the return annotation
-    def permute_rows(cxt, x: Tensor, p: Tensor, start_from: UInt) -> Map:
+    @post_op
+    def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
         @closure(start_from)
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
             p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
             x_k, x_kp1 = x[start_from].copy(), x[k + 1].copy()
 
-            return Map(After(
+            return After(
                 [
                     p[start_from].write(p_kp1),
                     p[k + 1].write(p_k),
                     x[start_from].write(x_kp1),
                     x[k + 1].write(x_k),
                 ],
-                Map(p=p, x=x, k=k + 1)
-            ))
+                {'p': p, 'x': x, 'k': k + 1}
+            )
 
-        cxt.step = step
-
+        @closure()
         @post_op
         def cond(x: Tensor, k: UInt):
             return (k < UInt(x.shape[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
 
-        cxt.cond = cond
+        return While(cond, step, {
+            'p': p.copy(),
+            'x': x.copy(),
+            'k': start_from
+        })
 
-        return Map(While(cxt.cond, cxt.step, Map(
-            p=p.copy(),
-            x=x.copy(),
-            k=start_from,
-        )))
+    txn.permute_rows = permute_rows
 
+    @closure(txn.permute_rows)
     @post_op
-    def step(cxt, p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
-        pu = permute_rows(cxt, p=p, x=u, start_from=i)
+    def step(p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
+        pu = txn.permute_rows(p=p, x=u, start_from=i)
         u = Tensor(pu['x'])
         p = Tensor(pu['p'])
         n = UInt(pu['k']) - i
