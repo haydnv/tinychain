@@ -186,7 +186,7 @@ class SVDTests(ClientTest):
         actual = (load_np(U), load_np(s), load_np(V))
         self._check(matrix, actual)
 
-    def testParallelSVDNltM(self):
+    def testParallelSVD_NltM(self):
         num_matrices = 1
         n = 4
         m = 6

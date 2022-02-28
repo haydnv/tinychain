@@ -170,16 +170,15 @@ class PLUFactorization(Map):
 
 @post_op
 def plu(x: Tensor) -> PLUFactorization:
-    """Compute the PLU factorization of the given `matrix`.
+    """Compute the PLU factorization of the given matrix `x`.
 
     Args:
         `x`: a matrix with shape `[N, N]`
 
-    Returns:
-        A `[p, l, u]` list of `Tensor`s where
-        `p`: a permutation matrix,
-        `l`: lower triangular with unit diagonal elements,
-        `u`: upper triangular.
+    Returns `(p, l, u)` where
+        `p` is the permutation matrix,
+        `l` is lower triangular with unit diagonal elements, and
+        `u` is upper triangular.
     """
 
     def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
@@ -271,10 +270,12 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     cxt.logdet_result = Dense.create([n])
     cxt.det = det
 
-    @closure(x, cxt.det, cxt.sign_result, cxt.logdet_result)
+    cxt.copy = x.copy()
+
+    @closure(cxt.copy, cxt.det, cxt.sign_result, cxt.logdet_result)
     @get_op
     def step(i: UInt):
-        d = cxt.det(x=x[i])
+        d = cxt.det(x=cxt.copy[i])
         logdet = F32(d.abs().log())
         sign = Int(If(d > 0, 1, -1)) * 1
         return [
