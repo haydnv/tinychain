@@ -292,7 +292,7 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     cxt.logdet_result = Dense.create([cxt.batch_size])
     cxt.det = det
 
-    cxt.copy = x.copy()
+    cxt.copy = x.reshape(cxt.batch_shape + x.shape[-2:]).copy()
 
     @closure(cxt.copy, cxt.det, cxt.sign_result, cxt.logdet_result)
     @get_op
