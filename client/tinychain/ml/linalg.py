@@ -234,14 +234,13 @@ def plu(txn, x: Tensor) -> PLUFactorization:
         return i < UInt(u.shape[0]) - 1
 
     txn.cond = cond
-
-    return PLUFactorization(Map(While(txn.cond, txn.step, Map(
-        p=identity(x.shape[0], F32).as_dense().copy(),
-        l=identity(x.shape[0], F32).as_dense().copy(),
-        u=x.copy(),
-        i=0,
-        num_permutations=0,
-    ))))
+    return While(txn.cond, txn.step, {
+        'p': identity(x.shape[0], F32).as_dense().copy(),
+        'l': identity(x.shape[0], F32).as_dense().copy(),
+        'u': x.copy(),
+        'i': 0,
+        "num_permutations": 0,
+    })
 
 
 @post_op
