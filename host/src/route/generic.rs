@@ -407,26 +407,28 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
+                let len = self.tuple.len() as i64;
+
                 match key {
                     Value::None => Ok(State::from(self.tuple.clone())),
                     Value::Tuple(range) if range.matches::<(Bound, Bound)>() => {
-                        let len = self.tuple.len();
                         let range = Range::opt_cast_from(range).expect("range");
-                        let (start, end) = cast_range(range, len as i64)?;
-                        Ok(State::Tuple(
-                            self.tuple[start..end]
-                                .iter()
-                                .cloned()
-                                .map(State::from)
-                                .collect(),
-                        ))
+                        let (start, end) = cast_range(range, len)?;
+                        let slice = self.tuple[start..end]
+                            .iter()
+                            .cloned()
+                            .map(State::from)
+                            .collect();
+
+                        Ok(State::Tuple(slice))
                     }
                     i if i.matches::<Number>() => {
                         let i = Number::opt_cast_from(i).expect("tuple index");
-                        let i = usize::cast_from(i);
+                        let i = i64::cast_from(i);
+                        let i = if i < 0 { len + i } else { i };
 
                         self.tuple
-                            .get(i)
+                            .get(i as usize)
                             .cloned()
                             .map(State::from)
                             .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
