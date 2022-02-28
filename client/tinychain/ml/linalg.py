@@ -273,17 +273,19 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     """Compute the sign and log of the absolute value of the determinant of one or more square matrices.
 
     Args:
-        `x`: a `Tensor` of square matrices with shape `[N, M, M]`
+        `x`: a `Tensor` of square matrices with shape `[..., M, M]`
 
     Returns:
         `(sign, logdet)` where:
-            `sign` is a `Tensor` of signs of determinants `{-1, +1}` with shape `[N,]`
-            `logdet` is a `Tensor` of the natural log of the absolute values of determinants with shape `[N,]`
+            `sign` is a `Tensor` of signs of determinants `{-1, +1}` with shape `[...]`
+            `logdet` is a `Tensor` of the natural log of the absolute values of determinants with shape `[...]`
     """
 
-    n = x.shape[0]
-    cxt.sign_result = Dense.create([n])
-    cxt.logdet_result = Dense.create([n])
+    cxt.batch_shape = x.shape[:-2]
+    cxt.batch_size = product(cxt.batch_shape)
+
+    cxt.sign_result = Dense.create([cxt.batch_size])
+    cxt.logdet_result = Dense.create([cxt.batch_size])
     cxt.det = det
 
     cxt.copy = x.copy()
@@ -299,7 +301,10 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
             cxt.logdet_result[i].write(logdet),
         ]
 
-    return After(Stream.range((0, n)).for_each(step), [cxt.sign_result, cxt.logdet_result])
+    result = After(Stream.range((0, cxt.batch_size)).for_each(step), [cxt.sign_result, cxt.logdet_result])
+    sign, determinants = Tuple(result).unpack(2)
+
+    return Tensor.reshape(sign, cxt.batch_shape), Tensor.reshape(determinants, cxt.batch_shape)
 
 
 @post_op
