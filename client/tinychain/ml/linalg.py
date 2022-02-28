@@ -292,7 +292,7 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     cxt.logdet_result = Dense.create([cxt.batch_size])
     cxt.det = det
 
-    cxt.copy = x.reshape(cxt.batch_shape + x.shape[-2:]).copy()
+    cxt.copy = x.reshape(Tuple([cxt.batch_size]) + x.shape[-2:]).copy()
 
     @closure(cxt.copy, cxt.det, cxt.sign_result, cxt.logdet_result)
     @get_op
@@ -455,7 +455,8 @@ def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typi
 def product(tuple: typing.Tuple[Number]) -> Number:
     """Compute the product of a `Tuple` of `Number` s."""
 
-    return tuple.fold('n', Map(p=1), post_op(lambda n, p: Map(p=Number.mul(n, p))))['p']
+    p = tuple.fold('n', Map(p=1), post_op(lambda n, p: Map(p=Number.mul(n, p))))['p']
+    return Number(p)
 
 
 def _is_square(x):
