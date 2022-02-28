@@ -169,7 +169,7 @@ class PLUFactorization(Map):
 
 
 @post_op
-def plu(x: Tensor) -> PLUFactorization:
+def plu(txn, x: Tensor) -> PLUFactorization:
     """Compute the PLU factorization of the given matrix `x`.
 
     Args:
@@ -181,7 +181,9 @@ def plu(x: Tensor) -> PLUFactorization:
         `u` is upper triangular.
     """
 
-    def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
+    # TODO: use a TypedDict as the return annotation
+    def permute_rows(cxt, x: Tensor, p: Tensor, start_from: UInt) -> Map:
+        @closure(start_from)
         @post_op
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
             p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
@@ -197,19 +199,23 @@ def plu(x: Tensor) -> PLUFactorization:
                 Map(p=p, x=x, k=k + 1)
             ))
 
+        cxt.step = step
+
         @post_op
         def cond(x: Tensor, k: UInt):
             return (k < UInt(x.shape[0]) - 1).logical_and(x[k, k].abs() < 1e-3)
 
-        return Map(While(cond, step, Map(
+        cxt.cond = cond
+
+        return Map(While(cxt.cond, cxt.step, Map(
             p=p.copy(),
             x=x.copy(),
             k=start_from,
         )))
 
     @post_op
-    def step(p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
-        pu = permute_rows(p=p, x=u, start_from=i)
+    def step(cxt, p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
+        pu = permute_rows(cxt, p=p, x=u, start_from=i)
         u = Tensor(pu['x'])
         p = Tensor(pu['p'])
         n = UInt(pu['k']) - i
@@ -221,11 +227,15 @@ def plu(x: Tensor) -> PLUFactorization:
             ],
             then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n)))
 
+    txn.step = step
+
     @post_op
     def cond(u: Tensor, i: UInt):
         return i < UInt(u.shape[0]) - 1
 
-    return PLUFactorization(Map(While(cond, step, Map(
+    txn.cond = cond
+
+    return PLUFactorization(Map(While(txn.cond, txn.step, Map(
         p=identity(x.shape[0], F32).as_dense().copy(),
         l=identity(x.shape[0], F32).as_dense().copy(),
         u=x.copy(),
@@ -322,12 +332,15 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
         _Q_prev = _Q.copy()
         return Map(i=i + 1, Q_prev=_Q_prev, Q=_Q, R=_R, err=_err)
 
+    cxt.step = step
+
     @closure(epsilon, max_iter)
     @post_op
     def cond(i: UInt, err: F32):
         return (F32(err).abs() > epsilon).logical_and(i < max_iter)
 
-    result_loop = Map(While(cond, step, Map(
+    cxt.cond = cond
+    result_loop = Map(While(cxt.cond, cxt.step, Map(
         i=UInt(0),
         Q_prev=Tensor(Q).copy(),
         Q=Tensor(Q).copy(),
