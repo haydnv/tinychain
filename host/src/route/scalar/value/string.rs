@@ -1,6 +1,5 @@
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastInto};
 
-use tc_error::*;
 use tc_value::{TCString, Value};
 use tcgeneric::{Map, PathSegment};
 
@@ -38,13 +37,8 @@ impl<'a> Handler<'a> for RenderHandler<'a> {
             Box::pin(async move {
                 let params = params
                     .into_iter()
-                    .map(|(id, state)| {
-                        Value::try_cast_from(state, |s| {
-                            TCError::bad_request("invalid value for template", s)
-                        })
-                        .map(|value| (id, value))
-                    })
-                    .collect::<TCResult<Map<Value>>>()?;
+                    .map(|(id, state)| (id, Value::String(state.to_string().into())))
+                    .collect::<Map<Value>>();
 
                 self.template
                     .render(params)
