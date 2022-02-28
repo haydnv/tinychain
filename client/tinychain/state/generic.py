@@ -4,7 +4,7 @@ from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 from .base import State
 from .number import Bool, UInt
-from .ref import Ref
+from .ref import Ref, Post
 from .value import Id
 
 
@@ -22,9 +22,6 @@ class Map(State):
         if args and "form" in kwargs:
             raise ValueError(f"Map got duplicate arguments for 'form': {args[0]}, {kwargs['form']}")
 
-        if len(args) > 1 and "spec" in kwargs:
-            raise ValueError(f"Map got duplicate arguments for 'form': {args[1]}, {kwargs['form']}")
-
         if len(args) > 2:
             raise ValueError(f"Map.__init__ got unexpected arguments {args} {kwargs}")
 
@@ -36,10 +33,6 @@ class Map(State):
 
         if len(args) > 1:
             spec = args[1]
-
-        if "spec" in kwargs:
-            spec = kwargs["spec"]
-            del kwargs["spec"]
 
         if not form:
             form = kwargs
@@ -60,6 +53,9 @@ class Map(State):
     def expect(cls, spec):
         class _Map(cls):
             __spec__ = spec
+
+            def __contains__(self, key):
+                return key in spec
 
             def __len__(self):
                 return len(spec)
@@ -173,6 +169,10 @@ class Tuple(State):
         return _Tuple
 
     @classmethod
+    def concatenate(cls, l, r):
+        return cls(Post(uri(cls).append("concatenate"), {'l': l, 'r': r}))
+
+    @classmethod
     def range(cls, range):
         """
         Construct a new :class:`Tuple` of :class:`Number` s in the given `range`.
@@ -200,7 +200,7 @@ class Tuple(State):
         return State.__init__(self, form)
 
     def __add__(self, other):
-        return self.extend(other)
+        return Tuple.concatenate(self, other)
 
     def __eq__(self, other):
         return self.eq(other)
@@ -209,32 +209,37 @@ class Tuple(State):
         return to_json(form_of(self))
 
     def __getitem__(self, i):
-        if hasattr(form_of(self), "__getitem__"):
-            if uri(self) == uri(self.__class__):
-                return form_of(self)[i]
-            elif isinstance(i, int):
-                return get_ref(form_of(self)[i], uri(self).append(i))
+        rtype = self.__spec__[0] if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis else State
 
         if isinstance(i, slice):
-            if i.step:
+            if i.step is not None:
                 raise NotImplementedError(f"slice with step: {i}")
 
+            if len(self.__spec__) == 2 and self.__spec__[1] is not Ellipsis:
+                # the contents are constants, so compute the slice now if possible
+                if hasattr(self.__form__, "__getitem__"):
+                    constant_start = slice.start is None or isinstance(slice.start, int)
+                    constant_stop = slice.stop is None or isinstance(slice.stop, int)
+                    if constant_start and constant_stop:
+                        start = _index_of(slice.start, len(self), 0)
+                        stop = _index_of(slice.stop, len(self), len(self))
+                        return Tuple([self[i] for i in range(start, stop)])
+
+            from .bound import Range
+            return self._get("", Range.from_slice(i), Tuple.expect(typing.Tuple[rtype, ...]))
+
+        if isinstance(i, int):
             if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
-                from .bound import Range
-
-                rtype = self.__class__
-                return self._get("", Range.from_slice(i), rtype)
+                rtype = self.__spec__[0]
             else:
-                start = _index_of(i.start, len(self), 0)
-                stop = _index_of(i.stop, len(self), len(self))
-                return Tuple([self[i] for i in range(start, stop)])
+                rtype = self.__spec__[i]
 
-        if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
-            rtype = self.__spec__[0]
-        elif i < len(self.__spec__):
-            rtype = self.__spec__[i]
-        else:
-            raise IndexError(f"index {i} out of bounds for {self}")
+            if hasattr(self.__form__, "__getitem__"):
+                item = self.__form__[i]
+                if uri(self) != uri(self.__class__) and hasattr(item, "__ref__"):
+                    item = get_ref(item, uri(self).append(i))
+
+                return item
 
         return self._get("", i, rtype)
 
@@ -253,11 +258,6 @@ class Tuple(State):
         """Return a `Bool` indicating whether the elements in this `Tuple` do not equal those in the given `other`."""
 
         return self.eq(other).logical_not()
-
-    def extend(self, other):
-        """Construct a new `Tuple` which is the concatenation of this `Tuple` and the given `other`."""
-
-        return self._get("extend", other, Tuple)
 
     def len(self):
         """Return the number of elements in this `Tuple`."""

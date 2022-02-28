@@ -669,14 +669,39 @@ impl<'a> Handler<'a> for CreateRangeHandler {
     }
 }
 
+struct ConcatenateHandler;
+
+impl<'a> Handler<'a> for ConcatenateHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let l: Tuple<State> = params.require(&label("l").into())?;
+                let r: Tuple<State> = params.require(&label("r").into())?;
+                params.expect_empty()?;
+
+                let mut concat = l.into_inner();
+                concat.extend(r.into_inner());
+                Ok(State::Tuple(concat.into()))
+            })
+        }))
+    }
+}
+
 pub struct TupleStatic;
 
 impl Route for TupleStatic {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             Some(Box::new(CreateTupleHandler))
-        } else if path.len() == 1 && path[0].as_str() == "range" {
-            Some(Box::new(CreateRangeHandler))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "concatenate" => Some(Box::new(ConcatenateHandler)),
+                "range" => Some(Box::new(CreateRangeHandler)),
+                _ => None,
+            }
         } else {
             None
         }

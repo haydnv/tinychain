@@ -48,7 +48,7 @@ class Range(object):
             self.start = start
 
         if end is not None and not isinstance(end, Bound):
-            self.end = In(end)
+            self.end = Ex(end)
         else:
             self.end = end
 
