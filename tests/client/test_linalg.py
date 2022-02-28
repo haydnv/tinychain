@@ -155,7 +155,7 @@ class LinearAlgebraTests(ClientTest):
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
     def testSVD_1(self):
-        THRESHOLD = 5e-4
+        threshold = 5e-4
         n = 4
         m = 5
         matrix = np.random.random(n * m).reshape(n, m)
@@ -164,16 +164,17 @@ class LinearAlgebraTests(ClientTest):
         cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
-        svd_result = self.host.post(ENDPOINT, cxt)
-        U, s, V = svd_result
+
+        result = self.host.post(ENDPOINT, cxt)
+        U, s, V = result
         U = load_np(U)
         s = load_np(s)
         V = load_np(V)
 
-        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < THRESHOLD)
+        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < threshold)
 
     def testSVD_2(self):
-        THRESHOLD = 5e-5
+        threshold = 5e-4
         n = 4
         m = 3
         matrix = np.random.random(n * m).reshape(n, m)
@@ -183,12 +184,65 @@ class LinearAlgebraTests(ClientTest):
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=200)
         svd_result = self.host.post(ENDPOINT, cxt)
+
         U, s, V = svd_result
         U = load_np(U)
         s = load_np(s)
         V = load_np(V)
 
-        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < THRESHOLD)
+        self.assertTrue(abs((U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V) - matrix).sum() < threshold)
+
+    def testSVD_parallel_1(self):
+        threshold = 5e-4
+
+        num_matrices = 1
+        n = 4
+        m = 6
+        shape = [num_matrices, n, m]
+        matrices = np.random.random(np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.matrices = tc.tensor.Dense.load(shape, tc.F32, matrices.flatten().tolist())
+        cxt.svd = tc.linalg.svd_parallel
+        cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=30)
+
+        result = self.host.post(ENDPOINT, cxt)
+
+        U, s, V = result
+        U = load_np(U)
+        s = load_np(s)
+        V = load_np(V)
+
+        for i in range(num_matrices):
+            expected = matrices[i]
+            actual = (U[i] @ (np.eye(s[i].shape[0], s[i].shape[0]) * s[i]) @ V[i])
+            self.assertTrue(abs(actual - expected).sum() < threshold)
+
+    def testSVD_parallel_2(self):
+        threshold = 5e-4
+
+        num_matrices = 1
+        n = 3
+        m = 2
+        shape = [num_matrices, n, m]
+        matrices = np.random.random(np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.matrices = tc.tensor.Dense.load(shape, tc.F32, matrices.flatten().tolist())
+        cxt.svd = tc.linalg.svd_parallel
+        cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=30)
+
+        result = self.host.post(ENDPOINT, cxt)
+
+        U, s, V = result
+        U = load_np(U)
+        s = load_np(s)
+        V = load_np(V)
+
+        for i in range(num_matrices):
+            expected = matrices[i]
+            actual = (U[i] @ (np.eye(s[i].shape[0], s[i].shape[0]) * s[i]) @ V[i])
+            self.assertTrue(abs(actual - expected).sum() < threshold)
 
 
 def expect_dense(x, dtype):

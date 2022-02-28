@@ -1,12 +1,12 @@
 import typing
 
-from tinychain.collection.tensor import einsum, Dense, Sparse, Tensor
-from tinychain.decorators import closure, get_op, post_op
-from tinychain.state.generic import Map, Tuple
-from tinychain.state.number import Number, Bool, F64, UInt, F32, Int
-from tinychain.state.ref import After, Get, If, MethodSubject, While
-from tinychain.state.value import Value
-from tinychain.state import Stream
+from ..collection.tensor import einsum, Dense, Sparse, Tensor
+from ..decorators import closure, get_op, post_op
+from ..state.generic import Map, Tuple
+from ..state.number import Number, Bool, F64, UInt, F32, Int
+from ..state.ref import After, Get, If, MethodSubject, While
+from ..state.value import Value
+from ..state import Stream
 
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
@@ -287,6 +287,13 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
 
 @post_op
 def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    """
+    Compute the singular value decomposition of the given matrix `A`
+
+    Returns:
+        `(U, s, V)`: :class:`Tensor` s such that `A` ~= `u * identity([s.shape[0], s.shape[0]]) * v.transpose()`.
+    """
+
     cxt.qr = qr
 
     cxt.shape = A.shape
@@ -350,3 +357,54 @@ def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typi
         cxt.vec_sing_values_upd))
 
     return vec_sing_values['left_vecs'], vec_sing_values['singular_values'], vec_sing_values['right_vecs']
+
+
+# TODO: update to support `Tensor` (not just `Dense`) after `Sparse.concatenate` is implemented
+@post_op
+def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    """
+    Given a `Tensor` of `matrices`, return the singular value decomposition `(s, u, v)` of each matrix.
+
+    Currently only implemented for `Dense` matrices.
+    """
+
+    txn.svd = svd
+
+    txn.N, txn.M = A.shape[-2:].unpack(2)
+    txn.batch_shape = A.shape[:-2]
+    txn.num_matrices = product(txn.batch_shape)
+
+    txn.matrices = A.reshape([txn.num_matrices, txn.N, txn.M]).copy()
+
+    @closure(txn.svd, txn.matrices, l, epsilon, max_iter)
+    @get_op
+    def matrix_svd(i: UInt) -> typing.Tuple[Tensor, Tensor, Tensor]:
+        return txn.svd(A=txn.matrices[i], l=l, epsilon=epsilon, max_iter=max_iter)
+
+    txn.indices = Tuple.range(txn.num_matrices)
+    txn.UsV_tuples = txn.indices.map(matrix_svd)
+
+    def get(j):
+        @closure(txn.UsV_tuples)
+        @get_op
+        def get(i: UInt) -> Dense:
+            return Tensor.expand_dims(Tuple(txn.UsV_tuples[i])[j], 0)
+
+        return get
+
+    txn.U = Dense.concatenate(txn.indices.map(get(0)), axis=0)
+    txn.s = Dense.concatenate(txn.indices.map(get(1)), axis=0)
+    txn.V = Dense.concatenate(txn.indices.map(get(2)), axis=0)
+
+    return (
+        txn.U.reshape(Tuple.concatenate(txn.batch_shape, txn.U.shape[1:])),
+        txn.s.reshape(Tuple.concatenate(txn.batch_shape, [Number.min(txn.N, txn.M)])),
+        txn.V.reshape(Tuple.concatenate(txn.batch_shape, txn.V.shape[1:]))
+    )
+
+
+# TODO: move this to a new top-level module caled "math"
+def product(tuple: typing.Tuple[Number]) -> Number:
+    """Compute the product of a `Tuple` of `Number` s."""
+
+    return tuple.fold('n', Map(p=1), post_op(lambda n, p: Map(p=Number.mul(n, p))))['p']
