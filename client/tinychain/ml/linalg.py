@@ -245,7 +245,7 @@ def plu(txn, x: Tensor) -> PLUFactorization:
     })
 
     return If(
-        (x.ndim == 2).logical_and(x.shape[0] == x.shape[1]),
+        _is_square(x),
         txn.factorization,
         BadRequest("PLU decomposition requires a square matrix, not {{x}}", x=x))
 
@@ -264,8 +264,12 @@ def det(cxt, x: Tensor) -> F32:
     cxt.plu = plu
     plu_result = cxt.plu(x=x)
     sign = Int(-1).pow(plu_result.num_permutations)
+    determinant = diagonal(plu_result.u).product() * sign
 
-    return diagonal(plu_result.u).product() * sign
+    return If(
+        _is_square(x),
+        determinant,
+        BadRequest("determinant requires a square matrix, not {{x}}", x=x))
 
 
 @post_op
@@ -452,3 +456,7 @@ def product(tuple: typing.Tuple[Number]) -> Number:
     """Compute the product of a `Tuple` of `Number` s."""
 
     return tuple.fold('n', Map(p=1), post_op(lambda n, p: Map(p=Number.mul(n, p))))['p']
+
+
+def _is_square(x):
+    return (x.ndim == 2).logical_and(x.shape[0] == x.shape[1])
