@@ -141,11 +141,21 @@ class Put(Method):
 class Post(Method):
     __uri__ = uri(op.Post)
 
-    def __call__(self, params=None, **kwargs):
-        if params is None:
+    def __call__(self, *args, **kwargs):
+        if args and kwargs:
+            raise ValueError("Post method takes a single argument (a Map), or kwargs, not both")
+
+        if args:
+            [params] = args
+        else:
             params = kwargs
-        elif kwargs:
-            raise ValueError("Post method takes a single argument called `params`, or kwargs, not both")
+
+        for name, param in inspect.signature(self.form).parameters.items():
+            if param.default == inspect.Parameter.empty:
+                continue
+
+            if name not in params:
+                params[name] = param.default
 
         rtype = _get_rtype(self.form, State)
         return rtype(ref.Post(self.subject(), params))

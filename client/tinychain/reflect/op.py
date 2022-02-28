@@ -159,6 +159,7 @@ class Post(Op):
         return cxt
 
     def __ref__(self, name):
+        sig = inspect.signature(self.form).parameters
         rtype = self.rtype
 
         class PostRef(op.Post):
@@ -166,10 +167,19 @@ class Post(Op):
                 if args and kwargs:
                     raise ValueError("POST Op takes one arg (a Map) or kwargs, but not both")
 
-                if not args:
-                    args = kwargs
+                if args:
+                    [params] = args
+                else:
+                    params = kwargs
 
-                return rtype(ref.Post(self, args))
+                for name, param in sig.items():
+                    if param.default == inspect.Parameter.empty:
+                        continue
+
+                    if name not in params:
+                        params[name] = param.default
+
+                return rtype(ref.Post(self, params))
 
         return PostRef(URI(name))
 
