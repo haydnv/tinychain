@@ -7,7 +7,7 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::try_join;
-use log::debug;
+use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
 
@@ -97,30 +97,45 @@ impl Refer for While {
             TCError::bad_request("while loop requires an Op or Closure, found", s)
         })?;
 
+        debug!("While condition definition is {}", cond);
+
         loop {
-            let still_going = cond.clone().call(txn, state.clone()).await?;
-
-            debug!("While condition is {}", cond);
-            if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = still_going {
-                if b.into() {
-                    state = closure.clone().call(txn, state).await?;
-
-                    if state.is_conditional() {
-                        return Err(TCError::bad_request(
-                            "conditional State is not allowed in a While loop",
-                            state,
-                        ));
+            let mut cond = cond.clone();
+            let still_going = loop {
+                match cond.clone().call(txn, state.clone()).await? {
+                    State::Scalar(Scalar::Value(Value::Number(Number::Bool(still_going)))) => {
+                        break still_going.into()
                     }
-
-                    debug!("While loop state is {}", state);
-                } else {
-                    break Ok(state);
+                    State::Closure(closure) => {
+                        warn!("While condition returned a nested {}", closure);
+                        cond = closure;
+                    }
+                    State::Scalar(Scalar::Op(op_def)) => {
+                        warn!("While condition returned a nested {}", op_def);
+                        cond = op_def.into()
+                    }
+                    other => {
+                        return Err(TCError::bad_request(
+                            "invalid condition for While loop",
+                            other,
+                        ))
+                    }
                 }
+            };
+
+            if still_going {
+                state = closure.clone().call(txn, state).await?;
+
+                if state.is_conditional() {
+                    return Err(TCError::bad_request(
+                        "conditional State is not allowed in a While loop",
+                        state,
+                    ));
+                }
+
+                debug!("While loop state is {}", state);
             } else {
-                break Err(TCError::bad_request(
-                    "expected boolean while condition but found",
-                    cond,
-                ));
+                break Ok(state);
             }
         }
     }

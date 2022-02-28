@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
+use log::debug;
 use safecast::{CastInto, TryCastInto};
 use sha2::digest::{Digest, Output};
 use sha2::Sha256;
@@ -93,6 +94,8 @@ impl Closure {
 
         let mut context = self.context;
         let subject = context.remove(&SELF.into());
+
+        debug!("call Closure with state {} and args {}", context, args);
 
         match self.op {
             OpDef::Get((key_name, op_def)) => {
