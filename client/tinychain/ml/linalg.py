@@ -286,12 +286,12 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
 
 
 @post_op
-def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
     """
     Compute the singular value decomposition of the given matrix `A`
 
     Returns:
-        `(U, s, V)`: :class:`Tensor` s such that `A` ~= `u * identity([s.shape[0], s.shape[0]]) * v.transpose()`.
+        `(U, s, V)`: :class:`Tensor` s such that `A` ~= `u * (identity([P, P]) * s) * v`, where `P = min(N, M)`.
     """
 
     cxt.qr = qr
@@ -368,7 +368,7 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
     Currently only implemented for `Dense` matrices.
     """
 
-    txn.svd = svd
+    txn.svd = svd_matrix
 
     txn.N, txn.M = A.shape[-2:].unpack(2)
     txn.batch_shape = A.shape[:-2]
@@ -381,6 +381,7 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
     def matrix_svd(i: UInt) -> typing.Tuple[Tensor, Tensor, Tensor]:
         return txn.svd(A=txn.matrices[i], l=l, epsilon=epsilon, max_iter=max_iter)
 
+    # TODO: replace Tuple.range with Stream.range after updating Tensor.concatenate to accept a Stream of Tensors
     txn.indices = Tuple.range(txn.num_matrices)
     txn.UsV_tuples = txn.indices.map(matrix_svd)
 
@@ -401,6 +402,24 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
         txn.s.reshape(Tuple.concatenate(txn.batch_shape, [Number.min(txn.N, txn.M)])),
         txn.V.reshape(Tuple.concatenate(txn.batch_shape, txn.V.shape[1:]))
     )
+
+
+@post_op
+def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    """
+    Computes `svd_matrix` for each matrix in `A`.
+
+    For `A` with shape `[..., N, M]`, `svd` returns a tuple `(U, s, V)` such that
+     `A[...]` ~= `u[...] * (identity([P, P]) * s[...]) * v[...]`, where `P = min(N, M)`.
+    """
+
+    cxt.svd_matrix = svd_matrix
+    cxt.svd_parallel = svd_parallel
+
+    return If(
+        A.ndim == 2,
+        cxt.svd_matrix(A=A, l=l, epsilon=epsilon, max_iter=max_iter),
+        cxt.svd_parallel(A=A, l=l, epsilon=epsilon, max_iter=max_iter))
 
 
 # TODO: move this to a new top-level module caled "math"
