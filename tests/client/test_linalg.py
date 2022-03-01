@@ -188,15 +188,15 @@ class SVDTests(ClientTest):
 
     def testParallelSVD_NltM(self):
         num_matrices = 1
-        n = 4
-        m = 6
+        n = 2
+        m = 3
         shape = [num_matrices, n, m]
         matrices = np.random.random(np.product(shape)).reshape(shape)
 
         cxt = tc.Context()
         cxt.matrices = tc.tensor.Dense.load(shape, tc.F32, matrices.flatten().tolist())
         cxt.svd = tc.linalg.svd
-        cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=30)
+        cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=10)
 
         result = self.host.post(ENDPOINT, cxt)
 

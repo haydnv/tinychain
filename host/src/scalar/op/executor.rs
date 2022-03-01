@@ -14,6 +14,36 @@ use crate::scalar::{Refer, Scope};
 use crate::state::{State, ToState};
 use crate::txn::Txn;
 
+struct Queue {
+    order: VecDeque<Id>,
+    set: HashSet<Id>,
+}
+
+impl Queue {
+    fn with_capacity(size: usize) -> Self {
+        Self {
+            order: VecDeque::with_capacity(size),
+            set: HashSet::with_capacity(size),
+        }
+    }
+
+    fn push_back(&mut self, id: Id) {
+        if !self.set.contains(&id) {
+            self.set.insert(id.clone());
+            self.order.push_back(id)
+        }
+    }
+
+    fn pop_front(&mut self) -> Option<Id> {
+        if let Some(id) = self.order.pop_front() {
+            self.set.remove(&id);
+            Some(id)
+        } else {
+            None
+        }
+    }
+}
+
 /// An `OpDef` executor.
 pub struct Executor<'a, T> {
     txn: &'a Txn,
@@ -51,7 +81,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
 
         while self.scope.resolve_id(&capture)?.is_ref() {
             let mut pending = Vec::with_capacity(self.scope.len());
-            let mut unvisited = VecDeque::with_capacity(self.scope.len());
+            let mut unvisited = Queue::with_capacity(self.scope.len());
             unvisited.push_back(capture.clone());
 
             while let Some(id) = unvisited.pop_front() {
