@@ -27,6 +27,18 @@ impl Queue {
         }
     }
 
+    fn into_iter(self) -> impl Iterator<Item = Id> {
+        self.order.into_iter()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.set.len()
+    }
+
     fn push_back(&mut self, id: Id) {
         if !self.set.contains(&id) {
             self.set.insert(id.clone());
@@ -80,7 +92,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
         debug!("execute op & capture {}", capture);
 
         while self.scope.resolve_id(&capture)?.is_ref() {
-            let mut pending = Vec::with_capacity(self.scope.len());
+            let mut pending = Queue::with_capacity(self.scope.len());
             let mut unvisited = Queue::with_capacity(self.scope.len());
             unvisited.push_back(capture.clone());
 
@@ -111,7 +123,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
 
                     if ready {
                         debug!("all deps resolved for {}", state);
-                        pending.push(id);
+                        pending.push_back(id);
                     } else {
                         debug!("{} still has unresolved deps", id);
                     }

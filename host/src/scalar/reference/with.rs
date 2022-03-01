@@ -82,7 +82,7 @@ impl Refer for With {
             .into_iter()
             .map(|id| {
                 context.resolve_id(&id).map(|state| {
-                    debug!("{} resolved to {}", id, state);
+                    debug!("closure captured {}: {}", id, state);
                     (id, state)
                 })
             })

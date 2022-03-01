@@ -156,6 +156,21 @@ class LinearAlgebraTests(ClientTest):
 
 
 class SVDTests(ClientTest):
+    def testSvd_1x1(self):
+        n = 1
+        m = 1
+        matrix = np.random.random(n * m).reshape(n, m)
+
+        cxt = tc.Context()
+        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.svd = tc.linalg.svd
+        cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
+
+        result = self.host.post(ENDPOINT, cxt)
+        U, s, V = result
+        actual = (load_np(U), load_np(s), load_np(V))
+        self._check(matrix, actual)
+
     def testMatrixSvd_NltM(self):
         n = 4
         m = 5
