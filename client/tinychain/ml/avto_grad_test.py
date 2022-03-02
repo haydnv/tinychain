@@ -61,7 +61,21 @@ class TensorMulGraphNode(GraphNode):
     def backward(self) -> Tensor:
         return self._left.backward() * self._right.value + self._left.value * self._right.backward()
 
-#TODO: Implementanit Tensor.__pow__()
+
+class TensorDivGraphNode(GraphNode):
+    name: str = 'tensor_div'
+
+    def __init__(self, value: Tensor, left: GraphNode, right: GraphNode) -> None:
+        super().__init__(value)
+        self._left = left
+        self._right = right
+
+    def backward(self) -> Tensor:
+        square_degree = Tensor(np.array(2).reshape(1, 1))
+        square_degree.enable_grad()
+        return (self._left.backward() * self._right.value - self._left.value * self._right.backward()) / (self._right.value**square_degree)
+
+
 class TensorPowGraphNode(GraphNode):
     name: str = 'tensor_pow'
 
@@ -70,9 +84,35 @@ class TensorPowGraphNode(GraphNode):
         self._left = left
         self._right = right
 
-    # def backward(self) -> Tensor:
-    #     return self._right.value * (self._left.value**(self._right.value - Tensor(1)))
+    def backward(self) -> Tensor:
+        sub_one = Tensor(np.array(1).reshape(1, 1))
+        sub_one.enable_grad()
+        return self._right.value * self._left.value**(self._right.value - sub_one) * self._left.backward()
 
+
+class TensorMatMulGraphNode(GraphNode):
+    name: str = 'tensor_matmul'
+
+    def __init__(self, value: Tensor, left: GraphNode, right: GraphNode) -> None:
+        super().__init__(value)
+        self._left = left
+        self._right = right
+
+    def backward(self) -> Tensor:
+        return self._left.value @ self._right.backward() + self._left.backward() @ self._right.value
+
+
+#TODO: Implementation e(x)
+class TensorExpGraphNode(GraphNode):
+    name: str = 'tensor_exp'
+
+    def __init__(self, value: Tensor, left: GraphNode, right: GraphNode) -> None:
+        super().__init__(value)
+        self._left = left
+        self._right = right
+
+    def backward(self) -> Tensor:
+        pass
 
 class GradientTape:
     _current: t.Optional[GradientTape] = None
@@ -133,10 +173,30 @@ class Tensor:
         ))
         return result
 
+    def __truediv__(self, other) -> Tensor:
+        result = Tensor(self._inner.__truediv__(other._inner))
+        tape = GradientTape.get_current_tape()
+        tape.track(id(result), TensorDivGraphNode(
+            result,
+            tape.get_or_raise(id(self)),
+            tape.get_or_raise(id(other)),
+        ))
+        return result
+
     def __pow__(self, other) -> Tensor:
         result = Tensor(self._inner.__pow__(other._inner))
         tape = GradientTape.get_current_tape()
         tape.track(id(result), TensorPowGraphNode(
+            result,
+            tape.get_or_raise(id(self)),
+            tape.get_or_raise(id(other)),
+        ))
+        return result
+
+    def __matmul__(self, other: Tensor) -> Tensor:
+        result = Tensor(self._inner.__matmul__(other._inner))
+        tape = GradientTape.get_current_tape()
+        tape.track(id(result), TensorMatMulGraphNode(
             result,
             tape.get_or_raise(id(self)),
             tape.get_or_raise(id(other)),
@@ -162,13 +222,8 @@ def tensor(*args, enable_grad: bool = False, **kwargs) -> Tensor:
     return ten
 
 
-a = tensor(np.array([1.1, 0, 0, 1.1]).reshape((2, 2)), enable_grad=True)
+a = tensor(np.array([1.1, 3]).reshape((2, 1)), enable_grad=True)
 b = tensor(np.array([1, 0, 0, 1]).reshape((2, 2)), enable_grad=True)
 c = tensor(np.array([2, 1, 4, 3]).reshape((2, 2)), enable_grad=True)
-
-p = tensor(np.array([2]), enable_grad=True)
-
-k = a + b + b * c
-j = k + a + a + c * k
-l = a**p
-print(l.backward().to_numpy())
+d = np.array([1, 2, 3, 4, 5])
+p = tensor(np.array([2]).reshape(1, 1), enable_grad=True)
