@@ -55,6 +55,7 @@ def header(cls):
     return instance, header
 
 
+# TODO: delete and replace with app._Meta
 class Meta(type):
     """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
 
