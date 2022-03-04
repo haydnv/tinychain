@@ -122,6 +122,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
+# TODO: delete
 class PersistenceTest(object):
     CACHE_SIZE = "5K"
     NUM_HOSTS = 4
