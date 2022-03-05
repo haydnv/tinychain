@@ -10,7 +10,7 @@ use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
 use futures::Future;
-use log::{debug, info};
+use log::{debug, info, trace};
 
 use tc_error::*;
 
@@ -45,6 +45,8 @@ impl<T> Deref for TxnLockReadGuard<T> {
 
 impl<T> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
+        trace!("TxnLockReadGuard::drop {}", self.lock.inner.name);
+
         let mut state = self.lock.lock_inner("TxnLockReadGuard::drop");
 
         assert_ne!(state.writer, Some(self.txn_id));
@@ -55,6 +57,12 @@ impl<T> Drop for TxnLockReadGuard<T> {
             .expect("read lock count");
 
         *num_readers -= 1;
+
+        trace!(
+            "TxnLockReadGuard::drop {} has {} readers remaining",
+            self.lock.inner.name,
+            num_readers
+        );
 
         if num_readers == &0 {
             state.wake();
@@ -107,6 +115,8 @@ impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
 
 impl<T> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
+        trace!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
+
         let mut state = self.lock.lock_inner("TxnLockWriteGuard::drop");
         if let Some(readers) = state.readers.get(&self.txn_id) {
             assert_eq!(readers, &0);

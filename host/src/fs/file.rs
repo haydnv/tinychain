@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use freqfs::*;
 use futures::future::{join_all, try_join_all, TryFutureExt};
-use futures::{join, try_join};
+use futures::try_join;
 use log::{debug, trace};
 use safecast::AsType;
 use tokio::sync::RwLock;
@@ -130,27 +130,45 @@ where
         })
     }
 
-    async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
+    async fn version(&self, txn_id: &TxnId) -> TCResult<DirLock<CacheBlock>> {
         trace!("getting write lock on file dir");
 
-        let version = {
-            let mut versions = self.versions.write().await;
-            trace!("got write lock on file dir");
+        let mut versions = self.versions.write().await;
+        trace!("got write lock on file dir");
 
-            versions
-                .get_or_create_dir(txn_id.to_string())
-                .map_err(io_err)
-        }?;
+        versions
+            .get_or_create_dir(txn_id.to_string())
+            .map_err(io_err)
+    }
 
+    async fn version_read(&self, txn_id: &TxnId) -> TCResult<DirReadGuard<CacheBlock>> {
+        trace!("getting read lock on file dir");
+        let version = self.version(txn_id).await?;
+        trace!("getting read lock on file version {} dir", txn_id);
+        Ok(version.read().await)
+    }
+
+    async fn version_write(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
+        trace!("getting write lock on file dir");
+        let version = self.version(txn_id).await?;
         trace!("getting write lock on file version {} dir", txn_id);
         Ok(version.write().await)
     }
 
-    async fn with_version<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
+    async fn with_version_read<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
+    where
+        F: FnOnce(DirReadGuard<CacheBlock>) -> T,
+    {
+        let dir = self.version_read(txn_id).await?;
+        trace!("got read lock on file version {} dir", txn_id);
+        Ok(then(dir))
+    }
+
+    async fn with_version_write<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
     where
         F: FnOnce(DirWriteGuard<CacheBlock>) -> T,
     {
-        let dir = self.version(txn_id).await?;
+        let dir = self.version_write(txn_id).await?;
         trace!("got write lock on file version {} dir", txn_id);
         Ok(then(dir))
     }
@@ -194,7 +212,7 @@ where
             try_join!(self.present.write(txn_id), other.present.read(txn_id))?;
 
         let (mut this_version, that_version) =
-            try_join!(self.version(&txn_id), other.version(&txn_id))?;
+            try_join!(self.version_write(&txn_id), other.version_read(&txn_id))?;
 
         let mut blocks = self.blocks.write().await;
         let canon = other.canon.read().await;
@@ -242,7 +260,7 @@ where
         }
 
         let mut blocks = self.blocks.write().await;
-        let version = self.version(&txn_id).await?;
+        let version = self.version_write(&txn_id).await?;
 
         let block = create_block_inner(
             &mut present,
@@ -276,7 +294,7 @@ where
         };
 
         let mut blocks = self.blocks.write().await;
-        let version = self.version(&txn_id).await?;
+        let version = self.version_write(&txn_id).await?;
 
         let block = create_block_inner(
             &mut present,
@@ -304,7 +322,7 @@ where
 
             // keep the version directory in sync in case create_block is called later
             // with the same block_id
-            self.with_version(&txn_id, |mut version| {
+            self.with_version_write(&txn_id, |mut version| {
                 version.delete(Self::file_name(&block_id))
             })
             .await?;
@@ -321,27 +339,37 @@ where
     ) -> TCResult<FileReadGuard<CacheBlock, B>> {
         debug!("File::read_block {}", block_id);
 
-        let present = self.present.read(txn_id).await?;
-        trace!("got read lock on block ID list");
+        let last_mutation = {
+            let block = {
+                let present = self.present.read(txn_id).await?;
+                trace!("File::read_block got read lock on block ID list");
 
-        if !present.contains(&block_id) {
-            return Err(TCError::not_found(block_id));
-        }
+                if !present.contains(&block_id) {
+                    return Err(TCError::not_found(block_id));
+                }
 
-        let blocks = self.blocks.read().await;
-        trace!("got read lock on file last mutation IDs");
+                let blocks = self.blocks.read().await;
+                trace!("File::read_block got read lock on last mutation IDs");
 
-        let last_mutation = blocks
-            .get(&block_id)
-            .expect("block last mutation ID")
-            .read(txn_id)
-            .await?;
+                trace!(
+                    "File::read_block getting read lock on last mutation ID of {}",
+                    block_id
+                );
+
+                blocks
+                    .get(&block_id)
+                    .expect("block last mutation ID")
+                    .clone()
+            };
+
+            block.read(txn_id).await?
+        };
 
         trace!("got read lock on block last mutation ID");
 
         let name = Self::file_name(&block_id);
         let block = self
-            .with_version(&txn_id, |version| version.get_file(&name))
+            .with_version_read(&txn_id, |version| version.get_file(&name))
             .await?;
 
         if let Some(block) = block {
@@ -370,7 +398,7 @@ where
             );
 
             let block_version = self
-                .with_version(&last_mutation, |version| version.get_file(&name))
+                .with_version_read(&last_mutation, |version| version.get_file(&name))
                 .await?
                 .expect("block prior value");
 
@@ -378,10 +406,12 @@ where
 
             let value = {
                 let value = block_version.read().map_err(io_err).await?;
+
                 trace!(
                     "File::read_block locked prior block version {}",
                     &*last_mutation
                 );
+
                 B::clone(&*value)
             };
 
@@ -389,16 +419,30 @@ where
                 "File::read_block unlocked prior block version {}",
                 &*last_mutation
             );
+
             (size_hint, value)
         };
 
+        trace!(
+            "File::read_block locking version dir {} to create new block {}",
+            txn_id,
+            block_id
+        );
+
         let block = self
-            .with_version(&txn_id, |mut version| {
+            .with_version_write(&txn_id, |mut version| {
                 version.create_file(name, value, size_hint).map_err(io_err)
             })
             .await??;
 
-        block.read().map_err(io_err).await
+        trace!(
+            "File::read_block getting read lock on new block {}",
+            block_id
+        );
+
+        let lock = block.read().map_err(io_err).await?;
+        trace!("File::read_block got read lock on new block {}", block_id);
+        Ok(lock)
     }
 
     async fn read_block_owned(
@@ -416,17 +460,35 @@ where
     ) -> TCResult<FileWriteGuard<CacheBlock, B>> {
         debug!("File::write_block {}", block_id);
 
-        let present = self.present.read(txn_id).await?;
-        if !present.contains(&block_id) {
-            return Err(TCError::not_found(block_id));
-        }
+        let mut last_mutation = {
+            {
+                let block = {
+                    trace!("File::write_block getting read lock on present block IDs...");
+                    let present = self.present.read(txn_id).await?;
+                    trace!("File::write_block got read lock on present block IDs");
 
-        let (blocks, canon) = join!(self.blocks.read(), self.canon.read());
-        let mut last_mutation = blocks
-            .get(&block_id)
-            .expect("block last mutation ID")
-            .write(txn_id)
-            .await?;
+                    if !present.contains(&block_id) {
+                        return Err(TCError::not_found(block_id));
+                    }
+
+                    trace!("File::write block getting read locks on last mutations IDs...");
+                    let blocks = self.blocks.read().await;
+                    trace!("File::write block got read lock on last mutation IDs");
+
+                    trace!(
+                        "File::write_block getting write lock on last mutation ID of block {}...",
+                        block_id
+                    );
+
+                    blocks
+                        .get(&block_id)
+                        .expect("block last mutation ID")
+                        .clone()
+                };
+
+                block.write(txn_id).await?
+            }
+        };
 
         trace!("File::write_block got write lock on block last mutation ID");
 
@@ -435,15 +497,14 @@ where
         let name = Self::file_name(&block_id);
 
         trace!(
-            "File::write_block getting lock on file version {} directory",
+            "File::write_block checking for existing version of {} at {}...",
+            block_id,
             txn_id
         );
 
         let block = self
-            .with_version(&txn_id, |version| version.get_file(&name))
+            .with_version_read(&txn_id, |version| version.get_file(&name))
             .await?;
-
-        trace!("File::write_block getting lock on block version {}", txn_id);
 
         if let Some(block) = block {
             trace!(
@@ -463,26 +524,56 @@ where
         // a write can only happen before a commit
         // therefore the canonical version must be current
 
-        let block_canon = canon.get_file(&name).expect("canonical block");
+        let block_canon = {
+            let canon = self.canon.read().await;
+            canon.get_file(&name).expect("canonical block")
+        };
 
         let size_hint = block_canon.size_hint().await;
         let value = {
+            trace!(
+                "File::write block getting read lock on canonical version of {}...",
+                block_id
+            );
             let value = block_canon.read().map_err(io_err).await?;
+            trace!(
+                "File::write block got read lock on canonical version of {}",
+                block_id
+            );
             B::clone(&*value)
         };
 
+        trace!(
+            "File::write_block creating new version of {} at {}",
+            block_id,
+            txn_id
+        );
         let block = self
-            .with_version(&txn_id, |mut version| {
+            .with_version_write(&txn_id, |mut version| {
                 version.create_file(name, value, size_hint).map_err(io_err)
             })
             .await??;
 
-        block.write().map_err(io_err).await
+        trace!(
+            "File::write_block getting write lock on new version {} of {}...",
+            txn_id,
+            block_id
+        );
+
+        let lock = block.write().map_err(io_err).await?;
+
+        trace!(
+            "File::write_block getting write lock on new version {} of {}",
+            txn_id,
+            block_id
+        );
+
+        Ok(lock)
     }
 
     async fn truncate(&self, txn_id: TxnId) -> TCResult<()> {
         let mut present = self.present.write(txn_id).await?;
-        let mut version = self.version(&txn_id).await?;
+        let mut version = self.version_write(&txn_id).await?;
         for block_id in present.drain() {
             version.delete(Self::file_name(&block_id));
         }
