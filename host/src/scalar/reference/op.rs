@@ -12,7 +12,7 @@ use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
 use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
 
 use tc_error::*;
@@ -197,6 +197,7 @@ impl TryCastFrom<Value> for Subject {
         match value {
             Value::Link(_) => true,
             Value::String(s) => IdRef::from_str(s).is_ok() || Link::from_str(s).is_ok(),
+            Value::Tuple(tuple) => tuple.matches::<(IdRef, TCPathBuf)>(),
             _ => false,
         }
     }
@@ -213,6 +214,9 @@ impl TryCastFrom<Value> for Subject {
                     None
                 }
             }
+            Value::Tuple(tuple) => tuple
+                .opt_cast_into()
+                .map(|(id, path)| Self::from((id, path))),
             _ => None,
         }
     }
@@ -226,6 +230,7 @@ impl TryCastFrom<Scalar> for Subject {
                 _ => false,
             },
             Scalar::Value(value) => Self::can_cast_from(value),
+            Scalar::Tuple(tuple) => tuple.matches::<(IdRef, TCPathBuf)>(),
             _ => false,
         }
     }
@@ -237,6 +242,10 @@ impl TryCastFrom<Scalar> for Subject {
                 _ => None,
             },
             Scalar::Value(value) => Self::opt_cast_from(value),
+            Scalar::Tuple(tuple) => tuple
+                .opt_cast_into()
+                .map(|(id, path)| Self::from((id, path))),
+
             _ => None,
         }
     }
@@ -591,7 +600,15 @@ impl OpRefVisitor {
 
                 let value = tuple.pop().unwrap();
                 let key = tuple.pop().unwrap();
-                Ok(OpRef::Put((subject, key, value)))
+
+                if subject == Subject::Link(OpRefType::Delete.path().into()) {
+                    let subject =
+                        key.try_cast_into(|k| E::invalid_type(k, "a Link or Id reference"))?;
+
+                    Ok(OpRef::Delete((subject, value)))
+                } else {
+                    Ok(OpRef::Put((subject, key, value)))
+                }
             }
             other => {
                 debug!(

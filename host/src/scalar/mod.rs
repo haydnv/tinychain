@@ -269,7 +269,6 @@ impl Scalar {
                     debug!("cast into op ref from {}", self);
 
                     if ort == ORT::Delete && self.matches::<(Scalar, Scalar)>() {
-                        // TODO: is there a better way to handle this edge case?
                         debug!("cast into DELETE ref from {}", self);
 
                         let (subject, key): (Scalar, Scalar) = self.opt_cast_into().unwrap();
