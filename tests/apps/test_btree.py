@@ -8,7 +8,7 @@ ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
 
 
-class ChainTests(PersistenceTest, unittest.TestCase):
+class BTreeChainTests(PersistenceTest, unittest.TestCase):
     NAME = "btree"
 
     def app(self, chain_type):

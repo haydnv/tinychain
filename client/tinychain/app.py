@@ -259,10 +259,7 @@ class Library(object):
         """A list of other :class:`Library` and :class:`App` services referenced by this `Library`"""
         return {}
 
-    def __init__(self, form=None):
-        if form is not None:
-            self.__uri__ = form
-
+    def __init__(self):
         for name, cls in self.uses().items():
             setattr(self, name, cls())
 
@@ -327,6 +324,15 @@ class Library(object):
 
 
 class App(Library):
+    def __init__(self):
+        Library.__init__(self)
+
+        for name, attr in inspect.getmembers(self, _is_mutable):
+            if isinstance(attr, Chain):
+                attr.__uri__ = uri(self).append(name)
+            else:
+                raise RuntimeError(f"{attr} must be managed by a Chain")
+
     def __json__(self):
         self.validate()
 
@@ -356,8 +362,13 @@ class App(Library):
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
-            elif _is_mutable(attr) and not isinstance(attr, Chain):
-                raise RuntimeError(f"{attr} must be managed by a Chain")
+            elif _is_mutable(attr):
+                assert isinstance(attr, Chain)
+                chain_type = type(attr)
+                collection = form_of(attr)
+                collection_type = type(collection)
+                schema = form_of(collection)
+                form[name] = {str(uri(chain_type)): [{str(uri(collection_type)): [to_json(schema)]}]}
             elif isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(header, name))
             else:
