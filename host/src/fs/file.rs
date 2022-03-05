@@ -132,17 +132,27 @@ where
 
     async fn version(&self, txn_id: &TxnId) -> TCResult<DirWriteGuard<CacheBlock>> {
         trace!("getting write lock on file dir");
+
         let version = {
             let mut versions = self.versions.write().await;
             trace!("got write lock on file dir");
 
             versions
                 .get_or_create_dir(txn_id.to_string())
-                .map_err(io_err)?
-        };
+                .map_err(io_err)
+        }?;
 
         trace!("getting write lock on file version {} dir", txn_id);
         Ok(version.write().await)
+    }
+
+    async fn with_version<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
+    where
+        F: FnOnce(DirWriteGuard<CacheBlock>) -> T,
+    {
+        let dir = self.version(txn_id).await?;
+        trace!("got write lock on file version {} dir", txn_id);
+        Ok(then(dir))
     }
 
     fn file_name(block_id: &fs::BlockId) -> String {
@@ -294,8 +304,10 @@ where
 
             // keep the version directory in sync in case create_block is called later
             // with the same block_id
-            let mut version = self.version(&txn_id).await?;
-            version.delete(Self::file_name(&block_id));
+            self.with_version(&txn_id, |mut version| {
+                version.delete(Self::file_name(&block_id))
+            })
+            .await?;
         }
 
         present.remove(&block_id);
@@ -327,19 +339,12 @@ where
 
         trace!("got read lock on block last mutation ID");
 
-        let mut version = self.version(&txn_id).await?;
-        trace!("got write lock on file version {} dir", txn_id);
-
         let name = Self::file_name(&block_id);
+        let block = self
+            .with_version(&txn_id, |version| version.get_file(&name))
+            .await?;
 
-        if let Some(block) = version.get_file(&name) {
-            std::mem::drop(version);
-
-            trace!(
-                "dropped write lock on file version {} dir, getting read lock on existing version of block {} at {}...",
-                txn_id, block_id, txn_id
-            );
-
+        if let Some(block) = block {
             let lock = block.read().map_err(io_err).await?;
 
             trace!(
@@ -352,43 +357,46 @@ where
         }
 
         assert!(*last_mutation < txn_id);
-        trace!("last mutation of block {} was at {}", block_id, txn_id);
+        trace!(
+            "last mutation of block {} was at {}",
+            block_id,
+            &*last_mutation
+        );
 
         let (size_hint, value) = {
-            trace!("File::read_block locking prior version dir {}...", txn_id);
-
-            let last_version = self.version(&*last_mutation).await?;
-
             trace!(
-                "File::read_block locked prior version dir, locking prior block version {}...",
-                txn_id
+                "File::read_block locking prior version dir {}...",
+                &*last_mutation
             );
 
-            let block_version = last_version.get_file(&name).expect("block prior value");
+            let block_version = self
+                .with_version(&last_mutation, |version| version.get_file(&name))
+                .await?
+                .expect("block prior value");
+
             let size_hint = block_version.size_hint().await;
 
             let value = {
                 let value = block_version.read().map_err(io_err).await?;
-                trace!("File::read_block locked prior block version {}", txn_id);
+                trace!(
+                    "File::read_block locked prior block version {}",
+                    &*last_mutation
+                );
                 B::clone(&*value)
             };
 
-            trace!("File::read_block unlocked prior block version {}", txn_id);
+            trace!(
+                "File::read_block unlocked prior block version {}",
+                &*last_mutation
+            );
             (size_hint, value)
         };
 
-        let block = version
-            .create_file(name, value, size_hint)
-            .map_err(io_err)?;
-
-        std::mem::drop(version);
-
-        trace!(
-            "dropped lock on version {} dir, created new version of block {} at {}",
-            txn_id,
-            block_id,
-            txn_id
-        );
+        let block = self
+            .with_version(&txn_id, |mut version| {
+                version.create_file(name, value, size_hint).map_err(io_err)
+            })
+            .await??;
 
         block.read().map_err(io_err).await
     }
@@ -431,21 +439,16 @@ where
             txn_id
         );
 
-        let mut version = self.version(&txn_id).await?;
+        let block = self
+            .with_version(&txn_id, |version| version.get_file(&name))
+            .await?;
 
         trace!("File::write_block getting lock on block version {}", txn_id);
 
-        if let Some(block) = version.get_file(&name) {
+        if let Some(block) = block {
             trace!(
                 "File::write_block read existing version of block {} at {}",
                 block_id,
-                txn_id
-            );
-
-            std::mem::drop(version);
-
-            trace!(
-                "File::write_block dropped lock on file version {} dir",
                 txn_id
             );
 
@@ -468,18 +471,11 @@ where
             B::clone(&*value)
         };
 
-        let block = version
-            .create_file(name, value, size_hint)
-            .map_err(io_err)?;
-
-        std::mem::drop(version);
-
-        trace!(
-            "dropped lock on file {} version dir and created new version of block {} at {}",
-            txn_id,
-            block_id,
-            txn_id
-        );
+        let block = self
+            .with_version(&txn_id, |mut version| {
+                version.create_file(name, value, size_hint).map_err(io_err)
+            })
+            .await??;
 
         block.write().map_err(io_err).await
     }
@@ -621,6 +617,8 @@ where
         .map_err(io_err)?;
 
     present.insert(block_id);
+
+    trace!("dropping file version dir lock at {}", txn_id);
 
     Ok(block.into())
 }

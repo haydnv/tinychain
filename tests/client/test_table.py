@@ -22,7 +22,6 @@ class TableTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [[[0], 5], [[1], 5]])
 
-    @unittest.skip  # TODO: debug this test by enabling trace logging in fs::File in a release build
     def testDeleteSlice(self):
         count = 50
         values = [[v] for v in range(count)]
