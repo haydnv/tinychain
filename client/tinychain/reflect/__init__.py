@@ -5,7 +5,7 @@ from pydoc import locate
 
 from ..util import form_of, URI
 
-from .meta import header, Meta, MethodStub
+from .meta import Meta, MethodStub
 
 
 def is_conditional(state):

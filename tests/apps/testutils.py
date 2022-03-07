@@ -57,6 +57,7 @@ class Docker(tc.host.Local.Process):
             print("stopping Docker container")
             self.container.stop()
             print("Docker container stopped")
+            print()
         else:
             logging.info(f"Docker container not running")
 
