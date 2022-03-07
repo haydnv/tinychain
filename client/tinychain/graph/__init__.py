@@ -3,9 +3,9 @@ from ..collection.table import Table
 from ..collection.tensor import Sparse
 from ..error import BadRequest
 from ..decorators import closure, get_op, put_op
-from ..state.generic import Map, Tuple
-from ..state.number import Bool, U32
-from ..state.ref import After, If, Put
+from ..generic import Map, Tuple
+from ..scalar.number import Bool, U32
+from ..scalar.ref import After, If, Put
 from ..util import uri
 
 from .edge import DIM, Edge, ForeignKey

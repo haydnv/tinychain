@@ -3,10 +3,10 @@ import typing
 from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get_op, post_op
 from ..error import BadRequest
-from ..state.generic import Map, Tuple
-from ..state.number import Number, Bool, F64, UInt, F32, Int
-from ..state.ref import After, Get, If, MethodSubject, While
-from ..state.value import Value
+from ..generic import Map, Tuple
+from ..scalar.number import Number, Bool, F64, UInt, F32, Int
+from ..scalar.ref import After, Get, If, MethodSubject, While
+from ..scalar.value import Value
 from ..state import Stream
 
 # from "Numerical Recipes in C" p. 65

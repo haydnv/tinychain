@@ -1,6 +1,6 @@
 from ..reflect import is_ref
-from ..state.generic import Tuple
-from ..state.ref import Post, Put
+from ..generic import Tuple
+from ..scalar.ref import Post, Put
 from ..state import State
 from ..util import form_of, to_json, uri, URI
 

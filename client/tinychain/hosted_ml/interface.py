@@ -1,4 +1,4 @@
-from tinychain.decorators import hidden, post_method
+from tinychain.decorators import post_method
 from tinychain.state import Interface
 from tinychain import error
 

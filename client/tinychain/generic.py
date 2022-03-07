@@ -1,11 +1,11 @@
 import typing
 
-from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
-
-from .base import State
-from .number import Bool, UInt
-from .ref import Ref, Post
-from .value import Id
+from .scalar.bound import Range
+from .scalar.number import Bool, Number, UInt
+from .scalar.ref import Get, Post, Ref
+from .scalar.value import Id
+from .state import State
+from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
 class Map(State):
@@ -180,8 +180,6 @@ class Tuple(State):
         `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
         """
 
-        from .ref import Get
-        from .number import Number
         return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
 
     def __new__(cls, form):
@@ -225,7 +223,6 @@ class Tuple(State):
                         stop = _index_of(slice.stop, len(self), len(self))
                         return Tuple([self[i] for i in range(start, stop)])
 
-            from .bound import Range
             return self._get("", Range.from_slice(i), Tuple.expect(typing.Tuple[rtype, ...]))
 
         if isinstance(i, int):

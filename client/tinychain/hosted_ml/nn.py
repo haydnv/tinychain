@@ -3,9 +3,9 @@ import typing
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import post_method
+from ..generic import Tuple
 from ..ml import Activation
-from ..state.generic import Tuple
-from ..state.ref import After
+from ..scalar.ref import After
 from ..util import uri
 
 from .interface import Differentiable

@@ -3,10 +3,10 @@ import operator
 
 from typing import List
 
-from tinychain.collection.tensor import Dense, Tensor, einsum
-from tinychain.ml import DiffedParameter, Identity, Layer, NeuralNet, Parameter
-from tinychain.state.ref import After
-from tinychain.state.number import Int
+from ..collection.tensor import Dense, Tensor, einsum
+from ..ml import DiffedParameter, Identity, Layer, NeuralNet, Parameter
+from ..scalar.ref import After
+from ..scalar.number import Int
 
 
 class DNNLayer(Layer):

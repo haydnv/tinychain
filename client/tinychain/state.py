@@ -3,13 +3,12 @@
 import inspect
 import typing
 
-from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from .reflect import is_ref, MethodStub
+from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
 class _Base(object):
     def __init__(self):
-        from ..reflect import MethodStub
-
         # TODO: is there a better place for this?
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
@@ -20,7 +19,7 @@ class _Base(object):
                 setattr(self, name, method)
 
     def _get(self, name, key=None, rtype=None):
-        from .ref import MethodSubject, Get
+        from .scalar.ref import Get, MethodSubject
 
         subject = MethodSubject(self, name)
         op_ref = Get(subject, key)
@@ -28,14 +27,14 @@ class _Base(object):
         return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
-        from .ref import MethodSubject, Put
-        from .value import Nil
+        from .scalar.ref import MethodSubject, Put
+        from .scalar.value import Nil
 
         subject = MethodSubject(self, name)
         return Nil(Put(subject, key, value))
 
     def _post(self, name, params, rtype):
-        from .ref import MethodSubject, Post
+        from .scalar.ref import MethodSubject, Post
 
         subject = MethodSubject(self, name)
         op_ref = Post(subject, params)
@@ -43,8 +42,8 @@ class _Base(object):
         return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
-        from .ref import MethodSubject, Delete
-        from .value import Nil
+        from .scalar.ref import Delete, MethodSubject
+        from .scalar.value import Nil
 
         subject = MethodSubject(self, name)
         return Nil(Delete(subject, key))
@@ -64,8 +63,6 @@ class State(_Base):
     __uri__ = URI("/state")
 
     def __init__(self, form=None):
-        from ..reflect import is_ref
-
         if form is None:
             if not hasattr(self, "__form__") or self.__form__ is None:
                 raise ValueError(f"instance of {self.__class__.__name__} has no form")
@@ -86,8 +83,6 @@ class State(_Base):
         raise NotImplementedError("State does not support equality; use a more specific type")
 
     def __json__(self):
-        from ..reflect import is_ref
-
         form = form_of(self)
 
         if is_ref(form):
@@ -125,7 +120,7 @@ class State(_Base):
         if not inspect.isclass(dtype) or not issubclass(dtype, State):
             raise NotImplementedError("dtype to cast into must be known at compile-time")
 
-        from .ref import Get
+        from .scalar.ref import Get
         return dtype(Get(dtype, self))
 
     def copy(self):
@@ -140,13 +135,14 @@ class State(_Base):
     def hash(self):
         """Return the SHA256 hash of this `State` as an :class:`Id`."""
 
-        from .value import Id
+        from .scalar.value import Id
+
         return self._get("hash", rtype=Id)
 
     def is_none(self):
         """Return `Bool(true)` if this `State` is :class:`Nil`."""
 
-        from .value import Bool
+        from .scalar.number import Bool
         return self._get("is_none", rtype=Bool)
 
     def is_some(self):
@@ -157,21 +153,6 @@ class State(_Base):
         """
 
         return self.is_none().logical_not()
-
-
-# Scalar types
-
-class Scalar(State):
-    """
-    An immutable `State` which always resides entirely in the host's memory.
-
-    Do not subclass `Scalar` directly. Use :class:`Value` instead.
-    """
-
-    __uri__ = uri(State) + "/scalar"
-
-    def __json__(self):
-        return to_json(form_of(self))
 
 
 # A stream of `State` s
@@ -189,7 +170,7 @@ class Stream(State):
         `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
         """
 
-        from .ref import Get
+        from .scalar.ref import Get
         return cls(Get(uri(cls) + "/range", range))
 
     def aggregate(self):
@@ -246,10 +227,10 @@ class Class(Object):
     __uri__ = uri(Object) + "/class"
 
     def __call__(self, *args, **kwargs):
-        from .ref import MethodSubject, Get
-
         if args and kwargs:
             raise ValueError("Class.__call__ accepts args or kwargs but not both")
+
+        from .scalar.ref import Get, MethodSubject
 
         subject = MethodSubject(self)
         if args:

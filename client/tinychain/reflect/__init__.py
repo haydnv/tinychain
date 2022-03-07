@@ -9,7 +9,7 @@ from .meta import Meta, MethodStub
 
 
 def is_conditional(state):
-    from ..state.ref import Case, If
+    from ..scalar.ref import Case, If
     from ..state import State
 
     if isinstance(state, State):
@@ -23,7 +23,7 @@ def is_conditional(state):
 
 
 def is_none(state):
-    from ..state.value import Nil
+    from ..scalar.value import Nil
 
     return state is None or state == Nil
 
@@ -45,7 +45,7 @@ def is_op(fn):
 
 
 def is_ref(state):
-    from ..state.ref import MethodSubject, Ref
+    from ..scalar.ref import MethodSubject, Ref
 
     if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
         return True
@@ -63,11 +63,11 @@ def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:
         return default
     elif typing.get_origin(annotation) is tuple:
-        from ..state.generic import Tuple
+        from ..generic import Tuple
 
         return Tuple.expect(annotation)
     elif typing.get_origin(annotation) is dict:
-        from ..state.generic import Map
+        from ..generic import Map
 
         return Map.expect(annotation)
     elif inspect.isclass(annotation):

@@ -75,13 +75,13 @@ class Context(object):
         if state is self:
             raise ValueError(f"cannot assign transaction Context to itself")
         elif isinstance(state, dict):
-            from .state.generic import Map
+            from .generic import Map
             state = Map(state)
         elif isinstance(state, tuple) or isinstance(state, list):
-            from .state.generic import Tuple
+            from .generic import Tuple
             state = Tuple(state)
         elif isinstance(state, str):
-            from .state.value import String
+            from .scalar.value import String
             state = String(state)
         elif not isinstance(state, State) and hasattr(state, "__iter__"):
             logging.warning(f"state {name} is set to {state}, which does not support URI assignment; " +

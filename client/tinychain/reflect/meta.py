@@ -1,7 +1,6 @@
 import inspect
 import logging
 
-from ..state import Class, State
 from ..util import form_of, get_ref, to_json, uri, URI
 
 
@@ -9,6 +8,8 @@ class Meta(type):
     """The metaclass of a :class:`Model` which provides support for `form_of` and `to_json`."""
 
     def parents(cls):
+        from ..state import State
+
         parents = []
         for parent in cls.mro()[1:]:
             if issubclass(parent, State):
@@ -19,6 +20,8 @@ class Meta(type):
 
     def __form__(cls):
         from ..app import Model  # TODO: remove this dependency from Meta
+        from ..state import State
+
         parents = [c for c in cls.parents() if not issubclass(c, Model)]
         parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
@@ -61,6 +64,8 @@ class Meta(type):
         return form
 
     def __json__(cls):
+        from ..state import Class, State
+
         parents = cls.parents()
 
         if not parents or uri(parents[0]).startswith(uri(State)):

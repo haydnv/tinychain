@@ -2,12 +2,12 @@ import typing
 
 from abc import abstractmethod
 
-from tinychain.collection.tensor import Dense
-from tinychain.decorators import closure, post_op
-from tinychain.ml import DiffedParameter, Parameter
-from tinychain.state.generic import Map
-from tinychain.state.number import F32, UInt
-from tinychain.state.ref import After, While
+from ..collection.tensor import Dense
+from ..decorators import closure, post_op
+from ..ml import DiffedParameter, Parameter
+from ..generic import Map
+from ..scalar.number import F32, UInt
+from ..scalar.ref import After, While
 
 
 class Optimizer(Map):

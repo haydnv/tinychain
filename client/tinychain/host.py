@@ -6,7 +6,7 @@ import requests
 import urllib.parse
 
 from tinychain.error import *
-from tinychain.state.value import Nil
+from tinychain.scalar.value import Nil
 from tinychain.util import to_json, uri, URI
 
 

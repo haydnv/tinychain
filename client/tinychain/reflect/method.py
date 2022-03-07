@@ -1,7 +1,8 @@
 import inspect
 
-from tinychain.state.value import Nil, Value
-from tinychain.state import ref, op, State
+from tinychain.scalar import Value
+from tinychain.scalar import op, ref
+from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
 
 from . import _get_rtype, is_none, resolve_class

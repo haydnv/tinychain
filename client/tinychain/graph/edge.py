@@ -1,10 +1,10 @@
-from tinychain.collection.tensor import einsum, Sparse
-from tinychain.decorators import closure, get_op, post_op, put_op, delete_op
-from tinychain.error import BadRequest
-from tinychain.state.generic import Map, Tuple
-from tinychain.state.number import Bool, I32, U64
-from tinychain.state.ref import After, Get, If, MethodSubject, While, With
-from tinychain.state.value import Nil, String
+from ..collection.tensor import einsum, Sparse
+from ..decorators import post_op
+from ..error import BadRequest
+from ..generic import Map
+from ..scalar.number import I32, U64
+from ..scalar.ref import If, While
+from ..scalar.value import String
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"

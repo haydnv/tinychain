@@ -8,11 +8,12 @@ from collections import OrderedDict
 
 from .collection import Collection
 from .reflect.meta import Meta, MethodStub
-from .state.chain import Chain
-from .state.generic import Tuple
-from .state.ref import Ref
-from .state.value import Nil
-from .state import Class, Instance, Object, Scalar, State
+from .chain import Chain
+from .generic import Tuple
+from .scalar.ref import Ref
+from .scalar.value import Nil
+from .scalar import Scalar
+from .state import Class, Instance, Object, State
 from .util import form_of, get_ref, to_json, uri, URI
 
 
