@@ -1,30 +1,39 @@
 import tinychain as tc
 import unittest
 
-from testutils import DEFAULT_PORT, start_host
+from testutils import DEFAULT_PORT, start_docker
 
 
-class Database(tc.Cluster):
+class Database(tc.app.App):
     __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/db")
 
-    def _configure(self):
+    def __init__(self):
         schema = tc.table.Schema(
             [tc.Column("name", tc.String, 100)],
             [tc.Column("year", tc.UInt), tc.Column("description", tc.String, 1000)])
 
         self.movies = tc.chain.Block(tc.table.Table(schema))
 
+        tc.app.App.__init__(self)
+
     @tc.get_method
     def has_movie(self, name: tc.String):
         return self.movies.contains([name])
 
 
-class Web(tc.Cluster):
+class Web(tc.app.App):
     __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/web")
 
-    def _configure(self):
+    @staticmethod
+    def uses():
+        return {
+            "db": Database,
+        }
+
+    def __init__(self):
         schema = tc.btree.Schema((tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt)))
         self.cache = tc.chain.Sync(tc.btree.BTree(schema))
+        tc.app.App.__init__(self)
 
     @tc.get_method
     def views(self, name: tc.String) -> tc.UInt:
@@ -32,10 +41,8 @@ class Web(tc.Cluster):
 
     @tc.post_method
     def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
-        db = tc.use(Database)
-
         return (
-            db.movies.insert([name], [year, description]),
+            self.db.movies.insert([name], [year, description]),
             self.cache.insert([name, 0]))
 
     @tc.put_method
@@ -52,7 +59,7 @@ class DemoTests(unittest.TestCase):
         for i in range(3):
             port = DEFAULT_PORT + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
-            host = start_host("table_demo", [Database, Web], True, host_uri, wait_time=2)
+            host = start_docker("table_demo", [Database(), Web()], True, host_uri, wait_time=2)
             self.hosts.append(host)
 
     def testCache(self):
