@@ -122,45 +122,6 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K"
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-# TODO: delete
-class PersistenceTest(object):
-    CACHE_SIZE = "5K"
-    NUM_HOSTS = 4
-    NAME = "persistence"
-
-    def cluster(self, chain_type):
-        raise NotImplementedError
-
-    def execute(self, hosts):
-        raise NotImplementedError
-
-    def testBlockChain(self):
-        self._execute(tc.chain.Block)
-
-    def testSyncChain(self):
-        self._execute(tc.chain.Sync)
-
-    def _execute(self, chain_type):
-        name = self.NAME
-
-        cluster = self.cluster(chain_type)
-
-        hosts = []
-        for i in range(self.NUM_HOSTS):
-            port = DEFAULT_PORT + i
-            host_uri = f"http://127.0.0.1:{port}" + tc.uri(cluster).path()
-            host = start_host(f"test_{name}_{i}", [cluster], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
-            hosts.append(host)
-            printlines(5)
-
-        time.sleep(1)
-
-        self.execute(hosts)
-
-        for host in hosts:
-            host.stop()
-
-
 def maybe_create_dir(path, force):
     path = pathlib.Path(path)
     if path.exists() and path.is_dir():
@@ -169,8 +130,3 @@ def maybe_create_dir(path, force):
         os.makedirs(path)
     else:
         raise RuntimeError(f"no directory at {path}")
-
-
-def printlines(n):
-    for _ in range(n):
-        print()

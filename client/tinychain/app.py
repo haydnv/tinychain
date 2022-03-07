@@ -262,9 +262,15 @@ class Library(object):
 
     def __init__(self):
         for name, cls in self.uses().items():
+            if not inspect.isclass(cls):
+                raise TypeError(f"Library.uses must specify a class, not {cls}")
+
             setattr(self, name, cls())
 
         for cls in self.exports():
+            if not inspect.isclass(cls):
+                raise TypeError(f"Library.exports must specify a class, not {cls}")
+
             setattr(self, cls.__name__, model(cls))
 
     def validate(self):

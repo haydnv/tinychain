@@ -351,15 +351,6 @@ def uri(subject):
     raise AttributeError(f"{subject} has no URI")
 
 
-def use(cls):
-    """Return an instance of the given class with callable methods."""
-
-    if hasattr(cls, "__use__"):
-        return cls.__use__()
-    else:
-        cls()
-
-
 def to_json(obj):
     """Return a JSON-encodable representation of the given state or reference."""
 
