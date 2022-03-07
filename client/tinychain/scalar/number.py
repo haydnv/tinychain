@@ -1,4 +1,5 @@
-from ..math import Numeric, Trigonometric
+from ..math.interface import Numeric, Trigonometric
+from ..math.operator import Add, Mul
 from ..util import form_of, uri
 
 from .value import Value
@@ -22,7 +23,7 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other + self
 
-        return self._get("add", other, self.__class__)
+        return self.__class__(Add(self, other))
 
     def div(self, other):
         """Return the quotient of `self` and `other`."""
@@ -50,7 +51,7 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other * self
 
-        return self._get("mul", other, self.__class__)
+        return self.__class__(Mul(self, other))
 
     def pow(self, other):
         """Raise `self` to the power of `other`."""

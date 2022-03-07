@@ -1,9 +1,9 @@
 import tinychain.app
 import tinychain.error
-import tinychain.graph
-import tinychain.graph.edge
+import tinychain.graph  # TODO: merge into app
+import tinychain.graph.edge  # TODO: merge into app
 import tinychain.host
-# TODO: move ml.linalg into hosted_ml and rename hosted_ml -> ml
+# TODO: move ml.linalg into math and rename hosted_ml -> ml
 import tinychain.hosted_ml
 import tinychain.hosted_ml.nn
 import tinychain.hosted_ml.service

@@ -5,7 +5,8 @@ import typing
 from ..decorators import post_op
 from ..generic import Map, Tuple
 from ..interface import Equality, Order
-from ..math import Numeric, Trigonometric
+from ..math.interface import Numeric, Trigonometric
+from ..math.operator import Add, Mul
 from ..reflect import is_ref
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
@@ -90,6 +91,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")
+
+    def add(self, other):
+        return self.__class__(Add(self, other))
 
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""
@@ -196,6 +200,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             return self.sum() / self.size
         else:
             return self.sum(axis) / self.shape[axis]
+
+    def mul(self, other):
+        return self.__class__(Mul(self, other))
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
@@ -423,7 +430,7 @@ class Dense(Tensor):
         return self._get("elements", bounds, Stream)
 
     def mul(self, other):
-        return self._post("mul", {"r": other}, Tensor)
+        return Tensor(Mul(self, other))
 
 
 class Sparse(Tensor):
@@ -451,7 +458,7 @@ class Sparse(Tensor):
         return cls.expect(shape, dtype)(ref.Get(cls, (shape, dtype)))
 
     def add(self, other):
-        return self._post("add", {"r": other}, Tensor)
+        return Tensor(Add(self, other))
 
     def as_dense(self):
         """Return a :class:`Dense` view of this `Sparse` tensor."""
