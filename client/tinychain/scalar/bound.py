@@ -1,5 +1,7 @@
-from ..util import to_json
+from ..state import State
+from ..util import form_of, to_json, URI
 
+from .ref import Ref
 from .value import Nil
 
 
@@ -57,3 +59,25 @@ class Range(object):
             return None
         else:
             return to_json((self.start, self.end))
+
+
+def handle_bounds(bounds):
+    if bounds is None or isinstance(bounds, Ref) or isinstance(bounds, URI):
+        return bounds
+
+    if isinstance(bounds, State):
+        form = bounds
+        while hasattr(form, "__form__"):
+            form = form_of(form)
+
+        if isinstance(form, tuple) or isinstance(form, list):
+            bounds = form
+        else:
+            return bounds
+
+    if hasattr(bounds, "__iter__"):
+        bounds = tuple(bounds)
+    else:
+        bounds = (bounds,)
+
+    return [Range.from_slice(x) if isinstance(x, slice) else x for x in bounds]

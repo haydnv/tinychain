@@ -1,3 +1,4 @@
+from ..math import Numeric, Trigonometric
 from ..util import form_of, uri
 
 from .value import Value
@@ -5,128 +6,32 @@ from .value import Value
 
 # Numeric types
 
-class Number(Value):
+class Number(Value, Numeric, Trigonometric):
     """A numeric :class:`Value`."""
 
     __uri__ = uri(Value) + "/number"
 
     @classmethod
-    def _trig_rtype(cls):
+    def trig_rtype(cls):
         return cls
-
-    def __abs__(self):
-        return self.abs()
-
-    def __add__(self, other):
-        return self.add(other)
-
-    def __radd__(self, other):
-        return self.add(other)
-
-    def __div__(self, other):
-        return self.div(other)
-
-    def __mod__(self, other):
-        return self.modulo(other)
-
-    def __mul__(self, other):
-        return self.mul(other)
-
-    def __neg__(self):
-        return self * Bool(False)
-
-    def __rmul__(self, other):
-        return self.mul(other)
-
-    def __rdiv__(self, other):
-        return self.__class__(other).div(self)
-
-    def __rpow__(self, other):
-        return self.__class__(other) ** self
-
-    def __rtruediv__(self, other):
-        return self.__class__(other).div(self)
-
-    def __pow__(self, other):
-        return self.pow(other)
-
-    def __sub__(self, other):
-        return self.sub(other)
-
-    def __truediv__(self, other):
-        return self.div(other)
-
-    def abs(self):
-        """Return this number's absolute value"""
-
-        return self._get("abs", rtype=self.__class__)
-
-    def acos(self):
-        """Return the arccosine of this `Number`."""
-
-        return self._get("acos", rtype=self._trig_rtype())
-
-    def acosh(self):
-        """Return the hyperbolic arccosine of this `Number`."""
-
-        return self._get("acosh", rtype=self._trig_rtype())
 
     def add(self, other):
         """Return the sum of `self` and `other`."""
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
-            return other.add(self)
+            return other + self
 
         return self._get("add", other, self.__class__)
-
-    def asin(self):
-        """Return the arcsine of this `Number`."""
-
-        return self._get("asin", rtype=self._trig_rtype())
-
-    def asinh(self):
-        """Return the hyperbolic arcsine of this `Number`."""
-
-        return self._get("asinh", rtype=self._trig_rtype())
-
-    def atan(self):
-        """Return the arctangent of this `Number`."""
-
-        return self._get("atan", rtype=self._trig_rtype())
-
-    def atanh(self):
-        """Return the hyperbolic arctangent of this `Number`."""
-
-        return self._get("atanh", rtype=self._trig_rtype())
-
-    def cos(self):
-        """Return the cosine of this `Number`."""
-
-        return self._get("cos", rtype=self._trig_rtype())
-
-    def cosh(self):
-        """Return the hyperbolic cosine of this `Number`."""
-
-        return self._get("cosh", rtype=self._trig_rtype())
 
     def div(self, other):
         """Return the quotient of `self` and `other`."""
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
-            return other.mul(1 / self)
+            return other * (1 / self)
 
         return self._get("div", other, self.__class__)
-
-    def log(self, base=None):
-        """
-        Return the logarithm of this `Number`.
-
-        If no `base` is specified, this will be the natural logarithm (base e).
-        """
-
-        return self._post("log", {"r": base}, F64)
 
     def modulo(self, other):
         """Return the remainder of `self` divided by `other`."""
@@ -143,7 +48,7 @@ class Number(Value):
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
-            return other.mul(self)
+            return other * self
 
         return self._get("mul", other, self.__class__)
 
@@ -157,39 +62,14 @@ class Number(Value):
 
         return self._get("pow", other, self.__class__)
 
-    def round(self, digits=None):
-        """Round this `Number` to the nearest integer, or `digits` decimal places (if `digits` is provided)."""
-
-        if digits is None:
-            return self._get("round", rtype=self.__class__)
-        else:
-            places = Int(10) ** digits
-            return (self * places).round() / places
-
-    def sin(self):
-        """Return the sine of this `Number`."""
-
-        return self._get("sin", rtype=self._trig_rtype())
-
-    def sinh(self):
-        """Return the hyperbolic sine of this `Number`."""
-
-        return self._get("sinh", rtype=self._trig_rtype())
-
     def sub(self, other):
         """Return the difference between `self` and `other`."""
 
+        from ..collection.tensor import Tensor
+        if isinstance(other, Tensor):
+            return -(other - self)
+
         return self._get("sub", other, self.__class__)
-
-    def tan(self):
-        """Return the tangent of this `Number`."""
-
-        return self._get("tan", rtype=self._trig_rtype())
-
-    def tanh(self):
-        """Return the hyperbolic tangent of this `Number`."""
-
-        return self._get("tanh", rtype=self._trig_rtype())
 
 
 class Bool(Number):

@@ -273,7 +273,7 @@ class Tuple(State):
     def map(self, op):
         """Construct a new `Tuple` by mapping the elements in this `Tuple` with the given `op`."""
 
-        rtype = op.rtype if hasattr(op, "rtype") else State
+        rtype = op._trig_rtype if hasattr(op, "rtype") else State
         return self._post("map", {"op": op}, rtype)
 
     def unpack(self, length):
