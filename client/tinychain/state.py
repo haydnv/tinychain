@@ -190,7 +190,7 @@ class Stream(State):
         This is useful when you need to execute an `op` for its side-effects and not its return value.
         """
 
-        rtype = op._trig_rtype if hasattr(op, "rtype") else State
+        rtype = op.rtype if hasattr(op, "rtype") else State
         return self._post("for_each", {"op": op}, rtype)
 
     def fold(self, item_name, initial_state, op):

@@ -83,7 +83,7 @@ def resolve_class(subject, annotation, default):
 
 def _get_rtype(fn, default_rtype):
     if is_op(fn):
-        return fn._trig_rtype
+        return fn.rtype
 
     rtype = default_rtype
 
