@@ -343,7 +343,7 @@ class App(Library):
             elif isinstance(attr, MethodStub):
                 setattr(header, name, attr.method(self, name))
             else:
-                setattr(header, name, attr)
+                setattr(header, name, get_ref(attr, f"self/{name}"))
 
         # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}
