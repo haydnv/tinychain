@@ -3,5 +3,7 @@ config
 tests
 host/target
 host/*/target
+host/**/.*
 LICENSE
 *.md
+.*

@@ -83,7 +83,10 @@ class Table(Collection):
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        delete_row = closure(self)(delete_op(lambda cxt, key: self.delete_row(key)))
+        delete_row = delete_op(lambda cxt, key: self.delete_row(key))
+        if uri(self).id():
+            delete_row = closure(self)(delete_row)
+
         to_delete = self.where(where) if where else self
         return to_delete.select(self.key_names()).rows().for_each(delete_row)
 

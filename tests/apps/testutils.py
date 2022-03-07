@@ -16,11 +16,12 @@ class Docker(tc.host.Local.Process):
     ADDRESS = "127.0.0.1"
     BUILD = "docker build -f tests/apps/Dockerfile ."
 
-    def __init__(self, config_dir, clusters):
+    def __init__(self, config_dir, clusters, **flags):
         self.client = docker.from_env()
         self.clusters = clusters
         self.config_dir = config_dir
         self.container = None
+        self._flags = flags
 
     def start(self, wait_time):
         """Build and run a Docker image from the local repository."""
@@ -36,6 +37,8 @@ class Docker(tc.host.Local.Process):
         # construct the TinyChain host arguments
         cmd = ["/tinychain", "--data_dir=/data"]
         cmd.extend(f"--cluster=/{CONFIG}{cluster}" for cluster in self.clusters)
+        for flag, value in self._flags.items():
+            cmd.append(f"--{flag}={value}")
         cmd = ' '.join(cmd)
 
         # run a Docker container
@@ -54,6 +57,7 @@ class Docker(tc.host.Local.Process):
             print("stopping Docker container")
             self.container.stop()
             print("Docker container stopped")
+            print()
         else:
             logging.info(f"Docker container not running")
 
@@ -63,7 +67,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(name, apps, overwrite=True, host_uri=None, wait_time=1.):
+def start_docker(name, apps, overwrite=True, host_uri=None, wait_time=1., cache_size="5K"):
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -78,7 +82,7 @@ def start_docker(name, apps, overwrite=True, host_uri=None, wait_time=1.):
         tc.app.write_config(app, f"{config_dir}{app_path}", overwrite)
         app_configs.append(app_path)
 
-    process = Docker(config_dir, app_configs)
+    process = Docker(config_dir, app_configs, http_port=port, cache_size=cache_size)
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
@@ -197,6 +201,44 @@ def start_host(name, libs=[], overwrite=True, host_uri=None, cache_size="5K", wa
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
+class PersistenceTest(object):
+    CACHE_SIZE = "5K"
+    NUM_HOSTS = 4
+    NAME = "persistence"
+
+    def app(self, chain_type):
+        raise NotImplementedError
+
+    def execute(self, hosts):
+        raise NotImplementedError
+
+    def testBlockChain(self):
+        self._execute(tc.chain.Block)
+
+    def testSyncChain(self):
+        self._execute(tc.chain.Sync)
+
+    def _execute(self, chain_type):
+        name = self.NAME
+
+        app = self.app(chain_type)
+
+        hosts = []
+        for i in range(self.NUM_HOSTS):
+            port = DEFAULT_PORT + i
+            host_uri = f"http://127.0.0.1:{port}" + tc.uri(app).path()
+            host = start_docker(f"test_{name}_{i}", [app], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
+            hosts.append(host)
+            printlines(5)
+
+        time.sleep(1)
+
+        self.execute(hosts)
+
+        for host in hosts:
+            host.stop()
+
+
 def maybe_create_dir(path, force):
     path = pathlib.Path(path)
     if path.exists() and path.is_dir():
@@ -205,3 +247,8 @@ def maybe_create_dir(path, force):
         os.makedirs(path)
     else:
         raise RuntimeError(f"no directory at {path}")
+
+
+def printlines(n):
+    for _ in range(n):
+        print()

@@ -3,7 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import DEFAULT_PORT, start_host, PersistenceTest
+from testutils import start_host
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(
@@ -135,103 +135,6 @@ class SparseTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
-
-
-class ChainTests(PersistenceTest, unittest.TestCase):
-    NAME = "table"
-    NUM_HOSTS = 4
-
-    def cluster(self, chain_type):
-        class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/table")
-
-            def _configure(self):
-                self.table = tc.chain.Block(tc.table.Table(SCHEMA))
-
-            @tc.delete_method
-            def truncate(self):
-                return self.table.delete()
-
-        return Persistent
-
-    def execute(self, hosts):
-        row1 = ["one", 1]
-        row2 = ["two", 2]
-
-        replica_set = set(str(tc.uri(host) + "/test/table") for host in hosts)
-
-        def check_replicas():
-            for i in range(len(hosts)):
-                replicas = {}
-                for replica in hosts[i].get("/test/table/replicas"):
-                    replicas.update(replica)
-
-                self.assertEqual(set(replicas.keys()), replica_set, f"host {i}")
-
-        check_replicas()
-
-        self.assertIsNone(hosts[0].put("/test/table/table", ["one"], [1]))
-
-        for host in hosts:
-            actual = host.get("/test/table/table", ["one"])
-            self.assertEqual(actual, row1)
-
-        hosts[1].stop()
-        hosts[2].put("/test/table/table", ["two"], [2])
-        hosts[1].start()
-
-        check_replicas()
-
-        for i in range(len(hosts)):
-            actual = hosts[i].get("/test/table/table", ["one"])
-            self.assertEqual(actual, row1)
-
-            actual = hosts[i].get("/test/table/table", ["two"])
-            self.assertEqual(actual, row2)
-
-        hosts[2].stop()
-        self.assertIsNone(hosts[1].delete("/test/table/table", ["one"]))
-        hosts[2].start()
-
-        check_replicas()
-
-        for i in range(len(hosts)):
-            actual = hosts[i].get("/test/table/table")
-            self.assertEqual(actual, expected(SCHEMA, [["two", 2]]), f"host {i}")
-
-        self.assertIsNone(hosts[0].delete("/test/table/truncate"))
-        for i in range(len(hosts)):
-            count = hosts[i].get("/test/table/table/count")
-            self.assertEqual(0, count, f"host {i}")
-
-        total = 100
-        for n in range(1, total):
-            i = random.choice(range(self.NUM_HOSTS))
-
-            self.assertIsNone(hosts[i].put("/test/table/table", [num2words(n)], [n]))
-
-            for i in range(len(hosts)):
-                count = hosts[i].get("/test/table/table/count")
-                self.assertEqual(n, count, f"host {i}")
-
-
-class ErrorTest(unittest.TestCase):
-    def setUp(self):
-        class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"/test/table")
-
-            def _configure(self):
-                self.table = tc.chain.Block(tc.table.Table(SCHEMA))
-
-        self.host = start_host("table_error", [Persistent])
-
-    def testInsert(self):
-        self.assertRaises(
-            tc.error.BadRequest,
-            lambda: self.host.put("/test/table/table", "one", [1]))
-
-    def tearDown(self):
-        self.host.stop()
 
 
 def expected(schema, rows):

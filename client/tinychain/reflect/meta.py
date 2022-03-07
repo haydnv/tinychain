@@ -1,68 +1,29 @@
 import inspect
 import logging
 
-from tinychain.state import State
-from tinychain.util import form_of, get_ref, to_json, uri, URI
-
-
-class MethodStub(object):
-    def __init__(self, dtype, form):
-        self.dtype = dtype
-        self.form = form
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"cannot call a MethodStub; use tc.use(<class>) for callable method references")
-
-    def method(self, header, name):
-        return self.dtype(header, self.form, name)
-
-
-def header(cls):
-    instance_uri = URI("self")
-
-    class Header(cls):
-        pass
-
-    try:
-        header = Header(form=instance_uri)
-        instance = cls(form=instance_uri)
-    except Exception as e:
-        raise RuntimeError(f"unable to generate headers for {cls}", e)
-
-    for name, attr in inspect.getmembers(instance):
-        if name.startswith('_') or isinstance(attr, URI):
-            continue
-        elif hasattr(attr, "hidden") and attr.hidden:
-            continue
-        elif inspect.ismethod(attr) and attr.__self__ is cls:
-            # it's a @classmethod
-            continue
-
-        if isinstance(attr, MethodStub):
-            setattr(header, name, attr.method(header, name))
-        elif isinstance(attr, State):
-            member_uri = instance_uri.append(name)
-            attr_ref = get_ref(attr, member_uri)
-
-            if not uri(attr_ref) == member_uri:
-                raise RuntimeError(f"failed to assign URI {member_uri} to instance attribute {attr_ref} "
-                                   + f"(assigned URI is {uri(attr_ref)})")
-
-            setattr(header, name, attr_ref)
-        else:
-            setattr(header, name, attr)
-
-    return instance, header
+from ..state import Class, State
+from ..util import form_of, get_ref, to_json, uri, URI
 
 
 class Meta(type):
-    """The metaclass of a :class:`State` which provides support for `form_of` and `to_json`."""
+    """The metaclass of a :class:`Model` which provides support for `form_of` and `to_json`."""
+
+    def parents(cls):
+        parents = []
+        for parent in cls.mro()[1:]:
+            if issubclass(parent, State):
+                if uri(parent) != uri(cls):
+                    parents.append(parent)
+
+        return parents
 
     def __form__(cls):
-        parents = [c for c in cls.mro()[1:] if issubclass(c, State)]
+        from ..app import Model  # TODO: remove this dependency from Meta
+        parents = [c for c in cls.parents() if not issubclass(c, Model)]
         parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
-        instance, instance_header = header(cls)
+        instance = cls(form=URI("self"))
+        instance_header = get_ref(instance, "self")
 
         form = {}
         for name, attr in inspect.getmembers(instance):
@@ -84,6 +45,14 @@ class Meta(type):
                 # it's a @classmethod
                 continue
 
+            elif isinstance(attr, State):
+                while isinstance(attr, State):
+                    attr = form_of(attr)
+
+                if isinstance(attr, URI):
+                    continue
+
+                form[name] = attr
             if isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(instance_header, name))
             else:
@@ -92,10 +61,21 @@ class Meta(type):
         return form
 
     def __json__(cls):
-        mro = [c for c in cls.mro()[1:] if issubclass(c, State)]
+        parents = cls.parents()
 
-        if mro:
-            parent = mro[0]
-            return {str(uri(parent)): to_json(form_of(cls))}
+        if not parents or uri(parents[0]).startswith(uri(State)):
+            return {str(uri(Class)): to_json(form_of(cls))}
         else:
-            return to_json(form_of(cls))
+            return {str(uri(parents[0])): to_json(form_of(cls))}
+
+
+class MethodStub(object):
+    def __init__(self, dtype, form):
+        self.dtype = dtype
+        self.form = form
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(f"cannot call a MethodStub; use tc.use(<class>) for callable method references")
+
+    def method(self, header, name):
+        return self.dtype(header, self.form, name)

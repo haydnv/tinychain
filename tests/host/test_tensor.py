@@ -5,7 +5,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from testutils import DEFAULT_PORT, start_host, PersistenceTest
+from testutils import DEFAULT_PORT, start_host
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -674,70 +674,6 @@ class TensorTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
-
-
-class ChainTests(PersistenceTest, unittest.TestCase):
-    CACHE_SIZE = "100M"
-    NUM_HOSTS = 4
-    NAME = "tensor"
-
-    def cluster(self, chain_type):
-        class Persistent(tc.Cluster, metaclass=tc.Meta):
-            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
-
-            def _configure(self):
-                schema = ([2, 3], tc.I32)
-                self.dense = chain_type(tc.tensor.Dense(schema))
-                self.sparse = chain_type(tc.tensor.Sparse(schema))
-
-            @tc.put_method
-            def overwrite(self, txn):
-                txn.new = tc.tensor.Dense.constant([3], 2)
-                return [
-                    self.dense.write(txn.new),
-                    self.sparse[0].write(txn.new)
-                ]
-
-            @tc.get_method
-            def eq(self):
-                return self.sparse == self.dense
-
-        return Persistent
-
-    def execute(self, hosts):
-        hosts[0].put("/test/tensor/dense", [0, 0], 1)
-        hosts[1].put("/test/tensor/sparse", [0, 0], 1)
-
-        dense = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
-        sparse = expect_sparse(tc.I32, [2, 3], [[[0, 0], 1]])
-        for host in hosts:
-            actual = host.get("/test/tensor/dense")
-            self.assertEqual(actual, dense)
-
-            actual = host.get("/test/tensor/sparse")
-            self.assertEqual(actual, sparse)
-
-        hosts[1].stop()
-        hosts[0].put("/test/tensor/overwrite")
-        hosts[1].start()
-
-        dense = expect_dense(tc.I32, [2, 3], [2] * 6)
-
-        expected = np.zeros([2, 3])
-        expected[0] = (np.ones([3]) * 2)
-        sparse = expect_sparse(tc.I32, [2, 3], expected)
-
-        eq = expect_dense(tc.Bool, [2, 3], [True, True, True, False, False, False])
-
-        for host in hosts:
-            actual = host.get("/test/tensor/dense")
-            self.assertEqual(actual, dense)
-
-            actual = host.get("/test/tensor/sparse")
-            self.assertEqual(actual, sparse)
-
-            actual = host.get("/test/tensor/eq")
-            self.assertEqual(actual, eq)
 
 
 def all_close(actual, expected):
