@@ -1,84 +1,32 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
+from ..interface import Order
 from ..util import form_of, to_json, uri, URI
 
 from .base import Scalar
-from .ref import If, Ref
+from .ref import Ref
 
 
 # Scalar value types
 
-class Value(Scalar):
+class Value(Scalar, Order):
     """A scalar `Value` which supports equality and collation."""
 
     __uri__ = uri(Scalar) + "/value"
 
-    @classmethod
-    def max(cls, l, r):
-        """Return `l`, or `r`, whichever is greater."""
-
-        return cls(If(l >= r, l, r))
-
-    @classmethod
-    def min(cls, l, r):
-        """Return `l`, or `r`, whichever is lesser."""
-
-        return cls(If(l <= r, l, r))
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __ne__(self, other):
-        return self.ne(other)
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __gt__(self, other):
-        return self.gt(other)
-
-    def __ge__(self, other):
-        return self.gte(other)
-
-    def __lt__(self, other):
-        return self.lt(other)
-
-    def __le__(self, other):
-        return self.lte(other)
-
-    def eq(self, other):
-        """Returns `true` if `self` is equal to `other`."""
-
-        from .number import Bool
-        return self._get("eq", other, Bool)
-
-    def ne(self, other):
-        """Returns `true` if `self` is not equal to `other`."""
-
-        from .number import Bool
-        return self._get("ne", other, Bool)
-
     def gt(self, other):
-        """Return true if `self` is greater than `other`."""
-
         from .number import Bool
         return self._get("gt", other, Bool)
 
     def gte(self, other):
-        """Return true if `self` is greater than or equal to `other`."""
-
         from .number import Bool
         return self._get("gte", other, Bool)
 
     def lt(self, other):
-        """Return true if `self` is less than `other`."""
-
         from .number import Bool
         return self._get("lt", other, Bool)
 
     def lte(self, other):
-        """Return true if `self` is less than or equal to `other`."""
-
         from .number import Bool
         return self._get("lte", other, Bool)
 

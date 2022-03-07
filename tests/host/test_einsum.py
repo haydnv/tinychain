@@ -121,6 +121,8 @@ class Tests(unittest.TestCase):
         cxt.results = (tc.tensor.einsum(fmt, cxt.dense), tc.tensor.einsum(fmt, cxt.sparse))
 
         (dense, sparse) = self.host.post(ENDPOINT, cxt)
+
+        # TODO: remove these false-positive asserts
         self.assertEqual(dense, to_dense(expected))
         self.assertEqual(sparse, to_sparse(expected))
 

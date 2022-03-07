@@ -1,5 +1,5 @@
 from tinychain.decorators import post_method
-from tinychain.state import Interface
+from tinychain.interface import Interface
 from tinychain import error
 
 

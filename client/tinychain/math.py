@@ -1,4 +1,4 @@
-from .state import Interface
+from .interface import Interface
 
 
 class Numeric(Interface):

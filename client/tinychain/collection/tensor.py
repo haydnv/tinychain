@@ -4,6 +4,7 @@ import typing
 
 from ..decorators import post_op
 from ..generic import Map, Tuple
+from ..interface import Equality, Order
 from ..math import Numeric, Trigonometric
 from ..reflect import is_ref
 from ..scalar.bound import handle_bounds
@@ -15,7 +16,7 @@ from ..util import uri, URI
 from .base import Collection
 
 
-class Tensor(Collection, Numeric, Trigonometric):
+class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
@@ -89,24 +90,6 @@ class Tensor(Collection, Numeric, Trigonometric):
 
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __gt__(self, other):
-        return self.gt(other)
-
-    def __ge__(self, other):
-        return self.gte(other)
-
-    def __lt__(self, other):
-        return self.lt(other)
-
-    def __le__(self, other):
-        return self.lte(other)
-
-    def __ne__(self, other):
-        return self.ne(other)
 
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""

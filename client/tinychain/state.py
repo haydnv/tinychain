@@ -49,10 +49,6 @@ class _Base(object):
         return Nil(Delete(subject, key))
 
 
-class Interface(_Base):
-    """The base class of a client-defined `Interface`"""
-
-
 class State(_Base):
     """
     A TinyChain state, such as a `Chain` or `Op` or `Value`.
@@ -78,9 +74,6 @@ class State(_Base):
 
     def __dbg__(self):
         return [form_of(self)]
-
-    def __eq__(self, _other):
-        raise NotImplementedError("State does not support equality; use a more specific type")
 
     def __json__(self):
         form = form_of(self)
