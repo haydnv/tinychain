@@ -7,14 +7,15 @@ from testutils import DEFAULT_PORT, PersistenceTest
 class ChainTests(PersistenceTest, unittest.TestCase):
     NAME = "chain"
 
-    def cluster(self, chain_type):
-        class Persistent(tc.Cluster, metaclass=tc.Meta):
+    def app(self, chain_type):
+        class Persistent(tc.app.App):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/chain")
 
-            def _configure(self):
+            def __init__(self):
                 self.map = chain_type(tc.Map({}))
+                tc.app.App.__init__(self)
 
-        return Persistent
+        return Persistent()
 
     def execute(self, hosts):
         hosts[1].put("/test/chain/map", "one", tc.tensor.Dense.load([1, 2], tc.F32, [0., 0.]))

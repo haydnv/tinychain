@@ -6,6 +6,7 @@ import typing
 
 from collections import OrderedDict
 
+from .collection import Collection
 from .reflect.meta import MethodStub
 from .state.chain import Chain
 from .state.generic import Tuple
@@ -366,9 +367,15 @@ class App(Library):
                 assert isinstance(attr, Chain)
                 chain_type = type(attr)
                 collection = form_of(attr)
-                collection_type = type(collection)
-                schema = form_of(collection)
-                form[name] = {str(uri(chain_type)): [{str(uri(collection_type)): [to_json(schema)]}]}
+
+                if isinstance(collection, Collection):
+                    schema = form_of(collection)
+                    form[name] = {str(uri(chain_type)): [{str(uri(type(collection))): [to_json(schema)]}]}
+                elif isinstance(collection, dict) or isinstance(collection, tuple) or isinstance(collection, list):
+                    form[name] = {str(uri(chain_type)): [collection]}
+                else:
+                    raise TypeError(f"invalid subject for Chain: {collection}")
+
             elif isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(header, name))
             else:
