@@ -1,5 +1,6 @@
 import typing
 
+from .interface import Functional
 from .scalar.bound import Range
 from .scalar.number import Bool, Number, UInt
 from .scalar.ref import Get, Post, Ref
@@ -8,6 +9,7 @@ from .state import State
 from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
+# TODO: implement `Functional` for `Map`
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
@@ -143,7 +145,7 @@ class MapRef(Ref):
         deanonymize(self.map, cxt)
 
 
-class Tuple(State):
+class Tuple(State, Functional):
     """A tuple of `State` s."""
 
     __uri__ = uri(State) + "/tuple"
@@ -260,21 +262,6 @@ class Tuple(State):
         """Return the number of elements in this `Tuple`."""
 
         return self._get("len", rtype=UInt)
-
-    def fold(self, item_name, initial_state, op):
-        """Iterate over the elements in this `Tuple` with the given `op`, accumulating the results.
-
-        `op` must be a POST Op. The item to handle will be passed with the given `item_name` as its name.
-        """
-
-        rtype = type(initial_state) if isinstance(initial_state, State) else State
-        return self._post("fold", {"item_name": item_name, "value": initial_state, "op": op}, rtype)
-
-    def map(self, op):
-        """Construct a new `Tuple` by mapping the elements in this `Tuple` with the given `op`."""
-
-        rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("map", {"op": op}, rtype)
 
     def unpack(self, length):
         """A Python convenience method which yields an iterator over the first `length` elements in this `Tuple`."""

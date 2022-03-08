@@ -1,52 +1,11 @@
 """A discrete :class:`State`."""
 
 import inspect
-import typing
 
-from .reflect import is_ref, MethodStub
+from .base import _Base
+from .interface import Functional
+from .reflect import is_ref
 from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
-
-
-class _Base(object):
-    def __init__(self):
-        # TODO: is there a better place for this?
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-
-            if isinstance(attr, MethodStub):
-                method = attr.method(self, name)
-                setattr(self, name, method)
-
-    def _get(self, name, key=None, rtype=None):
-        from .scalar.ref import Get, MethodSubject
-
-        subject = MethodSubject(self, name)
-        op_ref = Get(subject, key)
-        rtype = _resolve_rtype(rtype)
-        return rtype(form=op_ref)
-
-    def _put(self, name, key=None, value=None):
-        from .scalar.ref import MethodSubject, Put
-        from .scalar.value import Nil
-
-        subject = MethodSubject(self, name)
-        return Nil(Put(subject, key, value))
-
-    def _post(self, name, params, rtype):
-        from .scalar.ref import MethodSubject, Post
-
-        subject = MethodSubject(self, name)
-        op_ref = Post(subject, params)
-        rtype = _resolve_rtype(rtype)
-        return rtype(form=op_ref)
-
-    def _delete(self, name, key=None):
-        from .scalar.ref import Delete, MethodSubject
-        from .scalar.value import Nil
-
-        subject = MethodSubject(self, name)
-        return Nil(Delete(subject, key))
 
 
 class State(_Base):
@@ -150,7 +109,7 @@ class State(_Base):
 
 # A stream of `State` s
 
-class Stream(State):
+class Stream(State, Functional):
     """A stream of states which supports functional methods like `fold` and `map`."""
 
     __uri__ = uri(State) + "/stream"
@@ -169,11 +128,6 @@ class Stream(State):
     def aggregate(self):
         return self._get("aggregate", rtype=Stream)
 
-    def filter(self, op):
-        """Return a new `Stream` containing only those elements of this `Stream` where the given `op` returns `True`."""
-
-        return self._post("filter", {"op": op}, Stream)
-
     def first(self):
         """Return the first item in this `Stream`, or `Nil` if the `Stream` is empty."""
 
@@ -183,29 +137,6 @@ class Stream(State):
         """Flatten a `Stream` of `Stream` s into a single `Stream` of their component elements."""
 
         return self._get("flatten", rtype=Stream)
-
-    def for_each(self, op):
-        """Run the given `op` for each item in this `Stream`, then return the last result.
-
-        This is useful when you need to execute an `op` for its side-effects and not its return value.
-        """
-
-        rtype = op.rtype if hasattr(op, "rtype") else State
-        return self._post("for_each", {"op": op}, rtype)
-
-    def fold(self, item_name, initial_state, op):
-        """Run the given `op` for each item in this `Stream` along with the previous result.
-
-        `op` must be a POST Op. The stream item to handle will be passed with the given `item_name` as its name.
-        """
-
-        rtype = type(initial_state) if isinstance(initial_state, State) else State
-        return self._post("fold", {"item_name": item_name, "value": initial_state, "op": op}, rtype)
-
-    def map(self, op):
-        """Return a new `Stream` whose items are the results of running `op` on each item of this `Stream`."""
-
-        return self._post("map", {"op": op}, Stream)
 
 
 class Object(State):
@@ -239,16 +170,3 @@ class Instance(Object):
 
     def copy(self):
         raise NotImplementedError("abstract method")
-
-
-def _resolve_rtype(rtype, default=State):
-    if typing.get_origin(rtype) is tuple:
-        from .generic import Tuple
-        return Tuple.expect(rtype)
-    elif typing.get_origin(rtype) is dict:
-        from .generic import Map
-        return Map.expect(rtype)
-    elif inspect.isclass(rtype) and issubclass(rtype, State):
-        return rtype
-    else:
-        return default

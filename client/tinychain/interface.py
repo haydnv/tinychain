@@ -1,6 +1,6 @@
 """Basic :class:`Interface` classes."""
 
-from .state import _Base
+from .base import _Base
 
 
 class Interface(_Base):
@@ -71,3 +71,35 @@ class Order(Interface):
         """Return true if `self` is less than or equal to `other`."""
 
         raise NotImplementedError(f"{self.__class__} must implement the `lte` method")
+
+
+class Functional(Interface):
+    def filter(self, op):
+        """Filter the elements of this :class:`Functional` using the given `op`."""
+
+        return self._post("filter", {"op": op}, self.__class__)
+
+    def for_each(self, op):
+        """Run the given `op` for each element in this :class:`Functional`, then return the last result.
+
+        This is useful when you need to execute an `op` for its side-effects and not its return value.
+        """
+
+        from .state import State
+        rtype = op.rtype if hasattr(op, "rtype") else State
+        return self._post("for_each", {"op": op}, rtype)
+
+    def fold(self, item_name, initial_state, op):
+        """Run the given `op` for each item in this :class:`Functional` along with the previous result.
+
+        `op` must be a POST Op. The item to handle will be passed with the given `item_name` as its name.
+        """
+
+        from .state import State
+        rtype = type(initial_state) if isinstance(initial_state, State) else State
+        return self._post("fold", {"item_name": item_name, "value": initial_state, "op": op}, rtype)
+
+    def map(self, op):
+        """Return a new :class:`Functional` with the results of `op` for each element of this :class:`Functional`."""
+
+        return self._post("map", {"op": op}, self.__class__)
