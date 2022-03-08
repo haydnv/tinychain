@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::Deref;
 
 use log::debug;
 
@@ -132,6 +131,14 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
 
+    for f_input in &f_inputs {
+        if f_input.iter().collect::<HashSet<_>>().len() != f_input.len() {
+            return Err(TCError::not_implemented(
+                "repeated subscripts in einsum input",
+            ));
+        }
+    }
+
     if f_output.chars().collect::<HashSet<_>>().len() != f_output.len() {
         return Err(TCError::bad_request(
             "einsum output cannot include repeated subscripts",
@@ -252,35 +259,13 @@ where
             .cmp(&f_output.iter().position(|l| l == l2))
     });
 
+    let mut subscripts = permutation
+        .iter()
+        .map(|x| f_input[*x])
+        .collect::<Vec<char>>();
+
     debug!("permutation of {:?} is {:?}", f_input, permutation);
     let mut tensor = tensor.transpose(Some(permutation.clone()))?;
-
-    // sum over repeated subscripts
-    // the assumption that they have been transposed together is valid because subscripts
-    // in f_output are required to be unique
-    debug!(
-        "sum over repeated subscripts of {:?}",
-        permutation
-            .iter()
-            .map(|x| f_input[*x])
-            .collect::<Vec<char>>()
-    );
-
-    let mut x = 0;
-    let mut subscripts = Vec::with_capacity(f_output.len());
-    for i in 0..(f_input.len() - 1) {
-        let subscript = f_input[permutation[i]];
-        if subscript == f_input[permutation[i + 1]] {
-            tensor = tensor.sum(x)?;
-        } else {
-            subscripts.push(subscript);
-            x += 1;
-        }
-    }
-
-    subscripts.push(f_input[*permutation.last().unwrap()]);
-    debug!("after summation: {:?}", subscripts);
-    assert_eq!(tensor.ndim(), subscripts.len());
 
     let mut i = 0;
     while i < dimensions.len() {
@@ -304,7 +289,7 @@ where
         .cloned()
         .collect::<Vec<u64>>();
 
-    if tensor.shape().deref() == &shape {
+    if &**tensor.shape() == &shape {
         Ok(tensor)
     } else {
         debug!("broadcast {} into {:?}", tensor.shape(), shape);

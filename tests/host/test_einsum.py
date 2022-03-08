@@ -39,11 +39,6 @@ class Tests(unittest.TestCase):
         A = np.array([1, 2, 3])
         self.execute('i->i', A)
 
-    def testRepeatIndex(self):
-        A = np.array([[1, 1], [2, 2]])
-        B = np.array([3, 2, 1])
-        # self.execute('ii,j->ij', A, B)
-
     def test2D(self):
         A = np.array([[1, 1], [2, 2], [3, 3]])
         self.execute('ij->i', A)
@@ -107,6 +102,10 @@ class Tests(unittest.TestCase):
             self.execute("ij,jk->ki", A, B)
 
     def execute(self, fmt, *tensors):
+        # print("inputs")
+        # print(tensors)
+        # print()
+
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
         cxt = tc.Context()
