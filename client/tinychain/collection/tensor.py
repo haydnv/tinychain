@@ -349,6 +349,12 @@ class Dense(Tensor):
         return cls.expect(shape, dtype).constant(shape, Number(1).cast(dtype))
 
     @classmethod
+    def ones_like(cls, tensor):
+        """Return a `Dense` tensor filled with ones, with the same shape and data type as the given `tensor`."""
+
+        return cls.expect(tensor.shape, tensor.dtype).constant(tensor.shape, Number(1).cast(tensor.dtype))
+
+    @classmethod
     def zeros(cls, shape, dtype=F32):
         """
         Return a `Dense` tensor filled with zeros.
@@ -357,6 +363,12 @@ class Dense(Tensor):
         """
 
         return cls.expect(shape, dtype).constant(shape, Number(0).cast(dtype))
+
+    @classmethod
+    def zeros_like(cls, tensor):
+        """Return a `Dense` tensor filled with zeros, with the same shape and data type as the given `tensor`."""
+
+        return cls.expect(tensor.shape, tensor.dtype).constant(tensor.shape, Number(0).cast(tensor.dtype))
 
     @classmethod
     def random_normal(cls, shape, mean=0.0, std=1.0):
