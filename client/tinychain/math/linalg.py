@@ -9,6 +9,8 @@ from ..scalar.ref import After, Get, If, MethodSubject, While
 from ..scalar.value import Value
 from ..state import Stream
 
+from .base import product
+
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
 
@@ -449,14 +451,6 @@ def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typi
         A.ndim == 2,
         cxt.svd_matrix(A=A, l=l, epsilon=epsilon, max_iter=max_iter),
         cxt.svd_parallel(A=A, l=l, epsilon=epsilon, max_iter=max_iter))
-
-
-# TODO: move this to a new top-level module caled "math"
-def product(tuple: typing.Tuple[Number]) -> Number:
-    """Compute the product of a `Tuple` of `Number` s."""
-
-    p = tuple.fold('n', Map(p=1), post_op(lambda n, p: Map(p=Number.mul(n, p))))['p']
-    return Number(p)
 
 
 def _is_square(x):
