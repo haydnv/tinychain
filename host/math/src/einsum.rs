@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use log::debug;
 
@@ -225,7 +225,6 @@ fn validate_args<T: TensorAccess>(
 fn normalize<D, Txn, T>(
     tensor: T,
     f_input: &[char],
-    f_output: &[char],
     dimensions: &BTreeMap<char, u64>,
 ) -> TCResult<T>
 where
@@ -238,14 +237,21 @@ where
 {
     assert_eq!(tensor.ndim(), f_input.len());
 
+    let f_output = dimensions.keys().cloned().collect::<Label>();
+
     debug!(
         "normalize tensor with shape {} from {:?} -> {:?}",
         tensor.shape(),
         f_input,
-        f_output
+        f_output,
     );
 
     if f_input == f_output {
+        debug!(
+            "{:?} is already normalized to {:?}, returning...",
+            f_input, f_output
+        );
+
         return Ok(tensor);
     }
 
@@ -314,12 +320,10 @@ where
     assert_eq!(f_inputs.len(), tensors.len());
     assert!(!tensors.is_empty());
 
-    let f_output = dimensions.keys().cloned().collect::<Label>();
-
     let mut normalized = tensors
         .into_iter()
         .zip(f_inputs.iter())
-        .map(|(tensor, f_input)| normalize(tensor, f_input, &f_output, &dimensions))
+        .map(|(tensor, f_input)| normalize(tensor, f_input, &dimensions))
         .collect::<TCResult<VecDeque<T>>>()?;
 
     let mut op = normalized.pop_front().unwrap();
@@ -360,9 +364,24 @@ where
             f_output
         );
 
-        let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
+        let source: BTreeMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
         let permutation: Vec<usize> = f_output.iter().map(|l| *source.get(l).unwrap()).collect();
-        op.transpose(Some(permutation))
+        debug!("permutation is {:?}", permutation);
+
+        let transposed = op.transpose(Some(permutation))?;
+        debug!("shape after transpose is {}", transposed.shape());
+
+        debug_assert_eq!(
+            transposed.shape().as_slice(),
+            f_output
+                .iter()
+                .map(|l| dimensions.get(l).expect("tensor dim"))
+                .cloned()
+                .collect::<Vec<u64>>()
+                .as_slice()
+        );
+
+        Ok(transposed)
     }
 }
 
