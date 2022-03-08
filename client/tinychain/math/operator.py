@@ -101,7 +101,5 @@ class Mul(Operator):
 def _derivative(state):
     if isinstance(state, Operator):
         return state.derivative()
-    elif isinstance(state, GradientTape):
-        return state[-1].derivative()
     else:
         return 0
