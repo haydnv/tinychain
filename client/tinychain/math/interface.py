@@ -132,7 +132,7 @@ class Numeric(Interface):
         if digits is None:
             return self._get("round", rtype=self.__class__)
         else:
-            from .scalar.number import UInt
+            from ..scalar.number import UInt
             places = UInt(10) ** digits
             return (self * places).round() / places
 
