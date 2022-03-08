@@ -37,7 +37,6 @@ class Tests(unittest.TestCase):
 
     def test1D(self):
         A = np.array([1, 2, 3])
-        # self.execute('i->', A)
         self.execute('i->i', A)
 
     def testRepeatIndex(self):
@@ -47,7 +46,6 @@ class Tests(unittest.TestCase):
 
     def test2D(self):
         A = np.array([[1, 1], [2, 2], [3, 3]])
-        # self.execute('ij->', A)
         self.execute('ij->i', A)
         self.execute('ij->j', A)
         self.execute('ij->ij', A)
@@ -56,13 +54,11 @@ class Tests(unittest.TestCase):
     def test2Dto3D(self):
         A = np.array([[0, 1], [1, 2], [2, 3]])
         # self.execute('ij,ik->ijk', A, A)
-        # self.execute('ij,ik->', A, A)
 
     def test2DMulti(self):
         A = np.array([[1, 2], [3, 4]])
         B = np.array([[5, 6], [7, 8]])
 
-        # self.execute('ik,ik,il->', A, A, A)
         self.execute('ji,jk->ik', A, B)  # = matmul(transpose(A), B)
         self.execute('ij,jk->ijk', A, B)
         self.execute('ij,jk->ij', A, B)
@@ -71,7 +67,6 @@ class Tests(unittest.TestCase):
         self.execute('ij,jk->i', A, B)
         # self.execute('ij,jk->j', A, B)
         self.execute('ij,jk->k', A, B)
-        # self.execute('ij,jk->', A, B)
 
         A = np.array([[1], [2], [3], [4]])
         B = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
@@ -91,7 +86,6 @@ class Tests(unittest.TestCase):
 
         A = np.arange(60.).reshape(3, 4, 5)
         B = np.arange(24.).reshape(4, 3, 2)
-        # self.execute('ijk,jil->', A, B)
         # self.execute('ijk,jil->il', A, B)
         # self.execute('ijk,jil->kj', A, B)
         # self.execute('ijk,jil->lkij', A, B)

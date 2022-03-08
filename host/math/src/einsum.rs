@@ -44,6 +44,12 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         ))),
     }?;
 
+    let f_output = parts.pop_back().ok_or_else(|| {
+        TCError::unsupported(
+            "einsum requires > 0 output dimensions; use sum to sum over an entire Tensor",
+        )
+    })?;
+
     let valid_subscripts: HashSet<char> = VALID_SUBSCRIPTS.iter().cloned().collect();
 
     let mut elided = None;
@@ -126,7 +132,6 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
 
-    let f_output = parts.pop_back().unwrap_or("");
     if f_output.chars().collect::<HashSet<_>>().len() != f_output.len() {
         return Err(TCError::bad_request(
             "einsum output cannot include repeated subscripts",
