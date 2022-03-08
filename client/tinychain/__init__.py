@@ -3,8 +3,7 @@ import tinychain.error
 import tinychain.graph  # TODO: merge into app
 import tinychain.graph.edge  # TODO: merge into app
 import tinychain.host
-# TODO: move ml.linalg into math and rename hosted_ml -> ml
-import tinychain.hosted_ml
+import tinychain.hosted_ml  # TODO: rename hosted_ml -> ml
 import tinychain.hosted_ml.nn
 import tinychain.hosted_ml.service
 import tinychain.ml.nn
@@ -15,7 +14,7 @@ import tinychain.scalar.bound as bound
 from tinychain.collection import Column
 from tinychain.collection import btree, table, tensor
 from tinychain.decorators import closure, delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
-from tinychain.ml import linalg
+from tinychain.math import linalg
 from tinychain.reflect import Meta
 from tinychain.generic import Map, Tuple
 from tinychain.interface import Interface, Equality, Order
