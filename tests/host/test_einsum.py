@@ -48,7 +48,7 @@ class Tests(unittest.TestCase):
 
     def test2Dto3D(self):
         A = np.array([[0, 1], [1, 2], [2, 3]])
-        # self.execute('ij,ik->ijk', A, A)
+        self.execute('ij,ik->ijk', A, A)
 
     def test2DMulti(self):
         A = np.array([[1, 2], [3, 4]])
@@ -76,15 +76,15 @@ class Tests(unittest.TestCase):
                       [1, 1, 0],
                       [1, 1, 1]])
 
-        # self.execute('ij,jk->ijk', A, B)
+        self.execute('ij,jk->ijk', A, B)
         self.execute('ij,jk->ik', A, B)
 
         A = np.arange(60.).reshape(3, 4, 5)
         B = np.arange(24.).reshape(4, 3, 2)
-        # self.execute('ijk,jil->il', A, B)
-        # self.execute('ijk,jil->kj', A, B)
-        # self.execute('ijk,jil->lkij', A, B)
-        # self.execute('ijk,jil->lij', A, B)
+        self.execute('ijk,jil->il', A, B)
+        self.execute('ijk,jil->kj', A, B)
+        self.execute('ijk,jil->lkij', A, B)
+        self.execute('ijk,jil->lij', A, B)
 
     def test2DRandom(self):
         rand_dim = lambda x: random.randint(1, x)
