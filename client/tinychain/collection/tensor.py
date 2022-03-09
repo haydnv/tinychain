@@ -63,7 +63,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         return cls.expect(shape, dtype).create()
 
     @classmethod
-    def load(cls, shape, dtype, data):
+    def load(cls, shape, data, dtype=F32):
         """
         Load a `Tensor` from an existing data set.
 
@@ -73,11 +73,11 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
                 coords = [[0, 0, 1], [0, 1, 0]]
                 values = [1, 2]
-                sparse = tc.tensor.Sparse.load([2, 3, 4], tc.I32, zip(coords, values))
-                dense = tc.tensor.Dense.load([2, 3, 4], tc.i32, values)
+                sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
+                dense = tc.tensor.Dense.load([2, 3, 4], values, tc.I32)
         """
 
-        return super().load((shape, dtype), data)
+        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/load", ((shape, dtype), data)))
 
     def __getitem__(self, bounds):
         parent = self
@@ -244,7 +244,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         `self.shape[axis]` then a `BadRequest` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), typing.Tuple[self.__class__, ...])
+        return self._get("split", (num_or_size_splits, axis), typing.Tuple[Tensor, ...])
 
     def std(self, axis=None):
         """
@@ -317,26 +317,6 @@ class Dense(Tensor):
 
         dtype = type(value) if isinstance(value, Number) else Number
         return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/constant", (shape, value)))
-
-    @classmethod
-    def load(cls, shape, dtype, data):
-        """
-        Load a `Dense` tensor from an existing data set.
-
-        Example: `tc.tensor.Dense.load([2, 2], tc.i32, [1, 2, 3, 4])`
-        """
-
-        if is_ref(shape) or is_ref(dtype):
-            raise ValueError(f"cannot load schema ({shape}, {dtype}) (consider calling `copy_from` instead)")
-
-        if is_ref(data):
-            raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
-
-        class Load(cls.expect(shape, dtype)):
-            def __ref__(self, name):
-                return cls(URI(name))
-
-        return Load(ref.Put(cls, (shape, dtype), data))
 
     @classmethod
     def ones(cls, shape, dtype=F32):

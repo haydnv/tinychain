@@ -31,6 +31,7 @@ class DNNLayer(Layer):
     @classmethod
     def load(cls, name, weights, bias, activation):
         """Load a `DNNLayer` with the given `weights` and `bias` tensors."""
+
         class _DNNLayer(cls):
             @classmethod
             @property
@@ -106,7 +107,7 @@ class ConvLayer(Layer):
             def forward(self, x: Dense):
                 c_i, h_i, w_i = inputs_shape
                 out_c, h_f, w_f = filter_shape
-                b_i = Int(x.shape[0])
+                b_i = x.shape[0]
                 h_out = int((h_i - h_f + 2 * padding) / stride + 1)
                 w_out = int((w_i - w_f + 2 * padding) / stride + 1)
                 pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
@@ -125,7 +126,7 @@ class ConvLayer(Layer):
             def backward(self, x, loss):
                 c_i, h_i, w_i = inputs_shape
                 out_c, h_f, w_f = filter_shape
-                b_i = Int(x.shape[0])
+                b_i = x.shape[0]
                 h_out = int((h_i - h_f + 2 * padding) / stride + 1)
                 w_out = int((w_i - w_f + 2 * padding) / stride + 1)
                 inputs, im2col_matrix = self.forward(x)

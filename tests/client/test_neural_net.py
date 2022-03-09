@@ -164,7 +164,7 @@ class CNNTests(ClientTest):
 
         @tc.closure(cxt.labels)
         @tc.post_op
-        def train_while(i: tc.UInt, output: tc.tensor.Dense, loss):
+        def train_while(i: tc.UInt, loss):
             return (i <= MAX_ITERATIONS).logical_and(tc.F32(loss) > 0.5)
 
         cxt.optimizer = tc.ml.optimizer.Adam.create(param_list=cxt.neural_net.get_param_list(), lr=LEARNING_RATE)
@@ -176,7 +176,7 @@ class CNNTests(ClientTest):
 
 
 def load(ndarray, dtype=tc.F32):
-    return tc.tensor.Dense.load(ndarray.shape, dtype, ndarray.flatten().tolist())
+    return tc.tensor.Dense.load(ndarray.shape, ndarray.flatten().tolist(), dtype)
 
 
 if __name__ == "__main__":

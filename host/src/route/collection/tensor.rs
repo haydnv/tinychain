@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use futures::future::{self, Future, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
+use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
@@ -452,21 +452,109 @@ impl<'a> Handler<'a> for CreateHandler {
                 let schema: Schema =
                     key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
 
-                match self.class {
-                    TensorType::Dense => {
-                        constant(&txn, schema.shape, schema.dtype.zero())
-                            .map_ok(Tensor::from)
-                            .map_ok(Collection::Tensor)
-                            .map_ok(State::Collection)
-                            .await
+                create_tensor(self.class, schema, txn)
+                    .map_ok(Collection::Tensor)
+                    .map_ok(State::Collection)
+                    .await
+            })
+        }))
+    }
+}
+
+struct LoadHandler {
+    class: Option<TensorType>,
+}
+
+impl<'a> Handler<'a> for LoadHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let (schema, elements): (Value, Value) =
+                    key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+
+                let txn_id = *txn.id();
+
+                if elements.matches::<Vec<(Vec<u64>, Number)>>() {
+                    let elements: Vec<(Vec<u64>, Number)> = elements
+                        .opt_cast_into()
+                        .expect("tensor coordinate elements");
+
+                    let schema = if schema.matches::<Scalar>() {
+                        schema.opt_cast_into().expect("load tensor schema")
+                    } else if schema.matches::<Shape>() {
+                        let shape = schema.opt_cast_into().expect("load tensor shape");
+                        let dtype = if elements.is_empty() {
+                            NumberType::Float(FloatType::F32)
+                        } else {
+                            elements[0].1.class()
+                        };
+
+                        Schema { shape, dtype }
+                    } else {
+                        return Err(TCError::bad_request("invalid Tensor schema", schema));
+                    };
+
+                    let class = self.class.unwrap_or(TensorType::Sparse);
+                    let tensor = create_tensor(class, schema, txn).await?;
+
+                    stream::iter(elements)
+                        .map(|(coord, value)| tensor.write_value_at(txn_id, coord, value))
+                        .buffer_unordered(num_cpus::get())
+                        .try_fold((), |(), ()| future::ready(Ok(())))
+                        .await?;
+
+                    Ok(State::Collection(Collection::Tensor(tensor)))
+                } else if elements.matches::<Vec<Number>>() {
+                    let elements: Vec<Number> = elements.opt_cast_into().expect("tensor elements");
+                    if elements.is_empty() {
+                        return Err(TCError::unsupported(
+                            "a dense Tensor cannot be loaded from a zero-element Tuple",
+                        ));
                     }
-                    TensorType::Sparse => {
-                        create_sparse(txn, schema)
-                            .map_ok(Tensor::from)
-                            .map_ok(Collection::Tensor)
-                            .map_ok(State::Collection)
-                            .await
+
+                    let schema = if schema.matches::<Schema>() {
+                        schema.opt_cast_into().expect("load tensor schema")
+                    } else if schema.matches::<Shape>() {
+                        let shape = schema.opt_cast_into().expect("load tensor shape");
+                        Schema {
+                            shape,
+                            dtype: elements[0].class(),
+                        }
+                    } else {
+                        return Err(TCError::bad_request("invalid Tensor schema", schema));
+                    };
+
+                    if elements.len() as u64 != schema.shape.size() {
+                        return Err(TCError::unsupported(format!(
+                            "wrong number of elements for Tensor with shape {}: {}",
+                            schema.shape,
+                            Tuple::from(elements)
+                        )));
                     }
+
+                    if let Some(class) = self.class {
+                        if class != TensorType::Dense {
+                            return Err(TCError::bad_request(
+                                "loading all elements of a Sparse tensor does not make sense",
+                                Tuple::from(elements),
+                            ))?;
+                        }
+                    }
+
+                    let txn_id = *txn.id();
+                    let file = create_file(txn).await?;
+                    let elements = stream::iter(elements).map(Ok);
+                    DenseTensorFile::from_values(file, txn_id, schema.shape, schema.dtype, elements)
+                        .map_ok(DenseTensor::from)
+                        .map_ok(Tensor::from)
+                        .map_ok(Collection::Tensor)
+                        .map_ok(State::Collection)
+                        .await
+                } else {
+                    Err(TCError::bad_request("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not", elements))
                 }
             })
         }))
@@ -959,12 +1047,14 @@ impl Route for TensorType {
                     "copy_from" => Some(Box::new(CopyDenseHandler)),
                     "concatenate" => Some(Box::new(ConcatenateHandler)),
                     "constant" => Some(Box::new(ConstantHandler)),
+                    "load" => Some(Box::new(LoadHandler { class: Some(*self) })),
                     "range" => Some(Box::new(RangeHandler)),
                     "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
                     _ => None,
                 },
                 Self::Sparse => match path[0].as_str() {
                     "copy_from" => Some(Box::new(CopySparseHandler)),
+                    "load" => Some(Box::new(LoadHandler { class: Some(*self) })),
                     _ => None,
                 },
             }
@@ -1711,6 +1801,7 @@ impl Route for Static {
             "dense" => TensorType::Dense.route(&path[1..]),
             "sparse" => TensorType::Sparse.route(&path[1..]),
             "copy_from" if path.len() == 1 => Some(Box::new(CopyFromHandler)),
+            "load" if path.len() == 1 => Some(Box::new(LoadHandler { class: None })),
             "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
             "tile" if path.len() == 1 => Some(Box::new(TileHandler)),
             _ => None,
@@ -1766,6 +1857,17 @@ async fn create_file(txn: &Txn) -> TCResult<fs::File<Array>> {
     txn.context()
         .create_file_unique(*txn.id(), TensorType::Dense)
         .await
+}
+
+async fn create_tensor(class: TensorType, schema: Schema, txn: &Txn) -> TCResult<Tensor> {
+    match class {
+        TensorType::Dense => {
+            constant(txn, schema.shape, schema.dtype.zero())
+                .map_ok(Tensor::from)
+                .await
+        }
+        TensorType::Sparse => create_sparse(txn, schema).map_ok(Tensor::from).await,
+    }
 }
 
 fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {

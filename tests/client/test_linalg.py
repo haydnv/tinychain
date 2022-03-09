@@ -15,7 +15,7 @@ class LinearAlgebraTests(ClientTest):
         x = np.arange(0, 9).reshape(3, 3)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
         cxt.diag = tc.linalg.diagonal(cxt.x)
 
         expected = np.diag(x)
@@ -29,8 +29,8 @@ class LinearAlgebraTests(ClientTest):
         diag = [2] * size
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(x.shape, tc.I32, x.flatten().tolist())
-        cxt.diag = tc.tensor.Dense.load([size], tc.I32, diag)
+        cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
+        cxt.diag = tc.tensor.Dense.load([size], diag, tc.I32)
         cxt.result = tc.After(tc.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
 
         x[range(size), range(size)] = diag
@@ -42,8 +42,8 @@ class LinearAlgebraTests(ClientTest):
         r = np.random.random([2, 4, 5])
 
         cxt = tc.Context()
-        cxt.l = tc.tensor.Dense.load(l.shape, tc.F32, l.flatten().tolist())
-        cxt.r = tc.tensor.Dense.load(r.shape, tc.F32, r.flatten().tolist())
+        cxt.l = tc.tensor.Dense.load(l.shape, l.flatten().tolist(), tc.F32)
+        cxt.r = tc.tensor.Dense.load(r.shape, r.flatten().tolist(), tc.F32)
         cxt.result = tc.linalg.matmul(cxt.l, cxt.r)
 
         expected = np.matmul(l, r)
@@ -57,7 +57,7 @@ class LinearAlgebraTests(ClientTest):
         matrices = np.arange(24).reshape(shape)
 
         cxt = tc.Context()
-        cxt.matrices = tc.tensor.Dense.load(shape, tc.I32, matrices.flatten().tolist())
+        cxt.matrices = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.I32)
         cxt.result = tc.linalg.norm(tensor=cxt.matrices)
 
         expected = [np.linalg.norm(matrix) for matrix in matrices]
@@ -75,7 +75,7 @@ class LinearAlgebraTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.qr = tc.linalg.qr
         cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
         cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
@@ -93,7 +93,7 @@ class LinearAlgebraTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.qr = tc.linalg.qr
         cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
         cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
@@ -110,7 +110,7 @@ class LinearAlgebraTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.qr = tc.linalg.qr
         cxt.q, cxt.r = cxt.qr(a=cxt.matrix).unpack(2)
         cxt.reconstruction = tc.tensor.einsum("ij,jk->ik", [cxt.q, cxt.r])
@@ -123,7 +123,7 @@ class LinearAlgebraTests(ClientTest):
         x = np.array([1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 12.0, 6.0, 7.0], dtype=np.float32).reshape((3, 3))
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load([3, 3], tc.F32, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load([3, 3], x.flatten().tolist(), tc.F32)
         cxt.plu = tc.linalg.plu
         cxt.plu_factorization = cxt.plu(x=cxt.x)
         plu = self.host.post(ENDPOINT, cxt)
@@ -143,7 +143,7 @@ class LinearAlgebraTests(ClientTest):
         x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(x.shape, tc.F32, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
         cxt.slogdet = tc.linalg.slogdet
         cxt.result_slogdet = cxt.slogdet(x=cxt.x)
 
@@ -162,7 +162,7 @@ class SVDTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
 
@@ -177,7 +177,7 @@ class SVDTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=30)
 
@@ -192,7 +192,7 @@ class SVDTests(ClientTest):
         matrix = np.random.random(n * m).reshape(n, m)
 
         cxt = tc.Context()
-        cxt.matrix = tc.tensor.Dense.load((n, m), tc.F32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrix, l=n, epsilon=tc.F32(1e-7), max_iter=200)
 
@@ -209,7 +209,7 @@ class SVDTests(ClientTest):
         matrices = np.random.random(np.product(shape)).reshape(shape)
 
         cxt = tc.Context()
-        cxt.matrices = tc.tensor.Dense.load(shape, tc.F32, matrices.flatten().tolist())
+        cxt.matrices = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=10)
 
@@ -233,7 +233,7 @@ class SVDTests(ClientTest):
         matrices = np.random.random(np.product(shape)).reshape(shape)
 
         cxt = tc.Context()
-        cxt.matrices = tc.tensor.Dense.load(shape, tc.F32, matrices.flatten().tolist())
+        cxt.matrices = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
         cxt.svd = tc.linalg.svd
         cxt.result = cxt.svd(A=cxt.matrices, l=n, epsilon=1e-7, max_iter=30)
 

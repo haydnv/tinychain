@@ -14,7 +14,7 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
+use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, Tuple,
@@ -54,7 +54,22 @@ impl Schema {
     ///
     /// `debug_info` should be the name of the calling Op, as a user would understand it.
     pub fn validate(&self, debug_info: &'static str) -> TCResult<()> {
-        self.shape.validate(debug_info)
+        self.shape.validate(debug_info)?;
+
+        fn err_nonspecific(dtype: NumberType) -> TCResult<()> {
+            Err(TCError::bad_request(
+                "tensor requires a specific Number type, not",
+                dtype,
+            ))
+        }
+
+        match self.dtype {
+            NumberType::Complex(ComplexType::Complex) => err_nonspecific(self.dtype),
+            NumberType::Float(FloatType::Float) => err_nonspecific(self.dtype),
+            NumberType::Int(IntType::Int) => err_nonspecific(self.dtype),
+            NumberType::UInt(UIntType::UInt) => err_nonspecific(self.dtype),
+            _ => Ok(()),
+        }
     }
 }
 

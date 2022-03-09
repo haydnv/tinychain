@@ -1000,7 +1000,14 @@ where
     T: Transaction<D>,
 {
     fn new(source: BlockListFile<FD, FS, D, T>, bounds: Bounds) -> TCResult<Self> {
+        debug!(
+            "BlockListFile shape {} slice bounds {}",
+            source.shape(),
+            bounds
+        );
+
         let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
+        debug!("BlockListFileSlice shape is {}", rebase.shape());
         Ok(Self { source, rebase })
     }
 }

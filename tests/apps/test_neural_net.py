@@ -124,7 +124,7 @@ class NeuralNetTests(unittest.TestCase):
 
 
 def load_dense(nparray):
-    return tc.tensor.Dense.load(nparray.shape, tc.F32, nparray.flatten().tolist())
+    return tc.tensor.Dense.load(nparray.shape, nparray.flatten().tolist())
 
 
 def output_shape(as_json):

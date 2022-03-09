@@ -174,7 +174,7 @@ def expect_dense(x, dtype=tc.I64):
 
 
 def load_dense(x, dtype=tc.F32):
-    return tc.tensor.Dense.load(x.shape, dtype, x.flatten().tolist())
+    return tc.tensor.Dense.load(x.shape, x.flatten().tolist(), dtype)
 
 
 if __name__ == "__main__":

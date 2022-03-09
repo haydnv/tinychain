@@ -175,7 +175,7 @@ def expect_sparse(ndarray):
 def to_dense(ndarray):
     dtype = np_to_tc_dtype(ndarray.dtype)
     shape = list(ndarray.shape)
-    return tc.tensor.Dense.load(shape, dtype, [int(n) for n in ndarray.flatten()])
+    return tc.tensor.Dense.load(shape, [int(n) for n in ndarray.flatten()], dtype)
 
 
 def to_sparse(ndarray):
@@ -188,7 +188,7 @@ def to_sparse(ndarray):
         if value:
             data.append([coord, int(value)])
 
-    return tc.tensor.Sparse.load(shape, dtype, data)
+    return tc.tensor.Sparse.load(shape, data, dtype)
 
 
 def np_to_tc_dtype(dtype):

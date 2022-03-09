@@ -122,11 +122,11 @@ class DenseTests(unittest.TestCase):
 
     def testPow(self):
         cxt = tc.Context()
-        cxt.left = tc.tensor.Dense.load([1, 2], tc.I32, [1, 2])
+        cxt.left = tc.tensor.Dense.load([1, 2], [1, 2], tc.I64)
         cxt.result = cxt.left**2
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.I32, [1, 2], [1, 4])
+        expected = expect_dense(tc.I64, [1, 2], [1, 4])
 
         self.assertEqual(actual, expected)
 
@@ -148,7 +148,7 @@ class DenseTests(unittest.TestCase):
         x = np.ones(shape, dtype=np.int64)
 
         cxt = tc.Context()
-        cxt.x1 = tc.tensor.Dense.load(x.shape, tc.I64, x.flatten().tolist())
+        cxt.x1 = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I64)
         cxt.x2 = cxt.x1.split(3, axis=0)
         cxt.result = [tc.tensor.Tensor(cxt.x2[i]).shape for i in range(3)]
         actual = self.host.post(ENDPOINT, cxt)
@@ -162,9 +162,9 @@ class DenseTests(unittest.TestCase):
         x = np.random.random(np.product(input_shape)).reshape(input_shape)
 
         cxt = tc.Context()
-        cxt.input = tc.tensor.Dense.load(x.shape, tc.F32, x.flatten().tolist())
+        cxt.input = tc.tensor.Dense.load(x.shape, x.flatten().tolist())
         cxt.splits = cxt.input.split(split, axis=axis)
-        cxt.result = [cxt.splits[i].shape for i in range(2)]
+        cxt.result = [cxt.splits[i].shape for i in range(len(split))]
 
         actual = self.host.post(ENDPOINT, cxt)
 
@@ -212,7 +212,7 @@ class DenseTests(unittest.TestCase):
         x = (np.random.random(np.product(shape)) * 10).reshape(shape)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(shape, tc.F32, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
         cxt.result = cxt.x.mean(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -246,7 +246,7 @@ class DenseTests(unittest.TestCase):
         x = (np.random.random(np.product(shape)) * 10).reshape(shape)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(shape, tc.F32, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
         cxt.result = cxt.x.round()
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -280,7 +280,7 @@ class DenseTests(unittest.TestCase):
         x = np.arange(np.product(input_shape)).reshape(input_shape)
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.load(input_shape, tc.I64, x.flatten().tolist())
+        cxt.x = tc.tensor.Dense.load(input_shape, x.flatten().tolist(), tc.I64)
         cxt.expanded = cxt.x.expand_dims(0).expand_dims(0).transpose(permutation)
         cxt.reshaped = cxt.x.reshape((1, 1) + input_shape).transpose(permutation)
         cxt.result = [cxt.reshaped, cxt.expanded]
@@ -543,7 +543,7 @@ class SparseTests(unittest.TestCase):
         shape = [2, 5, 2, 3, 4, 10]
 
         cxt = tc.Context()
-        cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], tc.I32, data)
+        cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], data, tc.I32)
         cxt.big = cxt.small * tc.tensor.Dense.ones(shape, tc.I32)
         cxt.slice = cxt.big[:-1, 1:4, 1]
 
@@ -563,10 +563,10 @@ class SparseTests(unittest.TestCase):
 
         x = (np.random.random(np.product(shape)) * 2) - 1
         x = (x * (np.abs(x) > 0.5)).reshape(shape)
+        elements = [(list(coord), x[coord]) for coord in np.ndindex(x.shape) if x[coord] != 0]
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Sparse.load(
-            shape, tc.F32, [(list(coord), x[coord]) for coord in np.ndindex(x.shape) if x[coord] != 0])
+        cxt.x = tc.tensor.Sparse.load(shape, elements)
 
         cxt.am = cxt.x.argmax()
         cxt.am0 = cxt.x.argmax(0)
@@ -643,7 +643,7 @@ class TensorTests(unittest.TestCase):
         data = [(list(coord), bool(matrix[coord])) for coord in np.ndindex(matrix.shape) if matrix[coord] != 0]
 
         cxt = tc.Context()
-        cxt.sparse = tc.tensor.Sparse.load([3, 3], tc.Bool, data)
+        cxt.sparse = tc.tensor.Sparse.load([3, 3], data, tc.Bool)
         cxt.dense = cxt.sparse.as_dense()
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -702,7 +702,7 @@ def expect_sparse(dtype, shape, values):
 
 
 def load_dense(x, dtype=tc.F32):
-    return tc.tensor.Dense.load(x.shape, dtype, x.flatten().tolist())
+    return tc.tensor.Dense.load(x.shape, x.flatten().tolist(), dtype)
 
 
 def nparray_to_sparse(arr, dtype):
