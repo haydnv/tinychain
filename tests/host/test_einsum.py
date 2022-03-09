@@ -22,7 +22,7 @@ class Tests(unittest.TestCase):
         cxt.result = cxt.dense.expand_dims(1)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.I64, [2, 1, 3], range(6))
+        expected = expect_dense(np.arange(0, 6).reshape([2, 1, 3]))
         self.assertEqual(actual, expected)
 
     def testTranspose(self):
@@ -32,22 +32,15 @@ class Tests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.transpose(np.arange(0, 6).reshape([3, 2]))
-        expected = expect_dense(tc.I64, [2, 3], expected.flatten())
+        expected = expect_dense(expected)
         self.assertEqual(actual, expected)
 
     def test1D(self):
         A = np.array([1, 2, 3])
-        self.execute('i->', A)
         self.execute('i->i', A)
 
-    def testRepeatIndex(self):
-        A = np.array([[1, 1], [2, 2]])
-        B = np.array([3, 2, 1])
-        self.execute('ii,j->ij', A, B)
-
-    def test2D(self):
+    def test2Dx2(self):
         A = np.array([[1, 1], [2, 2], [3, 3]])
-        self.execute('ij->', A)
         self.execute('ij->i', A)
         self.execute('ij->j', A)
         self.execute('ij->ij', A)
@@ -56,13 +49,11 @@ class Tests(unittest.TestCase):
     def test2Dto3D(self):
         A = np.array([[0, 1], [1, 2], [2, 3]])
         self.execute('ij,ik->ijk', A, A)
-        self.execute('ij,ik->', A, A)
 
     def test2DMulti(self):
         A = np.array([[1, 2], [3, 4]])
         B = np.array([[5, 6], [7, 8]])
 
-        self.execute('ik,ik,il->', A, A, A)
         self.execute('ji,jk->ik', A, B)  # = matmul(transpose(A), B)
         self.execute('ij,jk->ijk', A, B)
         self.execute('ij,jk->ij', A, B)
@@ -71,7 +62,9 @@ class Tests(unittest.TestCase):
         self.execute('ij,jk->i', A, B)
         self.execute('ij,jk->j', A, B)
         self.execute('ij,jk->k', A, B)
-        self.execute('ij,jk->', A, B)
+
+        self.execute('ki,ij->kj', B, A)
+        self.execute('ij,kj->ki', B, A)
 
         A = np.array([[1], [2], [3], [4]])
         B = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
@@ -91,7 +84,6 @@ class Tests(unittest.TestCase):
 
         A = np.arange(60.).reshape(3, 4, 5)
         B = np.arange(24.).reshape(4, 3, 2)
-        self.execute('ijk,jil->', A, B)
         self.execute('ijk,jil->il', A, B)
         self.execute('ijk,jil->kj', A, B)
         self.execute('ijk,jil->lkij', A, B)
@@ -113,29 +105,69 @@ class Tests(unittest.TestCase):
             self.execute("ij,jk->ki", A, B)
 
     def execute(self, fmt, *tensors):
+        # print("inputs:")
+        # for tensor in tensors:
+        #     print(tensor.shape)
+        #     print(tensor)
+        #     print()
+
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
 
         cxt = tc.Context()
         cxt.dense = [to_dense(t) for t in tensors]
-        cxt.sparse = [to_sparse(t) for t in tensors]
-        cxt.results = (tc.tensor.einsum(fmt, cxt.dense), tc.tensor.einsum(fmt, cxt.sparse))
+        cxt.result = tc.tensor.einsum(fmt, cxt.dense)
 
-        (dense, sparse) = self.host.post(ENDPOINT, cxt)
+        # cxt.sparse = [to_sparse(t) for t in tensors]
+        # cxt.results = (tc.tensor.einsum(fmt, cxt.dense), tc.tensor.einsum(fmt, cxt.sparse))
 
-        # TODO: remove these false-positive asserts
-        self.assertEqual(dense, to_dense(expected))
-        self.assertEqual(sparse, to_sparse(expected))
+        # (dense, sparse) = self.host.post(ENDPOINT, cxt)
+
+        dense = self.host.post(ENDPOINT, cxt)
+        # print("expect", expected.shape, expected)
+        # print()
+        # print("expect dense", expect_dense(expected))
+        # print("actual dense", dense)
+        # print()
+        # print("expect sparse", expect_sparse(expected))
+        # print("actual sparse", sparse)
+
+        if expected.shape:
+            self.assertEqual(dense, expect_dense(expected))
+            # self.assertEqual(sparse, expect_sparse(expected))
+        else:
+            self.assertEqual(dense, expected)
+            # self.assertEqual(sparse, expected)
 
     @classmethod
     def tearDownClass(cls):
         cls.host.stop()
 
 
-def expect_dense(dtype, shape, flat):
+def expect_dense(ndarray):
+    shape = list(ndarray.shape)
+    dtype = np_to_tc_dtype(ndarray.dtype)
+
     return {
         str(tc.uri(tc.tensor.Dense)): [
             [shape, str(tc.uri(dtype))],
-            list(flat),
+            ndarray.flatten().tolist(),
+        ]
+    }
+
+
+def expect_sparse(ndarray):
+    shape = list(ndarray.shape)
+    dtype = np_to_tc_dtype(ndarray.dtype)
+
+    coords = itertools.product(*[range(dim) for dim in shape])
+    elements = [
+        [list(coord), n]
+        for (coord, n) in zip(coords, (n for n in ndarray.flatten().tolist())) if n != 0]
+
+    return {
+        str(tc.uri(tc.tensor.Sparse)): [
+            [shape, str(tc.uri(dtype))],
+            elements,
         ]
     }
 

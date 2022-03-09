@@ -468,7 +468,6 @@ impl Shape {
 
     /// Return the number of elements contained within this `Shape`.
     pub fn size(&self) -> u64 {
-        log::debug!("size of {}?", self);
         self.0.iter().product()
     }
 

@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::Deref;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
 use log::debug;
 
@@ -18,6 +18,58 @@ const VALID_SUBSCRIPTS: [char; 52] = [
     'J', 'k', 'K', 'l', 'L', 'm', 'M', 'n', 'N', 'o', 'O', 'p', 'P', 'q', 'Q', 'r', 'R', 's', 'S',
     't', 'T', 'u', 'U', 'v', 'V', 'w', 'W', 'x', 'X', 'y', 'Y', 'z', 'Z',
 ];
+
+struct Dimensions {
+    shape: HashMap<char, u64>,
+    order: Vec<char>,
+}
+
+impl Dimensions {
+    fn with_capacity(size: usize) -> Self {
+        Self {
+            shape: HashMap::with_capacity(size),
+            order: Vec::with_capacity(size),
+        }
+    }
+
+    fn extend(&mut self, labels: &[char], shape: &[u64]) -> TCResult<()> {
+        if labels.len() != shape.len() {
+            return Err(TCError::unsupported(format!(
+                "tensor with {} dimensions does not match format string {}",
+                shape.len(),
+                labels.iter().copied().collect::<String>()
+            )));
+        }
+
+        for (label, dim) in labels.iter().zip(shape) {
+            if let Some(known) = self.shape.get(label) {
+                if dim != known {
+                    return Err(TCError::unsupported(format!(
+                        "einsum found inconsistent dimensions for axis {}: {:?} vs {:?}",
+                        label, known, dim
+                    )));
+                }
+            } else {
+                self.shape.insert(*label, *dim);
+                self.order.push(*label);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get(&self, subscript: &char) -> Option<&u64> {
+        self.shape.get(subscript)
+    }
+
+    fn len(&self) -> usize {
+        self.order.len()
+    }
+
+    fn order(&self) -> &[char] {
+        &self.order
+    }
+}
 
 fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<Label>, Label)> {
     debug!("einsum format string is {}", format);
@@ -43,6 +95,12 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
             count
         ))),
     }?;
+
+    let f_output = parts.pop_back().ok_or_else(|| {
+        TCError::unsupported(
+            "einsum requires > 0 output dimensions; use sum to sum over an entire Tensor",
+        )
+    })?;
 
     let valid_subscripts: HashSet<char> = VALID_SUBSCRIPTS.iter().cloned().collect();
 
@@ -126,7 +184,14 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .map(|f_input| f_input.chars().collect())
         .collect::<Vec<Label>>();
 
-    let f_output = parts.pop_back().unwrap_or("");
+    for f_input in &f_inputs {
+        if f_input.iter().collect::<HashSet<_>>().len() != f_input.len() {
+            return Err(TCError::not_implemented(
+                "repeated subscripts in einsum input",
+            ));
+        }
+    }
+
     if f_output.chars().collect::<HashSet<_>>().len() != f_output.len() {
         return Err(TCError::bad_request(
             "einsum output cannot include repeated subscripts",
@@ -166,10 +231,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
     Ok((f_inputs, f_output))
 }
 
-fn validate_args<T: TensorAccess>(
-    f_inputs: &[Label],
-    tensors: &[T],
-) -> TCResult<BTreeMap<char, u64>> {
+fn validate_args<T: TensorAccess>(f_inputs: &[Label], tensors: &[T]) -> TCResult<Dimensions> {
     if f_inputs.len() != tensors.len() {
         return Err(TCError::bad_request(
             "number of Tensors passed to einsum does not match number of format strings",
@@ -182,40 +244,16 @@ fn validate_args<T: TensorAccess>(
         ));
     }
 
-    let mut dimensions = BTreeMap::new();
+    let mut dimensions = Dimensions::with_capacity(f_inputs.iter().map(|f| f.len()).sum());
 
     for (f_input, tensor) in f_inputs.iter().zip(tensors.iter()) {
-        if f_input.len() != tensor.ndim() {
-            return Err(TCError::unsupported(format!(
-                "tensor with {} dimensions does not match format string {}",
-                tensor.ndim(),
-                f_input.iter().cloned().collect::<String>()
-            )));
-        }
-
-        for (subscript, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
-            if let Some(known_dim) = dimensions.get(subscript) {
-                if *dim != *known_dim {
-                    return Err(TCError::unsupported(format!(
-                        "einsum got inconsistent dimension for axis {}: {} vs {}",
-                        subscript, dim, known_dim
-                    )));
-                }
-            } else {
-                dimensions.insert(*subscript, *dim);
-            }
-        }
+        dimensions.extend(f_input, tensor.shape())?;
     }
 
     Ok(dimensions)
 }
 
-fn normalize<D, Txn, T>(
-    tensor: T,
-    f_input: &[char],
-    f_output: &[char],
-    dimensions: &BTreeMap<char, u64>,
-) -> TCResult<T>
+fn normalize<D, Txn, T>(tensor: T, f_input: &[char], dimensions: &Dimensions) -> TCResult<T>
 where
     D: Dir,
     Txn: Transaction<D>,
@@ -226,14 +264,21 @@ where
 {
     assert_eq!(tensor.ndim(), f_input.len());
 
+    let f_output = dimensions.order().to_vec();
+
     debug!(
         "normalize tensor with shape {} from {:?} -> {:?}",
         tensor.shape(),
         f_input,
-        f_output
+        f_output,
     );
 
     if f_input == f_output {
+        debug!(
+            "{:?} is already normalized to {:?}, returning...",
+            f_input, f_output
+        );
+
         return Ok(tensor);
     }
 
@@ -247,35 +292,13 @@ where
             .cmp(&f_output.iter().position(|l| l == l2))
     });
 
+    let mut subscripts = permutation
+        .iter()
+        .map(|x| f_input[*x])
+        .collect::<Vec<char>>();
+
     debug!("permutation of {:?} is {:?}", f_input, permutation);
     let mut tensor = tensor.transpose(Some(permutation.clone()))?;
-
-    // sum over repeated subscripts
-    // the assumption that they have been transposed together is valid because subscripts
-    // in f_output are required to be unique
-    debug!(
-        "sum over repeated subscripts of {:?}",
-        permutation
-            .iter()
-            .map(|x| f_input[*x])
-            .collect::<Vec<char>>()
-    );
-
-    let mut x = 0;
-    let mut subscripts = Vec::with_capacity(f_output.len());
-    for i in 0..(f_input.len() - 1) {
-        let subscript = f_input[permutation[i]];
-        if subscript == f_input[permutation[i + 1]] {
-            tensor = tensor.sum(x)?;
-        } else {
-            subscripts.push(subscript);
-            x += 1;
-        }
-    }
-
-    subscripts.push(f_input[*permutation.last().unwrap()]);
-    debug!("after summation: {:?}", subscripts);
-    assert_eq!(tensor.ndim(), subscripts.len());
 
     let mut i = 0;
     while i < dimensions.len() {
@@ -299,7 +322,7 @@ where
         .cloned()
         .collect::<Vec<u64>>();
 
-    if tensor.shape().deref() == &shape {
+    if &**tensor.shape() == &shape {
         Ok(tensor)
     } else {
         debug!("broadcast {} into {:?}", tensor.shape(), shape);
@@ -309,7 +332,7 @@ where
 
 fn outer_product<D, Txn, T>(
     f_inputs: &[Label],
-    dimensions: &BTreeMap<char, u64>,
+    dimensions: &Dimensions,
     tensors: Vec<T>,
 ) -> TCResult<T>
 where
@@ -319,33 +342,33 @@ where
         + TensorMath<D, T, LeftCombine = T>
         + TensorReduce<D, Txn = Txn, Reduce = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
-        + Clone,
+        + Clone
+        + fmt::Display,
 {
     assert_eq!(f_inputs.len(), tensors.len());
     assert!(!tensors.is_empty());
 
-    let f_output = dimensions.keys().cloned().collect::<Label>();
-
     let mut normalized = tensors
         .into_iter()
         .zip(f_inputs.iter())
-        .map(|(tensor, f_input)| normalize(tensor, f_input, &f_output, &dimensions))
+        .map(|(tensor, f_input)| normalize(tensor, f_input, &dimensions))
         .collect::<TCResult<VecDeque<T>>>()?;
 
     let mut op = normalized.pop_front().unwrap();
     while let Some(tensor) = normalized.pop_front() {
+        debug!("outer product: {} *= {}", op, tensor);
         op = op.mul(tensor)?;
     }
 
     Ok(op)
 }
 
-fn contract<D, T>(mut op: T, dimensions: BTreeMap<char, u64>, f_output: Label) -> TCResult<T>
+fn contract<D, T>(mut op: T, dimensions: Dimensions, f_output: Label) -> TCResult<T>
 where
     D: Dir,
     T: TensorAccess + TensorReduce<D, Reduce = T> + TensorTransform<Transpose = T>,
 {
-    let mut f_input = dimensions.keys().cloned().collect::<Label>();
+    let mut f_input = dimensions.order().to_vec();
     let mut axis = 0;
     while op.ndim() > f_output.len() {
         assert_eq!(f_input.len(), op.ndim());
@@ -361,6 +384,11 @@ where
     }
 
     if f_input == f_output {
+        debug!(
+            "outer product already has shape {:?}, no need to transpose",
+            f_output
+        );
+
         Ok(op)
     } else {
         debug!(
@@ -383,7 +411,8 @@ where
         + TensorMath<D, T, LeftCombine = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + TensorReduce<D, Reduce = T>
-        + Clone,
+        + Clone
+        + fmt::Display,
 {
     let (f_inputs, f_output) = parse_format(&tensors, format)?;
 
@@ -394,15 +423,5 @@ where
 
     let dimensions = validate_args(&f_inputs, &tensors)?;
     let op = outer_product(&f_inputs, &dimensions, tensors)?;
-
-    debug_assert_eq!(
-        op.shape().as_slice(),
-        dimensions
-            .values()
-            .cloned()
-            .collect::<Vec<u64>>()
-            .as_slice()
-    );
-
     contract(op, dimensions, f_output)
 }
