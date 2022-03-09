@@ -319,22 +319,23 @@ where
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
+    Self: TensorInstance,
+    <Self as TensorInstance>::Dense: TensorBooleanConst,
 {
     type Combine = SparseTensor<FD, FS, D, T, SparseConstCombinator<FD, FS, D, T, A>>;
+    type DenseCombine = <<Self as TensorInstance>::Dense as TensorBooleanConst>::DenseCombine;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         let access = SparseConstCombinator::new(self.accessor, other, Number::and);
         Ok(access.into())
     }
 
-    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
-        let access = SparseConstCombinator::new(self.accessor, other, Number::or);
-        Ok(access.into())
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().or_const(other)
     }
 
-    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
-        let access = SparseConstCombinator::new(self.accessor, other, Number::xor);
-        Ok(access.into())
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().xor_const(other)
     }
 }
 
@@ -946,11 +947,21 @@ where
     }
 }
 
-impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A> {
+impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+    Self: TensorInstance,
+    <Self as TensorInstance>::Dense: TensorMathConst,
+{
     type Combine = SparseTensor<FD, FS, D, T, SparseConstCombinator<FD, FS, D, T, A>>;
+    type DenseCombine = <<Self as TensorInstance>::Dense as TensorMathConst>::DenseCombine;
 
-    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(SparseConstCombinator::new(self.accessor, other, Number::add).into())
+    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().add_const(other)
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -986,8 +997,8 @@ impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A> {
         Ok(SparseConstCombinator::new(self.accessor, other, Number::pow).into())
     }
 
-    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(SparseConstCombinator::new(self.accessor, other, Number::sub).into())
+    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().sub_const(other)
     }
 }
 

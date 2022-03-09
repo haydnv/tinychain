@@ -327,6 +327,7 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
+    type DenseCombine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         fn array_and(l: Array, r: Number) -> Array {
@@ -941,6 +942,7 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
+    type DenseCombine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         fn add_array(l: Array, r: Number) -> Array {

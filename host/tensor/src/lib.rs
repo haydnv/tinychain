@@ -185,17 +185,19 @@ pub trait TensorBoolean<O> {
 
 /// [`Tensor`] boolean operations in relation to a constant.
 pub trait TensorBooleanConst {
-    /// The result type of a boolean operation.
+    /// The return type of a boolean operation.
     type Combine: TensorInstance;
+    /// The return type of a boolean operation with a result expected to be dense.
+    type DenseCombine: TensorInstance;
 
     /// Logical and
     fn and_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Logical or
-    fn or_const(self, other: Number) -> TCResult<Self::Combine>;
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 
     /// Logical xor
-    fn xor_const(self, other: Number) -> TCResult<Self::Combine>;
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 }
 
 /// Tensor comparison operations
@@ -332,11 +334,13 @@ pub trait TensorMath<D: Dir, O> {
 
 /// [`Tensor`] constant math operations
 pub trait TensorMathConst {
-    /// The result type of a math operation
+    /// The return type of a math operation
     type Combine: TensorInstance;
+    /// The return type of a math operation with a result expected to be dense
+    type DenseCombine: TensorInstance;
 
     /// Add a constant to this tensor
-    fn add_const(self, other: Number) -> TCResult<Self::Combine>;
+    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 
     /// Divide `self` by `other`.
     fn div_const(self, other: Number) -> TCResult<Self::Combine>;
@@ -351,7 +355,7 @@ pub trait TensorMathConst {
     fn pow_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Subtract `other` from `self`.
-    fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
+    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 }
 
 /// Methods to access this [`Tensor`] as a persistent type.
@@ -699,6 +703,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
+    type DenseCombine = Self;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
@@ -1004,6 +1009,7 @@ where
     D::FileClass: From<TensorType>,
 {
     type Combine = Self;
+    type DenseCombine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
