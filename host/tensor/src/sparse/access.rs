@@ -1410,25 +1410,21 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let expand_axis = if let Some(permutation) = &permutation {
-            if permutation.len() != self.ndim() {
-                return Err(TCError::unsupported(format!(
-                    "invalid permutation for tensor of shape {}: {:?}",
-                    self.shape(),
-                    permutation
-                )));
-            }
+        let permutation =
+            permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
 
-            if permutation[self.rebase.expand_axis()] > self.rebase.expand_axis() {
-                permutation[self.rebase.expand_axis()] - 1
-            } else {
-                permutation[self.rebase.expand_axis()]
-            }
-        } else {
-            self.ndim() - self.rebase.expand_axis()
-        };
+        assert_eq!(permutation.len(), self.ndim());
 
-        let source = self.source.transpose(permutation)?;
+        let mut expand_axis = None;
+        for i in 0..permutation.len() {
+            if permutation[i] == self.rebase.expand_axis() {
+                expand_axis = Some(i);
+            }
+        }
+        let expand_axis = expand_axis.expect("expand axis");
+
+        let permutation = self.rebase.invert_axes(permutation);
+        let source = self.source.transpose(Some(permutation))?;
         SparseExpand::new(source, expand_axis)
     }
 }

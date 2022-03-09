@@ -429,6 +429,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        assert_eq!(self.left.shape(), self.right.shape());
+
         debug!(
             "BlockListCombine::transpose {} {} {:?}",
             self.left.shape(),
@@ -438,6 +440,7 @@ where
 
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
+        assert_eq!(left.shape(), right.shape());
 
         BlockListCombine::new(
             left,
@@ -603,6 +606,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListConst::transpose {:?}", permutation);
+
         let transpose = self.source.transpose(permutation)?;
         Ok(BlockListConst::new(
             transpose,
@@ -759,6 +764,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListBroadcast::transpose {:?}", permutation);
+
         BlockListTranspose::new(self, permutation)
     }
 
@@ -881,6 +888,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListCast::transpose {:?}", permutation);
         let transpose = self.source.transpose(permutation)?;
         Ok(BlockListCast::new(transpose, self.dtype))
     }
@@ -1033,24 +1041,32 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         debug!(
-            "BlockListExpand::transpose {} {:?}",
+            "BlockListExpand::transpose {} {:?} (expanded axis is {})",
             self.shape(),
-            permutation
+            permutation,
+            self.rebase.expand_axis(),
         );
 
-        let expand_axis = if let Some(permutation) = &permutation {
-            if permutation[self.rebase.expand_axis()] > self.rebase.expand_axis() {
-                permutation[self.rebase.expand_axis()] - 1
-            } else {
-                permutation[self.rebase.expand_axis()]
+        let permutation =
+            permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
+
+        assert_eq!(permutation.len(), self.ndim());
+
+        let mut expand_axis = None;
+        for i in 0..permutation.len() {
+            if permutation[i] == self.rebase.expand_axis() {
+                expand_axis = Some(i);
             }
-        } else {
-            self.ndim() - self.rebase.expand_axis()
-        };
+        }
+        let expand_axis = expand_axis.expect("expand axis");
 
-        let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
+        let permutation = self.rebase.invert_axes(permutation);
+        let source = self.source.transpose(Some(permutation))?;
 
-        let source = self.source.transpose(permutation)?;
+        debug!(
+            "BlockListExpand::transpose expand source transpose at axis {}",
+            expand_axis
+        );
         let rebase = transform::Expand::new(source.shape().clone(), expand_axis)?;
 
         Ok(BlockListExpand {
@@ -1204,6 +1220,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListFlip::transpose {:?}", permutation);
+
         let axis = if let Some(permutation) = &permutation {
             if permutation.len() != self.ndim() {
                 return Err(TCError::bad_request(
@@ -1390,6 +1408,8 @@ where
     }
 
     fn block_stream<'a>(self, txn: Self::Txn) -> TCBoxTryFuture<'a, TCBoxTryStream<'a, Array>> {
+        debug!("BlockListReduce::block_stream with shape {}", self.shape());
+
         Box::pin(async move {
             let reductor = self.reductor;
             let axis = self.rebase.reduce_axis();
@@ -1401,10 +1421,20 @@ where
                 Ok(reductor.reduce_stream(blocks))
             } else {
                 let mut permutation: Vec<usize> = (0..ndim).collect();
-                permutation[axis] = ndim - 1;
-                permutation[ndim - 1] = axis;
+                let axis = permutation.remove(axis);
+                permutation.push(axis);
+
+                debug!(
+                    "BlockListReduce::block_stream will transpose its source: {:?}",
+                    permutation
+                );
 
                 let transpose = source.transpose(Some(permutation))?;
+                debug!(
+                    "reducing last axis of dense block list with shape {}",
+                    transpose.shape()
+                );
+
                 let blocks = transpose.block_stream(txn).await?;
                 Ok(reductor.reduce_stream(blocks))
             }
@@ -1720,6 +1750,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListTranspose::transpose {:?}", permutation);
+
         let permutation = if let Some(permutation) = permutation {
             self.rebase.invert_axes(permutation)
         } else {
@@ -1838,6 +1870,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListSparse::transpose {:?}", permutation);
+
         let transpose = self.source.transpose(permutation)?;
         Ok(transpose.into())
     }
@@ -1994,6 +2028,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("BlockListUnary::transpose {:?}", permutation);
+
         let source = self.source.transpose(permutation)?;
         Ok(BlockListUnary {
             source,

@@ -1148,9 +1148,15 @@ where
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         if let Some(permutation) = &permutation {
             if permutation.iter().zip(0..self.ndim()).all(|(x, i)| x == &i) {
+                debug!(
+                    "no need to transpose {} with permutation {:?}",
+                    self, permutation
+                );
                 return Ok(self);
             }
         }
+
+        debug!("transpose {} with permutation {:?}", self, permutation);
 
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
