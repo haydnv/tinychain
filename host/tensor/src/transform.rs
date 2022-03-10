@@ -35,6 +35,8 @@ impl Broadcast {
         }
 
         let ndim = shape.len();
+        debug_assert!(source_shape.len() <= ndim);
+
         if source_shape.len() > ndim {
             return Err(TCError::unsupported(format!(
                 "cannot broadcast {} into {}",
@@ -53,10 +55,10 @@ impl Broadcast {
             } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
                 inverted_axes.push(axis - offset);
             } else {
-                return Err(TCError::bad_request(
-                    &format!("cannot broadcast into {}", shape),
-                    source_shape,
-                ));
+                return Err(TCError::unsupported(format!(
+                    "cannot broadcast {} into {}",
+                    source_shape, shape
+                )));
             }
         }
 

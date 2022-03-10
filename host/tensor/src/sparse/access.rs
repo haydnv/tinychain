@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
-use log::debug;
+use log::{debug, trace};
 use safecast::AsType;
 
 use tc_btree::Node;
@@ -343,6 +343,7 @@ where
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("DenseToSparse::transpose {:?}", permutation);
+
         if needs_transpose(&permutation) {
             self.source
                 .transpose(permutation)
@@ -403,7 +404,9 @@ where
 {
     pub fn new(source: A, shape: Shape) -> TCResult<Self> {
         debug!("SparseBroadcast::new {} into {}", source.shape(), shape);
+
         let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
+
         Ok(Self {
             source,
             rebase,
@@ -510,7 +513,7 @@ where
             .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
             .map_ok(move |coord| {
-                debug!("broadcast source coord {:?}", coord);
+                trace!("broadcast source coord {:?}", coord);
                 rebase.map_coord(coord)
             })
             // TODO: can this happen in `Coords`? maybe a new stream generator type?
@@ -550,6 +553,12 @@ where
         );
 
         let source = self.source.slice(source_bounds)?;
+        debug!(
+            "SparseBroadcast::slice will broadcast source slice {} to shape {}",
+            source.shape(),
+            shape
+        );
+
         SparseBroadcast::new(source, shape)
     }
 
@@ -1411,48 +1420,27 @@ where
     }
 
     fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("SparseExpand {} axis {} slice {}", self.shape(), self.rebase.expand_axis(), bounds);
-        self.shape().validate_bounds(&bounds)?;
-        bounds.normalize(self.shape());
-
-        if bounds == Bounds::all(self.shape()) {
-            return Ok(self.accessor());
-        }
-
-        let source_bounds = self.rebase.invert_bounds(bounds.clone());
-        let source_slice_shape = source_bounds.to_shape(self.source.shape())?;
-
-        let expand_axis = self.rebase.expand_axis();
-        let source_expand_axis = if bounds[expand_axis].is_index() {
-            // in this case the expanded dimension is elided
-            None
-        } else if source_slice_shape.len() == 1 {
-            // in this case only the expanded dimension is present in the slice
-            Some(0)
-        } else {
-            let num_elided = bounds[..expand_axis]
-                .iter()
-                .filter(|bound| bound.is_index())
-                .count();
-
-            Some(expand_axis - num_elided)
-        };
-
         debug!(
-            "SparseExpand slice source {} with bounds {} (removed axis {}, expanding axis {:?})",
-            self.source.shape(),
-            source_bounds,
-            expand_axis,
-            source_expand_axis,
+            "SparseExpand {} axis {} slice {}",
+            self.shape(),
+            self.rebase.expand_axis(),
+            bounds
         );
 
-        let slice = self.source.slice(source_bounds)?;
-        debug_assert_eq!(&source_slice_shape, slice.shape());
+        self.shape().validate_bounds(&bounds)?;
+        bounds.normalize(self.shape());
+        let ndim = bounds.ndim();
 
-        if let Some(source_expand_axis) = source_expand_axis {
-            SparseExpand::new(slice, source_expand_axis).map(|expansion| expansion.accessor())
+        let expand_axis = self.rebase.invert_axis(&bounds);
+        let bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(bounds)?;
+
+        if ndim == source.ndim() {
+            Ok(source.accessor())
+        } else if let Some(axis) = expand_axis {
+            SparseExpand::new(source, axis).map(SparseAccess::accessor)
         } else {
-            Ok(slice.accessor())
+            Ok(source.accessor())
         }
     }
 
@@ -1776,7 +1764,8 @@ where
             .try_flatten()
             .map_ok(move |coord| {
                 let source_bounds = rebase.invert_coord(&coord);
-                debug!("reduce {:?} (bounds {})", coord, source_bounds);
+                trace!("reduce {:?} (bounds {})", coord, source_bounds);
+
                 let source = source.clone();
                 let txn = txn.clone();
                 Box::pin(async move {
