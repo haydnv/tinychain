@@ -1411,7 +1411,7 @@ where
     }
 
     fn slice(self, mut bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("SparseExpand {} slice {}", self.shape(), bounds);
+        debug!("SparseExpand {} axis {} slice {}", self.shape(), self.rebase.expand_axis(), bounds);
         self.shape().validate_bounds(&bounds)?;
         bounds.normalize(self.shape());
 
@@ -1428,7 +1428,7 @@ where
             None
         } else if source_slice_shape.len() == 1 {
             // in this case only the expanded dimension is present in the slice
-            None
+            Some(0)
         } else {
             let num_elided = bounds[..expand_axis]
                 .iter()

@@ -533,6 +533,23 @@ class SparseTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def testExpandAndTransposeAndSum(self):
+        shape = [2, 3]
+        elements = [((0, 1), 1), ((1, 1), 2)]
+
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
+        cxt.result = cxt.tensor.expand_dims(1).transpose().sum(1).sum(1)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = np.zeros(shape)
+        for coord, value in elements:
+            expected[coord] = value
+        expected = expect_sparse(tc.I32, [3], np.sum(np.sum(np.transpose(np.expand_dims(expected, 1)), 1), 1))
+
+        self.assertEqual(actual, expected)
+
     def testTranspose(self):
         shape = [2, 3]
         elements = [((0, 1), 1), ((1, 1), 2)]
@@ -545,12 +562,8 @@ class SparseTests(unittest.TestCase):
 
         expected = np.zeros(shape)
         for coord, value in elements:
-            print(f"expect {value} at {coord}")
             expected[coord] = value
         expected = expect_sparse(tc.I32, reversed(shape), np.transpose(expected))
-
-        print("actual", actual)
-        print("expected", expected)
 
         self.assertEqual(actual, expected)
 
