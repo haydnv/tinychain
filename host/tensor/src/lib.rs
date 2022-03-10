@@ -1579,3 +1579,12 @@ fn coord_bounds(shape: &[u64]) -> Vec<u64> {
         .map(|axis| shape[axis + 1..].iter().product())
         .collect()
 }
+
+#[inline]
+fn needs_transpose(permutation: &Option<Vec<usize>>) -> bool {
+    if let Some(axes) = permutation {
+        !axes.iter().enumerate().all(|(i, x)| x == &i)
+    } else {
+        true
+    }
+}

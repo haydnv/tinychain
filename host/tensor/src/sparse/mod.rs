@@ -1080,7 +1080,7 @@ where
     type Flip = SparseTensor<FD, FS, D, T, SparseFlip<FD, FS, D, T, A>>;
     type Reshape = SparseTensor<FD, FS, D, T, SparseReshape<FD, FS, D, T, A>>;
     type Slice = SparseTensor<FD, FS, D, T, A::Slice>;
-    type Transpose = SparseTensor<FD, FS, D, T, A::Transpose>;
+    type Transpose = SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         let accessor = SparseBroadcast::new(self.accessor, shape)?;

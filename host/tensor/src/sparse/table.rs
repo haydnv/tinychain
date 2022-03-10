@@ -23,8 +23,9 @@ use tcgeneric::{label, Id, Label, TCBoxTryStream, Tuple};
 
 use crate::dense::PER_BLOCK;
 use crate::stream::{sorted_coords, Read, ReadValueAt};
-use crate::transform;
-use crate::{AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType};
+use crate::{
+    needs_transpose, transform, AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess, TensorType,
+};
 
 use super::access::SparseTranspose;
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor, SparseWrite};
@@ -106,7 +107,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
-    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Table(self)
@@ -172,9 +172,13 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseTable::transpose {:?}", permutation);
-        SparseTranspose::new(self, permutation)
+        if needs_transpose(&permutation) {
+            SparseTranspose::new(self, permutation).map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -397,7 +401,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
-    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Slice(self)
@@ -456,9 +459,14 @@ where
         self.source.slice(source_bounds)
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        debug!("SparseTableSlice::tranpose {:?}", permutation);
-        SparseTranspose::new(self, permutation)
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
+        debug!("SparseTableSlice::transpose {:?}", permutation);
+
+        if needs_transpose(&permutation) {
+            SparseTranspose::new(self, permutation).map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 

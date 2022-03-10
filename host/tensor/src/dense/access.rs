@@ -1840,7 +1840,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListSparse<FD, FS, D, T, A::Slice>;
-    type Transpose = BlockListSparse<FD, FS, D, T, A::Transpose>;
+    type Transpose = BlockListSparse<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
 
     fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
         let source = self.source.accessor();

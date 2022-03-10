@@ -18,8 +18,8 @@ use tcgeneric::{TCBoxTryFuture, TCBoxTryStream, Tuple};
 use crate::dense::{DenseAccess, DenseAccessor, DenseTensor, PER_BLOCK};
 use crate::stream::{sorted_coords, sorted_values, Read, ReadValueAt};
 use crate::{
-    coord_bounds, transform, AxisBounds, Bounds, Coord, Phantom, Shape, TensorAccess, TensorType,
-    TensorUnary, ERR_INF, ERR_NAN,
+    coord_bounds, needs_transpose, transform, AxisBounds, Bounds, Coord, Phantom, Shape,
+    TensorAccess, TensorType, TensorUnary, ERR_INF, ERR_NAN,
 };
 
 use super::combine::{coord_to_offset, SparseCombine};
@@ -33,9 +33,6 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
 {
     /// The type of a slice of this accessor
     type Slice: SparseAccess<FD, FS, D, T>;
-
-    /// The type of a transpose of this accessor
-    type Transpose: SparseAccess<FD, FS, D, T>;
 
     /// Return this accessor as a [`SparseAccessor`].
     fn accessor(self) -> SparseAccessor<FD, FS, D, T>;
@@ -60,7 +57,7 @@ pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D
     /// Return this accessor as transposed according to the given `permutation`.
     ///
     /// If no permutation is given, this accessor's axes will be reversed.
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>>;
 }
 
 /// Write methods for [`SparseTensor`] data
@@ -149,7 +146,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
-    type Transpose = Self;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         self
@@ -263,7 +259,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = DenseToSparse<FD, FS, D, T, B::Slice>;
-    type Transpose = DenseToSparse<FD, FS, D, T, B::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Dense(Box::new(DenseToSparse {
@@ -346,9 +341,16 @@ where
         self.source.slice(bounds).map(DenseToSparse::from)
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("DenseToSparse::transpose {:?}", permutation);
-        self.source.transpose(permutation).map(DenseToSparse::from)
+        if needs_transpose(&permutation) {
+            self.source
+                .transpose(permutation)
+                .map(DenseToSparse::from)
+                .map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -447,7 +449,6 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
-    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Broadcast(Box::new(SparseBroadcast {
@@ -552,9 +553,14 @@ where
         SparseBroadcast::new(source, shape)
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseBroadcast::transpose {:?}", permutation);
-        SparseTranspose::new(self, permutation)
+
+        if needs_transpose(&permutation) {
+            SparseTranspose::new(self, permutation).map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -637,11 +643,12 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseCast<FD, FS, D, T, A::Slice>;
-    type Transpose = SparseCast<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Cast(Box::new(SparseCast::new(
@@ -676,15 +683,21 @@ where
         })
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseCast::transpose {:?}", permutation);
 
-        let source = self.source.transpose(permutation)?;
-        Ok(SparseCast {
-            source,
-            dtype: self.dtype,
-            phantom: self.phantom,
-        })
+        if needs_transpose(&permutation) {
+            let source = self.source.transpose(permutation)?;
+            let cast = SparseCast {
+                source,
+                dtype: self.dtype,
+                phantom: self.phantom,
+            };
+
+            Ok(cast.accessor())
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -819,11 +832,12 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseCombinator<FD, FS, D, T, L::Slice, R::Slice>;
-    type Transpose = SparseCombinator<FD, FS, D, T, L::Transpose, R::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Combine(Box::new(SparseCombinator {
@@ -888,19 +902,25 @@ where
         })
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseCombinator::transpose {:?}", permutation);
+
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
 
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
         assert_eq!(left.shape(), right.shape());
 
-        Ok(SparseCombinator {
+        let transpose = SparseCombinator {
             left,
             right,
             combinator: self.combinator,
             phantom: self.phantom,
-        })
+        };
+
+        Ok(transpose.accessor())
     }
 }
 
@@ -982,11 +1002,12 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseConstCombinator<FD, FS, D, T, A::Slice>;
-    type Transpose = SparseConstCombinator<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         let this = SparseConstCombinator {
@@ -1026,15 +1047,17 @@ where
         ))
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseConstCombinator::transpose {:?}", permutation);
 
-        let transpose = self.source.transpose(permutation)?;
-        Ok(SparseConstCombinator::new(
-            transpose,
-            self.other,
-            self.combinator,
-        ))
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
+
+        let source = self.source.transpose(permutation)?;
+        let transpose = SparseConstCombinator::new(source, self.other, self.combinator);
+
+        Ok(transpose.accessor())
     }
 }
 
@@ -1156,11 +1179,12 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
+    D::File: AsType<FD> + AsType<FS>,
+    D::FileClass: From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseLeftCombinator<FD, FS, D, T, L::Slice, R::Slice>;
-    type Transpose = SparseLeftCombinator<FD, FS, D, T, L::Transpose, R::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::CombineLeft(Box::new(SparseLeftCombinator {
@@ -1211,19 +1235,25 @@ where
         })
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseLeftCombinator::transpose {:?}", permutation);
+
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
 
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
         assert_eq!(left.shape(), right.shape());
 
-        Ok(SparseLeftCombinator {
+        let transpose = SparseLeftCombinator {
             left,
             right,
             combinator: self.combinator,
             phantom: self.phantom,
-        })
+        };
+
+        Ok(transpose.accessor())
     }
 }
 
@@ -1325,7 +1355,6 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
-    type Transpose = SparseExpand<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Expand(Box::new(SparseExpand {
@@ -1427,8 +1456,12 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseExpand::transpose {:?}", permutation);
+
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
 
         let permutation =
             permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
@@ -1445,7 +1478,7 @@ where
 
         let permutation = self.rebase.invert_axes(permutation);
         let source = self.source.transpose(Some(permutation))?;
-        SparseExpand::new(source, expand_axis)
+        SparseExpand::new(source, expand_axis).map(SparseAccess::accessor)
     }
 }
 
@@ -1539,7 +1572,6 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
-    type Transpose = SparseFlip<FD, FS, D, T, A::Transpose>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Flip(Box::new(SparseFlip {
@@ -1600,8 +1632,12 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseFlip::transpose {:?}", permutation);
+
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
 
         let flip_axis = if let Some(permutation) = &permutation {
             if permutation.len() == self.ndim() {
@@ -1617,7 +1653,7 @@ where
         };
 
         let source = self.source.transpose(permutation)?;
-        SparseFlip::new(source, flip_axis)
+        SparseFlip::new(source, flip_axis).map(SparseAccess::accessor)
     }
 }
 
@@ -1717,7 +1753,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = SparseReduce<FD, FS, D, T>;
-    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Reduce(Box::new(self))
@@ -1773,7 +1808,7 @@ where
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        debug!("SparseReduce::slice {}", bounds);
+        debug!("SparseReduce::slice {} from {:?}", bounds, self.shape());
 
         self.shape().validate_bounds(&bounds)?;
 
@@ -1786,6 +1821,8 @@ where
 
         let source = self.source.slice(source_bounds)?;
         let reduced = SparseReduce::new(source.into(), reduce_axis, self.reductor)?;
+        debug_assert!(reduced.ndim() > 0);
+
         if reduced.ndim() == 0 {
             Err(TCError::unsupported(
                 "cannot return a zero-dimensional slice from a reduced Tensor",
@@ -1795,9 +1832,14 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseReduce::transpose {:?}", permutation);
-        SparseTranspose::new(self, permutation)
+
+        if needs_transpose(&permutation) {
+            SparseTranspose::new(self, permutation).map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -1891,7 +1933,6 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseTable<FD, FS, D, T>;
-    type Transpose = SparseTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         let reshape = SparseReshape {
@@ -1938,9 +1979,14 @@ where
         ))
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseReshape::transpose {:?}", permutation);
-        SparseTranspose::new(self, permutation)
+
+        if needs_transpose(&permutation) {
+            SparseTranspose::new(self, permutation).map(SparseAccess::accessor)
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
@@ -1982,6 +2028,16 @@ where
     A: SparseAccess<FD, FS, D, T>,
 {
     pub fn new(source: A, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        if !needs_transpose(&permutation) {
+            return Err(TCError::bad_request(
+                "sparse transpose got no axes to transpose",
+                permutation
+                    .expect("permutation")
+                    .iter()
+                    .collect::<Tuple<&usize>>(),
+            ));
+        }
+
         transform::Transpose::new(source.shape().clone(), permutation).map(|rebase| Self {
             source,
             rebase,
@@ -2027,8 +2083,7 @@ where
     A: SparseAccess<FD, FS, D, T>,
     A::Slice: SparseAccess<FD, FS, D, T>,
 {
-    type Slice = <A::Slice as SparseAccess<FD, FS, D, T>>::Transpose;
-    type Transpose = SparseAccessor<FD, FS, D, T>;
+    type Slice = SparseAccessor<FD, FS, D, T>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Transpose(Box::new(SparseTranspose {
@@ -2097,18 +2152,21 @@ where
         source.transpose(Some(slice_permutation))
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseTranspose::transpose {:?}", permutation);
 
-        let permutation =
-            permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
-        let source_permutation = self.rebase.invert_axes(permutation);
-        if source_permutation.iter().enumerate().all(|(i, x)| x == &i) {
-            Ok(self.source.accessor())
-        } else {
+        if !needs_transpose(&permutation) {
+            return Ok(self.accessor());
+        }
+
+        let source_permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
+
+        if needs_transpose(&source_permutation) {
             self.source
-                .transpose(Some(source_permutation))
+                .transpose(source_permutation)
                 .map(|access| access.accessor())
+        } else {
+            Ok(self.source.accessor())
         }
     }
 }
@@ -2198,7 +2256,6 @@ where
     D::FileClass: From<TensorType>,
 {
     type Slice = Self;
-    type Transpose = Self;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Unary(Box::new(self))
@@ -2229,15 +2286,21 @@ where
         })
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
         debug!("SparseUnary::transpose {:?}", permutation);
 
-        let source = self.source.transpose(permutation)?;
-        Ok(SparseUnary {
-            source: source.accessor(),
-            dtype: self.dtype,
-            transform: self.transform,
-        })
+        if needs_transpose(&permutation) {
+            let source = self.source.transpose(permutation)?;
+            let transpose = SparseUnary {
+                source: source.accessor(),
+                dtype: self.dtype,
+                transform: self.transform,
+            };
+
+            Ok(transpose.accessor())
+        } else {
+            Ok(self.accessor())
+        }
     }
 }
 
