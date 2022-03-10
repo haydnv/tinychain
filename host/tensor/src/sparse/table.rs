@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::AsType;
 
 use tc_btree::{BTreeType, Node};
@@ -113,8 +113,12 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        debug!("SparseTable::filled");
         let rows = self.table.rows(*txn.id()).await?;
-        let filled = rows.and_then(|row| future::ready(expect_row(row)));
+        let filled = rows
+            .map(|result| result.and_then(|row| expect_row(row)))
+            .inspect_ok(|(coord, value)| trace!("filled at {:?}: {}", coord, value));
+
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
     }
@@ -169,6 +173,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseTable::transpose {:?}", permutation);
         SparseTranspose::new(self, permutation)
     }
 }
@@ -412,6 +417,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseTableSlice::filled_at {:?}", axes);
+
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -450,6 +457,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseTableSlice::tranpose {:?}", permutation);
         SparseTranspose::new(self, permutation)
     }
 }
@@ -539,9 +547,17 @@ where
     T::Selection: TableStream,
 {
     assert!(!axes.is_empty());
-    let coords = table.select(axes.into_iter().map(Id::from).collect())?;
+    let order: Vec<Id> = axes.into_iter().map(Id::from).collect();
+    debug!(
+        "sparse::table::filled_at {}",
+        order.iter().collect::<Tuple<&Id>>()
+    );
+
+    let coords = table.select(order)?;
     let coords = coords.rows(*txn.id()).await?;
-    Ok(coords.map(|r| r.and_then(expect_coord)))
+    Ok(coords
+        .map(|r| r.and_then(expect_coord))
+        .inspect_ok(|coord| trace!("sparse::table::filled_at coord {:?}", coord)))
 }
 
 fn table_bounds(shape: &Shape, bounds: &Bounds) -> TCResult<tc_table::Bounds> {

@@ -286,6 +286,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("DenseToSparse::filled_at {:?}", axes);
+
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
@@ -345,6 +347,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("DenseToSparse::transpose {:?}", permutation);
         self.source.transpose(permutation).map(DenseToSparse::from)
     }
 }
@@ -550,6 +553,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseBroadcast::transpose {:?}", permutation);
         SparseTranspose::new(self, permutation)
     }
 }
@@ -655,6 +659,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseCast::filled_at {:?}", axes);
+
         self.source.filled_at(txn, axes).await
     }
 
@@ -671,6 +677,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseCast::transpose {:?}", permutation);
+
         let source = self.source.transpose(permutation)?;
         Ok(SparseCast {
             source,
@@ -835,6 +843,8 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseCombinator::filled_at {:?}", axes);
+
         self.shape().validate_axes(&axes)?;
 
         if axes.is_empty() {
@@ -879,6 +889,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseCombinator::transpose {:?}", permutation);
+
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
         assert_eq!(left.shape(), right.shape());
@@ -997,6 +1009,7 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseConstCombinator::filled_at {:?}", axes);
         self.source.filled_at(txn, axes).await
     }
 
@@ -1014,6 +1027,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseConstCombinator::transpose {:?}", permutation);
+
         let transpose = self.source.transpose(permutation)?;
         Ok(SparseConstCombinator::new(
             transpose,
@@ -1164,6 +1179,7 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseLeftCombinator::filled_at {:?}", axes);
         self.left.filled_at(txn, axes).await
     }
 
@@ -1196,6 +1212,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseLeftCombinator::transpose {:?}", permutation);
+
         let left = self.left.transpose(permutation.clone())?;
         let right = self.right.transpose(permutation)?;
         assert_eq!(left.shape(), right.shape());
@@ -1410,6 +1428,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseExpand::transpose {:?}", permutation);
+
         let permutation =
             permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
 
@@ -1581,6 +1601,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseFlip::transpose {:?}", permutation);
+
         let flip_axis = if let Some(permutation) = &permutation {
             if permutation.len() == self.ndim() {
                 permutation[self.rebase.axis()]
@@ -1774,6 +1796,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseReduce::transpose {:?}", permutation);
         SparseTranspose::new(self, permutation)
     }
 }
@@ -1916,6 +1939,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseReshape::transpose {:?}", permutation);
         SparseTranspose::new(self, permutation)
     }
 }
@@ -2004,7 +2028,7 @@ where
     A::Slice: SparseAccess<FD, FS, D, T>,
 {
     type Slice = <A::Slice as SparseAccess<FD, FS, D, T>>::Transpose;
-    type Transpose = A::Transpose;
+    type Transpose = SparseAccessor<FD, FS, D, T>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Transpose(Box::new(SparseTranspose {
@@ -2015,8 +2039,10 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
+        debug!("SparseTranspose::filled");
+
         let rebase = self.rebase.clone();
-        let source_axes = self.rebase.invert_axes((0..self.ndim()).collect());
+        let source_axes = (0..self.ndim()).collect();
         let filled_at = self
             .source
             .clone()
@@ -2072,8 +2098,18 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
-        self.source.transpose(permutation)
+        debug!("SparseTranspose::transpose {:?}", permutation);
+
+        let permutation =
+            permutation.unwrap_or_else(|| (0..self.ndim()).into_iter().rev().collect());
+        let source_permutation = self.rebase.invert_axes(permutation);
+        if source_permutation.iter().enumerate().all(|(i, x)| x == &i) {
+            Ok(self.source.accessor())
+        } else {
+            self.source
+                .transpose(Some(source_permutation))
+                .map(|access| access.accessor())
+        }
     }
 }
 
@@ -2176,6 +2212,7 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
+        debug!("SparseUnary::filled_at {:?}", axes);
         self.source.filled_at(txn, axes).await
     }
 
@@ -2193,6 +2230,8 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseUnary::transpose {:?}", permutation);
+
         let source = self.source.transpose(permutation)?;
         Ok(SparseUnary {
             source: source.accessor(),

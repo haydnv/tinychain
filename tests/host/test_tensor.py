@@ -533,6 +533,27 @@ class SparseTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def testTranspose(self):
+        shape = [2, 3]
+        elements = [((0, 1), 1), ((1, 1), 2)]
+
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
+        cxt.result = cxt.tensor.transpose()
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = np.zeros(shape)
+        for coord, value in elements:
+            print(f"expect {value} at {coord}")
+            expected[coord] = value
+        expected = expect_sparse(tc.I32, reversed(shape), np.transpose(expected))
+
+        print("actual", actual)
+        print("expected", expected)
+
+        self.assertEqual(actual, expected)
+
     def testSliceAndBroadcast(self):
         self.maxDiff = None
         data = [

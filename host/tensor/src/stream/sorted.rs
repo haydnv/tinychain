@@ -1,6 +1,6 @@
 use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::AsType;
 
 use tc_btree::Node;
@@ -71,8 +71,10 @@ where
     let buffered = coords
         .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
         .try_flatten()
+        .inspect_ok(|coord| trace!("read value at {:?} to sort", coord))
         .map_ok(move |coord| source.clone().read_value_at(txn.clone(), coord))
-        .try_buffered(num_cpus::get());
+        .try_buffered(num_cpus::get())
+        .inspect_ok(|(coord, value)| trace!("value at {:?} is {}", coord, value));
 
     Ok(buffered)
 }

@@ -1113,6 +1113,7 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        debug!("SparseTensor::transpose {:?}", permutation);
         let accessor = self.accessor.transpose(permutation)?;
         Ok(accessor.into())
     }
