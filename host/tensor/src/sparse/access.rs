@@ -1,6 +1,6 @@
 use std::fmt;
 
-use afarray::{Array, CoordBlocks, CoordMerge, Coords};
+use afarray::{Array, CoordBlocks, CoordIntersect, CoordMerge, Coords};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -1213,7 +1213,16 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         debug!("SparseLeftCombinator::filled_at {:?}", axes);
-        self.left.filled_at(txn, axes).await
+        debug_assert_eq!(self.left.shape(), self.right.shape());
+        self.left.shape().validate_axes(&axes)?;
+
+        let shape = axes.iter().map(|x| self.shape()[*x]).collect();
+        let (left, right) = try_join!(
+            self.left.filled_at(txn.clone(), axes.to_vec()),
+            self.right.filled_at(txn, axes)
+        )?;
+
+        Ok(Box::pin(CoordIntersect::new(left, right, shape, PER_BLOCK)))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
@@ -1232,6 +1241,7 @@ where
             "SparseLeftCombinator::slice right {} {}",
             self.right, bounds
         );
+
         let right = self.right.slice(bounds)?;
 
         assert_eq!(left.shape(), right.shape());
@@ -1781,7 +1791,10 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        debug!("SparseReduce::filled_at {:?}", axes);
+        debug!(
+            "SparseReduce::filled_at {:?} with source {}",
+            axes, self.source
+        );
 
         let source_axes = self.rebase.invert_axes(axes);
         self.source.filled_at(txn, source_axes).await
@@ -2083,7 +2096,7 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        debug!("SparseTranspose::filled");
+        debug!("SparseTranspose::filled with source {}", self.source);
 
         let rebase = self.rebase.clone();
         let source_axes = (0..self.ndim()).collect();
