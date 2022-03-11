@@ -125,6 +125,7 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         debug!("SparseTable::filled_at {:?}", axes);
+        debug_assert!(!axes.is_empty());
 
         self.shape().validate_axes(&axes)?;
 
@@ -150,6 +151,10 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    async fn is_empty(self, txn: T) -> TCResult<bool> {
+        self.table.is_empty(&txn).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -443,6 +448,11 @@ where
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
         self.table.count(*txn.id()).await
+    }
+
+    async fn is_empty(self, txn: T) -> TCResult<bool> {
+        let mut rows = self.table.rows(*txn.id()).await?;
+        rows.try_next().map_ok(|row| row.is_none()).await
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
