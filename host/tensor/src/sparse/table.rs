@@ -670,6 +670,7 @@ fn expect_coord(coord: Vec<Value>) -> TCResult<Coord> {
 fn expect_row(mut row: Vec<Value>) -> TCResult<(Coord, Number)> {
     if let Some(value) = row.pop() {
         let value = value.try_into()?;
+        debug_assert_ne!(value, 0.into());
         expect_coord(row).map(|coord| (coord, value))
     } else {
         Err(TCError::internal(ERR_CORRUPT))

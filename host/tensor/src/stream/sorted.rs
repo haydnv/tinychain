@@ -1,3 +1,5 @@
+use std::fmt;
+
 use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
@@ -58,13 +60,10 @@ where
     FS: File<Node>,
     D::File: AsType<FD> + AsType<FS>,
     D::FileClass: From<TensorType>,
-    A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + 'a,
+    A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {
-    debug!(
-        "sort values by coordinate for Tensor with shape {}",
-        source.shape()
-    );
+    debug!("sort values by coordinate for {}", source);
 
     let coords = sorted_coords::<FD, FS, D, T, C>(&txn, source.shape().clone(), coords).await?;
 

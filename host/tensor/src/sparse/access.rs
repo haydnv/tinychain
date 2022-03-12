@@ -1,6 +1,6 @@
 use std::fmt;
 
-use afarray::{Array, CoordBlocks, CoordIntersect, CoordMerge, Coords};
+use afarray::{Array, CoordBlocks, CoordIntersect, CoordMerge, CoordUnique, Coords};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -476,7 +476,7 @@ where
     }
 
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
-        debug!("SparseBroadcast::filled");
+        debug!("SparseBroadcast::filled with source {}", self.source);
 
         let source_axes: Vec<usize> = (0..self.source.ndim()).collect();
         let ndim = self.ndim();
@@ -497,6 +497,7 @@ where
             .try_flatten();
 
         let coords = CoordBlocks::new(coords, ndim, PER_BLOCK);
+
         let broadcast = sorted_values::<FD, FS, T, D, _, _>(txn, self, coords).await?;
         Ok(Box::pin(broadcast))
     }
@@ -882,7 +883,11 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let zero = self.dtype().zero();
         let filled_inner = self.filled_inner(txn).await?;
-        let filled = filled_inner.try_filter(move |(_, value)| future::ready(*value != zero));
+        let filled = filled_inner
+            .try_filter(move |(_, value)| future::ready(*value != zero))
+            .inspect_ok(|(coord, value)| {
+                trace!("SparseCombinator filled at {:?}: {}", coord, value)
+            });
 
         Ok(Box::pin(filled))
     }
@@ -1245,12 +1250,21 @@ where
     async fn filled<'a>(self, txn: T) -> TCResult<SparseStream<'a>> {
         let zero = self.dtype().zero();
         let filled_inner = self.filled_inner(txn).await?;
-        let filled = filled_inner.try_filter(move |(_, value)| future::ready(value != &zero));
+        let filled = filled_inner
+            .try_filter(move |(_, value)| future::ready(value != &zero))
+            .inspect_ok(|(coord, value)| {
+                trace!("SparseLeftCombinator filled at {:?}: {}", coord, value)
+            });
+
         Ok(Box::pin(filled))
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        debug!("SparseLeftCombinator::filled_at {:?}", axes);
+        debug!(
+            "SparseLeftCombinator::filled_at {:?} with sources {}, {}",
+            axes, self.left, self.right
+        );
+
         debug_assert_eq!(self.left.shape(), self.right.shape());
         self.left.shape().validate_axes(&axes)?;
 
@@ -1463,6 +1477,11 @@ where
             axes, expand
         );
 
+        let mut filled = self.source.clone().filled(txn.clone()).await?;
+        while let Some((coord, value)) = filled.try_next().await? {
+            trace!("source filled at {:?}: {}", coord, value)
+        }
+
         let source_axes = self.rebase.invert_axes(axes);
         if source_axes.is_empty() {
             return if self.source.is_empty(txn).await? {
@@ -1475,8 +1494,8 @@ where
         }
 
         debug!(
-            "SparseExpand::filled_at will expand axis {:?} of source axes {:?}",
-            expand, source_axes
+            "SparseExpand::filled_at will expand axis {:?} of source {} axes {:?}",
+            expand, self.source, source_axes
         );
 
         let source = self.source.filled_at(txn, source_axes).await?;
@@ -1831,10 +1850,16 @@ where
         debug!("SparseReduce::filled");
 
         let filled_at = self
+            .source
             .clone()
-            .filled_at(txn.clone(), (0..self.ndim()).collect())
+            .filled_at(
+                txn.clone(),
+                self.rebase
+                    .invert_axes((0..self.ndim()).into_iter().collect()),
+            )
             .await?;
 
+        let ndim = self.ndim();
         let zero = self.dtype().zero();
         let rebase = self.rebase;
         let reductor = self.reductor;
@@ -1844,6 +1869,8 @@ where
             .map_ok(|coords| stream::iter(coords.to_vec()).map(TCResult::Ok))
             .try_flatten()
             .map_ok(move |coord| {
+                debug_assert_eq!(coord.len(), ndim);
+
                 let source_bounds = rebase.invert_coord(&coord);
                 trace!("reduce {:?} (bounds {})", coord, source_bounds);
 
@@ -1856,22 +1883,26 @@ where
                 })
             })
             .try_buffered(num_cpus::get())
-            .try_filter(move |(_coord, value)| future::ready(value != &zero));
+            .try_filter(move |(_coord, value)| future::ready(value != &zero))
+            .inspect_ok(|(coord, value)| trace!("SparseReduce filled at {:?}: {}", coord, value));
 
         Ok(Box::pin(filled))
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        // TODO: handle the edge case where a filled slice sums to zero
+        let ndim = self.ndim();
+        let shape: Vec<u64> = axes.iter().map(|x| self.shape()[*x]).collect();
 
-        let source_axes = self.rebase.invert_axes(axes);
+        let filled = self.filled(txn.clone()).await?;
+        let filled = filled.map_ok(|(coord, _value)| coord);
+        let filled =
+            CoordBlocks::new(filled, ndim, PER_BLOCK).map_ok(move |coords| coords.get(&axes));
 
-        debug!(
-            "SparseReduce::filled_at with source {} (source axes are {:?}",
-            self.source, source_axes,
-        );
+        let sorted = sorted_coords::<FD, FS, D, T, _>(&txn, shape.to_vec().into(), filled).await?;
 
-        self.source.filled_at(txn, source_axes).await
+        let unique = CoordUnique::new(sorted, shape, PER_BLOCK);
+
+        Ok(Box::pin(unique))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {
