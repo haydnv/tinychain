@@ -156,19 +156,22 @@ class Tuple(State, Functional):
         if typing.get_args(spec):
             spec = typing.get_args(spec)
 
-        class _Tuple(cls):
-            __spec__ = spec
+        if len(spec) == 2 and spec[1] is Ellipsis:
+            class _Tuple(cls):
+                __spec__ = spec
 
-            def __len__(self):
-                if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
-                    raise RuntimeError(f"the length of {self} is not known at compile-time")
-                else:
+            return _Tuple
+        else:
+            class _Tuple(cls):
+                __spec__ = spec
+
+                def __len__(self):
                     return len(self.__spec__)
 
-            def __iter__(self):
-                return (self[i] for i in range(len(self)))
+                def __iter__(self):
+                    return (self[i] for i in range(len(self)))
 
-        return _Tuple
+            return _Tuple
 
     @classmethod
     def concatenate(cls, l, r):
