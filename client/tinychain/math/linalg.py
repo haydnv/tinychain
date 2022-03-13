@@ -57,21 +57,6 @@ def householder(cxt, x: Tensor) -> Tuple:
     return v, tau
 
 
-def matmul(l: Tensor, r: Tensor):
-    """
-    Multiply two matrices, or two batches of matrices.
-
-    Args:
-        `l`: a `Tensor` with shape `[..., i, j]`
-        `r`: a `Tensor` with shape `[..., j, k]`
-
-    Returns:
-        A `Tensor` of shape `[..., i, k]`
-    """
-
-    return einsum("...ij,...jk->ik", [l, r])
-
-
 def norm(tensor: Tensor) -> Tensor:
     """Compute the 2D Frobenius (aka Euclidean) norm of the matrices in the given `tensor`.
 
@@ -330,10 +315,10 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
     A_orig = A.copy()
     cxt.A1, n, m = Tuple(If(
         UInt(cxt.n_orig) > UInt(cxt.m_orig),
-        [matmul(A.transpose(), A), Tensor(A).shape[1], Tensor(A).shape[1]],
+        [A.transpose() @ A, Tensor(A).shape[1], Tensor(A).shape[1]],
         If(
             cxt.n_orig < cxt.m_orig,
-            [matmul(A, Tensor(A).transpose()), A.shape[0], A.shape[0]],
+            [A @ Tensor(A).transpose(), A.shape[0], A.shape[0]],
             [A, cxt.n_orig, cxt.m_orig]
         ),
     )).unpack(3)
@@ -343,7 +328,7 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
     @closure(cxt.qr, cxt.A1)
     @post
     def step(i: UInt, Q_prev: Tensor, Q: Tensor):
-        Z = matmul(cxt.A1, Q)
+        Z = Tensor(cxt.A1) @ Q
         _Q, _R = cxt.qr(a=Z)
         _err = _Q.sub(Q_prev).pow(2).sum()
         _Q_prev = _Q.copy()
