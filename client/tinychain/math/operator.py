@@ -41,6 +41,28 @@ class Add(Operator):
         return Add(subject, arg)
 
 
+class Exp(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Numeric.exp(self.subject)
+
+    def backward(self):
+        return self
+
+
+class MatMul(Operator):
+    def forward(self):
+        from ..collection.tensor import einsum
+        return einsum("...ij,...jk->ik", [self.subject, self.args])
+
+    def backward(self):
+        subject = _derivative(self.subject)
+        arg = _derivative(self.arg)
+        return Add(MatMul(subject, self.arg), MatMul(self.subject, arg))
+
+
 class Mul(Operator):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
@@ -49,6 +71,34 @@ class Mul(Operator):
         subject = _derivative(self.subject)
         arg = _derivative(self.args)
         return Add(Mul(subject, self.args), Mul(self.subject, arg))
+
+
+class Sub(Operator):
+    def forward(self):
+        return Numeric.sub(self.subject, self.args)
+
+    def backward(self):
+        subject = _derivative(self.subject)
+        arg = _derivative(self.arg)
+        return Sub(subject, arg)
+
+
+class Div(Operator):
+    def forward(self):
+        return Numeric.div(self.subject, self.args)
+
+    def backward(self):
+        subject = _derivative(self.subject)
+        arg = _derivative(self.arg)
+        return Div(Sub(Mul(subject, self.arg), Mul(self.subject, arg)), Pow(self.arg, 2))
+
+
+class Pow(Operator):
+    def forward(self):
+        return Numeric.pow(self.subject, self.args)
+
+    def backward(self):
+        return Mul(self.arg, Pow(self.subject, Sub(self.arg, 1)))
 
 
 def _derivative(state):

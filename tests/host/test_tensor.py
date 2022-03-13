@@ -76,7 +76,7 @@ class DenseTests(unittest.TestCase):
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [{tc.uri(tc.F64): []}, {tc.uri(tc.F64): []}, {tc.uri(tc.F32): []}])
+        self.assertEqual(actual, [{tc.uri(tc.Class): {tc.uri(tc.F64): {}}}] * 3)
 
     def testDiv(self):
         shape = [3]
