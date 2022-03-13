@@ -238,10 +238,10 @@ class Tuple(State, Functional):
 
             if hasattr(self.__form__, "__getitem__"):
                 item = self.__form__[i]
-                if uri(self) != uri(self.__class__) and hasattr(item, "__ref__"):
-                    item = get_ref(item, uri(self).append(i))
-
-                return item
+                if uri(self) == uri(self.__class__):
+                    return item
+                else:
+                    return get_ref(item, uri(self).append(i))
 
         return self._get("", i, rtype)
 
