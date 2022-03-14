@@ -26,7 +26,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
                 tc.app.App.__init__(self)
 
-            @tc.put_method
+            @tc.put
             def overwrite(self, txn):
                 txn.new = tc.tensor.Dense.constant([3], 2)
                 return [
@@ -34,7 +34,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
                     self.sparse[0].write(txn.new)
                 ]
 
-            @tc.get_method
+            @tc.get
             def eq(self):
                 return self.sparse == self.dense
 

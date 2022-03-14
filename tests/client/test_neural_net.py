@@ -99,7 +99,7 @@ class DNNTests(ClientTest):
             return output.sub(labels).pow(2).mean()
 
         @tc.closure(cxt.labels)
-        @tc.post_op
+        @tc.post
         def train_while(i: tc.UInt, output: tc.tensor.Dense):
             return (i <= MAX_ITERATIONS).logical_and(((output > 0.5) != cxt.labels).any())
 
@@ -163,7 +163,7 @@ class CNNTests(ClientTest):
             return output.sub(labels).pow(2).mean()
 
         @tc.closure(cxt.labels)
-        @tc.post_op
+        @tc.post
         def train_while(i: tc.UInt, loss):
             return (i <= MAX_ITERATIONS).logical_and(tc.F32(loss) > 0.5)
 

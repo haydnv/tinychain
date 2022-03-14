@@ -2,7 +2,7 @@ from ..collection import Column
 from ..collection.table import Table
 from ..collection.tensor import Sparse
 from ..error import BadRequest
-from ..decorators import closure, get_op, put_op
+from ..decorators import closure, get, put
 from ..generic import Map, Tuple
 from ..scalar.number import Bool, U32
 from ..scalar.ref import After, If, Put
@@ -143,10 +143,10 @@ def graph_table(graph, schema, table_name):
     def maybe_update_row(edge, adjacent, row, cond, new_id):
         to_table = graph[edge.to_table]
 
-        args = closure(new_id)(get_op(lambda row: [new_id, Tuple(row)[0]]))
+        args = closure(new_id)(get(lambda row: [new_id, Tuple(row)[0]]))
 
         # assumes row[0] is always the key
-        add = put_op(lambda new_id, key: Put(uri(adjacent), [new_id, key], True))
+        add = put(lambda new_id, key: Put(uri(adjacent), [new_id, key], True))
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
 
         return After(If(cond, delete_row(edge, adjacent, row)), add)
@@ -174,7 +174,7 @@ def graph_table(graph, schema, table_name):
             """Given a vector of `node_ids`, return a :class:`Stream` of :class:`Table` rows matching those IDs."""
 
             @closure(self)
-            @get_op
+            @get
             def read_node(row: Tuple):
                 return self[row[0]]
 

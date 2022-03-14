@@ -22,7 +22,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
                 self.table = chain_type(tc.table.Table(SCHEMA))
                 tc.app.App.__init__(self)
 
-            @tc.delete_method
+            @tc.delete
             def truncate(self):
                 return self.table.delete()
 

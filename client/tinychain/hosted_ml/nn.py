@@ -2,7 +2,7 @@ import typing
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
-from ..decorators import post_method
+from ..decorators import post
 from ..generic import Tuple
 from ..ml import Activation
 from ..scalar.ref import After
@@ -60,7 +60,7 @@ class ConvLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @post_method
+    @post
     def forward(self, cxt, inputs: Tensor) -> Tensor:
         b_i = inputs.shape[0]
 
@@ -129,7 +129,7 @@ class DNNLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @post_method
+    @post
     def forward(self, inputs: Tensor) -> Tensor:
         x = einsum("ki,ij->kj", [inputs, self.weights]) + self.bias
         if self._activation is None:
@@ -152,7 +152,7 @@ class Sequential(NeuralNet, Dynamic):
         self.layers = layers
         Dynamic.__init__(self)
 
-    @post_method
+    @post
     def forward(self, inputs: typing.Tuple[Tensor]) -> Tensor:
         if uri(self.layers[0]) != "$self/layers/0":
             raise RuntimeError(f"{self.__class__.__name__}.forward must be called with a header (URI {uri(self.layers[0])} is not valid)")

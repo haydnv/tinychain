@@ -3,7 +3,7 @@ import typing
 from abc import abstractmethod
 
 from ..collection.tensor import Dense
-from ..decorators import closure, post_op
+from ..decorators import closure, post
 from ..ml import DiffedParameter, Parameter
 from ..generic import Map
 from ..scalar.number import F32, UInt
@@ -63,18 +63,18 @@ class Adam(Optimizer):
         update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
         a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
         update_model = [
-                p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
-                for p in param_list
-                ]
+            p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
+            for p in param_list
+        ]
+
         return After(
             when=[update_m, update_v],
             then=update_model)
 
 
 def train(model, optimizer, inputs, labels, cost, train_while):
-
     @closure(model, optimizer, labels, inputs)
-    @post_op
+    @post
     def step(cxt, i: UInt):
         cxt.output = model.forward(inputs).copy()
         cxt.loss = cost(cxt.output, labels)

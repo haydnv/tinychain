@@ -2,17 +2,16 @@
 
 import typing
 
-from ..decorators import post_op
+from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Order
 from ..math.interface import Numeric, Trigonometric
 from ..math.operator import Add, Mul
-from ..reflect import is_ref
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import uri, URI
+from ..util import uri
 
 from .base import Collection
 
@@ -390,13 +389,13 @@ class Dense(Tensor):
         minval = std * -2 if minval is None else minval
         maxval = std * 2 if maxval is None else maxval
 
-        @post_op
+        @post
         def cond(cxt, tensor: Dense) -> Bool:
             cxt.too_small = (tensor < minval).any()
             cxt.too_big = (tensor > maxval).any()
             return cxt.too_small.logical_or(cxt.too_big)
 
-        @post_op
+        @post
         def step(cxt, tensor: Dense) -> Map:
             cxt.new_dist = Dense.random_normal(shape, mean, std)
             cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)

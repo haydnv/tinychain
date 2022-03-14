@@ -1,4 +1,4 @@
-from ..decorators import closure, delete_op, get_op
+from ..decorators import closure, delete, get
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.bound import Range
@@ -50,7 +50,7 @@ class Table(Collection):
         """
 
         @closure(self)
-        @get_op
+        @get
         def group(cxt, key: Tuple) -> Tuple:
             cxt.where = Tuple(columns).zip(key).cast(Map)
             cxt.slice = self.where(cxt.where)
@@ -83,7 +83,7 @@ class Table(Collection):
         If no where clause is specified, all contents of this `Table` will be deleted.
         """
 
-        delete_row = delete_op(lambda cxt, key: self.delete_row(key))
+        delete_row = delete(lambda cxt, key: self.delete_row(key))
         if uri(self).id():
             delete_row = closure(self)(delete_row)
 
@@ -160,7 +160,7 @@ class Table(Collection):
     def update(self, values, where={}):
         """Update the specified rows of this table with the given `values`."""
 
-        update_row = closure(self)(get_op(lambda cxt, key: self.update_row(key, values)))
+        update_row = closure(self)(get(lambda cxt, key: self.update_row(key, values)))
         return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
 
     def update_row(self, key, values):

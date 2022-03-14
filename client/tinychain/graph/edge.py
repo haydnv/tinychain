@@ -1,5 +1,5 @@
 from ..collection.tensor import einsum, Sparse
-from ..decorators import post_op
+from ..decorators import post
 from ..error import BadRequest
 from ..generic import Map
 from ..scalar.number import I32, U64
@@ -46,11 +46,11 @@ class Edge(Sparse):
         Returns a new vector filled with the IDs of the matched nodes.
         """
 
-        @post_op
+        @post
         def cond(i: U64):
             return i < degrees
 
-        @post_op
+        @post
         def traverse(edge: Sparse, i: U64, neighbors: Sparse):
             neighbors += Sparse.sum(edge * neighbors, 1)
             return {"edge": edge, "i": i + 1, "neighbors": neighbors.copy()}

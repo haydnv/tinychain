@@ -9,7 +9,7 @@ SIZE = 10
 
 
 # in this case, we know the `size` of the Tensor at compile time,
-# so it's safe to use a regular Python for loop, and we don't need an Op decorator like `@tc.post_op`
+# so it's safe to use a regular Python for loop, and we don't need an Op decorator like `@tc.post`
 def example1(tensor, size):
     # Tensor.write is a PUT Op that we're using for its side-effects
     writes = [tensor[i].write(tensor[i] * 10) for i in range(size) if i % 2 == 0]
@@ -21,12 +21,12 @@ def example1(tensor, size):
 # so we have to call `Stream.range` at runtime to achieve the same result
 #
 # since this function `example2` is only called at compile time though,
-# it still doesn't need a decorator like `@tc.post_op`
+# it still doesn't need a decorator like `@tc.post`
 def example2(tensor):
     # the `@tc.closure` decorator captures referenced states from the outer context
     # in this case "tensor"
     @tc.closure(tensor)
-    @tc.get_op  # since the `step` Op will be called at runtime, it needs a decorator
+    @tc.get  # since the `step` Op will be called at runtime, it needs a decorator
     def step(i: tc.U64):
         return tensor[i].write(tensor[i] * 10)
 
@@ -34,16 +34,16 @@ def example2(tensor):
     return tc.Stream.range((0, tensor.size, 2)).for_each(step)
 
 
-# `example3` needs its own Op context at runtime, so we define it as a POST Op using the `@tc.post_op` decorator
-@tc.post_op
+# `example3` needs its own Op context at runtime, so we define it as a POST Op using the `@tc.post` decorator
+@tc.post
 def example3(x: tc.tensor.Dense):  # without this type annotation, TinyChain won't know what type of `x` to expect
     @tc.closure(x)
-    @tc.post_op
+    @tc.post
     def cond(i: tc.UInt):
         return i < x.size
 
     @tc.closure(x)
-    @tc.post_op
+    @tc.post
     def step(i: tc.UInt):
         write = x[i].write(x[i] * 10)
         return tc.After(write, tc.Map(i=i + 2))  # return the new state of the loop
@@ -126,7 +126,7 @@ class TensorTests(ClientTest):
 
 # Example of a matrix transpose implemented using a nested loop.
 # This is not intended to be performant. Use `Tensor.transpose` to transpose any `Tensor`.
-@tc.post_op
+@tc.post
 def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
     m, n = a.shape.unpack(2)
 
@@ -137,11 +137,11 @@ def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
     # transposed = tc.tensor.Dense.zeros([n, m])
 
     @tc.closure(a, cxt.transposed)
-    @tc.get_op
+    @tc.get
     def row_step(x: tc.U64):
 
         @tc.closure(a, x, cxt.transposed)
-        @tc.get_op
+        @tc.get
         def step(y: tc.U64):
             return cxt.transposed[y, x].write(a[x, y])
 

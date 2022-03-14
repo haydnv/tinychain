@@ -13,7 +13,7 @@ import tinychain.scalar.bound as bound
 
 from tinychain.collection import Column
 from tinychain.collection import btree, table, tensor
-from tinychain.decorators import closure, delete_method, get_method, post_method, put_method, delete_op, get_op, post_op, put_op
+from tinychain.decorators import closure, delete, get, post, put
 from tinychain.math import linalg
 from tinychain.reflect import Meta
 from tinychain.generic import Map, Tuple

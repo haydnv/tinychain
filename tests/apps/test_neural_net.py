@@ -24,49 +24,49 @@ class TestLibrary(tc.app.Library):
             "ML": tc.hosted_ml.service.ML
         }
 
-    @tc.get_method
+    @tc.get
     def create_dnn_layer(self) -> tc.hosted_ml.nn.Layer:
         return tc.hosted_ml.nn.DNNLayer.create(2, 2, tc.ml.Sigmoid())
 
-    @tc.get_method
+    @tc.get
     def load_dnn_layer(self, cxt) -> tc.hosted_ml.nn.Layer:
         cxt.weights = tc.tensor.Dense.create(DNN_SHAPE[0])
         cxt.bias = tc.tensor.Dense.create(DNN_SHAPE[0][1:]) + 1
         return tc.hosted_ml.nn.DNNLayer(cxt.weights, cxt.bias)
 
-    @tc.post_method
+    @tc.post
     def check_dnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.layer = self.create_dnn_layer()
         return cxt.layer.forward(inputs=inputs)
 
-    @tc.post_method
+    @tc.post
     def check_conv_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape, output_shape = CNN_SHAPE[0]
         cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape)
         return cxt.layer.forward(inputs=inputs)
 
-    @tc.post_method
+    @tc.post
     def check_conv_layer_zero_padded(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape = [20, 1, 2]
         output_shape = [4, 1, 1]
         cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, padding=0)
         return cxt.layer.forward(inputs=inputs)
 
-    @tc.post_method
+    @tc.post
     def check_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_cnn()
         return cxt.nn.forward(inputs=inputs)
 
-    @tc.get_method
+    @tc.get
     def create_cnn(self) -> tc.hosted_ml.nn.NeuralNet:
         layers = tc.Tuple([tc.hosted_ml.nn.ConvLayer.create(i, o) for i, o in CNN_SHAPE])
         return tc.hosted_ml.nn.Sequential(layers)
 
-    @tc.get_method
+    @tc.get
     def create_dnn(self) -> tc.hosted_ml.nn.NeuralNet:
         return tc.hosted_ml.nn.DNN.create([(i, o, tc.ml.Sigmoid()) for i, o in DNN_SHAPE])
 
-    @tc.post_method
+    @tc.post
     def check_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_dnn()
         return cxt.nn.forward(inputs=inputs)

@@ -1,7 +1,7 @@
 import typing
 
 from ..collection.tensor import einsum, Dense, Sparse, Tensor
-from ..decorators import closure, get_op, post_op
+from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.number import Number, Bool, F64, UInt, F32, Int
@@ -41,7 +41,7 @@ def set_diagonal(matrix, diag):
 
 
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
-@post_op
+@post
 def householder(cxt, x: Tensor) -> Tuple:
     """Compute the Householder vector of the given column vector `a`."""
 
@@ -89,7 +89,7 @@ def norm(tensor: Tensor) -> Tensor:
 
 
 # TODO: vectorize to support a `Tensor` containing a batch of matrices
-@post_op
+@post
 def qr(cxt, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
     """Compute the QR decomposition of the given matrix `a`"""
 
@@ -107,10 +107,10 @@ def qr(cxt, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
         )).copy()
 
     @closure(a)
-    @post_op
+    @post
     def q_step(cxt, q: Tensor, u: Tensor, i: UInt) -> Map:
         @closure(a)
-        @post_op
+        @post
         def u_step(q: Tensor, u: Tensor, i: UInt, j: UInt) -> Map:
             return After(u[:, i].write(u[:, i].copy() - q[:, j].mul(a[:, i].mul(q[:, j]).sum())), Map(q=q, u=u, i=i))
 
@@ -173,7 +173,7 @@ class PLUFactorization(Map):
         return UInt(self['num_permutations'])
 
 
-@post_op
+@post
 def plu(txn, x: Tensor) -> PLUFactorization:
     """Compute the PLU factorization of the given matrix `x`.
 
@@ -187,10 +187,10 @@ def plu(txn, x: Tensor) -> PLUFactorization:
     """
 
     # TODO: use a TypedDict as the return annotation
-    @post_op
+    @post
     def permute_rows(x: Tensor, p: Tensor, start_from: UInt) -> Map:
         @closure(start_from)
-        @post_op
+        @post
         def step(p: Tensor, x: Tensor, k: UInt) -> Map:
             p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
             x_k, x_kp1 = x[start_from].copy(), x[k + 1].copy()
@@ -205,7 +205,7 @@ def plu(txn, x: Tensor) -> PLUFactorization:
                 {'p': p, 'x': x, 'k': k + 1}
             )
 
-        @post_op
+        @post
         def cond(cxt, x: Tensor, k: UInt):
             cxt.valid_k = k < (x.shape[0] - 1)
             cxt.valid_x_k_k = x[k, k].abs() < 1e-3
@@ -220,7 +220,7 @@ def plu(txn, x: Tensor) -> PLUFactorization:
     txn.permute_rows = permute_rows
 
     @closure(txn.permute_rows)
-    @post_op
+    @post
     def step(p: Tensor, l: Tensor, u: Tensor, i: UInt, num_permutations: UInt) -> Map:
         pu = txn.permute_rows(p=p, x=u, start_from=i)
         u = Tensor(pu['x'])
@@ -234,7 +234,7 @@ def plu(txn, x: Tensor) -> PLUFactorization:
             ],
             then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n))
 
-    @post_op
+    @post
     def cond(u: Tensor, i: UInt):
         return i < UInt(u.shape[0]) - 1
 
@@ -252,7 +252,7 @@ def plu(txn, x: Tensor) -> PLUFactorization:
         BadRequest("PLU decomposition requires a square matrix, not {{x}}", x=x))
 
 
-@post_op
+@post
 def det(cxt, x: Tensor) -> F32:
     """Computes the determinant of square `matrix`.
 
@@ -274,7 +274,7 @@ def det(cxt, x: Tensor) -> F32:
         BadRequest("determinant requires a square matrix, not {{x}}", x=x))
 
 
-@post_op
+@post
 def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     """Compute the sign and log of the absolute value of the determinant of one or more square matrices.
 
@@ -313,7 +313,7 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     return Tensor.reshape(sign, cxt.batch_shape), Tensor.reshape(determinants, cxt.batch_shape)
 
 
-@post_op
+@post
 def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
     """
     Compute the singular value decomposition of the given matrix `A`
@@ -341,7 +341,7 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
     Q, R = cxt.qr(a=Dense.random_uniform([n, k]).abs())
 
     @closure(cxt.qr, cxt.A1)
-    @post_op
+    @post
     def step(i: UInt, Q_prev: Tensor, Q: Tensor):
         Z = matmul(cxt.A1, Q)
         _Q, _R = cxt.qr(a=Z)
@@ -352,7 +352,7 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
     cxt.step = step
 
     @closure(epsilon, max_iter)
-    @post_op
+    @post
     def cond(i: UInt, err: F32):
         return (F32(err).abs() > epsilon).logical_and(i < max_iter)
 
@@ -391,7 +391,7 @@ def svd_matrix(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) 
 
 
 # TODO: update to support `Tensor` (not just `Dense`) after `Sparse.concatenate` is implemented
-@post_op
+@post
 def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
     """
     Given a `Tensor` of `matrices`, return the singular value decomposition `(s, u, v)` of each matrix.
@@ -416,17 +416,17 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
     txn.indices = Tuple.range(txn.num_matrices)
     txn.UsV_tuples = txn.indices.map(matrix_svd)
 
-    def get(j):
+    def getter(j):
         @closure(txn.UsV_tuples)
         @get_op
-        def get(i: UInt) -> Dense:
+        def getter(i: UInt) -> Dense:
             return Tensor.expand_dims(Tuple(txn.UsV_tuples[i])[j], 0)
 
-        return get
+        return getter
 
-    txn.U = Dense.concatenate(txn.indices.map(get(0)), axis=0)
-    txn.s = Dense.concatenate(txn.indices.map(get(1)), axis=0)
-    txn.V = Dense.concatenate(txn.indices.map(get(2)), axis=0)
+    txn.U = Dense.concatenate(txn.indices.map(getter(0)), axis=0)
+    txn.s = Dense.concatenate(txn.indices.map(getter(1)), axis=0)
+    txn.V = Dense.concatenate(txn.indices.map(getter(2)), axis=0)
 
     return (
         txn.U.reshape(Tuple.concatenate(txn.batch_shape, txn.U.shape[1:])),
@@ -435,7 +435,7 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
     )
 
 
-@post_op
+@post
 def svd(cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
     """
     Computes `svd_matrix` for each matrix in `A`.

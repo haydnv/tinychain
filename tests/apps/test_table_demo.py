@@ -16,7 +16,7 @@ class Database(tc.app.App):
 
         tc.app.App.__init__(self)
 
-    @tc.get_method
+    @tc.get
     def has_movie(self, name: tc.String):
         return self.movies.contains([name])
 
@@ -35,17 +35,17 @@ class Web(tc.app.App):
         self.cache = tc.chain.Sync(tc.btree.BTree(schema))
         tc.app.App.__init__(self)
 
-    @tc.get_method
+    @tc.get
     def views(self, name: tc.String) -> tc.UInt:
         return self.cache[name].first()["views"]
 
-    @tc.post_method
+    @tc.post
     def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
         return (
             self.db.movies.insert([name], [year, description]),
             self.cache.insert([name, 0]))
 
-    @tc.put_method
+    @tc.put
     def add_view(self, txn, key: tc.String):
         txn.views = self.views(key)
         return tc.After(

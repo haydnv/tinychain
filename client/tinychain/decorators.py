@@ -1,3 +1,5 @@
+import inspect
+
 from .reflect.meta import MethodStub
 from .reflect import method, op
 from .scalar.ref import With
@@ -15,10 +17,10 @@ def closure(*deps):
         .. highlight:: python
         .. code-block:: python
 
-            @tc.post_op
+            @tc.post
             def outer(x: Number, y: Number):
                 @tc.closure(x, y)
-                @tc.get_op
+                @tc.get
                 def inner(z: tc.Number):
                     return x * y * z
 
@@ -35,49 +37,48 @@ def hidden(form):
     return form
 
 
-def get_method(form):
-    """Annotation for a callable method specifying that it is a GET method."""
+def get(form):
+    """Annotation for a callable function or method specifying that it is a GET :class:`Op`."""
 
-    return MethodStub(method.Get, form)
-
-
-def put_method(form):
-    """Annotation for a callable method specifying that it is a PUT method."""
-
-    return MethodStub(method.Put, form)
+    if _is_method(form):
+        return MethodStub(method.Get, form)
+    else:
+        return op.Get(form)
 
 
-def post_method(form):
-    """Annotation for a callable method specifying that it is a POST method."""
+def put(form):
+    """Annotation for a callable function or method specifying that it is a PUT :class:`Op`."""
 
-    return MethodStub(method.Post, form)
-
-
-def delete_method(form):
-    """Annotation for a callable method specifying that it is a DELETE method."""
-
-    return MethodStub(method.Delete, form)
+    if _is_method(form):
+        return MethodStub(method.Put, form)
+    else:
+        return op.Put(form)
 
 
-def get_op(form):
-    """Annotation for a callable function specifying that it is a GET :class:`Op`."""
+def post(form):
+    """Annotation for a callable function or method specifying that it is a POST :class:`Op`."""
 
-    return op.Get(form)
-
-
-def put_op(form):
-    """Annotation for a callable function specifying that it is a PUT :class:`Op`."""
-
-    return op.Put(form)
+    if _is_method(form):
+        return MethodStub(method.Post, form)
+    else:
+        return op.Post(form)
 
 
-def post_op(form):
-    """Annotation for a callable function specifying that it is a POST :class:`Op`."""
+def delete(form):
+    """Annotation for a callable function or method specifying that it is a DELETE :class:`Op`."""
 
-    return op.Post(form)
+    if _is_method(form):
+        return MethodStub(method.Delete, form)
+    else:
+        return op.Delete(form)
 
 
-def delete_op(form):
-    """Annotation for a callable function specifying that it is a DELETE :class:`Op`."""
+def _is_method(form):
+    if inspect.ismethod(form):
+        return True
 
-    return op.Delete(form)
+    param_names = list(inspect.signature(form).parameters.keys())
+    if param_names and param_names[0] == "self":
+        return True
+
+    return False
