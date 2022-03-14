@@ -73,6 +73,15 @@ def delete(form):
         return op.Delete(form)
 
 
+def operator(form):
+    """Annotation for a differentiable operator"""
+
+    if _is_method(form):
+        return MethodStub(method.Operator, form)
+    else:
+        return op.Operator(form)
+
+
 def _is_method(form):
     if inspect.ismethod(form):
         return True

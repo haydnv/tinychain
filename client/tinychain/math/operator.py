@@ -4,7 +4,7 @@ from ..util import deanonymize, form_of, to_json
 from .interface import Numeric
 
 
-class OperatorRef(ref.Op):
+class Operator(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
     def __json__(self):
@@ -31,7 +31,7 @@ class OperatorRef(ref.Op):
         raise NotImplementedError(f"{self.__class__}.backward")
 
 
-class Add(OperatorRef):
+class Add(Operator):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -41,9 +41,9 @@ class Add(OperatorRef):
         return Add(subject, arg)
 
 
-class Exp(OperatorRef):
+class Exp(Operator):
     def __init__(self, subject):
-        OperatorRef.__init__(self, subject, None)
+        Operator.__init__(self, subject, None)
 
     def forward(self):
         return Numeric.exp(self.subject)
@@ -52,7 +52,7 @@ class Exp(OperatorRef):
         return self
 
 
-class MatMul(OperatorRef):
+class MatMul(Operator):
     def forward(self):
         from ..collection.tensor import einsum
         return einsum("...ij,...jk->ik", [self.subject, self.args])
@@ -63,7 +63,7 @@ class MatMul(OperatorRef):
         return Add(MatMul(subject, self.arg), MatMul(self.subject, arg))
 
 
-class Mul(OperatorRef):
+class Mul(Operator):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -73,7 +73,7 @@ class Mul(OperatorRef):
         return Add(Mul(subject, self.args), Mul(self.subject, arg))
 
 
-class Sub(OperatorRef):
+class Sub(Operator):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -83,7 +83,7 @@ class Sub(OperatorRef):
         return Sub(subject, arg)
 
 
-class Div(OperatorRef):
+class Div(Operator):
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
@@ -93,7 +93,7 @@ class Div(OperatorRef):
         return Div(Sub(Mul(subject, self.arg), Mul(self.subject, arg)), Pow(self.arg, 2))
 
 
-class Pow(OperatorRef):
+class Pow(Operator):
     def forward(self):
         return Numeric.pow(self.subject, self.args)
 
@@ -102,7 +102,7 @@ class Pow(OperatorRef):
 
 
 def _derivative(state):
-    if isinstance(form_of(state), OperatorRef):
+    if isinstance(form_of(state), Operator):
         return form_of(state).derivative()
     else:
         from ..collection.tensor import Sparse

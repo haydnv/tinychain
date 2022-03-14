@@ -1,2 +1,2 @@
 from .base import product, sum
-from .operator import OperatorRef
+from .operator import Operator

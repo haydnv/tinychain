@@ -1,11 +1,11 @@
-from ..math import OperatorRef
+from ..math import Operator
 
 
-class Activation(OperatorRef):
+class Activation(Operator):
     """A differentiable activation function for a :class:`Layer`."""
 
     def __init__(self, subject):
-        OperatorRef.__init__(self, subject, None)
+        Operator.__init__(self, subject, None)
 
     @staticmethod
     def optimal_std(input_size, output_size):
@@ -22,9 +22,8 @@ class Sigmoid(Activation):
         return 1.0 * (2 / (input_size + output_size))**0.5
 
     def forward(self):
-        # return 1 / (1 + (-self.subject).exp())
-        return self.subject
+        return 1 / (1 + (-self.subject).exp())
 
-    # def backward(self):
-    #     sig = self.forward()
-    #     return sig * (1 - sig)
+    def backward(self):
+        sig = self.forward()
+        return sig * (1 - sig)

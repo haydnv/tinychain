@@ -208,6 +208,20 @@ class Delete(Method):
         return Get.__form__(self)
 
 
+class Operator(Post):
+    def __call__(self, input):
+        return self.forward(input)
+
+    def __repr__(self):
+        return f"differentiable operator method with form {self.form}"
+
+    def forward(self, input):
+        raise NotImplementedError(f"{self.__class__}.forward")
+
+    def backward(self, input):
+        raise NotImplementedError(f"{self.__class__}.backward")
+
+
 def _check_context_param(parameter):
     _name, param = parameter
     if param.annotation == EMPTY or param.annotation == Context:

@@ -37,25 +37,25 @@ class TestLibrary(tc.app.Library):
     @tc.post
     def check_dnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.layer = self.create_dnn_layer()
-        return cxt.layer.eval(inputs=inputs)
+        return cxt.layer.eval(inputs)
 
     @tc.post
     def check_conv_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape, output_shape = CNN_SHAPE[0]
         cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape)
-        return cxt.layer.eval(inputs=inputs)
+        return cxt.layer.eval(inputs)
 
     @tc.post
     def check_conv_layer_zero_padded(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         input_shape = [20, 1, 2]
         output_shape = [4, 1, 1]
         cxt.layer = tc.hosted_ml.nn.ConvLayer.create(input_shape, output_shape, padding=0)
-        return cxt.layer.eval(inputs=inputs)
+        return cxt.layer.eval(inputs)
 
     @tc.post
     def check_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_cnn()
-        return cxt.nn.eval(inputs=inputs)
+        return cxt.nn.eval(inputs)
 
     @tc.get
     def create_cnn(self) -> tc.hosted_ml.nn.NeuralNet:
@@ -69,7 +69,7 @@ class TestLibrary(tc.app.Library):
     @tc.post
     def check_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.tensor.Tensor:
         cxt.nn = self.create_dnn()
-        return cxt.nn.eval(inputs=inputs)
+        return cxt.nn.eval(inputs)
 
 
 class NeuralNetTests(unittest.TestCase):

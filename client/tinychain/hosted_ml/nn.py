@@ -60,11 +60,7 @@ class ConvLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-<<<<<<< HEAD
     @post
-=======
-    @post_method
->>>>>>> 88356c158944d7dc1bbae3a3c76a88c3c8352057
     def eval(self, cxt, inputs: Tensor) -> Tensor:
         b_i = inputs.shape[0]
 
@@ -133,11 +129,7 @@ class DNNLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-<<<<<<< HEAD
     @post
-=======
-    @post_method
->>>>>>> 88356c158944d7dc1bbae3a3c76a88c3c8352057
     def eval(self, inputs: Tensor) -> Tensor:
         x = einsum("ki,ij->kj", [inputs, self.weights]) + self.bias
         if self._activation is None:
