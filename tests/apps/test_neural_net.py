@@ -18,9 +18,16 @@ class TestLibrary(tc.app.Library):
         }
 
     @tc.post
-    def test_dnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
+    def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
         layer = tc.hosted_ml.nn.DNNLayer.create(2, 1)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
+        return cxt.optimizer.train(inputs, labels).sum()
+
+    @tc.post
+    def test_dnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
+        layers = [tc.hosted_ml.nn.DNNLayer.create(2, 2), tc.hosted_ml.nn.DNNLayer.create(2, 1)]
+        dnn = tc.hosted_ml.nn.Sequential(layers)
+        cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(dnn)
         return cxt.optimizer.train(inputs, labels).sum()
 
 
@@ -28,6 +35,15 @@ class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = testutils.start_docker("test_neural_net", [tc.hosted_ml.service.ML(), TestLibrary()])
+
+    def testDNNLayer(self):
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        labels = np.logical_or(inputs[:, 0], inputs[:, 1])
+
+        self.host.post(tc.uri(TestLibrary).append("test_dnn"), {
+            "inputs": load_dense(inputs),
+            "labels": load_dense(labels),
+        })
 
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
