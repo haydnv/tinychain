@@ -197,20 +197,6 @@ class Delete(Op):
         return f"DELETE Op with form {self.form}"
 
 
-class Operator(Post):
-    def __call__(self, input):
-        return self.forward(input)
-
-    def __repr__(self):
-        return f"differentiable operator with form {self.form}"
-
-    def forward(self, input):
-        raise NotImplementedError(f"{self.__class__}.forward")
-
-    def backward(self, input):
-        raise NotImplementedError(f"{self.__class__}.backward")
-
-
 def _maybe_first_arg(op):
     sig = inspect.signature(op.form)
     param_names = list(sig.parameters.keys())

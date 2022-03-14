@@ -1,12 +1,9 @@
-import typing
-
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
-from ..decorators import post
+from ..decorators import hidden, post
 from ..generic import Tuple
 from ..ml import Activation
 from ..scalar.ref import After
-from ..util import uri
 
 from .interface import Differentiable
 from . import LIB_URI
@@ -129,13 +126,13 @@ class DNNLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @post
-    def eval(self, inputs: Tensor) -> Tensor:
-        x = einsum("ki,ij->kj", [inputs, self.weights]) + self.bias
+    @hidden
+    def operator(self, inputs):
+        x = (inputs @ self.weights) + self.bias
         if self._activation is None:
             return x
         else:
-            return self._activation(x).forward()
+            return self._activation(x)
 
 
 class NeuralNet(Model, Differentiable):
@@ -152,14 +149,11 @@ class Sequential(NeuralNet, Dynamic):
         self.layers = layers
         Dynamic.__init__(self)
 
-    @post
-    def eval(self, inputs: typing.Tuple[Tensor]) -> Tensor:
-        if uri(self.layers[0]) != "$self/layers/0":
-            raise RuntimeError(f"{self.__class__.__name__}.eval must be called with a header (URI {uri(self.layers[0])} is not valid)")
-
-        state = self.layers[0].eval(inputs=inputs)
+    @hidden
+    def operator(self, inputs):
+        state = self.layers[0].operator(inputs)
         for i in range(1, len(self.layers)):
-            state = self.layers[i].eval(inputs=state)
+            state = self.layers[i].operator(state)
 
         return state
 
