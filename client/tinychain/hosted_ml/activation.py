@@ -1,11 +1,11 @@
-from ..math import Operator
+from ..math import OperatorRef
 
 
-class Activation(Operator):
+class Activation(OperatorRef):
     """A differentiable activation function for a :class:`Layer`."""
 
     def __init__(self, subject):
-        Operator.__init__(self, subject, None)
+        OperatorRef.__init__(self, subject, None)
 
     @staticmethod
     def optimal_std(input_size, output_size):

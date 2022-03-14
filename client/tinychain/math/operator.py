@@ -1,10 +1,10 @@
-from ..scalar.ref import is_op_ref, reference, Op
+from ..scalar import ref
 from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric
 
 
-class Operator(Op):
+class OperatorRef(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
     def __json__(self):
@@ -14,11 +14,11 @@ class Operator(Op):
         deanonymize(self.subject, context)
         deanonymize(self.args, context)
 
-        if is_op_ref(self.subject):
-            self.subject = reference(context, self.subject)
+        if ref.is_op_ref(self.subject):
+            self.subject = ref.reference(context, self.subject)
 
-        if is_op_ref(self.args):
-            self.args = reference(context, self.args)
+        if ref.is_op_ref(self.args):
+            self.args = ref.reference(context, self.args)
 
     def forward(self):
         """Return the result of evaluating this `Operator`"""
@@ -31,7 +31,7 @@ class Operator(Op):
         raise NotImplementedError(f"{self.__class__}.backward")
 
 
-class Add(Operator):
+class Add(OperatorRef):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -41,9 +41,9 @@ class Add(Operator):
         return Add(subject, arg)
 
 
-class Exp(Operator):
+class Exp(OperatorRef):
     def __init__(self, subject):
-        Operator.__init__(self, subject, None)
+        OperatorRef.__init__(self, subject, None)
 
     def forward(self):
         return Numeric.exp(self.subject)
@@ -52,7 +52,7 @@ class Exp(Operator):
         return self
 
 
-class MatMul(Operator):
+class MatMul(OperatorRef):
     def forward(self):
         from ..collection.tensor import einsum
         return einsum("...ij,...jk->ik", [self.subject, self.args])
@@ -63,7 +63,7 @@ class MatMul(Operator):
         return Add(MatMul(subject, self.arg), MatMul(self.subject, arg))
 
 
-class Mul(Operator):
+class Mul(OperatorRef):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -73,7 +73,7 @@ class Mul(Operator):
         return Add(Mul(subject, self.args), Mul(self.subject, arg))
 
 
-class Sub(Operator):
+class Sub(OperatorRef):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -83,7 +83,7 @@ class Sub(Operator):
         return Sub(subject, arg)
 
 
-class Div(Operator):
+class Div(OperatorRef):
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
@@ -93,7 +93,7 @@ class Div(Operator):
         return Div(Sub(Mul(subject, self.arg), Mul(self.subject, arg)), Pow(self.arg, 2))
 
 
-class Pow(Operator):
+class Pow(OperatorRef):
     def forward(self):
         return Numeric.pow(self.subject, self.args)
 
@@ -102,7 +102,7 @@ class Pow(Operator):
 
 
 def _derivative(state):
-    if isinstance(form_of(state), Operator):
+    if isinstance(form_of(state), OperatorRef):
         return form_of(state).derivative()
     else:
         from ..collection.tensor import Sparse
