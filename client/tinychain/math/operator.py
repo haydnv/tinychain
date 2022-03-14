@@ -59,8 +59,8 @@ class MatMul(Operator):
 
     def backward(self):
         subject = _derivative(self.subject)
-        arg = _derivative(self.arg)
-        return Add(MatMul(subject, self.arg), MatMul(self.subject, arg))
+        arg = _derivative(self.args)
+        return Add(MatMul(subject, self.args), MatMul(self.subject, arg))
 
 
 class Mul(Operator):
@@ -79,7 +79,7 @@ class Sub(Operator):
 
     def backward(self):
         subject = _derivative(self.subject)
-        arg = _derivative(self.arg)
+        arg = _derivative(self.args)
         return Sub(subject, arg)
 
 
@@ -89,8 +89,8 @@ class Div(Operator):
 
     def backward(self):
         subject = _derivative(self.subject)
-        arg = _derivative(self.arg)
-        return Div(Sub(Mul(subject, self.arg), Mul(self.subject, arg)), Pow(self.arg, 2))
+        arg = _derivative(self.args)
+        return Div(Sub(Mul(subject, self.args), Mul(self.subject, arg)), Pow(self.args, 2))
 
 
 class Pow(Operator):
@@ -98,12 +98,12 @@ class Pow(Operator):
         return Numeric.pow(self.subject, self.args)
 
     def backward(self):
-        return Mul(self.arg, Pow(self.subject, Sub(self.arg, 1)))
+        return Mul(self.args, Pow(self.subject, Sub(self.args, 1)))
 
 
 def _derivative(state):
     if isinstance(form_of(state), Operator):
-        return form_of(state).derivative()
+        return form_of(state).backward()
     else:
         from ..collection.tensor import Sparse
         return Sparse.zeros(state.shape, state.dtype)

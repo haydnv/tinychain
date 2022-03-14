@@ -6,6 +6,7 @@ from ..ml import Activation
 from ..scalar.ref import After
 
 from .interface import Differentiable
+from .optimizer import Variable
 from . import LIB_URI
 
 
@@ -38,8 +39,8 @@ class ConvLayer(Layer, Dynamic):
 
         optimal_std = activation.optimal_std if activation else Activation.optimal_std
         std = optimal_std(c_i * h_i * w_i, out_c * h_f * w_f)
-        weights = Dense.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
-        bias = Dense.random_normal([out_c, 1], mean=0.0, std=std)
+        weights = Variable.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
+        bias = Variable.random_normal([out_c, 1], mean=0.0, std=std)
 
         return cls(weights, bias, inputs_shape, filter_shape, stride, padding, activation)
 
@@ -115,8 +116,8 @@ class DNNLayer(Layer, Dynamic):
     def create(cls, input_size, output_size, activation=None):
         optimal_std = activation.optimal_std if activation else Activation.optimal_std
         std = optimal_std(input_size, output_size)
-        weights = Dense.random_normal([input_size, output_size], std=std)
-        bias = Dense.random_normal([output_size], std=std)
+        weights = Variable.random_normal([input_size, output_size], std=std)
+        bias = Variable.random_normal([output_size], std=std)
         return cls(weights, bias, activation)
 
     def __init__(self, weights, bias, activation=None):
