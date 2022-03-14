@@ -6,7 +6,7 @@ from tinychain.scalar import op, ref
 from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
 
-from . import _get_rtype, resolve_class
+from . import _get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -158,26 +158,16 @@ class Post(Op):
         return cxt
 
     def __ref__(self, name):
-        sig = inspect.signature(self.form).parameters
+        sig = list(inspect.signature(self.form).parameters.items())
         rtype = self.rtype
+
+        if sig:
+            if sig[0][0] in ["cxt", "txn"]:
+                sig = sig[1:]
 
         class PostRef(op.Post):
             def __call__(self, *args, **kwargs):
-                if args and kwargs:
-                    raise ValueError("POST Op takes one arg (a Map) or kwargs, but not both")
-
-                if args:
-                    [params] = args
-                else:
-                    params = kwargs
-
-                for name, param in sig.items():
-                    if param.default == inspect.Parameter.empty:
-                        continue
-
-                    if name not in params:
-                        params[name] = param.default
-
+                params = parse_args(sig, *args, **kwargs)
                 return rtype(ref.Post(self, params))
 
         return PostRef(URI(name))

@@ -4,9 +4,8 @@ import inspect
 import logging
 import typing
 
-from collections import OrderedDict
-
 from .collection import Collection
+from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .chain import Chain
 from .generic import Tuple
@@ -175,7 +174,11 @@ def model(cls):
             elif cls.__init__ is Model.__init__:
                 cls.__init__(self, form=Nil())
             else:
-                params = _parse_init_args(cls, inspect.signature(cls.__init__), args, kwargs)
+                sig = list(inspect.signature(cls.__init__).parameters.items())
+                if sig[0][0] != "self":
+                    raise TypeError(f"__init__ signature {sig} must begin with a 'self' parameter")
+
+                params = parse_args(sig[1:], *args, **kwargs)
                 Instance.__init__(self, params)
 
         def __json__(self):
@@ -367,36 +370,3 @@ def write_config(lib, config_path, overwrite=False):
             config_file.write(json.dumps(config, indent=4))
 
 
-def _parse_init_args(cls, sig, args, kwargs):
-    params = {}
-    sig = OrderedDict(sig.parameters)
-    if list(sig.keys())[0] != "self":
-        raise TypeError(f"__init__ signature {sig} must begin with a 'self' parameter")
-
-    i = 0
-    for name, param in list(sig.items())[1:]:
-        if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            if args:
-                raise TypeError("Model does not support variable positional arguments (*args) in __init__; " +
-                                f"use keyword arguments instead")
-
-        elif param.kind == inspect.Parameter.POSITIONAL_ONLY:
-            params[name] = args[i]
-            i += 1
-
-        elif param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
-            if name in kwargs:
-                params[name] = kwargs[name]
-            elif i < len(args):
-                params[name] = args[i]
-                i += 1
-            elif param.default != inspect.Parameter.empty:
-                params[name] = param.default
-            else:
-                raise ValueError(
-                    f"no value specified for parameter {name} in {cls.__name__}.__init__")
-
-        elif param.kind == inspect.Parameter.VAR_KEYWORD:
-            params.update(kwargs)
-
-    return params

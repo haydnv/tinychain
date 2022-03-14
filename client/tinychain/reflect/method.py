@@ -5,7 +5,7 @@ from tinychain.scalar import op, ref
 from tinychain.state import State
 from tinychain.util import form_of, to_json, uri, Context, URI
 
-from . import _get_rtype, is_none, resolve_class
+from . import _get_rtype, is_none, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -46,10 +46,10 @@ class Get(Method):
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
+        self.rtype = _get_rtype(self.form, State)
 
     def __call__(self, key=None):
-        rtype = _get_rtype(self.form, State)
-        return rtype(ref.Get(self.subject(), key))
+        return self.rtype(ref.Get(self.subject(), key))
 
     def __dbg__(self):
         _, cxt = form_of(self)
@@ -85,7 +85,7 @@ class Put(Method):
         rtype = _get_rtype(form, None)
 
         if not is_none(rtype):
-            raise ValueError(f"Put method must return None, not f{rtype}")
+            raise ValueError(f"PUT method must return None, not f{rtype}")
 
         Method.__init__(self, header, form, name)
 
@@ -142,23 +142,25 @@ class Put(Method):
 class Post(Method):
     __uri__ = uri(op.Post)
 
+    def __init__(self, header, form, name):
+        Method.__init__(self, header, form, name)
+        self.rtype = _get_rtype(self.form, State)
+
     def __call__(self, *args, **kwargs):
-        if args and kwargs:
-            raise ValueError("Post method takes a single argument (a Map), or kwargs, not both")
+        sig = list(inspect.signature(self.form).parameters.items())
+        rtype = self.rtype
 
-        if args:
-            [params] = args
+        if not sig:
+            raise TypeError(f"POST method signature for {self} is missing the 'self' parameter")
+        elif sig[0][0] != "self":
+            raise TypeError(f"POST method signature must begin with 'self', not '{sig[0][0]}'")
+
+        if len(sig) > 1 and sig[1][0] in ["cxt", "txn"]:
+            sig = sig[2:]
         else:
-            params = kwargs
+            sig = sig[1:]
 
-        for name, param in inspect.signature(self.form).parameters.items():
-            if param.default == inspect.Parameter.empty:
-                continue
-
-            if name not in params:
-                params[name] = param.default
-
-        rtype = _get_rtype(self.form, State)
+        params = parse_args(sig, *args, **kwargs)
         return rtype(ref.Post(self.subject(), params))
 
     def __dbg__(self):
@@ -191,7 +193,7 @@ class Delete(Method):
         rtype = _get_rtype(form, None)
 
         if not is_none(rtype):
-            raise ValueError(f"Delete method must return None, not f{rtype}")
+            raise ValueError(f"DELETE method must return None, not f{rtype}")
 
         Method.__init__(self, header, form, name)
 

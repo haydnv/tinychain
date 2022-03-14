@@ -59,6 +59,37 @@ def is_ref(state):
         return False
 
 
+def parse_args(sig, *args, **kwargs):
+    params = {}
+
+    i = 0
+    for name, param in sig:
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            raise TypeError(f"variable positional arguments are not supported")
+        elif param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            if i < len(args):
+                params[name] = args[i]
+                i += 1
+            elif param.default == inspect.Parameter.empty:
+                raise TypeError(f"missing required positional argument {name}")
+            else:
+                params[name] = param.default
+        elif param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            if i < len(args):
+                params[name] = args[i]
+                i += 1
+            elif name in kwargs:
+                params[name] = kwargs[name]
+            elif param.default == inspect.Parameter.empty:
+                raise TypeError(f"missing required argument {name}")
+            else:
+                params[name] = param.default
+        elif param.kind == inspect.Parameter.VAR_KEYWORD:
+            params.update(kwargs)
+
+    return params
+
+
 def resolve_class(subject, annotation, default):
     if annotation == inspect.Parameter.empty:
         return default
