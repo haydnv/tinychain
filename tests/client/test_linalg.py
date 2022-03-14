@@ -44,7 +44,7 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.l = tc.tensor.Dense.load(l.shape, l.flatten().tolist(), tc.F32)
         cxt.r = tc.tensor.Dense.load(r.shape, r.flatten().tolist(), tc.F32)
-        cxt.result = tc.linalg.matmul(cxt.l, cxt.r)
+        cxt.result = cxt.l @ cxt.r
 
         expected = np.matmul(l, r)
         actual = self.host.post(ENDPOINT, cxt)
