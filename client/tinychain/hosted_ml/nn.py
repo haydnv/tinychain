@@ -1,14 +1,12 @@
-import typing
-
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
-from ..decorators import post
+from ..decorators import hidden, post
 from ..generic import Tuple
 from ..ml import Activation
 from ..scalar.ref import After
-from ..util import uri
 
 from .interface import Differentiable
+from .optimizer import Variable
 from . import LIB_URI
 
 
@@ -41,8 +39,8 @@ class ConvLayer(Layer, Dynamic):
 
         optimal_std = activation.optimal_std if activation else Activation.optimal_std
         std = optimal_std(c_i * h_i * w_i, out_c * h_f * w_f)
-        weights = Dense.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
-        bias = Dense.random_normal([out_c, 1], mean=0.0, std=std)
+        weights = Variable.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
+        bias = Variable.random_normal([out_c, 1], mean=0.0, std=std)
 
         return cls(weights, bias, inputs_shape, filter_shape, stride, padding, activation)
 
@@ -61,14 +59,14 @@ class ConvLayer(Layer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def forward(self, cxt, inputs: Tensor) -> Tensor:
+    def eval(self, cxt, inputs: Tensor) -> Tensor:
         b_i = inputs.shape[0]
 
         if self._padding == 0:
             output = einsum("abcd,efgh->eacd", [self.weights, inputs])
             output += self.bias.reshape([1, self._filter_shape[0], 1, 1])
             if self._activation:
-                return self._activation.forward(output)
+                return self._activation(output).forward()
             else:
                 return output
 
@@ -108,7 +106,7 @@ class ConvLayer(Layer, Dynamic):
         output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
 
         if self._activation:
-            return self._activation.forward(output)
+            return self._activation(output).forward()
         else:
             return output
 
@@ -118,8 +116,8 @@ class DNNLayer(Layer, Dynamic):
     def create(cls, input_size, output_size, activation=None):
         optimal_std = activation.optimal_std if activation else Activation.optimal_std
         std = optimal_std(input_size, output_size)
-        weights = Dense.random_normal([input_size, output_size], std=std)
-        bias = Dense.random_normal([output_size], std=std)
+        weights = Variable.random_normal([input_size, output_size], std=std)
+        bias = Variable.random_normal([output_size], std=std)
         return cls(weights, bias, activation)
 
     def __init__(self, weights, bias, activation=None):
@@ -129,13 +127,13 @@ class DNNLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @post
-    def forward(self, inputs: Tensor) -> Tensor:
-        x = einsum("ki,ij->kj", [inputs, self.weights]) + self.bias
+    @hidden
+    def operator(self, inputs):
+        x = (inputs @ self.weights) + self.bias
         if self._activation is None:
             return x
         else:
-            return self._activation.forward(x)
+            return self._activation(x)
 
 
 class NeuralNet(Model, Differentiable):
@@ -152,14 +150,11 @@ class Sequential(NeuralNet, Dynamic):
         self.layers = layers
         Dynamic.__init__(self)
 
-    @post
-    def forward(self, inputs: typing.Tuple[Tensor]) -> Tensor:
-        if uri(self.layers[0]) != "$self/layers/0":
-            raise RuntimeError(f"{self.__class__.__name__}.forward must be called with a header (URI {uri(self.layers[0])} is not valid)")
-
-        state = self.layers[0].forward(inputs=inputs)
+    @hidden
+    def operator(self, inputs):
+        state = self.layers[0].operator(inputs)
         for i in range(1, len(self.layers)):
-            state = self.layers[i].forward(inputs=state)
+            state = self.layers[i].operator(state)
 
         return state
 

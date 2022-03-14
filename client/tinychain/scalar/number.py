@@ -1,11 +1,9 @@
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Mul
+from ..math.operator import Add, Div, Exp, Mul, Pow, Sub
 from ..util import form_of, uri
 
 from .value import Value
 
-
-# Numeric types
 
 class Number(Value, Numeric, Trigonometric):
     """A numeric :class:`Value`."""
@@ -32,7 +30,10 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other * (1 / self)
 
-        return self._get("div", other, self.__class__)
+        return self.__class__(Div(self, other))
+
+    def exp(self):
+        return self.__class__(Exp(self))
 
     def modulo(self, other):
         """Return the remainder of `self` divided by `other`."""
@@ -61,7 +62,7 @@ class Number(Value, Numeric, Trigonometric):
             raise NotImplementedError("Number**Tensor is not supported; " +
                                       f"construct a constant Tensor from {self} instead")
 
-        return self._get("pow", other, self.__class__)
+        return self.__class__(Pow(self, other))
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""
@@ -70,7 +71,7 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return -(other - self)
 
-        return self._get("sub", other, self.__class__)
+        return self.__class__(Sub(self, other))
 
 
 class Bool(Number):

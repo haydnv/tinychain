@@ -1,24 +1,18 @@
-from ..decorators import post
-from ..interface import Interface
 from .. import error
+from ..collection.tensor import Tensor
+from ..decorators import hidden, post
+from ..interface import Interface
 
 
 class Differentiable(Interface):
     """A :class:`Differentiable` state in an ML model, which can be used in the composition of a more complex model"""
 
+    @hidden
+    def operator(self, inputs):
+        return error.NotImplemented(f"{self.__class__.__name__}")
+
     @post
-    def forward(self, inputs):
+    def eval(self, inputs: Tensor) -> Tensor:
         """Evaluate this :class:`Differentiable` with respect to the given `inputs`."""
 
-        return error.NotImplemented("abstract")
-
-    @post
-    def backward(self, inputs, loss):
-        """
-        Compute the gradient of this :class`Differentiable` with respect to the given `inputs` and `loss`.
-
-        Returns a tuple `(loss, diffed_params)` where `loss` is the loss to propagate further backwards and
-        `diffed_params` is a flattened list of the :class:`DiffedParameter` s for an :class:`Optimizer` to optimize.
-        """
-
-        return error.NotImplemented("abstract")
+        return self.operator(inputs)

@@ -6,7 +6,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Mul
+from ..math.operator import Add, Div, Exp, MatMul, Mul, Pow, Sub
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -91,6 +91,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")
 
+    def __matmul__(self, other):
+        return Tensor(MatMul(self, other))
+
     def add(self, other):
         return self.__class__(Add(self, other))
 
@@ -122,11 +125,17 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
         return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
 
+    def div(self, other):
+        return self.__class__(Div(self, other))
+
     @property
     def dtype(self):
         """Return the data type of this `Tensor`."""
 
         return self._get("dtype", rtype=Class)
+
+    def exp(self):
+        return self.__class__(Exp(self))
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
@@ -208,6 +217,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
         return self._post("ne", {"r": other}, self.__class__)
 
+    def pow(self, other):
+        return self.__class__(Pow(self, other))
+
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
 
@@ -257,6 +269,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             return (((self - average)**2).sum() / size)**0.5
         else:
             raise NotImplementedError("Tensor.std with axis")
+
+    def sub(self, other):
+        return self.__class__(Sub(self, other))
 
     def sum(self, axis=None):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
@@ -414,6 +429,9 @@ class Dense(Tensor):
 
         return self._get("sparse", rtype=Sparse)
 
+    def div(self, other):
+        return Tensor(Div(self, other))
+
     def elements(self, bounds=None):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
 
@@ -467,7 +485,7 @@ class Sparse(Tensor):
         return self._get("elements", bounds, Stream)
 
     def sub(self, other):
-        return self._post("sub", {"r": other}, Tensor)
+        return Tensor(Sub(self, other))
 
 
 def einsum(format, tensors):

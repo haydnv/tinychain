@@ -49,6 +49,9 @@ class Model(Object, metaclass=Meta):
                 pass  # self.name is already set to attr, just leave it alone
 
     def __json__(self):
+        if form_of(self) is self:
+            raise RuntimeError(f"{self} has no JSON encoder defined--did you forget to call super().__init__?")
+
         form = form_of(self)
         form = form if form else [None]
 
@@ -56,6 +59,12 @@ class Model(Object, metaclass=Meta):
             return to_json(form)
         else:
             return {str(uri(self)): to_json(form)}
+
+    def __ns__(self, _context):
+        logging.debug(f"will not deanonymize model {self}")
+
+    def __ref__(self, name):
+        return ModelRef(self, name)
 
 
 class Header(object):
@@ -121,8 +130,8 @@ class Dynamic(Instance):
         form = form if form else [None]
         return {str(uri(self)): to_json(form)}
 
-    def __ref__(self, name):
-        return ModelRef(self, name)
+    def __ns__(self, _context):
+        logging.debug(f"will not deanonymize dynamic model {self}")
 
     def __repr__(self):
         return f"a Dynamic model {self.__class__.__name__}"
@@ -139,8 +148,6 @@ class ModelRef(object):
         # TODO: deduplicate with Meta.__form__
         for name, attr in inspect.getmembers(self.instance):
             if name.startswith('__'):
-                continue
-            elif hasattr(attr, "hidden") and attr.hidden:
                 continue
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod

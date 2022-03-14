@@ -65,6 +65,11 @@ class Host(object):
     def link(self, path):
         """Return a link to the given path at this host."""
 
+        if hasattr(path, "__uri__"):
+            path = uri(path)
+        else:
+            path = URI(path)
+
         return uri(self) + path
 
     def get(self, path, key=None, auth=None):
