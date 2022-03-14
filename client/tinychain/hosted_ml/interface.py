@@ -1,6 +1,6 @@
-from tinychain.decorators import post_method
-from tinychain.interface import Interface
-from tinychain import error
+from ..decorators import post_method
+from ..interface import Interface
+from .. import error
 
 
 class Differentiable(Interface):

@@ -1,6 +1,6 @@
-from tinychain.reflect.meta import MethodStub
-from tinychain.reflect import method, op
-from tinychain.scalar.ref import With
+from .reflect.meta import MethodStub
+from .reflect import method, op
+from .scalar.ref import With
 
 
 def closure(*deps):

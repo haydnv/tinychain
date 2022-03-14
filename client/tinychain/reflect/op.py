@@ -1,10 +1,10 @@
 import inspect
 import logging
 
-from tinychain.scalar.value import Nil, Value
-from tinychain.scalar import op, ref
-from tinychain.state import State
-from tinychain.util import form_of, to_json, uri, Context, URI
+from ..scalar.value import Nil, Value
+from ..scalar import op, ref
+from ..state import State
+from ..util import form_of, to_json, uri, Context, URI
 
 from . import _get_rtype, parse_args, resolve_class
 

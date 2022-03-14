@@ -5,9 +5,9 @@ import json
 import requests
 import urllib.parse
 
-from tinychain.error import *
-from tinychain.scalar.value import Nil
-from tinychain.util import to_json, uri, URI
+from .error import *
+from .scalar.value import Nil
+from .util import to_json, uri, URI
 
 
 DEFAULT_PORT = 8702
