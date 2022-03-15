@@ -30,6 +30,15 @@ class TestLibrary(tc.app.Library):
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(dnn)
         return cxt.optimizer.train(inputs, labels).sum()
 
+    # @tc.host
+    # def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
+    #     padding, stride = 1, 1
+    #     layer = [tc.hosted_ml.nn.ConvLayer.create(inputs.shape[1:], (1, 3, 3), padding=padding, stride=stride)]
+    #     cnn = tc.hosted_ml.nn.Sequential(layer)
+    #     cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(cnn)
+    #     print(layer)
+    #     return cxt.optimizer.train(inputs, labels).sum()
+
 
 class NeuralNetTests(unittest.TestCase):
     @classmethod
@@ -40,7 +49,7 @@ class NeuralNetTests(unittest.TestCase):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         labels = np.logical_or(inputs[:, 0], inputs[:, 1])
 
-        self.host.post(tc.uri(TestLibrary).append("test_dnn"), {
+        self.host.post(tc.uri(TestLibrary).append("test_dnn_layer"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })
@@ -53,6 +62,15 @@ class NeuralNetTests(unittest.TestCase):
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })
+
+    # def testConvLayer(self):
+    #     inputs = np.random.random(3*5*5*BATCH_SIZE).reshape((BATCH_SIZE, 3, 5, 5))
+    #     labels = np.expand_dims(inputs.sum(axis=1), 1)
+
+    #     self.host.post(tc.uri(TestLibrary).append("test_test_cnn_layer"), {
+    #         "inputs": load_dense(inputs),
+    #         "labels": load_dense(labels),
+    #     })
 
     @classmethod
     def tearDownClass(cls) -> None:
