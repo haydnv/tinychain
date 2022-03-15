@@ -6,7 +6,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, MatMul, Mul, Pow, Sub
+from ..math.operator import Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -136,6 +136,30 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
     def exp(self):
         return self.__class__(Exp(self))
+
+    def sin(self):
+        return self.__class__(Sin(self))
+
+    def cos(self):
+        return self.__class__(Cos(self))
+
+    def asin(self):
+        return self.__class__(Asin(self))
+
+    def acos(self):
+        return self.__class__(Acos(self))
+
+    def sinh(self):
+        return self.__class__(Sinh(self))
+
+    def cosh(self):
+        return self.__class__(Cosh(self))
+
+    def asinh(self):
+        return self.__class__(Asinh(self))
+
+    def acosh(self):
+        return self.__class__(Acosh(self))
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""

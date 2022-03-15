@@ -1,7 +1,7 @@
 from ..scalar import ref
 from ..util import deanonymize, form_of, to_json
 
-from .interface import Numeric
+from .interface import Numeric, Trigonometric
 
 
 class Operator(ref.Op):
@@ -99,6 +99,99 @@ class Pow(Operator):
 
     def backward(self):
         return Mul(self.args, Pow(self.subject, Sub(self.args, 1)))
+
+
+class Sin(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.sin(self.subject)
+
+    def backward(self):
+        return Cos(self.subject)
+
+
+class Cos(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.cos(self.subject)
+
+    def backward(self):
+        from ..collection.tensor import Dense
+        return Sub(Dense.zeros(self.subject.shape), Sin(self.subject))
+
+
+class Asin(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.asin(self.subject)
+
+    def backward(self):
+        from ..collection.tensor import Dense, Tensor
+        return Pow(Tensor(Sub(Dense.ones(self.subject.shape), Pow(self.subject, 2))), -0.5)
+
+
+class Acos(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.acos(self.subject)
+    
+    def backward(self):
+        from ..collection.tensor import Dense, Tensor
+        return Sub(Dense.zeros(self.subject.shape), Pow(Tensor(Sub(Dense.ones(self.subject.shape), Pow(self.subject, 2))), -0.5))
+
+
+class Sinh(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.sinh(self.subject)
+
+    def backward(self):
+        return Cosh(self.subject)
+
+
+class Cosh(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.cosh(self.subject)
+    
+    def backward(self):
+        return Sinh(self.subject)
+
+
+class Asinh(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.asinh(self.subject)
+
+    def backward(self):
+        from ..collection.tensor import Dense, Tensor
+        return Pow(Tensor(Add(Dense.ones(self.subject.shape), Pow(self.subject, 2))), -0.5)
+
+
+class Acosh(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Trigonometric.acosh(self.subject)
+    
+    def backward(self):
+        from ..collection.tensor import Dense, Tensor
+        return Pow(Tensor(Sub(Tensor(Pow(self.subject, 2)), Dense.ones(self.subject.shape))), -0.5)
 
 
 def _derivative(state):
