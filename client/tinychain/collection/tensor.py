@@ -78,6 +78,12 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
 
         return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/load", ((shape, dtype), data)))
 
+    @classmethod
+    def zeros_like(cls, tensor):
+        """Return a `Tensor` filled with zeros, with the same shape and data type as the given `tensor`."""
+
+        return cls.expect(tensor.shape, tensor.dtype)((tensor.shape, tensor.dtype))
+
     def __getitem__(self, bounds):
         parent = self
         bounds = handle_bounds(bounds)
@@ -357,12 +363,6 @@ class Dense(Tensor):
         """
 
         return cls.expect(shape, dtype).constant(shape, Number(0).cast(dtype))
-
-    @classmethod
-    def zeros_like(cls, tensor):
-        """Return a `Dense` tensor filled with zeros, with the same shape and data type as the given `tensor`."""
-
-        return cls.expect(tensor.shape, tensor.dtype).constant(tensor.shape, Number(0).cast(tensor.dtype))
 
     @classmethod
     def random_normal(cls, shape, mean=0.0, std=1.0):
