@@ -1,5 +1,5 @@
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, Mul, Pow, Sub
+from ..math.operator import Add, Div, Exp, Mul, Pow, Sub, Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
 from ..util import form_of, uri
 
 from .value import Value
@@ -72,6 +72,42 @@ class Number(Value, Numeric, Trigonometric):
             return -(other - self)
 
         return self.__class__(Sub(self, other))
+
+    def sin(self):
+        return self.__class__(Sin(self))
+
+    def cos(self):
+        return self.__class__(Cos(self))
+
+    def asin(self):
+        return self.__class__(Asin(self))
+
+    def acos(self):
+        return self.__class__(Acos(self))
+
+    def sinh(self):
+        return self.__class__(Sinh(self))
+
+    def cosh(self):
+        return self.__class__(Cosh(self))
+
+    def asinh(self):
+        return self.__class__(Asinh(self))
+
+    def acosh(self):
+        return self.__class__(Acosh(self))
+
+    def tan(self):
+        return self.__class__(Tan(self))
+
+    def tanh(self):
+        return self.__class__(Tanh(self))
+
+    def atan(self):
+        return self.__class__(Atan(self))
+
+    def atanh(self):
+        return self.__class__(Atanh(self))
 
 
 class Bool(Number):

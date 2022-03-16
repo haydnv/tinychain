@@ -274,6 +274,23 @@ class DenseTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, sum(range(10)))
 
+    def testTanh(self):
+        shape = [3, 4, 5]
+        x = np.random.random(np.product(shape)).reshape(shape)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x)
+        cxt.y = cxt.x.tanh()
+        cxt.z = tc.form_of(cxt.x.tanh()).backward()  # TODO: this should be possible without calling form_of
+        cxt.result = (cxt.y, cxt.z)
+        actual_y, actual_z = self.host.post(ENDPOINT, cxt)
+
+        expected_y = np.tanh(x)
+        expected_z = 1 / (np.cosh(x)**2)
+
+        self.assertTrue(all_close(actual_y, expected_y))
+        self.assertTrue(all_close(actual_z, expected_z))
+
     def testExpandAndTranspose(self):
         input_shape = (5, 8)
         permutation = (0, 3, 1, 2)
