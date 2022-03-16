@@ -184,8 +184,17 @@ class Tan(Unary):
 
 
 def _derivative(state):
+    from ..scalar.number import Number
+    from ..collection.tensor import Dense, Sparse, Tensor
+    from ..hosted_ml.optimizer import Variable
+
     if isinstance(form_of(state), Operator):
         return form_of(state).backward()
+    elif isinstance(state, Variable):
+        return Dense.ones_like(state)
+    elif isinstance(state, Number):
+        return type(state)(0)
+    elif isinstance(state, Tensor):
+        return Sparse.zeros_like(state)
     else:
-        from ..collection.tensor import Sparse
-        return Sparse.zeros(state.shape, state.dtype)
+        raise TypeError(f"the derivative of {state} is not defined")
