@@ -1,3 +1,5 @@
+from turtle import forward
+from client.tinychain.math.operator import Operator
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import hidden, post
@@ -46,8 +48,10 @@ class ConvLayer(Layer, Dynamic):
 
     def __init__(self, weights, bias, inputs_shape, filter_shape, stride, padding, activation):
         # compile-time constants
-        self._inputs_shape = inputs_shape
-        self._filter_shape = filter_shape
+        self.c_i, self.h_i, self.w_i = inputs_shape
+        self.out_c, self.h_f, self.w_f = filter_shape
+        # self._inputs_shape = inputs_shape
+        # self._filter_shape = filter_shape
         self._stride = stride
         self._padding = padding
         self._activation = activation
@@ -60,82 +64,10 @@ class ConvLayer(Layer, Dynamic):
 
     @hidden
     def operator(self, inputs):
-        c_i, h_i, w_i = self._inputs_shape
-        out_c, h_f, w_f = self._filter_shape
-        b_i = inputs.shape[0]
-        h_out = int((h_i - h_f + 2 * self._padding) / self._stride + 1)
-        w_out = int((w_i - w_f + 2 * self._padding) / self._stride + 1)
-
-        assert h_out
-        assert w_out
-
-        pad_matrix = Dense.zeros([b_i, c_i, h_i + self._padding * 2, w_i + self._padding * 2])
-        im2col_matrix = []
-        for i in range(h_out):
-            for j in range(w_out):
-                im2col_matrix.append(pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape([c_i * h_f * w_f, b_i]))
-        im2col_concat = Tensor(After(pad_matrix[:, :, self._padding:(self._padding + h_i), self._padding:(self._padding + w_i)].write(inputs.copy()), Dense.concatenate(im2col_matrix, 0)))
-        im2col_matrix = Tensor(After(im2col_concat, im2col_concat.reshape([b_i * h_out * w_out, c_i * h_f * w_f]).transpose()))
-        w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
-        in2col_multiply = (w_col @ im2col_matrix + self.bias).reshape([out_c, h_out, w_out, b_i])
-        output = Tensor(in2col_multiply.copy().transpose([3, 0, 1, 2]))
-
+        x = Convolution(self, inputs)
         if self._activation:
-            return self._activation(output)
-
-        return output
-
-    # @post
-    # def eval(self, cxt, inputs: Tensor) -> Tensor:
-    #     b_i = inputs.shape[0]
-
-    #     if self._padding == 0:
-    #         output = einsum("abcd,efgh->eacd", [self.weights, inputs])
-    #         output += self.bias.reshape([1, self._filter_shape[0], 1, 1])
-    #         if self._activation:
-    #             return self._activation(output).forward()
-    #         else:
-    #             return output
-
-    #     padding = self._padding
-    #     stride = self._stride
-
-    #     c_i, h_i, w_i = self._inputs_shape
-    #     out_c, h_f, w_f = self._filter_shape
-
-    #     h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
-    #     w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
-
-    #     assert h_out
-    #     assert w_out
-
-    #     _pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-    #     cxt.pad_matrix = Tensor(After(
-    #         _pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
-    #         _pad_matrix))
-
-    #     _im2col_matrix = []
-    #     for i in range(h_out):
-    #         for j in range(w_out):
-    #             shape = [c_i * h_f * w_f, b_i]
-    #             _im2col = cxt.pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
-    #             _im2col_matrix.append(_im2col)
-
-    #     assert _im2col_matrix
-
-    #     shape = [b_i * h_out * w_out, c_i * h_f * w_f]
-    #     cxt.im2col_matrix = Dense.concatenate(_im2col_matrix, 0).reshape(shape).transpose()
-    #     cxt.w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
-
-    #     shape = [out_c, h_out, w_out, b_i]
-    #     cxt.in2col_multiply = (einsum("ij,jm->im", [cxt.w_col, cxt.im2col_matrix]) + self.bias).reshape(shape)
-
-    #     output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
-
-    #     if self._activation:
-    #         return self._activation(output).forward()
-    #     else:
-    #         return output
+            return self._activation(x)
+        return x
 
 
 class DNNLayer(Layer, Dynamic):
@@ -198,3 +130,55 @@ class DNN(Sequential):
 
         layers = Tuple([DNNLayer.create(*layer_schema) for layer_schema in schema])
         return cls(layers)
+
+
+#TODO: Convalution for ConvLayer.operator()
+class Convolution(Operator):
+    def __init__(self, params, inputs):
+        Operator.__init__(self, params.weights, params.bias)
+        self.params = params
+        self.inputs = inputs
+
+    def forward(self):
+        # c_i, h_i, w_i = self.params._inputs_shape
+        # out_c, h_f, w_f = self.params._filter_shape
+        self.b_i = self.inputs.shape[0]
+        self.h_out = int((self.params.h_i - self.params.h_f + 2 * self.params._padding) / self.params._stride + 1)
+        self.w_out = int((self.params.w_i - self.params.w_f + 2 * self.params._padding) / self.params._stride + 1)
+
+        assert self.h_out
+        assert self.w_out
+
+        pad_matrix = Dense.zeros([self.b_i, self.params.c_i, self.params.h_i + self.params._padding * 2, self.params.w_i + self.params._padding * 2])
+        im2col_matrix = []
+        for i in range(self.h_out):
+            for j in range(self.w_out):
+                im2col_matrix.append(pad_matrix[:, :, i:i + self.params.h_f, j:j + self.params.w_f].reshape([self.params.c_i * self.params.h_f * self.params.w_f, self.b_i]))
+        im2col_concat = Tensor(After(pad_matrix[:, :, self.params._padding:(self.params._padding + self.params.h_i), self.params._padding:(self.params._padding + self.params.w_i)].write(self.inputs.copy()), Dense.concatenate(im2col_matrix, 0)))
+        self.im2col_matrix = Tensor(After(im2col_concat, im2col_concat.reshape([self.b_i * self.params.h_out * self.params.w_out, self.params.c_i * self.params.h_f * self.params.w_f]).transpose()))
+        w_col = self.subject.reshape([self.params.out_c, self.params.c_i * self.params.h_f * self.params.w_f])
+        in2col_multiply = (w_col @ self.im2col_matrix + self.arg).reshape([self.params.out_c, self.params.h_out, self.params.w_out, self.b_i])
+        output = Tensor(in2col_multiply.copy().transpose([3, 0, 1, 2]))
+
+        if self._activation:
+            return self._activation(output)
+
+        return output
+
+    def backward(self, dl):
+        # delta = Tensor(self._activation.backward(Tensor(inputs)) * loss)
+        delta_reshaped = Tensor(dl.transpose([1, 2, 3, 0])).reshape([self.params.out_c, self.params.h_out * self.params.w_out * self.b_i])
+        self.dw = Tensor(einsum('ij,mj->im', [delta_reshaped, self.im2col_matrix])).reshape(self.subject.shape)
+        self.db = Tensor(einsum('ijkb->j', [dl])).reshape([self.params.out_c, 1])
+        dloss_col = Tensor(einsum('ji,jm->im', [self.subject.reshape([self.params.out_c, self.params.c_i * self.params.h_f * self.params.w_f]), delta_reshaped]))
+        dloss_col_reshaped = dloss_col.reshape([self.params.c_i, self.params.h_f, self.params.w_f, self.params.h_out, self.params.w_out, self.b_i]).copy().transpose([5, 0, 3, 4, 1, 2])
+
+        # TODO: make this a property of the ConvLayer instance
+        pad_matrix = Dense.zeros([self.b_i, self.params.c_i, self.params.h_i + self.params._padding * 2, self.params.w_i + self.params._padding * 2])
+        result = [
+                pad_matrix[:, :, i:i + self.params.h_f, j:j + self.params.w_f].write(pad_matrix[:, :, i:i + self.params.h_f, j:j + self.params.w_f].copy() + dloss_col_reshaped[:, :, i, j, :, :])
+                for i in range(self.h_out) for j in range(self.w_out)
+                ]
+        dloss_result = Tensor(After(result, pad_matrix[:, :, self.params._padding:(self.params._padding + self.params.h_i), self.params._padding:(self.params.padding + self.params.w_i)]))
+
+        return dloss_result

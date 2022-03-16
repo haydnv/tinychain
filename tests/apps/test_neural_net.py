@@ -30,7 +30,7 @@ class TestLibrary(tc.app.Library):
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(dnn)
         return cxt.optimizer.train(inputs, labels).sum()
 
-    # @tc.host
+    # @tc.post
     # def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
     #     padding, stride = 1, 1
     #     layer = [tc.hosted_ml.nn.ConvLayer.create(inputs.shape[1:], (1, 3, 3), padding=padding, stride=stride)]

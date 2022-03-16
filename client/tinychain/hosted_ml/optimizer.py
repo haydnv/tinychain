@@ -1,5 +1,7 @@
 import logging
 
+from client.tinychain.hosted_ml.nn import Convolution
+
 from .. import error
 from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
@@ -49,6 +51,10 @@ class GradientDescent(Optimizer, Dynamic):
 
             if isinstance(op.subject, Variable) and isinstance(op.args, Variable):
                 raise NotImplementedError(f"partial derivative w/r/t independent variables {op.subject} and {op.args}")
+            
+            #TODO: Convalution.backward()
+            elif isinstance(op, Convolution):
+                continue 
             elif isinstance(op.subject, Variable):
                 dl = dl.copy()
                 delta = (dl * self.lr).sum() / inputs.shape[0]
