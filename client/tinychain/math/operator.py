@@ -1,4 +1,7 @@
+import logging
+
 from ..scalar import ref
+from ..state import State
 from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
@@ -6,6 +9,13 @@ from .interface import Numeric, Trigonometric
 
 class Operator(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
+
+    def __init__(self, subject, args):
+        if not isinstance(subject, Numeric):
+            logging.info(f"assuming that {subject} is Numeric since it's the subject of a differentiable Operator")
+            subject = type("OperatorSubject", (Numeric, State), {})(subject)
+
+        ref.Op.__init__(self, subject, args)
 
     def __json__(self):
         return to_json(self.forward())
@@ -128,7 +138,7 @@ class Asin(Unary):
         return Trigonometric.asin(self.subject)
 
     def backward(self):
-        return Numeric.pow(Numeric.add(Numeric.mul(Numeric.pow(self.subject, 2), -1), 1), -0.5)
+        return Pow(Add(Mul(Pow(self.subject, 2), -1), 1), -0.5)
 
 
 class Acos(Unary):
@@ -136,7 +146,7 @@ class Acos(Unary):
         return Trigonometric.acos(self.subject)
     
     def backward(self):
-        return Numeric.mul(Numeric.pow(Numeric.add(Numeric.mul(Numeric.pow(self.subject, 2), -1), 1), -0.5), -1)
+        return Mul(Pow(Add(Mul(Pow(self.subject, 2), -1), 1), -0.5), -1)
 
 
 class Sinh(Unary):
@@ -160,7 +170,7 @@ class Asinh(Unary):
         return Trigonometric.asinh(self.subject)
 
     def backward(self):
-        return Numeric.pow(Numeric.add(Numeric.pow(self.subject, 2), 1), -0.5)
+        return Pow(Add(Pow(self.subject, 2), 1), -0.5)
 
 
 class Acosh(Unary):
@@ -168,8 +178,7 @@ class Acosh(Unary):
         return Trigonometric.acosh(self.subject)
     
     def backward(self):
-        from ..collection.tensor import Dense, Tensor
-        return Numeric.pow(Numeric.add(Numeric.pow(self.subject, 2), -1), -0.5)
+        return Pow(Add(Pow(self.subject, 2), -1), -0.5)
 
 
 class Tan(Unary):
@@ -177,7 +186,7 @@ class Tan(Unary):
         return Trigonometric.tan(self.subject)
     
     def backward(self):
-        return Numeric.pow(Numeric.pow(Numeric.cos(self.subject), 2), -1)
+        return Pow(Pow(Cos(self.subject), 2), -1)
 
 
 class Tanh(Unary):
@@ -185,7 +194,7 @@ class Tanh(Unary):
         return Trigonometric.tanh(self.subject)
     
     def backward(self):
-        return Numeric.pow(Numeric.pow(Numeric.cosh(self.subject), 2), -1)
+        return Pow(Pow(Cosh(self.subject), 2), -1)
 
 
 class Atan(Unary):
@@ -193,7 +202,7 @@ class Atan(Unary):
         return Trigonometric.atan(self.subject)
     
     def backward(self):
-        return Numeric.pow(Numeric.add(Numeric.pow(self.subject, 2), 1), -1)
+        return Pow(Add(Pow(self.subject, 2), 1), -1)
 
 
 class Atanh(Unary):
@@ -201,7 +210,7 @@ class Atanh(Unary):
         return Trigonometric.atanh(self.subject)
     
     def backward(self):
-        return Numeric.pow(Numeric.add(Numeric.mul(Numeric.pow(self.subject, 2), -1), 1), -1)
+        return Pow(Add(Mul(Pow(self.subject, 2), -1), 1), -1)
 
 
 def _derivative(state):
