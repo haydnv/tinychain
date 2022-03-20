@@ -281,7 +281,7 @@ class DenseTests(unittest.TestCase):
         cxt = tc.Context()
         cxt.x = load_dense(x)
         cxt.y = cxt.x.tanh()
-        cxt.z = tc.form_of(cxt.x.tanh()).backward()  # TODO: this should be possible without calling form_of
+        cxt.z = tc.math.operator.derivative(cxt.x.tanh())
         cxt.result = (cxt.y, cxt.z)
         actual_y, actual_z = self.host.post(ENDPOINT, cxt)
 

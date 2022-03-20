@@ -1,15 +1,12 @@
-import inspect
 import logging
 
 from .. import error
 from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
-from ..math import Operator
+from ..math.operator import derivative, Operator
 from ..scalar.ref import After
 from ..util import form_of
-
-from .interface import Differentiable
 
 
 class Variable(Dense):
@@ -25,8 +22,6 @@ class Optimizer(Model):
 
 class GradientDescent(Optimizer, Dynamic):
     def __init__(self, ml_model, learning_rate=0.001):
-        self._ns = _namespace(ml_model)
-
         self.ml_model = ml_model
         self.lr = learning_rate
         Dynamic.__init__(self)
@@ -34,62 +29,39 @@ class GradientDescent(Optimizer, Dynamic):
     @post
     def train(self, inputs: Tensor, labels: Tensor) -> Tensor:
         outputs = self.ml_model.operator(inputs)
+        loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
+        assert isinstance(form_of(outputs), Operator)
 
-        # TODO: support a custom cost function
-        loss = (outputs - labels)**2
-        dl = 2 * (outputs - labels)
-
-        op_list = [form_of(outputs)]
-        assert isinstance(op_list[0], Operator)
+        deltas = backpropagate(loss, form_of(outputs))
+        if not deltas:
+            logging.warning(f"model {self.ml_model} has no Variables for {self} to train")
 
         writes = []
-        for op in op_list:
-            if isinstance(form_of(op.subject), Operator):
-                op_list.append(form_of(op.subject))
-            elif isinstance(form_of(op.args), Operator):
-                op_list.append(form_of(op.args))
-
-            derivative = op.backward()
-            dl = dl / derivative
-
-            if isinstance(op.subject, Variable) and isinstance(op.args, Variable):
-                raise NotImplementedError(f"partial derivative w/r/t independent variables {op.subject} and {op.args}")
-            elif isinstance(op.subject, Variable):
-                dl = dl.copy()
-                delta = (dl * self.lr).sum() / inputs.shape[0]
-                writes.append(op.subject.update(delta))
-                logging.info(f"{self} will update {self._ns[id(op.subject)]}")
-            elif isinstance(op.args, Variable):
-                dl = dl.copy()
-                delta = (dl * self.lr).sum() / inputs.shape[0]
-                writes.append(op.args.update(delta))
-                logging.info(f"{self} will update {self._ns[id(op.args)]}")
-
-        if not writes:
-            logging.warning(f"model {self.ml_model} has no Variables for {self} to train")
+        for var, delta in deltas:
+            writes.append(var.update((delta * self.lr).sum()))
 
         return After(writes, loss)
 
 
-def _namespace(ml_model):
-    variables = {}
+def backpropagate(loss, op):
+    assert isinstance(op, Operator)
 
-    for name, attr in inspect.getmembers(ml_model):
-        if name.startswith('_') or (hasattr(attr, "hidden") and attr.hidden):
-            continue
+    deltas = []
+    unvisited = [op]
 
-        if isinstance(attr, Variable):
-            variables[id(attr)] = name
-        elif isinstance(attr, Differentiable):
-            for var, var_name in _namespace(attr).items():
-                variables[var] = f"{name}.{var_name}"
-        elif isinstance(attr, dict):
-            for item_name in attr:
-                for var, var_name in _namespace(attr[item_name]).items():
-                    variables[var] = f"{name}.{item_name}.{var_name}"
-        elif isinstance(attr, tuple) or isinstance(attr, list):
-            for i in range(len(attr)):
-                for var, var_name in _namespace(attr[i]).items():
-                    variables[var] = f"{name}.{i}.{var_name}"
+    for op in unvisited:
+        assert isinstance(op, Operator)
 
-    return variables
+        if isinstance(op.subject, Variable):
+            delta = derivative(loss, op.subject)
+            deltas.append((op.subject, delta.copy()))
+        elif isinstance(form_of(op.subject), Operator):
+            unvisited.append(form_of(op.subject))
+
+        if isinstance(op.args, Variable):
+            delta = derivative(loss, op.args)
+            deltas.append((op.args, delta.copy()))
+        elif isinstance(form_of(op.args), Operator):
+            unvisited.append(form_of(op.args))
+
+    return deltas
