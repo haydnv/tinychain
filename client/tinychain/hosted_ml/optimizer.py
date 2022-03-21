@@ -9,9 +9,32 @@ from ..scalar.ref import After
 from ..util import form_of
 
 
+# TODO: support Sparse and Number variable types
 class Variable(Dense):
+    """A trainable variable in a machine learning model."""
+
+    def __getitem__(self, bounds):
+        return Variable(Dense[bounds])
+
+    def cast(self, number_type):
+        return Variable(Dense.cast(number_type))
+
+    def expand_dims(self, axis=None):
+        return Variable(Dense.expand_dims(self, axis))
+
+    def flip(self, axis):
+        return Variable(Dense.flip(axis))
+
     def update(self, delta):
-        self.write(self - delta)
+        """Decrement the value of this `Variable` by `delta`."""
+
+        return self.write(self - delta)
+
+    def reshape(self, shape):
+        return Variable(Dense.reshape(self, shape))
+
+    def transpose(self, permutation=None):
+        return Variable(Dense.transpose(self, permutation))
 
 
 class Optimizer(Model):

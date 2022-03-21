@@ -101,7 +101,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         return Tensor(MatMul(self, other))
 
     def add(self, other):
-        return self.__class__(Add(self, other))
+        return Tensor(Add(self, other))
 
     def all(self):
         """Return `True` if all elements in this `Tensor` are nonzero."""
@@ -132,7 +132,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
 
     def div(self, other):
-        return self.__class__(Div(self, other))
+        return Tensor(Div(self, other))
 
     @property
     def dtype(self):
@@ -141,43 +141,43 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         return self._get("dtype", rtype=Class)
 
     def exp(self):
-        return self.__class__(Exp(self))
+        return Tensor(Exp(self))
 
     def sin(self):
-        return self.__class__(Sin(self))
+        return Tensor(Sin(self))
 
     def cos(self):
-        return self.__class__(Cos(self))
+        return Tensor(Cos(self))
 
     def asin(self):
-        return self.__class__(Asin(self))
+        return Tensor(Asin(self))
 
     def acos(self):
-        return self.__class__(Acos(self))
+        return Tensor(Acos(self))
 
     def sinh(self):
-        return self.__class__(Sinh(self))
+        return Tensor(Sinh(self))
 
     def cosh(self):
-        return self.__class__(Cosh(self))
+        return Tensor(Cosh(self))
 
     def asinh(self):
-        return self.__class__(Asinh(self))
+        return Tensor(Asinh(self))
 
     def acosh(self):
-        return self.__class__(Acosh(self))
+        return Tensor(Acosh(self))
     
     def tan(self):
-        return self.__class__(Tan(self))
+        return Tensor(Tan(self))
 
     def tanh(self):
-        return self.__class__(Tanh(self))
+        return Tensor(Tanh(self))
 
     def atan(self):
-        return self.__class__(Atan(self))
+        return Tensor(Atan(self))
 
     def atanh(self):
-        return self.__class__(Atanh(self))
+        return Tensor(Atanh(self))
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
@@ -197,7 +197,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
-        return self._post("gt", {"r": other}, self.__class__)
+        return self._post("gt", {"r": other}, Tensor)
 
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
@@ -207,7 +207,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
 
-        return self._post("lt", {"r": other}, self.__class__)
+        return self._post("lt", {"r": other}, Tensor)
 
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
@@ -217,7 +217,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def logical_and(self, other):
         """Return a boolean `Tensor` with element-wise logical and values."""
 
-        return self._post("and", {"r": other}, self.__class__)
+        return self._post("and", {"r": other}, Tensor)
 
     def logical_not(self):
         """Return a boolean `Tensor` with element-wise logical not values."""
@@ -252,20 +252,20 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             return self.sum(axis) / self.shape[axis]
 
     def mul(self, other):
-        return self.__class__(Mul(self, other))
+        return Tensor(Mul(self, other))
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
 
-        return self._post("ne", {"r": other}, self.__class__)
+        return self._post("ne", {"r": other}, Tensor)
 
     def pow(self, other):
-        return self.__class__(Pow(self, other))
+        return Tensor(Pow(self, other))
 
     def product(self, axis=None):
         """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
 
-        rtype = Number if axis is None else self.__class__
+        rtype = Number if axis is None else Tensor
         return self._get("product", axis, rtype)
 
     def reshape(self, shape):
@@ -313,12 +313,12 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             raise NotImplementedError("Tensor.std with axis")
 
     def sub(self, other):
-        return self.__class__(Sub(self, other))
+        return Tensor(Sub(self, other))
 
     def sum(self, axis=None):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
-        rtype = Number if axis is None else self.__class__
+        rtype = Number if axis is None else Tensor
         return self._get("sum", axis, rtype)
 
     def transpose(self, permutation=None):
@@ -328,7 +328,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
         """
 
-        return self._get("transpose", permutation, self.__class__)
+        return self._get("transpose", permutation, Tensor)
 
     def write(self, value):
         """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
@@ -455,6 +455,9 @@ class Dense(Tensor):
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
         return cls(truncated)
 
+    def add(self, other):
+        return Dense(Add(self, other))
+
     def argsort(self):
         """Return the coordinates needed to sort this `Tensor`."""
 
@@ -465,17 +468,14 @@ class Dense(Tensor):
 
         return self._get("sparse", rtype=Sparse)
 
-    def div(self, other):
-        return Tensor(Div(self, other))
-
     def elements(self, bounds=None):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
 
         bounds = handle_bounds(bounds)
         return self._get("elements", bounds, Stream)
 
-    def mul(self, other):
-        return Tensor(Mul(self, other))
+    def sub(self, other):
+        return Dense(Sub(self, other))
 
 
 class Sparse(Tensor):
@@ -502,13 +502,13 @@ class Sparse(Tensor):
 
         return cls.expect(shape, dtype)(ref.Get(cls, (shape, dtype)))
 
-    def add(self, other):
-        return Tensor(Add(self, other))
-
     def as_dense(self):
         """Return a :class:`Dense` view of this `Sparse` tensor."""
 
         return self._get("dense", rtype=Dense)
+
+    def div(self, other):
+        return Sparse(Div(self, other))
 
     def elements(self, bounds=None):
         """
@@ -520,8 +520,8 @@ class Sparse(Tensor):
         bounds = handle_bounds(bounds)
         return self._get("elements", bounds, Stream)
 
-    def sub(self, other):
-        return Tensor(Sub(self, other))
+    def mul(self, other):
+        return Sparse(Mul(self, other))
 
 
 def einsum(format, tensors):
