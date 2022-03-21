@@ -8,7 +8,7 @@ from .collection import Collection
 from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .chain import Chain
-from .generic import Tuple
+from .generic import Map, Tuple
 from .scalar.ref import Ref
 from .scalar.value import Nil
 from .scalar import Scalar
@@ -324,8 +324,10 @@ class App(Library):
                 if isinstance(collection, Collection):
                     schema = form_of(collection)
                     form[name] = {str(uri(chain_type)): [{str(uri(type(collection))): [to_json(schema)]}]}
+                elif isinstance(collection, Map) or isinstance(collection, Tuple):
+                    form[name] = {str(uri(chain_type)): [to_json(collection)]}
                 elif isinstance(collection, dict) or isinstance(collection, tuple) or isinstance(collection, list):
-                    form[name] = {str(uri(chain_type)): [collection]}
+                    form[name] = {str(uri(chain_type)): [to_json(collection)]}
                 else:
                     raise TypeError(f"invalid subject for Chain: {collection}")
 

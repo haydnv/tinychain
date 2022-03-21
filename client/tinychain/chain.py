@@ -4,7 +4,7 @@ from .reflect import is_ref
 from .scalar import ref
 from .scalar.value import Nil
 from .state import State
-from .util import uri
+from .util import uri, URI
 
 
 class Chain(State):
@@ -26,6 +26,17 @@ class Chain(State):
 
         else:
             raise ValueError(f"Chain subject must be a State, not {form}")
+
+    def __init__(self, form):
+        # in this case, the type of form is significant
+        # so we can't call State.__init__ because it will discard the type of the form
+
+        if isinstance(form, URI):
+            self.__uri__ = form
+        elif is_ref(form) and hasattr(form, "__uri__"):
+            self.__uri__ = uri(form)
+
+        self.__form__ = form
 
     def set(self, value):
         """Update the value of this `Chain`."""
