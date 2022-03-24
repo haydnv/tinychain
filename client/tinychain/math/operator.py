@@ -1,8 +1,6 @@
-import logging
-
+from ..error import BadRequest
 from ..scalar import ref
-from ..state import State
-from ..util import deanonymize, form_of, to_json
+from ..util import deanonymize, form_of, hex_id, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -36,15 +34,35 @@ class Operator(ref.Op):
 
     def backward(self, variable):
         """
-        Return the derivative of this `Operator` (may be a numeric constant or itself an `Operator`).
+        Return the derivative of this :class:`Operator` (may be a numeric constant or itself an :class:`Operator`).
 
         If a `variable` is specified, this will be the partial derivative w/r/t the given `variable`.
         """
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
+    def gradients(self, variable):
+        """Return the gradients of the :class:`Variable` s that this :class:`Operator` depends on"""
 
-class Add(Operator):
+        raise NotImplementedError(f"{self.__class__}.gradients")
+
+
+class Unary(Operator):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def __ns__(self, context):
+        deanonymize(self.subject, context)
+
+        if ref.is_op_ref(self.subject):
+            self.subject = ref.reference(context, self.subject)
+
+
+class Dual(Operator):
+    """A differentiable operator with two arguments"""
+
+
+class Add(Dual):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -53,30 +71,62 @@ class Add(Operator):
         arg = derivative(self.args, variable)
         return subject + arg
 
+    def gradients(self, loss):
+        # TODO: there should be a way to avoid this import (same below)
+        from ..hosted_ml.optimizer import Variable
 
-class Exp(Operator):
-    def __init__(self, subject):
-        Operator.__init__(self, subject, None)
+        grads = {}
 
-    def forward(self):
-        return Numeric.exp(self.subject)
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = loss.sum()
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(loss))
 
-    def backward(self, _variable):
-        return self.subject.exp()
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = loss.sum()
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(loss))
+
+        return grads
 
 
-class MatMul(Operator):
+class MatMul(Dual):
     def forward(self):
         from ..collection.tensor import einsum
-        return einsum("...ij,...jk->ik", [self.subject, self.args])
+        return einsum("ij,jk->ik", [self.subject, self.args])
 
     def backward(self, variable):
         subject = derivative(self.subject, variable)
         arg = derivative(self.args, variable)
         return (subject @ self.args) + (self.subject @ arg)
 
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
 
-class Mul(Operator):
+        def transpose(matrix):
+            return type(matrix)(ref.If(
+                matrix.ndim == 2,
+                matrix.transpose(),
+                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
+
+        grads = {}
+
+        grad = loss @ transpose(self.args)
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = grad
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(grad))
+
+        grad = transpose(self.subject) @ loss
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = grad
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(grad))
+
+        return grads
+
+
+class Mul(Dual):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -85,8 +135,27 @@ class Mul(Operator):
         arg = derivative(self.args, variable)
         return (subject * self.args) + (self.subject * arg)
 
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
 
-class Sub(Operator):
+        grads = {}
+
+        grad = self.args * loss
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = grad
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(grad))
+
+        grad = self.subject * loss
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = grad
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(grads))
+
+        return grads
+
+
+class Sub(Dual):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -95,8 +164,25 @@ class Sub(Operator):
         arg = derivative(self.args, variable)
         return subject - arg
 
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
 
-class Div(Operator):
+        grads = {}
+
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = -loss.sum()
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(loss))
+
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = -loss.sum()
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(loss))
+
+        return grads
+
+
+class Div(Dual):
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
@@ -105,8 +191,25 @@ class Div(Operator):
         arg = derivative(self.args, variable)
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
 
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
 
-class Pow(Operator):
+        grads = {}
+
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = self.subject * loss / self.args
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(loss / self.args))
+
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = (-self.subject * loss) / self.args ** 2
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(loss / self.args))
+
+        return grads
+
+
+class Pow(Dual):
     def forward(self):
         return Numeric.pow(self.subject, self.args)
 
@@ -116,10 +219,43 @@ class Pow(Operator):
 
         return self.args * (self.subject**(self.args - 1))
 
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
 
-class Unary(Operator):
+        grads = {}
+
+        if isinstance(self.subject, Variable):
+            grads[hex_id(self.subject)] = loss * self.args * self.subject ** (self.args - 1)
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+
+        if isinstance(self.args, Variable):
+            grads[hex_id(self.args)] = loss * self.subject.ln() * self.subject ** self.args
+        elif isinstance(form_of(self.args), Operator):
+            grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
+
+        return grads
+
+
+class Exp(Unary):
     def __init__(self, subject):
         Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Numeric.exp(self.subject)
+
+    def backward(self, _variable):
+        return self.subject.exp()
+
+    def gradients(self, loss):
+        from ..hosted_ml.optimizer import Variable
+
+        grad = self.subject.exp() * loss
+
+        if isinstance(self.subject, Variable):
+            return {hex_id(self.subject): grad}
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Sin(Unary):

@@ -21,7 +21,7 @@ class DeepNeuralNet(tc.app.App):
     def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
         layer = tc.hosted_ml.nn.DNNLayer.create(2, 1)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
-        return cxt.optimizer.train(inputs, labels).sum()
+        return cxt.optimizer.train(inputs, labels)
 
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
@@ -38,9 +38,9 @@ class NeuralNetTests(unittest.TestCase):
 
     def testDNNLayer(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        labels = np.logical_or(inputs[:, 0], inputs[:, 1])
+        labels = np.logical_or(inputs[:, 0], inputs[:, 1]).reshape([BATCH_SIZE, 1])
 
-        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn"), {
+        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn_layer"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })

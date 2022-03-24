@@ -6,7 +6,7 @@ from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..math.operator import derivative, Operator
 from ..scalar.ref import After
-from ..util import form_of
+from ..util import form_of, hex_id
 
 from . import LIB_URI
 
@@ -59,36 +59,33 @@ class GradientDescent(Optimizer, Dynamic):
         loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
         assert isinstance(form_of(outputs), Operator)
 
-        deltas = backpropagate(loss, form_of(outputs))
-        if not deltas:
+        variables = trainable(form_of(outputs))
+
+        gradients = form_of(outputs).gradients(derivative(loss))
+        if not gradients:
             logging.warning(f"model {self.ml_model} has no Variables for {self} to train")
 
         writes = []
-        for var, delta in deltas:
-            writes.append(var.update((delta * self.lr).sum()))
+        for var_id, delta in gradients.items():
+            var = variables[var_id]
+            writes.append(var.update(delta * self.lr))
 
         return After(writes, loss)
 
 
-def backpropagate(loss, op):
+def trainable(op):
     assert isinstance(op, Operator)
 
-    deltas = []
-    unvisited = [op]
+    vars = {}
 
-    for op in unvisited:
-        assert isinstance(op, Operator)
+    if isinstance(op.subject, Variable):
+        vars[hex_id(op.subject)] = op.subject
+    elif isinstance(form_of(op.subject), Operator):
+        vars.update(trainable(form_of(op.subject)))
 
-        if isinstance(op.subject, Variable):
-            delta = derivative(loss, op.subject)
-            deltas.append((op.subject, delta.copy()))
-        elif isinstance(form_of(op.subject), Operator):
-            unvisited.append(form_of(op.subject))
+    if isinstance(op.args, Variable):
+        vars[hex_id(op.args)] = op.args
+    elif isinstance(form_of(op.args), Operator):
+        vars.update(trainable(form_of(op.args)))
 
-        if isinstance(op.args, Variable):
-            delta = derivative(loss, op.args)
-            deltas.append((op.args, delta.copy()))
-        elif isinstance(form_of(op.args), Operator):
-            unvisited.append(form_of(op.args))
-
-    return deltas
+    return vars
