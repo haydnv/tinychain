@@ -16,12 +16,17 @@ from .state import Class, Instance, Object, State
 from .util import form_of, get_ref, to_json, uri, URI
 
 
+RESERVED = set(["exports", "provides", "uses", "validate"])
+
+
 class Model(Object, metaclass=Meta):
     def __new__(cls, *args, **kwargs):
-        if "form" in kwargs:
+        if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
+        elif "form" in kwargs:
+            return Instance.__new__(model(cls))
         else:
-            return Class.__new__(cls)
+            return Class.__new__(model(cls))
 
     def __init__(self, form):
         if form is None:
@@ -50,7 +55,7 @@ class Model(Object, metaclass=Meta):
 
     def __json__(self):
         if form_of(self) is self:
-            raise RuntimeError(f"{self} has no JSON encoder defined--did you forget to call super().__init__?")
+            raise RuntimeError(f"{self} is not JSON-encodable")
 
         form = form_of(self)
         form = form if form else [None]
@@ -169,6 +174,9 @@ class ModelRef(object):
 
 
 def model(cls):
+    if not issubclass(cls, Model):
+        raise TypeError(f"expected a subclass of Model but found {cls}")
+
     class _Model(cls):
         def __init__(self, *args, **kwargs):
             if "form" in kwargs:
@@ -199,7 +207,6 @@ class Library(object):
     @staticmethod
     def exports():
         """A list of :class:`Model` s provided by this `Library`"""
-
         return []
 
     @staticmethod
@@ -218,7 +225,11 @@ class Library(object):
             if not inspect.isclass(cls):
                 raise TypeError(f"Library.exports must specify a class, not {cls}")
 
-            setattr(self, cls.__name__, model(cls))
+            expected_uri = uri(self).append(cls.__name__)
+            if not uri(cls) or uri(cls) != expected_uri:
+                raise ValueError(f"the URI {cls} should be {expected_uri}, not {uri(cls)}")
+
+            setattr(self, cls.__name__, cls)
 
     def validate(self):
         name = self.__class__.__name__
@@ -237,7 +248,7 @@ class Library(object):
 
         header = Header()
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in ["exports", "uses", "validate"]:
+            if name.startswith('_') or name in RESERVED:
                 continue
 
             if hasattr(attr, "hidden") and attr.hidden:
@@ -253,7 +264,7 @@ class Library(object):
 
         form = {}
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
+            if name.startswith('_') or name in RESERVED:
                 continue
 
             if inspect.isclass(attr):
@@ -302,7 +313,7 @@ class App(Library):
         # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in ["exports", "provides", "uses", "validate"]:
+            if name.startswith('_') or name in RESERVED:
                 continue
 
             if inspect.isclass(attr):
@@ -353,7 +364,7 @@ def write_config(lib, config_path, overwrite=False):
     """Write the configuration of the given :class:`tc.App` or :class:`Library` to the given path."""
 
     if inspect.isclass(lib):
-        raise ValueError(f"write_app expects an instance of App, not a class: {lib}")
+        raise ValueError(f"write_app expects an instance of Library, not a class: {lib}")
 
     import json
     import pathlib
@@ -377,5 +388,3 @@ def write_config(lib, config_path, overwrite=False):
 
         with open(config_path, 'w') as config_file:
             config_file.write(json.dumps(config, indent=4))
-
-

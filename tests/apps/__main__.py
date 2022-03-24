@@ -1,4 +1,4 @@
-from test_app import *
+from test_inheritance import *
 from test_btree import *
 from test_chain import *
 from test_neural_net import *

@@ -8,6 +8,8 @@ from ..math.operator import derivative, Operator
 from ..scalar.ref import After
 from ..util import form_of
 
+from . import LIB_URI
+
 
 # TODO: support Sparse and Number variable types
 class Variable(Dense):
@@ -38,6 +40,8 @@ class Variable(Dense):
 
 
 class Optimizer(Model):
+    __uri__ = LIB_URI.append("Optimizer")
+
     @post
     def train(self, inputs):
         return error.NotImplemented(f"{self.__class__.__name__}.train")

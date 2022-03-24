@@ -1,85 +1,39 @@
-import typing
-import unittest
 import testutils
 import tinychain as tc
+import unittest
+
+URI = tc.URI("/test/app")
 
 
-URI = tc.URI("/test/lib")
-
-
-class Foo(tc.app.Model):
+class User(tc.app.Model):
     __uri__ = URI.append("Foo")
 
-    name = tc.String
+    first_name = tc.Column(tc.String, 100)
+    last_name = tc.Column(tc.String, 100)
+    email = tc.Column(tc.EmailAddress, 100)
 
-    def __init__(self, name):
-        self.name = name
-
-    @tc.get
-    def greet(self):
-        return tc.String("my name is {{name}}").render(name=self.name)
-
-
-class Bar(Foo):
-    __uri__ = URI.append("Bar")
-
-    @tc.get
-    def greet(self):
-        return tc.String("their name is {{name}}").render(name=self.name)
+    def __init__(self, first_name, last_name, email):
+        self.first_name = first_name
+        self.last_name = last_name
+        self.email = email
 
 
-class Baz(Bar, tc.app.Dynamic):
-    def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
-        Bar.__init__(self, name)
-        self.greetings = greetings
-
-    @tc.get
-    def greet(self):
-        return tc.String("hello {{name}} x{{number}}").render(name=self.name, number=len(self.greetings))
-
-
-class TestLib(tc.app.Library):
+class TestApp(tc.app.App):
     __uri__ = URI
 
-    def exports(self):
-        return [
-            Foo,
-            Bar,
-        ]
-
-    @tc.get
-    def check_foo(self, cxt) -> tc.String:
-        cxt.foo = self.Foo("foo")
-        return cxt.foo.greet()
-
-    @tc.get
-    def check_bar(self, cxt) -> tc.String:
-        cxt.bar = self.Bar("bar")
-        return cxt.bar.greet()
-
-    @tc.get
-    def check_baz(self, cxt) -> tc.String:
-        cxt.baz = Baz("baz", ["one", "two", "three"])
-        return cxt.baz.greet()
+    @tc.post
+    def create_user(self, new_user: User):
+        """TODO"""
 
 
-class LibraryTests(unittest.TestCase):
+class UserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_lib", [TestLib()])
+        cls.host = testutils.start_docker("test_lib", [TestApp()])
 
-    def testApp(self):
-        expected = "my name is foo"
-        actual = self.host.get("/test/lib/check_foo")
-        self.assertEqual(expected, actual)
-
-        expected = "their name is bar"
-        actual = self.host.get("/test/lib/check_bar")
-        self.assertEqual(expected, actual)
-
-        expected = "hello baz x3"
-        actual = self.host.get("/test/lib/check_baz")
-        self.assertEqual(expected, actual)
+    def testCreateUser(self):
+        details = {"first_name": "First", "last_name": "Last", "email": "email@example.com"}
+        self.host.post(tc.uri(TestApp).append("create_user"), details)
 
     @classmethod
     def tearDownClass(cls) -> None:
