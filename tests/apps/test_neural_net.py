@@ -8,7 +8,7 @@ URI = tc.URI("/test/ml/app")
 BATCH_SIZE = 20
 
 
-class TestLibrary(tc.app.Library):
+class DeepNeuralNet(tc.app.App):
     __uri__ = URI
 
     @staticmethod
@@ -34,13 +34,13 @@ class TestLibrary(tc.app.Library):
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_neural_net", [tc.hosted_ml.service.ML(), TestLibrary()])
+        cls.host = testutils.start_docker("test_neural_net", DeepNeuralNet())
 
     def testDNNLayer(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         labels = np.logical_or(inputs[:, 0], inputs[:, 1])
 
-        self.host.post(tc.uri(TestLibrary).append("test_dnn"), {
+        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })
@@ -49,7 +49,7 @@ class NeuralNetTests(unittest.TestCase):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         labels = np.logical_or(inputs[:, 0], inputs[:, 1])
 
-        self.host.post(tc.uri(TestLibrary).append("test_dnn"), {
+        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })

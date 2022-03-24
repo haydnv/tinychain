@@ -67,7 +67,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(name, apps, overwrite=True, host_uri=None, wait_time=1., cache_size="5K"):
+def start_docker(name, app_or_libraries, overwrite=True, host_uri=None, wait_time=1., cache_size="5K"):
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -77,7 +77,11 @@ def start_docker(name, apps, overwrite=True, host_uri=None, wait_time=1., cache_
     maybe_create_dir(config_dir, overwrite)
 
     app_configs = []
-    for app in apps:
+
+    if isinstance(app_or_libraries, tc.app.Library):
+        app_or_libraries = [app_or_libraries] + list(lib() for lib in app_or_libraries.uses().values())
+
+    for app in app_or_libraries:
         app_path = tc.uri(app).path()
         tc.app.write_config(app, f"{config_dir}{app_path}", overwrite)
         app_configs.append(app_path)
