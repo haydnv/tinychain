@@ -47,7 +47,7 @@ class NeuralNetTests(unittest.TestCase):
 
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        labels = np.logical_or(inputs[:, 0], inputs[:, 1])
+        labels = np.logical_or(inputs[:, 0], inputs[:, 1]).reshape([BATCH_SIZE, 1])
 
         self.host.post(tc.uri(DeepNeuralNet).append("test_dnn"), {
             "inputs": load_dense(inputs),
