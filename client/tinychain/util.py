@@ -343,12 +343,15 @@ def uri(subject):
         return subject
 
     if hasattr(subject, "__uri__"):
+        if subject.__uri__ is None:
+            raise ValueError(f"{subject} (a {type(subject)}) has a URI of {None}")
+
         return subject.__uri__
 
     if hasattr(type(subject), "__uri__"):
         return uri(type(subject))
 
-    raise AttributeError(f"{subject} has no URI")
+    return None
 
 
 def to_json(obj):

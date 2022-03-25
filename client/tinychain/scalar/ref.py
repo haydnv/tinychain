@@ -219,7 +219,7 @@ class Op(Ref):
             subject = self.subject
 
         if uri(subject) is None:
-            raise ValueError(f"Op subject {subject} has no URI")
+            raise ValueError(f"subject {self.subject} of {self} has no URI")
 
         return {str(uri(subject)): to_json(self.args)}
 
@@ -391,8 +391,6 @@ class MethodSubject(object):
     def __init__(self, subject, method_name=""):
         if uri(subject).startswith('$'):
             self.__uri__ = uri(subject).append(method_name)
-        else:
-            self.__uri__ = None
 
         self.subject = subject
         self.method_name = method_name
@@ -408,7 +406,7 @@ class MethodSubject(object):
         name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
         auto_uri = URI(name).append(self.method_name)
 
-        if uri(self):
+        if hasattr(self, "__uri__"):
             if uri(self) == auto_uri and name not in cxt:
                 logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
@@ -428,7 +426,6 @@ class MethodSubject(object):
             deanonymize(self.subject, cxt)
             self.__uri__ = uri(self.subject).append(self.method_name)
 
-
     def __json__(self):
         if self.__uri__ is None:
             raise ValueError(f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
@@ -436,7 +433,7 @@ class MethodSubject(object):
         return to_json(uri(self))
 
     def __str__(self):
-        if self.__uri__ is None:
+        if not hasattr(self, "__uri__"):
             return str(uri(self.subject).append(self.method_name))
         else:
             return str(uri(self))
