@@ -19,13 +19,16 @@ class DeepNeuralNet(tc.app.App):
 
     @tc.post
     def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
-        layer = tc.hosted_ml.nn.DNNLayer.create(2, 1)
+        layer = tc.hosted_ml.nn.DNNLayer.create(2, 1, tc.hosted_ml.sigmoid)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
         return cxt.optimizer.train(inputs, labels)
 
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
-        layers = [tc.hosted_ml.nn.DNNLayer.create(2, 2), tc.hosted_ml.nn.DNNLayer.create(2, 1)]
+        layers = [
+            tc.hosted_ml.nn.DNNLayer.create(2, 2, tc.hosted_ml.sigmoid),
+            tc.hosted_ml.nn.DNNLayer.create(2, 1, tc.hosted_ml.sigmoid)]
+
         dnn = tc.hosted_ml.nn.Sequential(layers)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(dnn)
         return cxt.optimizer.train(inputs, labels).sum()

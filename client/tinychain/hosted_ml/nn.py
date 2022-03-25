@@ -2,7 +2,6 @@ from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import hidden, post
 from ..generic import Tuple
-from ..ml import Activation
 from ..scalar.ref import After
 
 from .interface import Differentiable
@@ -18,7 +17,7 @@ class Layer(Model, Differentiable):
 
 class ConvLayer(Layer, Dynamic):
     @classmethod
-    def create(cls, inputs_shape, filter_shape, stride=1, padding=1, activation=None):
+    def create(cls, inputs_shape, filter_shape, stride=1, padding=1, activation=None, optimal_std=None):
         """
         Create a new, empty `ConvLayer` with the given shape and activation function.
 
@@ -37,7 +36,7 @@ class ConvLayer(Layer, Dynamic):
         c_i, h_i, w_i = inputs_shape
         out_c, h_f, w_f = filter_shape
 
-        optimal_std = activation.optimal_std if activation else Activation.optimal_std
+        optimal_std = lambda i, o: (i * o)**0.5 if optimal_std is None else optimal_std
         std = optimal_std(c_i * h_i * w_i, out_c * h_f * w_f)
         weights = Variable.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
         bias = Variable.random_normal([out_c, 1], mean=0.0, std=std)
@@ -113,9 +112,8 @@ class ConvLayer(Layer, Dynamic):
 
 class DNNLayer(Layer, Dynamic):
     @classmethod
-    def create(cls, input_size, output_size, activation=None):
-        optimal_std = activation.optimal_std if activation else Activation.optimal_std
-        std = optimal_std(input_size, output_size)
+    def create(cls, input_size, output_size, activation=None, optimal_std=None):
+        std = optimal_std(input_size, output_size) if optimal_std else (input_size * output_size)**0.5
         weights = Variable.random_normal([input_size, output_size], std=std)
         bias = Variable.random_normal([output_size], std=std)
         return cls(weights, bias, activation)
