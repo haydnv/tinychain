@@ -52,6 +52,8 @@ class Unary(Operator):
         Operator.__init__(self, subject, None)
 
     def __ns__(self, context):
+        assert self.args is None
+
         deanonymize(self.subject, context)
 
         if ref.is_op_ref(self.subject):
@@ -93,7 +95,7 @@ class Add(Dual):
 class MatMul(Dual):
     def forward(self):
         from ..collection.tensor import einsum
-        return einsum("ij,jk->ik", [self.subject, self.args])
+        return einsum("...ij,...jk->ik", [self.subject, self.args])
 
     def backward(self, variable):
         subject = derivative(self.subject, variable)
