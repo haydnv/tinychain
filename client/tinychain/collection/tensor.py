@@ -1,22 +1,36 @@
 """An n-dimensional array of numbers."""
-
+import logging
 import typing
 
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..interface import Equality, Order
+from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import Operator, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import uri
+from ..util import form_of, uri
 
 from .base import Collection
 
 
-class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
+class NDArray(Interface):
+    def expand_dims(self, axis=-1):
+        return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
+
+    def flip(self, axis):
+        return ref.Get(ref.MethodSubject(self, "flip"), axis)
+
+    def reshape(self, shape):
+        return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+
+    def transpose(self, permutation=None):
+        return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
+
+
+class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
@@ -44,6 +58,13 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             @property
             def dtype(self):
                 return dtype
+
+            @property
+            def ndim(self):
+                if hasattr(shape, "__len__"):
+                    return len(shape)
+                else:
+                    return ref.Get(ref.MethodSubject(self, "ndim"))
 
             @property
             def schema(self):
@@ -182,7 +203,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
-        return self._get("flip", axis, Tensor)
+        return self.__class__(Flip(self, axis))
 
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
@@ -192,7 +213,14 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def expand_dims(self, axis=None):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
-        return self._get("expand_dims", axis, self.__class__)
+        rtype = Tensor
+        if isinstance(form_of(self.shape), list) or isinstance(form_of(self.shape), tuple):
+            if isinstance(form_of(axis), int):
+                shape = list(form_of(self.shape))
+                shape.insert(form_of(axis), 1)
+                rtype = Tensor.expect(shape, self.dtype)
+
+        return rtype(form=Expand(self, axis))
 
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
@@ -271,7 +299,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def reshape(self, shape):
         """Return a view of this `Tensor` with the given `shape`."""
 
-        return self._get("reshape", shape, self.__class__)
+        return Tensor.expect(shape, self.dtype)(form=Reshape(self, shape))
 
     @property
     def shape(self):
@@ -328,7 +356,21 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
         """
 
-        return self._get("transpose", permutation, Tensor)
+        dtype = self.dtype
+        shape = None
+
+        if hasattr(self.shape, "__len__"):
+            if permutation is None:
+                shape = reversed(self.shape)
+            elif hasattr(permutation, "__iter__"):
+                shape = [self.shape[x] for x in permutation]
+
+        if shape is None:
+            rtype = Tensor
+        else:
+            rtype = Tensor.expect(shape, dtype)
+
+        return rtype(form=Transpose(self, permutation))
 
     def write(self, value):
         """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
@@ -556,3 +598,63 @@ def where(cond, x, y):
     """
 
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+
+
+class Transform(Operator):
+    def backward(self, variable):
+        raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
+
+
+class Expand(Transform):
+    def forward(self):
+        return NDArray.expand_dims(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
+
+
+class Flip(Transform):
+    def forward(self):
+        return NDArray.flip(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+
+        return form_of(self.subject).gradients(loss.flip(self.args))
+
+
+class Transpose(Transform):
+    def __init__(self, subject, permutation=None):
+        Transform.__init__(self, subject, permutation)
+
+        if permutation is None:
+            self.inverse_permutation = None
+        else:
+            self.inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(permutation)))
+
+    def forward(self):
+        return NDArray.transpose(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+        return form_of(self.subject).gradients(loss.transpose(self.inverse_permutation))
+
+
+class Reshape(Transform):
+    def forward(self):
+        return NDArray.reshape(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))

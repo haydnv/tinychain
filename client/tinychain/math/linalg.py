@@ -295,7 +295,7 @@ def slogdet(cxt, x: Dense) -> typing.Tuple[Tensor, Tensor]:
     result = After(Stream.range((0, cxt.batch_size)).for_each(step), [cxt.sign_result, cxt.logdet_result])
     sign, determinants = Tuple(result).unpack(2)
 
-    return Tensor.reshape(sign, cxt.batch_shape), Tensor.reshape(determinants, cxt.batch_shape)
+    return Tensor(sign).reshape(cxt.batch_shape), Tensor(determinants).reshape(cxt.batch_shape)
 
 
 @post
@@ -405,7 +405,8 @@ def svd_parallel(txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)
         @closure(txn.UsV_tuples)
         @get_op
         def getter(i: UInt) -> Dense:
-            return Tensor.expand_dims(Tuple(txn.UsV_tuples[i])[j], 0)
+            tensor = Tensor(Tuple(txn.UsV_tuples[i])[j])
+            return tensor.expand_dims(0)
 
         return getter
 
