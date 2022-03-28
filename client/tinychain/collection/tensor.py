@@ -1,17 +1,17 @@
 """An n-dimensional array of numbers."""
-
+import logging
 import typing
 
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import Operator, Dual, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import uri
+from ..util import form_of, hex_id, uri
 
 from .base import Collection
 
@@ -44,6 +44,13 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
             @property
             def dtype(self):
                 return dtype
+
+            @property
+            def ndim(self):
+                if hasattr(shape, "__len__"):
+                    return len(shape)
+                else:
+                    return ref.Get(ref.MethodSubject(self, "ndim"))
 
             @property
             def schema(self):
@@ -192,7 +199,14 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def expand_dims(self, axis=None):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
-        return self._get("expand_dims", axis, self.__class__)
+        rtype = Tensor
+        if isinstance(form_of(self.shape), list) or isinstance(form_of(self.shape), tuple):
+            if isinstance(form_of(axis), int):
+                shape = list(form_of(self.shape))
+                shape.insert(form_of(axis), 1)
+                rtype = Tensor.expect(shape, self.dtype)
+
+        return rtype(form=Expand(self, axis))
 
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
@@ -271,7 +285,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
     def reshape(self, shape):
         """Return a view of this `Tensor` with the given `shape`."""
 
-        return self._get("reshape", shape, self.__class__)
+        return Tensor.expect(shape, self.dtype)(form=Reshape(self, shape))
 
     @property
     def shape(self):
@@ -328,7 +342,21 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
         If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
         """
 
-        return self._get("transpose", permutation, Tensor)
+        dtype = self.dtype
+        shape = None
+
+        if hasattr(self.shape, "__len__"):
+            if permutation is None:
+                shape = reversed(self.shape)
+            elif hasattr(permutation, "__iter__"):
+                shape = [self.shape[x] for x in permutation]
+
+        if shape is None:
+            rtype = Tensor
+        else:
+            rtype = Tensor.expect(shape, dtype)
+
+        return rtype(form=Transpose(self, permutation))
 
     def write(self, value):
         """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
@@ -556,3 +584,53 @@ def where(cond, x, y):
     """
 
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+
+
+class Transform(Operator):
+    def backward(self, variable):
+        raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
+
+
+class Expand(Transform):
+    def forward(self):
+        return ref.Get(ref.MethodSubject(self.subject, "expand_dims"), self.args)
+
+
+class Transpose(Transform):
+    def forward(self):
+        return ref.Get(ref.MethodSubject(self.subject, "transpose"), self.args)
+
+    def gradients(self, loss):
+        # TODO: remove this dependency
+        from ..hosted_ml.optimizer import Variable
+
+        if self.args is None:
+            permutation = list(reversed(range(form_of(self.subject.ndim))))
+        else:
+            permutation = tuple(i[1] for i in sorted(zip(self.args, range(len(self.args))), key=lambda i: i[0]))
+
+        if isinstance(self.subject, Variable):
+            return {hex_id(self.subject): self.subject.transpose(permutation)}
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(loss.transpose(permutation))
+        else:
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+
+class Reshape(Transform):
+    def forward(self):
+        return ref.Get(ref.MethodSubject(self.subject, "reshape"), self.args)
+
+    def gradients(self, loss):
+        # TODO: remove this dependency
+        from ..hosted_ml.optimizer import Variable
+
+        old_shape = self.subject.shape
+        if isinstance(self.subject, Variable):
+            return {hex_id(self.subject): loss.reshape(old_shape)}
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(loss.reshape(old_shape))
+        else:
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}

@@ -106,10 +106,10 @@ class MatMul(Dual):
         from ..hosted_ml.optimizer import Variable
 
         def transpose(matrix):
-            return type(matrix)(ref.If(
+            return type(matrix)(form=ref.If(
                 matrix.ndim == 2,
                 matrix.transpose(),
-                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
+                BadRequest(f"not a matrix: {{tensor}}", tensor=matrix)))
 
         grads = {}
 

@@ -117,6 +117,13 @@ class If(Ref):
         return [self.cond, self.then, self.or_else]
 
     def __json__(self):
+        # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
+        if isinstance(self.cond, bool):
+            if self.cond:
+                return to_json(self.then)
+            else:
+                return to_json(self.or_else)
+
         return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt):
