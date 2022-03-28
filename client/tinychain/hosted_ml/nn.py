@@ -1,3 +1,5 @@
+import logging
+
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import hidden
@@ -45,6 +47,12 @@ class ConvLayer(Layer, Dynamic):
         return cls(weights, bias, inputs_shape, filter_shape, stride, padding, activation)
 
     def __init__(self, weights, bias, inputs_shape, filter_shape, stride, padding, activation):
+        if not isinstance(weights, Variable):
+            logging.warning(f"ConvLayer with weights {weights} will not be trainable")
+
+        if not isinstance(bias, Variable):
+            logging.warning(f"ConvLayer with bias {bias} will not be trainable")
+
         # compile-time constants
         self._inputs_shape = inputs_shape
         self._filter_shape = filter_shape

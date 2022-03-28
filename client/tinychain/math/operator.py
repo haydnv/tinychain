@@ -27,6 +27,9 @@ class Operator(ref.Op):
         if ref.is_op_ref(self.args):
             self.args = ref.reference(context, self.args)
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.subject}, {self.args})"
+
     def forward(self):
         """Return the result of evaluating this `Operator`"""
 

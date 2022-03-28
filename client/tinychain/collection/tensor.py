@@ -619,14 +619,14 @@ class Transpose(Transform):
         return NDArray.transpose(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(self.subject, Operator):
+        if not isinstance(form_of(self.subject), Operator):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
 
         if self.args is None:
-            permutation = list(reversed(range(form_of(self.subject.ndim))))
+            permutation = None
         else:
-            permutation = tuple(i[1] for i in sorted(zip(self.args, range(len(self.args))), key=lambda i: i[0]))
+            permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
 
         return form_of(self.subject).gradients(loss.transpose(permutation))
 

@@ -53,17 +53,13 @@ class Variable(tensor.Dense):
 
 class Transpose(tensor.Transpose):
     def gradients(self, loss):
-        if not isinstance(self.subject, Variable):
-            return tensor.Transpose.gradients(self, loss)
-
-        permutation = tuple(i[1] for i in sorted(zip(self.args, range(len(self.args))), key=lambda i: i[0]))
+        assert isinstance(self.subject, Variable)
+        permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
         return {hex_id(self.subject): self.subject.transpose(permutation)}
 
 
 class Reshape(tensor.Reshape):
     def gradients(self, loss):
-        if not isinstance(self.subject, Variable):
-            return tensor.Reshape.gradients(self, loss)
-
+        assert isinstance(self.subject, Variable)
         old_shape = self.subject.shape
         return {hex_id(self.subject): loss.reshape(old_shape)}

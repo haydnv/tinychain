@@ -38,7 +38,7 @@ class GradientDescent(Optimizer, Dynamic):
 
         gradients = form_of(outputs).gradients(derivative(loss))
         if not gradients:
-            logging.warning(f"model {self.ml_model} has no Variables for {self} to train")
+            logging.warning(f"model {self.ml_model} operator {form_of(outputs)} has no Variables for {self} to train")
 
         writes = []
         for var_id, delta in gradients.items():
