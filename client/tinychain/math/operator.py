@@ -41,7 +41,7 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
-    def gradients(self, variable):
+    def gradients(self, loss):
         """Return the gradients of the :class:`Variable` s that this :class:`Operator` depends on"""
 
         raise NotImplementedError(f"{self.__class__}.gradients")

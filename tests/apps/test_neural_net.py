@@ -8,7 +8,7 @@ URI = tc.URI("/test/ml/app")
 BATCH_SIZE = 20
 
 
-class DeepNeuralNet(tc.app.App):
+class NeuralNetTester(tc.app.Library):
     __uri__ = URI
 
     @staticmethod
@@ -16,6 +16,12 @@ class DeepNeuralNet(tc.app.App):
         return {
             "ML": tc.hosted_ml.service.ML
         }
+
+    @tc.post
+    def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
+        layer = tc.hosted_ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1])
+        cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
+        return cxt.optimizer.train(inputs, labels)
 
     @tc.post
     def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
@@ -37,13 +43,22 @@ class DeepNeuralNet(tc.app.App):
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_neural_net", DeepNeuralNet())
+        cls.host = testutils.start_docker("test_neural_net", NeuralNetTester())
+
+    def testCNNLayer(self):
+        inputs = np.ones([BATCH_SIZE, 3, 5, 5])
+        labels = np.ones([BATCH_SIZE, 2, 3, 3]) * 2
+
+        self.host.post(tc.uri(NeuralNetTester).append("test_cnn_layer"), {
+            "inputs": load_dense(inputs),
+            "labels": load_dense(labels),
+        })
 
     def testDNNLayer(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         labels = np.logical_or(inputs[:, 0], inputs[:, 1]).reshape([BATCH_SIZE, 1])
 
-        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn_layer"), {
+        self.host.post(tc.uri(NeuralNetTester).append("test_dnn_layer"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })
@@ -52,7 +67,7 @@ class NeuralNetTests(unittest.TestCase):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         labels = np.logical_or(inputs[:, 0], inputs[:, 1]).reshape([BATCH_SIZE, 1])
 
-        self.host.post(tc.uri(DeepNeuralNet).append("test_dnn"), {
+        self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {
             "inputs": load_dense(inputs),
             "labels": load_dense(labels),
         })

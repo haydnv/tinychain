@@ -1,11 +1,11 @@
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
-from ..decorators import hidden, post
+from ..decorators import hidden
 from ..generic import Tuple
 from ..scalar.ref import After
 
 from .interface import Differentiable
-from .optimizer import Variable
+from .variable import Variable
 from . import LIB_URI
 
 
@@ -36,8 +36,9 @@ class ConvLayer(Layer, Dynamic):
         c_i, h_i, w_i = inputs_shape
         out_c, h_f, w_f = filter_shape
 
-        optimal_std = lambda i, o: (i * o)**0.5 if optimal_std is None else optimal_std
-        std = optimal_std(c_i * h_i * w_i, out_c * h_f * w_f)
+        input_size = c_i * h_i * w_i
+        output_size = out_c * h_f * w_f
+        std = optimal_std(input_size, output_size) if optimal_std else (input_size * output_size)**0.5
         weights = Variable.random_normal([out_c, c_i, h_f, w_f], mean=0.0, std=std)
         bias = Variable.random_normal([out_c, 1], mean=0.0, std=std)
 
@@ -57,15 +58,15 @@ class ConvLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @post
-    def eval(self, cxt, inputs: Tensor) -> Tensor:
+    @hidden
+    def operator(self, inputs):
         b_i = inputs.shape[0]
 
         if self._padding == 0:
             output = einsum("abcd,efgh->eacd", [self.weights, inputs])
             output += self.bias.reshape([1, self._filter_shape[0], 1, 1])
             if self._activation:
-                return self._activation(output).forward()
+                return self._activation(output)
             else:
                 return output
 
@@ -81,31 +82,30 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        _pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-        cxt.pad_matrix = Tensor(After(
-            _pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
-            _pad_matrix))
+        pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
+        pad_matrix = Tensor(After(
+            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            pad_matrix))
 
-        _im2col_matrix = []
+        im2col_matrix = []
         for i in range(h_out):
             for j in range(w_out):
                 shape = [c_i * h_f * w_f, b_i]
-                _im2col = cxt.pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
-                _im2col_matrix.append(_im2col)
+                im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
+                im2col_matrix.append(im2col)
 
-        assert _im2col_matrix
+        assert im2col_matrix
 
         shape = [b_i * h_out * w_out, c_i * h_f * w_f]
-        cxt.im2col_matrix = Dense.concatenate(_im2col_matrix, 0).reshape(shape).transpose()
-        cxt.w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
+        im2col_matrix = Dense.concatenate(im2col_matrix, 0).reshape(shape).transpose()
+        w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
 
         shape = [out_c, h_out, w_out, b_i]
-        cxt.in2col_multiply = (einsum("ij,jm->im", [cxt.w_col, cxt.im2col_matrix]) + self.bias).reshape(shape)
-
-        output = cxt.in2col_multiply.copy().transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
+        in2col_multiply = (w_col @ im2col_matrix) + self.bias
+        output = in2col_multiply.reshape(shape).transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
 
         if self._activation:
-            return self._activation(output).forward()
+            return self._activation(output)
         else:
             return output
 

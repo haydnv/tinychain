@@ -4,19 +4,30 @@ import typing
 
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..interface import Equality, Order
+from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Operator, Dual, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import Operator, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import form_of, hex_id, uri
+from ..util import form_of, uri
 
 from .base import Collection
 
 
-class Tensor(Collection, Equality, Numeric, Order, Trigonometric):
+class NDArray(Interface):
+    def expand_dims(self, axis=-1):
+        return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
+
+    def reshape(self, shape):
+        return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+
+    def transpose(self, permutation=None):
+        return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
+
+
+class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
@@ -593,29 +604,31 @@ class Transform(Operator):
 
 class Expand(Transform):
     def forward(self):
-        return ref.Get(ref.MethodSubject(self.subject, "expand_dims"), self.args)
+        return NDArray.expand_dims(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(self.subject, Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
 
 
 class Transpose(Transform):
     def forward(self):
-        return ref.Get(ref.MethodSubject(self.subject, "transpose"), self.args)
+        return NDArray.transpose(self.subject, self.args)
 
     def gradients(self, loss):
-        # TODO: remove this dependency
-        from ..hosted_ml.optimizer import Variable
+        if not isinstance(self.subject, Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
 
         if self.args is None:
             permutation = list(reversed(range(form_of(self.subject.ndim))))
         else:
             permutation = tuple(i[1] for i in sorted(zip(self.args, range(len(self.args))), key=lambda i: i[0]))
 
-        if isinstance(self.subject, Variable):
-            return {hex_id(self.subject): self.subject.transpose(permutation)}
-        elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(loss.transpose(permutation))
-        else:
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
+        return form_of(self.subject).gradients(loss.transpose(permutation))
 
 
 class Reshape(Transform):
@@ -623,14 +636,9 @@ class Reshape(Transform):
         return ref.Get(ref.MethodSubject(self.subject, "reshape"), self.args)
 
     def gradients(self, loss):
-        # TODO: remove this dependency
-        from ..hosted_ml.optimizer import Variable
-
-        old_shape = self.subject.shape
-        if isinstance(self.subject, Variable):
-            return {hex_id(self.subject): loss.reshape(old_shape)}
-        elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(loss.reshape(old_shape))
-        else:
+        if not isinstance(form_of(self.subject), Operator):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
+
+        old_shape = self.subject.shape
+        return form_of(self.subject).gradients(loss.reshape(old_shape))
