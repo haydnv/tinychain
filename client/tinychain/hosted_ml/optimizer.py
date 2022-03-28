@@ -14,6 +14,9 @@ from . import LIB_URI
 # TODO: support Sparse and Number variable types
 class Variable(Dense):
     """A trainable variable in a machine learning model."""
+    def __init__(self, form):
+        super().__init__(form)
+        self.grad = 0
 
     def __getitem__(self, bounds):
         return Variable(Dense[bounds])

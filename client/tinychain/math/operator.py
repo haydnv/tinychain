@@ -49,9 +49,17 @@ class Add(Operator):
         return Numeric.add(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
-        return subject + arg
+        from ..hosted_ml.optimizer import Variable
+        
+        if isinstance(self.args, Variable):
+            self.args.grad = variable
+        elif isinstance(form_of(self.args), Operator):
+            form_of(self.args).backward(variable)
+        
+        if isinstance(self.subject, Variable):
+            self.subject.grad = variable
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(variable)
 
 
 class Exp(Operator):
@@ -61,8 +69,13 @@ class Exp(Operator):
     def forward(self):
         return Numeric.exp(self.subject)
 
-    def backward(self, _variable):
-        return self.subject.exp()
+    def backward(self, variable):
+        from ..hosted_ml.optimizer import Variable
+
+        if isinstance(self.subject, Variable):
+            self.subject.grad = self.subject.exp() * variable
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(self.subject.exp() * variable)
 
 
 class MatMul(Operator):
@@ -81,9 +94,17 @@ class Mul(Operator):
         return Numeric.mul(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
-        return (subject * self.args) + (self.subject * arg)
+        from ..hosted_ml.optimizer import Variable
+
+        if isinstance(self.args, Variable):
+            self.args.grad = self.subject*variable
+        elif isinstance(form_of(self.args), Operator):
+            form_of(self.args).backward(self.subject)*variable
+        
+        if isinstance(self.subject, Variable):
+            self.subject.grad = self.args*variable
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(variable * (self.args))
 
 
 class Sub(Operator):
@@ -91,9 +112,17 @@ class Sub(Operator):
         return Numeric.sub(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
-        return subject - arg
+        from ..hosted_ml.optimizer import Variable
+
+        if isinstance(self.args, Variable):
+            self.args.grad = variable*(-1)
+        elif isinstance(form_of(self.args), Operator):
+            form_of(self.args).backward(variable)
+        
+        if isinstance(self.subject, Variable):
+            self.subject.grad = variable*(-1)
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(variable)
 
 
 class Div(Operator):
@@ -101,9 +130,17 @@ class Div(Operator):
         return Numeric.div(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
-        return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
+        from ..hosted_ml.optimizer import Variable
+
+        if isinstance(self.args, Variable):
+            self.args.grad = (-1)*self.subject*variable/Pow(self.args, 2)
+        elif isinstance(form_of(self.args), Operator):
+            form_of(self.args).backward(variable / self.args)
+        
+        if isinstance(self.subject, Variable):
+            self.subject.grad = self.subject*variable/self.args
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(variable / self.args)
 
 
 class Pow(Operator):
@@ -111,10 +148,17 @@ class Pow(Operator):
         return Numeric.pow(self.subject, self.args)
 
     def backward(self, variable):
-        if self.args is variable:
-            return (self.subject**self.args) * self.subject.ln()
+        from ..hosted_ml.optimizer import Variable
 
-        return self.args * (self.subject**(self.args - 1))
+        if isinstance(self.args, Variable):
+            self.args.grad = variable * (self.subject).log() * self.subject**self.args
+        elif isinstance(form_of(self.args), Operator):
+            form_of(self.args).backward(variable * (self.subject).log() * self.subject**self.args)
+        
+        if isinstance(self.subject, Variable):
+            self.subject.grad = variable * self.args * self.subject**(self.args-1)
+        elif isinstance(form_of(self.subject), Operator):
+            form_of(self.subject).backward(variable * self.args * self.subject**(self.args-1))
 
 
 class Unary(Operator):
