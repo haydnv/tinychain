@@ -33,7 +33,7 @@ class Variable(tensor.Dense):
         """Decrement the value of this `Variable` by `delta`."""
 
         if isinstance(form_of(self), tensor.Transform):
-            return form_of(self).subject.update(delta)
+            return form_of(self).update(delta)
         else:
             return self.write(self - delta)
 
@@ -51,27 +51,45 @@ class Variable(tensor.Dense):
         return Variable.expect(shape, self.dtype)(Transpose(self, permutation))
 
 
-class Expand(tensor.Expand):
+class Transform(tensor.Transform):
+    def __init__(self, subject, args):
+        if not isinstance(subject, Variable):
+            raise TypeError(f"the subject of a Variable transform must be a Variable, not {subject}")
+
+        tensor.Transform.__init__(self, subject, args)
+
+    def update(self):
+        raise NotImplementedError(f"{self.__class__}.update")
+
+
+class Expand(Transform, tensor.Expand):
     def gradients(self, loss):
-        assert isinstance(self.subject, Variable)
         return {hex_id(self.subject): loss.reshape(self.subject.shape)}
 
+    def update(self, delta):
+        return self.subject.update(delta.reshape(self.subject.shape))
 
-class Flip(tensor.Flip):
+
+class Flip(Transform, tensor.Flip):
     def gradients(self, loss):
-        assert isinstance(self.subject, Variable)
         return {hex_id(self.subject): loss.flip(self.args)}
 
+    def update(self, delta):
+        return self.subject.update(delta.flip(self.args))
 
-class Transpose(tensor.Transpose):
+
+class Transpose(Transform, tensor.Transpose):
     def gradients(self, loss):
-        assert isinstance(self.subject, Variable)
-        permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
-        return {hex_id(self.subject): loss.transpose(permutation)}
+        return {hex_id(self.subject): loss.transpose(self.inverse_permutation)}
+
+    def update(self, delta):
+        return self.subject.update(delta.transpose(self.inverse_permutation))
 
 
-class Reshape(tensor.Reshape):
+class Reshape(Transform, tensor.Reshape):
     def gradients(self, loss):
-        assert isinstance(self.subject, Variable)
         old_shape = self.subject.shape
         return {hex_id(self.subject): loss.reshape(old_shape)}
+
+    def update(self, delta):
+        return self.subject.update(delta.reshape(self.subject.shape))

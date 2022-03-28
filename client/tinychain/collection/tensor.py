@@ -629,6 +629,14 @@ class Flip(Transform):
 
 
 class Transpose(Transform):
+    def __init__(self, subject, permutation=None):
+        Transform.__init__(self, subject, permutation)
+
+        if permutation is None:
+            self.inverse_permutation = None
+        else:
+            self.inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(permutation)))
+
     def forward(self):
         return NDArray.transpose(self.subject, self.args)
 
@@ -637,12 +645,7 @@ class Transpose(Transform):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
 
-        if self.args is None:
-            permutation = None
-        else:
-            permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
-
-        return form_of(self.subject).gradients(loss.transpose(permutation))
+        return form_of(self.subject).gradients(loss.transpose(self.inverse_permutation))
 
 
 class Reshape(Transform):

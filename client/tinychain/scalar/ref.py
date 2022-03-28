@@ -118,8 +118,8 @@ class If(Ref):
 
     def __json__(self):
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
-        if isinstance(self.cond, bool):
-            if self.cond:
+        if isinstance(form_of(self.cond), bool):
+            if form_of(self.cond):
                 return to_json(self.then)
             else:
                 return to_json(self.or_else)
