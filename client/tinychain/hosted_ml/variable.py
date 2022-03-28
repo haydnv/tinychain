@@ -24,10 +24,10 @@ class Variable(tensor.Dense):
         shape = list(form_of(self.shape))
         shape.insert(axis, 1)
 
-        raise Variable.expect(shape, self.dtype)(tensor.Expand(self, axis))
+        raise Variable.expect(shape, self.dtype)(Expand(self, axis))
 
     def flip(self, axis):
-        raise NotImplementedError
+        return self.__class__(form=Flip(self, axis))
 
     def update(self, delta):
         """Decrement the value of this `Variable` by `delta`."""
@@ -51,11 +51,23 @@ class Variable(tensor.Dense):
         return Variable.expect(shape, self.dtype)(Transpose(self, permutation))
 
 
+class Expand(tensor.Expand):
+    def gradients(self, loss):
+        assert isinstance(self.subject, Variable)
+        return {hex_id(self.subject): loss.reshape(self.subject.shape)}
+
+
+class Flip(tensor.Flip):
+    def gradients(self, loss):
+        assert isinstance(self.subject, Variable)
+        return {hex_id(self.subject): loss.flip(self.args)}
+
+
 class Transpose(tensor.Transpose):
     def gradients(self, loss):
         assert isinstance(self.subject, Variable)
         permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
-        return {hex_id(self.subject): self.subject.transpose(permutation)}
+        return {hex_id(self.subject): loss.transpose(permutation)}
 
 
 class Reshape(tensor.Reshape):

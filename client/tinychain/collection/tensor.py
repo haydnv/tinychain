@@ -20,6 +20,9 @@ class NDArray(Interface):
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
+    def flip(self, axis):
+        return ref.Get(ref.MethodSubject(self, "flip"), axis)
+
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
 
@@ -200,7 +203,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
-        return self._get("flip", axis, Tensor)
+        return self.__class__(Flip(self, axis))
 
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
@@ -607,11 +610,22 @@ class Expand(Transform):
         return NDArray.expand_dims(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(self.subject, Operator):
+        if not isinstance(form_of(self.subject), Operator):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
 
         return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
+
+
+class Flip(Transform):
+    def forward(self):
+        return NDArray.flip(self.subject, self.args)
+
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+
+        return form_of(self.subject).gradients(loss.flip(self.args))
 
 
 class Transpose(Transform):
@@ -633,12 +647,11 @@ class Transpose(Transform):
 
 class Reshape(Transform):
     def forward(self):
-        return ref.Get(ref.MethodSubject(self.subject, "reshape"), self.args)
+        return NDArray.reshape(self.subject, self.args)
 
     def gradients(self, loss):
         if not isinstance(form_of(self.subject), Operator):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
 
-        old_shape = self.subject.shape
-        return form_of(self.subject).gradients(loss.reshape(old_shape))
+        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
