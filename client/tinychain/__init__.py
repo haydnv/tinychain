@@ -3,11 +3,9 @@ import tinychain.error
 import tinychain.graph  # TODO: merge into app
 import tinychain.graph.edge  # TODO: merge into app
 import tinychain.host
-import tinychain.hosted_ml  # TODO: rename hosted_ml -> ml
-import tinychain.hosted_ml.nn
-import tinychain.hosted_ml.service
+import tinychain.ml
 import tinychain.ml.nn
-import tinychain.ml.optimizer
+import tinychain.ml.service
 import tinychain.scalar
 import tinychain.scalar.bound as bound
 

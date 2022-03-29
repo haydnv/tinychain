@@ -78,7 +78,7 @@ class Add(Dual):
 
     def gradients(self, loss):
         # TODO: there should be a way to avoid this import (same below)
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
@@ -106,7 +106,7 @@ class MatMul(Dual):
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         def transpose(matrix):
             return type(matrix)(form=ref.If(
@@ -141,7 +141,7 @@ class Mul(Dual):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
@@ -170,7 +170,7 @@ class Sub(Dual):
         return subject - arg
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
@@ -197,7 +197,7 @@ class Div(Dual):
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
@@ -225,7 +225,7 @@ class Pow(Dual):
         return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
@@ -253,7 +253,7 @@ class Exp(Unary):
         return self.subject.exp()
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grad = self.subject.exp() * loss
 
@@ -374,7 +374,7 @@ class Atanh(Unary):
 def derivative(state, variable=None):
     from ..scalar.number import Number
     from ..collection.tensor import Dense, Sparse, Tensor
-    from ..hosted_ml.optimizer import Variable
+    from ..ml.optimizer import Variable
 
     if isinstance(state, Variable):
         if variable is None:
