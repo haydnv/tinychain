@@ -1,9 +1,11 @@
+import inspect
 import logging
 
 from .. import error
-from ..app import Dynamic, Model
+from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Tensor
 from ..decorators import post
+from ..generic import Map, Tuple
 from ..math.operator import derivative, Operator
 from ..scalar.ref import After
 from ..util import form_of, hex_id
@@ -28,14 +30,13 @@ class GradientDescent(Optimizer, Dynamic):
 
     @post
     def train(self, inputs: Tensor, labels: Tensor) -> Tensor:
+        variables = trainable(self.ml_model)
         outputs = self.ml_model.operator(inputs)
-        loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
 
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        variables = trainable(form_of(outputs))
-
+        loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
         gradients = form_of(outputs).gradients(derivative(loss))
         if not gradients:
             logging.warning(f"model {self.ml_model} operator {form_of(outputs)} has no Variables for {self} to train")
@@ -48,19 +49,24 @@ class GradientDescent(Optimizer, Dynamic):
         return After(writes, loss)
 
 
-def trainable(op):
-    assert isinstance(op, Operator)
+def trainable(model):
+    if isinstance(model, Variable):
+        return {hex_id(model): model}
+
+    if isinstance(model, Map) or isinstance(model, Tuple):
+        model = form_of(model)
 
     vars = {}
 
-    if isinstance(op.subject, Variable):
-        vars[hex_id(op.subject)] = op.subject
-    elif isinstance(form_of(op.subject), Operator):
-        vars.update(trainable(form_of(op.subject)))
-
-    if isinstance(op.args, Variable):
-        vars[hex_id(op.args)] = op.args
-    elif isinstance(form_of(op.args), Operator):
-        vars.update(trainable(form_of(op.args)))
+    if isinstance(model, list) or isinstance(model, tuple):
+        for component in model:
+            vars.update(trainable(component))
+    elif isinstance(model, dict):
+        for component in model.values():
+            vars.update(trainable(component))
+    elif isinstance(model, Model) or isinstance(model, ModelRef):
+        # TODO: a ModelRef should implement the same interfaces as its Model
+        for _name, component in inspect.getmembers(model):
+            vars.update(trainable(component))
 
     return vars

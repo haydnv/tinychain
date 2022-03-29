@@ -1,6 +1,6 @@
 from ..error import BadRequest
 from ..scalar import ref
-from ..util import deanonymize, form_of, hex_id, to_json
+from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -83,12 +83,12 @@ class Add(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = loss.sum()
+            grads.update(self.subject.gradients(loss.sum()))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = loss.sum()
+            grads.update(self.args.gradients(loss.sum()))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -112,19 +112,19 @@ class MatMul(Dual):
             return type(matrix)(form=ref.If(
                 matrix.ndim == 2,
                 matrix.transpose(),
-                BadRequest(f"not a matrix: {{tensor}}", tensor=matrix)))
+                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
 
         grads = {}
 
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = grad
+            grads.update(self.subject.gradients(grad))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(grad))
 
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = grad
+            grads.update(self.args.gradients(grad))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(grad))
 
@@ -147,13 +147,13 @@ class Mul(Dual):
 
         grad = self.args * loss
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = grad
+            grads.update(self.subject.gradients(grad))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(grad))
 
         grad = self.subject * loss
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = grad
+            grads.update(self.args.gradients(grad))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(grads))
 
@@ -175,12 +175,12 @@ class Sub(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = -loss.sum()
+            grads.update(self.subject.gradients(-loss.sum()))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = -loss.sum()
+            grads.update(self.args.gradients(-loss.sum()))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -202,12 +202,12 @@ class Div(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = self.subject * loss / self.args
+            grads.update(self.subject.gradients(self.subject * loss / self.args))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss / self.args))
 
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = (-self.subject * loss) / self.args ** 2
+            grads.update(self.args.gradients((-self.subject * loss) / self.args**2))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss / self.args))
 
@@ -230,12 +230,12 @@ class Pow(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads[hex_id(self.subject)] = loss * self.args * self.subject ** (self.args - 1)
+            grads.update(self.subject.gradients(loss * self.args * self.subject**(self.args - 1)))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads[hex_id(self.args)] = loss * self.subject.ln() * self.subject ** self.args
+            grads.update(self.args.gradients(loss * self.subject.ln() * self.subject**self.args))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
 
@@ -258,7 +258,7 @@ class Exp(Unary):
         grad = self.subject.exp() * loss
 
         if isinstance(self.subject, Variable):
-            return {hex_id(self.subject): grad}
+            return self.subject.gradients(grad)
         elif isinstance(form_of(self.subject), Operator):
             return form_of(self.subject).gradients(grad)
 

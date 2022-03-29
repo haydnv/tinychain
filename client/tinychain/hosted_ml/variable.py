@@ -3,6 +3,7 @@ from ..util import form_of, hex_id
 
 
 # TODO: support Sparse and Number variable types
+
 class Variable(tensor.Dense):
     """A trainable variable in a machine learning model."""
 
@@ -29,13 +30,16 @@ class Variable(tensor.Dense):
     def flip(self, axis):
         return self.__class__(form=Flip(self, axis))
 
+    def gradients(self, loss):
+        if isinstance(form_of(self), Transform):
+            return form_of(self).gradients(loss)
+        else:
+            return {hex_id(self): loss}
+
     def update(self, delta):
         """Decrement the value of this `Variable` by `delta`."""
 
-        if isinstance(form_of(self), tensor.Transform):
-            return form_of(self).update(delta)
-        else:
-            return self.write(self - delta)
+        return self.write(self - delta)
 
     def reshape(self, shape):
         shape = tuple(dim for dim in form_of(shape))
@@ -64,32 +68,19 @@ class Transform(tensor.Transform):
 
 class Expand(Transform, tensor.Expand):
     def gradients(self, loss):
-        return {hex_id(self.subject): loss.reshape(self.subject.shape)}
-
-    def update(self, delta):
-        return self.subject.update(delta.reshape(self.subject.shape))
+        return self.subject.gradients(loss.reshape(self.subject.shape))
 
 
 class Flip(Transform, tensor.Flip):
     def gradients(self, loss):
-        return {hex_id(self.subject): loss.flip(self.args)}
-
-    def update(self, delta):
-        return self.subject.update(delta.flip(self.args))
+        return self.subject.gradients(loss.flip(self.args))
 
 
 class Transpose(Transform, tensor.Transpose):
     def gradients(self, loss):
-        return {hex_id(self.subject): loss.transpose(self.inverse_permutation)}
-
-    def update(self, delta):
-        return self.subject.update(delta.transpose(self.inverse_permutation))
+        return self.subject.gradients(loss.transpose(self.inverse_permutation))
 
 
 class Reshape(Transform, tensor.Reshape):
     def gradients(self, loss):
-        old_shape = self.subject.shape
-        return {hex_id(self.subject): loss.reshape(old_shape)}
-
-    def update(self, delta):
-        return self.subject.update(delta.reshape(self.subject.shape))
+        return self.subject.gradients(loss.reshape(self.subject.shape))
