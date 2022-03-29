@@ -21,7 +21,7 @@ class NeuralNetTester(tc.app.Library):
     def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
         layer = tc.hosted_ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1])
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
-        return cxt.optimizer.train(inputs, labels)
+        return cxt.optimizer.train(1, inputs, labels)
 
     @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
@@ -32,13 +32,13 @@ class NeuralNetTester(tc.app.Library):
 
         cnn = tc.hosted_ml.nn.Sequential(layers)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(cnn)
-        return cxt.optimizer.train(inputs, labels)
+        return cxt.optimizer.train(1, inputs, labels)
 
     @tc.post
     def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
         layer = tc.hosted_ml.nn.DNNLayer.create(2, 1, tc.hosted_ml.sigmoid)
-        cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(layer)
-        return cxt.optimizer.train(inputs, labels)
+        cxt.optimizer = tc.hosted_ml.optimizer.Adam(layer)
+        return cxt.optimizer.train(1, inputs, labels)
 
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
@@ -48,7 +48,7 @@ class NeuralNetTester(tc.app.Library):
 
         dnn = tc.hosted_ml.nn.Sequential(layers)
         cxt.optimizer = tc.hosted_ml.optimizer.GradientDescent(dnn)
-        return cxt.optimizer.train(inputs, labels)
+        return cxt.optimizer.train(1, inputs, labels)
 
 
 class NeuralNetTests(unittest.TestCase):
