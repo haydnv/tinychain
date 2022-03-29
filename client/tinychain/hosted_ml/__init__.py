@@ -1,11 +1,9 @@
-import os
-
 from ..util import URI
 
 from .variable import Variable
 
 
-LIB_URI = URI(os.getenv("TC_URI", "/lib/ml"))
+LIB_URI = URI("/lib/ml")
 
 
 def sigmoid(x):
