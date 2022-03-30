@@ -4,7 +4,9 @@ from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..decorators import hidden
 from ..generic import Tuple
+from ..math import Operator
 from ..scalar.ref import After
+from ..util import form_of
 
 from .interface import Differentiable
 from .variable import Variable

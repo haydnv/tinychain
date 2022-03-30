@@ -37,7 +37,7 @@ class GradientDescent(Optimizer, Dynamic):
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
+        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
         gradients = form_of(outputs).gradients(derivative(loss))
 
         if not gradients:
@@ -85,7 +85,7 @@ class Adam(Optimizer, Dynamic):
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = 0.5 * (outputs - labels)**2  # TODO: support an arbitrary cost function
+        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
         gradients = form_of(outputs).gradients(derivative(loss))
         gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
 

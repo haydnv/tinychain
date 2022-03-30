@@ -604,17 +604,20 @@ class Transform(Operator):
     def backward(self, variable):
         raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
 
+    def gradients(self, loss):
+        if not isinstance(form_of(self.subject), Operator):
+            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
+            return {}
+
+        return form_of(self.subject).gradients(loss)
+
 
 class Expand(Transform):
     def forward(self):
         return NDArray.expand_dims(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
-
-        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
+        return Transform.gradients(self, loss.reshape(self.subject.shape))
 
 
 class Flip(Transform):
@@ -622,10 +625,7 @@ class Flip(Transform):
         return NDArray.flip(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-
-        return form_of(self.subject).gradients(loss.flip(self.args))
+        return Transform.gradients(self, loss.flip(self.args))
 
 
 class Transpose(Transform):
@@ -641,11 +641,7 @@ class Transpose(Transform):
         return NDArray.transpose(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
-
-        return form_of(self.subject).gradients(loss.transpose(self.inverse_permutation))
+        return Transform.gradients(self, loss.transpose(self.inverse_permutation))
 
 
 class Reshape(Transform):
@@ -653,8 +649,4 @@ class Reshape(Transform):
         return NDArray.reshape(self.subject, self.args)
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
-
-        return form_of(self.subject).gradients(loss.reshape(self.subject.shape))
+        return Transform.gradients(self, loss.reshape(self.subject.shape))
