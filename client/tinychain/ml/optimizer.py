@@ -1,87 +1,168 @@
-import typing
+import inspect
+import logging
 
-from abc import abstractmethod
+from .. import error
+from ..app import Dynamic, Model, ModelRef
+from ..collection.tensor import Dense, Tensor
+from ..decorators import post
+from ..generic import Map, Tuple
+from ..math.operator import derivative, Operator
+from ..scalar.number import F32, F64, UInt
+from ..scalar.ref import After
+from ..util import form_of, hex_id
 
-from ..collection.tensor import Dense
-from ..decorators import closure, post
-from ..ml import DiffedParameter, Parameter
-from ..generic import Map
-from ..scalar.number import F32, UInt
-from ..scalar.ref import After, While
-
-
-class Optimizer(Map):
-    @abstractmethod
-    def optimize(self, param_list: typing.List[Parameter]):
-        """Update the given `gradient` by computing deltas for the given `loss`."""
-
-    @property
-    def lr(self) -> F32:
-        return self['lr']
+from .variable import Variable
+from . import LIB_URI
 
 
-class GradientDescent(Optimizer):
-    @classmethod
-    def create(cls, lr=F32(0.01)):
-        """Create a new `GradientDescent` optimizer with the given hyperparameter.
-        Args:
-            'lr': learning rate
-        """
+class Optimizer(Model):
+    __uri__ = LIB_URI.append("Optimizer")
 
-        return cls({"lr": lr})
-
-    def optimize(self, i, param_list: typing.List[Parameter]):
-        return [param.value.write(param.value - (param.grad * self.lr)) for param in param_list]
-
-
-class Adam(Optimizer):
-
-    @classmethod
-    def create(cls, param_list: typing.List[Parameter],  beta1=F32(0.9), beta2=F32(0.999), lr=F32(1e-3), eps=F32(1e-8)):
-        """Create a new `Adam` optimizer with the given hyperparameters.
-        Args:
-            'lr': learning rate;
-            'beta1': The exponential decay rate for the 1st moment estimates;
-            'beta2': The exponential decay rate for the 2nd moment estimates;
-            'eps': A small constant for numerical stability.
-            `param_list`: a `List[Parameter]` of model's parameters for optimizing.
-        """
-
-        m = Map({p.name: Dense.zeros(p.value.shape, F32) for p in param_list})
-        v = Map({p.name: Dense.zeros(p.value.shape, F32) for p in param_list})
-
-        return cls({"beta1": beta1, "beta2": beta2, "eps": eps, "lr": lr, "m": m, "v": v})
-
-    def optimize(self, i, param_list: typing.List[DiffedParameter]):
-        beta1 = self["beta1"]
-        beta2 = self["beta2"]
-        lr = self["lr"]
-        eps = self["eps"]
-        m = self["m"]
-        v = self["v"]
-        update_m = [m[p.name].write(m[p.name] * beta1 + p.grad * (F32(1.0) - beta1)) for p in param_list]
-        update_v = [v[p.name].write(v[p.name] * beta2 + p.grad.pow(2) * (F32(1.0) - beta2)) for p in param_list]
-        a = lr * F32(F32(1) - beta2.pow(i)).pow(F32(0.5)) / (F32(1) - beta1.pow(i))
-        update_model = [
-            p.value.write(p.value - m[p.name] / (v[p.name].pow(F32(0.5)).add(eps)) * a)
-            for p in param_list
-        ]
-
-        return After(
-            when=[update_m, update_v],
-            then=update_model)
-
-
-def train(model, optimizer, inputs, labels, cost, train_while):
-    @closure(model, optimizer, labels, inputs)
     @post
-    def step(cxt, i: UInt):
-        cxt.output = model.forward(inputs).copy()
-        cxt.loss = cost(cxt.output, labels)
-        cxt.dloss = cost(cxt.output, labels, dl=True)
-        _, param_list = model.backward(inputs, cxt.dloss)
-        update = optimizer.optimize(i, param_list)
+    def train(self, inputs):
+        return error.NotImplemented(f"{self.__class__.__name__}.train")
 
-        return After(update, {"i": i + 1, 'loss': cxt.loss, 'output':cxt.output})
 
-    return While(train_while, step, {"i": 1, "loss": F32(1.0), 'output': Dense.ones(labels.shape)})
+class GradientDescent(Optimizer, Dynamic):
+    """A simple gradient descent optimizer with a configurable learning rate."""
+
+    def __init__(self, ml_model, learning_rate=0.001):
+        self.ml_model = ml_model
+        self.lr = F32(learning_rate)
+        Dynamic.__init__(self)
+
+    @post
+    def train(self, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
+        outputs = self.ml_model.operator(inputs)
+        if not isinstance(form_of(outputs), Operator):
+            raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
+
+        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
+        gradients = form_of(outputs).gradients(derivative(loss))
+
+        if not gradients:
+            logging.warning(f"model {self.ml_model} operator {form_of(outputs)} has no Variables for {self} to train")
+
+        variables = trainable(self.ml_model)
+
+        writes = []
+        for var_id, delta in gradients.items():
+            var = variables[var_id]
+            writes.append(var.update(delta * self.lr))
+
+        return After(writes, loss)
+
+
+class Adam(Optimizer, Dynamic):
+    """
+    Adam optimizer, an adaptive learning rate optimization algorithm designed to handle sparse gradients and noisy data.
+
+    Based on "Adam: A Method for Stochastic Optimization" by Kingma & Ba, 2014: https://arxiv.org/abs/1412.6980
+    """
+
+    def __init__(self, ml_model, beta1=0.9, beta2=0.999, learning_rate=0.001, eps=1e-8):
+        self._ns = namespace(ml_model, ml_model.__class__.__name__)
+        if not self._ns:
+            raise ValueError(f"{ml_model} has no Variables to train")
+
+        self.ml_model = ml_model
+        self.beta1 = F32(beta1)
+        self.beta2 = F32(beta2)
+        self.lr = F32(learning_rate)
+        self.eps = F64(eps)
+
+        self.m = Map({name: Dense.zeros(var.shape) for name, var in self._ns.items()})
+        self.v = Map({name: Dense.zeros(var.shape) for name, var in self._ns.items()})
+
+        Dynamic.__init__(self)
+
+    @post
+    def train(self, cxt, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
+        var_names = {hex_id(var): name for name, var in self._ns.items()}
+
+        outputs = self.ml_model.operator(inputs)
+
+        if not isinstance(form_of(outputs), Operator):
+            raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
+
+        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
+        gradients = form_of(outputs).gradients(derivative(loss))
+        gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
+
+        update_m = {}
+        for name in self.m:
+            grad = gradients[name]
+            update_m[name] = self.m[name] * self.beta1 * grad * (1. - self.beta1)
+
+        update_v = {}
+        for name in self.v:
+            grad = gradients[name]
+            update_v[name] = self.v[name] * self.beta2 + grad**2 * (1. - self.beta2)
+
+        update_v = {name: self.v[name] * self.beta2 + gradients[name]**2 * (1. - self.beta2) for name in self.v}
+
+        cxt.a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
+        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * cxt.a for name in gradients}
+
+        updates = After([
+            [self.m[name].write(new_value) for name, new_value in update_m.items()],
+            [self.v[name].write(new_value) for name, new_value in update_v.items()],
+        ], [self._ns[name].update(delta) for name, delta in update_model.items()])
+
+        return After(updates, loss)
+
+
+def namespace(model, prefix):
+    if isinstance(model, Variable):
+        return {prefix: model}
+
+    if isinstance(model, Map) or isinstance(model, Tuple):
+        model = form_of(model)
+
+    ns = {}
+
+    if isinstance(model, list) or isinstance(model, tuple):
+        for i, component in enumerate(model):
+            ns.update(namespace(component, f"{prefix}.{i}"))
+    elif isinstance(model, dict):
+        for name, component in model.items():
+            ns.update(namespace(component, f"{prefix}.{name}"))
+    elif isinstance(model, Model) or isinstance(model, ModelRef):
+        # TODO: a ModelRef should implement the same interfaces as its Model
+        for name, component in inspect.getmembers(model):
+            if name.startswith("__"):
+                continue
+
+            ns.update(namespace(component, f"{prefix}.{name}"))
+    else:
+        logging.debug(f"ignoring non-trainable model component {model}")
+
+    return ns
+
+
+def trainable(model):
+    if isinstance(model, Variable):
+        return {hex_id(model): model}
+
+    if isinstance(model, Map) or isinstance(model, Tuple):
+        model = form_of(model)
+
+    vars = {}
+
+    if isinstance(model, list) or isinstance(model, tuple):
+        for component in model:
+            vars.update(trainable(component))
+    elif isinstance(model, dict):
+        for component in model.values():
+            vars.update(trainable(component))
+    elif isinstance(model, Model) or isinstance(model, ModelRef):
+        # TODO: a ModelRef should implement the same interfaces as its Model
+        for name, component in inspect.getmembers(model):
+            if name.startswith("__"):
+                continue
+
+            vars.update(trainable(component))
+    else:
+        logging.debug(f"ignoring non-trainable model component {model}")
+
+    return vars

@@ -30,9 +30,9 @@ class Variable(tensor.Dense):
     def flip(self, axis):
         return self.__class__(form=Flip(self, axis))
 
-    def gradients(self, loss):
+    def invert(self, loss):
         if isinstance(form_of(self), Transform):
-            return form_of(self).gradients(loss)
+            return form_of(self).invert(loss)
         else:
             return {hex_id(self): loss}
 
@@ -67,20 +67,20 @@ class Transform(tensor.Transform):
 
 
 class Expand(Transform, tensor.Expand):
-    def gradients(self, loss):
-        return self.subject.gradients(loss.reshape(self.subject.shape))
+    def invert(self, loss):
+        return self.subject.invert(loss.reshape(self.subject.shape))
 
 
 class Flip(Transform, tensor.Flip):
-    def gradients(self, loss):
-        return self.subject.gradients(loss.flip(self.args))
+    def invert(self, loss):
+        return self.subject.invert(loss.flip(self.args))
 
 
 class Transpose(Transform, tensor.Transpose):
-    def gradients(self, loss):
-        return self.subject.gradients(loss.transpose(self.inverse_permutation))
+    def invert(self, loss):
+        return self.subject.invert(loss.transpose(self.inverse_permutation))
 
 
 class Reshape(Transform, tensor.Reshape):
-    def gradients(self, loss):
-        return self.subject.gradients(loss.reshape(self.subject.shape))
+    def invert(self, loss):
+        return self.subject.invert(loss.reshape(self.subject.shape))

@@ -78,17 +78,17 @@ class Add(Dual):
 
     def gradients(self, loss):
         # TODO: there should be a way to avoid this import (same below)
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(loss.sum()))
+            grads.update(self.subject.invert(loss.sum()))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients(loss.sum()))
+            grads.update(self.args.invert(loss.sum()))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -106,7 +106,7 @@ class MatMul(Dual):
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         def transpose(matrix):
             return type(matrix)(form=ref.If(
@@ -118,13 +118,13 @@ class MatMul(Dual):
 
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(grad))
+            grads.update(self.subject.invert(grad))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(grad))
 
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients(grad))
+            grads.update(self.args.invert(grad))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(grad))
 
@@ -141,19 +141,19 @@ class Mul(Dual):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
         grad = self.args * loss
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(grad))
+            grads.update(self.subject.invert(grad))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(grad))
 
         grad = self.subject * loss
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients(grad))
+            grads.update(self.args.invert(grad))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(grads))
 
@@ -170,17 +170,17 @@ class Sub(Dual):
         return subject - arg
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(-loss.sum()))
+            grads.update(self.subject.invert(-loss.sum()))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients(-loss.sum()))
+            grads.update(self.args.invert(-loss.sum()))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -197,17 +197,17 @@ class Div(Dual):
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(self.subject * loss / self.args))
+            grads.update(self.subject.invert(self.subject * loss / self.args))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss / self.args))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients((-self.subject * loss) / self.args**2))
+            grads.update(self.args.invert((-self.subject * loss) / self.args**2))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss / self.args))
 
@@ -225,17 +225,17 @@ class Pow(Dual):
         return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.gradients(loss * self.args * self.subject**(self.args - 1)))
+            grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.gradients(loss * self.subject.ln() * self.subject**self.args))
+            grads.update(self.args.invert(loss * self.subject.ln() * self.subject**self.args))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
 
@@ -253,12 +253,12 @@ class Exp(Unary):
         return self.subject.exp()
 
     def gradients(self, loss):
-        from ..hosted_ml.optimizer import Variable
+        from ..ml.optimizer import Variable
 
         grad = self.subject.exp() * loss
 
         if isinstance(self.subject, Variable):
-            return self.subject.gradients(grad)
+            return self.subject.invert(grad)
         elif isinstance(form_of(self.subject), Operator):
             return form_of(self.subject).gradients(grad)
 
@@ -374,7 +374,7 @@ class Atanh(Unary):
 def derivative(state, variable=None):
     from ..scalar.number import Number
     from ..collection.tensor import Dense, Sparse, Tensor
-    from ..hosted_ml.optimizer import Variable
+    from ..ml.optimizer import Variable
 
     if isinstance(state, Variable):
         if variable is None:

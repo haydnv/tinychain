@@ -233,6 +233,8 @@ class Tuple(State, Functional):
         if isinstance(i, int):
             if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
                 rtype = self.__spec__[0]
+            elif i >= len(self.__spec__):
+                raise IndexError(f"index {i} is out of bounds for {self}")
             else:
                 rtype = self.__spec__[i]
 
