@@ -127,9 +127,13 @@ class ConvLayer(Layer, Dynamic):
                 grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
 
                 if isinstance(form_of(self.args), Operator):
-                    loss = (self.w_col.transpose() * loss).reshape([b_i, c_i, h_f, w_f])
+                    shape = [b_i, c_i, h_i - padding, w_i - padding]
+                    loss = (self.w_col.transpose() @ loss).reshape(shape)
+
                     grad = Dense.zeros([b_i, c_i, h_i, w_i])
-                    grad = Tensor(After(grad[:, :, padding:(h_i - padding), padding:(w_i - padding)].write(loss), grad))
+                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                    grad = Tensor(After(grad_slice.write(loss), grad))
+
                     grads.update(form_of(self.args).gradients(grad))
 
                 return grads
