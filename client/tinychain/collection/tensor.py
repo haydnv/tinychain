@@ -109,7 +109,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         parent = self
         bounds = handle_bounds(bounds)
 
-        class Slice(self.__class__):
+        class Slice(Tensor):
             def write(self, value):
                 return parent._put("", bounds, value)
 
