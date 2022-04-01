@@ -1,12 +1,11 @@
 import logging
 
 from ..app import Dynamic, Model
-from ..collection.tensor import einsum, Dense, Tensor
+from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import hidden
 from ..generic import Tuple
-from ..math import Operator
 from ..scalar.ref import After
-from ..util import form_of
+from ..util import deanonymize
 
 from .interface import Differentiable
 from .variable import Variable
@@ -73,7 +72,7 @@ class ConvLayer(Layer, Dynamic):
         b_i = inputs.shape[0]
 
         if self._padding == 0:
-            output = einsum("abcd,efgh->eacd", [self.weights, inputs])
+            output = einsum("abcd,efgh->eacd", [self.weights, inputs])  # TODO: define an Operator for this case
             output += self.bias.reshape([1, self._filter_shape[0], 1, 1])
             if self._activation:
                 return self._activation(output)
@@ -92,26 +91,42 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
-        pad_matrix = Tensor(After(
-            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
-            pad_matrix))
+        class Convolution(Transform):
+            def __init__(self, weights, inputs):
+                Transform.__init__(self, weights, inputs)
 
-        im2col_matrix = []
-        for i in range(h_out):
-            for j in range(w_out):
-                shape = [c_i * h_f * w_f, b_i]
-                im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
-                im2col_matrix.append(im2col)
+                pad_matrix = Dense.zeros([b_i, c_i, h_i + padding * 2, w_i + padding * 2])
+                pad_matrix = Tensor(After(
+                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
+                    pad_matrix))
 
-        assert im2col_matrix
+                im2col_matrix = []
+                for i in range(h_out):
+                    for j in range(w_out):
+                        shape = [c_i * h_f * w_f, b_i]
+                        im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
+                        im2col_matrix.append(im2col)
 
-        shape = [b_i * h_out * w_out, c_i * h_f * w_f]
-        im2col_matrix = Dense.concatenate(im2col_matrix, 0).reshape(shape).transpose()
-        w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
+                assert im2col_matrix
+
+                shape = [b_i * h_out * w_out, c_i * h_f * w_f]
+                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
+
+                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
+                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
+
+            def __ns__(self, context):
+                deanonymize(self.im2col_matrix, context)
+                deanonymize(self.w_col, context)
+
+            def forward(self):
+                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
+
+            def gradients(self, loss):
+                return self.w_col.invert(loss @ self.im2col_matrix.transpose())
 
         shape = [out_c, h_out, w_out, b_i]
-        in2col_multiply = (w_col @ im2col_matrix) + self.bias
+        in2col_multiply = Tensor(Convolution(self.weights, inputs)) + self.bias
         output = in2col_multiply.reshape(shape).transpose([3, 0, 1, 2])  # shape = [b_i, out_c, h_out, w_out]
 
         if self._activation:
