@@ -31,7 +31,7 @@ class NeuralNetTester(tc.app.Library):
         ]
 
         cnn = tc.ml.nn.Sequential(layers)
-        cxt.optimizer = tc.ml.optimizer.GradientDescent(cnn)
+        cxt.optimizer = tc.ml.optimizer.Adam(cnn)
         return cxt.optimizer.train(1, inputs, labels)
 
     @tc.post

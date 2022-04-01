@@ -4,8 +4,9 @@ from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import hidden
 from ..generic import Tuple
+from ..math import Operator
 from ..scalar.ref import After
-from ..util import deanonymize
+from ..util import deanonymize, form_of
 
 from .interface import Differentiable
 from .variable import Variable
@@ -123,7 +124,15 @@ class ConvLayer(Layer, Dynamic):
                 return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
 
             def gradients(self, loss):
-                return self.w_col.invert(loss @ self.im2col_matrix.transpose())
+                grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
+
+                if isinstance(form_of(self.args), Operator):
+                    loss = (self.w_col.transpose() * loss).reshape([b_i, c_i, h_f, w_f])
+                    grad = Dense.zeros([b_i, c_i, h_i, w_i])
+                    grad = Tensor(After(grad[:, :, padding:(h_i - padding), padding:(w_i - padding)].write(loss), grad))
+                    grads.update(form_of(self.args).gradients(grad))
+
+                return grads
 
         shape = [out_c, h_out, w_out, b_i]
         in2col_multiply = Tensor(Convolution(self.weights, inputs)) + self.bias
