@@ -29,17 +29,35 @@ class DenseTests(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def testSlice(self):
-        shape = [2, 5]
+        shape = [2, 5, 3, 3]
 
         cxt = tc.Context()
-        cxt.tensor = tc.tensor.Dense.arange(shape, 1, 11)
-        cxt.result = cxt.tensor[1, 2:-1]
+        cxt.tensor = tc.tensor.Dense.arange(shape, 1, 91)
+        cxt.slice = cxt.tensor[:, :, 1:-1, 1:-1]
+        cxt.result = cxt.slice, cxt.slice.shape
 
-        actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.I64, [2], np.arange(1, 11).reshape([2, 5])[1, 2:-1])
+        actual, actual_shape = self.host.post(ENDPOINT, cxt)
+        expected = np.arange(1, 91).reshape([2, 5, 3, 3])[:, :, 1:-1, 1:-1]
+
+        self.assertEqual(actual_shape, list(expected.shape))
+
+        expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
 
-    def testAssignSlice(self):
+    def testSliceAndWriteConstant(self):
+        shape = [2, 5, 3, 3]
+
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Dense.arange(shape, 1, 91)
+        cxt.result = tc.After(cxt.tensor[:, :, 1:-1, 1:-1].write(1), cxt.tensor)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.arange(1, 91).reshape([2, 5, 3, 3])
+        expected[:, :, 1:-1, 1:-1] = 1
+        expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
+        self.assertEqual(actual, expected)
+
+    def testSliceAndWriteTensor(self):
         cxt = tc.Context()
         cxt.big = tc.tensor.Dense.zeros([2, 2, 5], tc.I32)
         cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
