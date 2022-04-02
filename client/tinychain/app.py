@@ -231,6 +231,15 @@ class Library(object):
 
             setattr(self, cls.__name__, cls)
 
+        self._methods = {}
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+
+            if isinstance(attr, MethodStub):
+                self._methods[name] = attr
+                setattr(self, name, attr.method(self, name))
+
     def validate(self):
         name = self.__class__.__name__
 
@@ -245,22 +254,6 @@ class Library(object):
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
         self.validate()
-
-        header = Header()
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in RESERVED:
-                continue
-
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-
-            if isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(self, name))
-            else:
-                setattr(header, name, attr)
 
         form = {}
         for name, attr in inspect.getmembers(self):
@@ -280,8 +273,6 @@ class Library(object):
                 continue
             elif _is_mutable(attr):
                 raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
-            elif isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(header, name))
             else:
                 form[name] = to_json(attr)
 
@@ -327,6 +318,10 @@ class App(Library):
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
+
+            elif name in self._methods:
+                form[name] = to_json(self._methods[name].method(header, name))
+
             elif _is_mutable(attr):
                 assert isinstance(attr, Chain)
                 chain_type = type(attr)
@@ -335,15 +330,11 @@ class App(Library):
                 if isinstance(collection, Collection):
                     schema = form_of(collection)
                     form[name] = {str(uri(chain_type)): [{str(uri(type(collection))): [to_json(schema)]}]}
-                elif isinstance(collection, Map) or isinstance(collection, Tuple):
-                    form[name] = {str(uri(chain_type)): [to_json(collection)]}
-                elif isinstance(collection, dict) or isinstance(collection, tuple) or isinstance(collection, list):
+                elif isinstance(collection, (dict, list, tuple, Map, Tuple)):
                     form[name] = {str(uri(chain_type)): [to_json(collection)]}
                 else:
                     raise TypeError(f"invalid subject for Chain: {collection}")
 
-            elif isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(header, name))
             else:
                 form[name] = to_json(attr)
 

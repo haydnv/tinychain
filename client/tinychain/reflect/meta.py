@@ -80,7 +80,7 @@ class MethodStub(object):
         self.form = form
 
     def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"cannot call a MethodStub; use tc.use(<class>) for callable method references")
+        raise RuntimeError(f"cannot call the instance method {self.form} from a static context")
 
     def method(self, header, name):
         return self.dtype(header, self.form, name)
