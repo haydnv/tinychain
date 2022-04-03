@@ -2,7 +2,7 @@ import logging
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
-from ..decorators import hidden
+from ..decorators import differentiable
 from ..generic import Tuple
 from ..math import Operator
 from ..scalar.ref import After
@@ -68,8 +68,8 @@ class ConvLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @hidden
-    def operator(self, inputs):
+    @differentiable
+    def eval(self, inputs: Tensor) -> Tensor:
         b_i = inputs.shape[0]
 
         if self._padding == 0:
@@ -163,8 +163,8 @@ class DNNLayer(Layer, Dynamic):
 
         Dynamic.__init__(self)
 
-    @hidden
-    def operator(self, inputs):
+    @differentiable
+    def eval(self, inputs: Tensor) -> Tensor:
         x = (inputs @ self.weights) + self.bias
         if self._activation is None:
             return x
@@ -186,11 +186,11 @@ class Sequential(NeuralNet, Dynamic):
         self.layers = layers
         Dynamic.__init__(self)
 
-    @hidden
-    def operator(self, inputs):
-        state = self.layers[0].operator(inputs)
+    @differentiable
+    def eval(self, inputs: Tensor) -> Tensor:
+        state = self.layers[0].eval(inputs)
         for i in range(1, len(self.layers)):
-            state = self.layers[i].operator(state)
+            state = self.layers[i].eval(state)
 
         return state
 

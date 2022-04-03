@@ -208,6 +208,11 @@ class Delete(Method):
         return Get.__form__(self)
 
 
+class Operator(Post):
+    def __call__(self, *args, **kwargs):
+        return self.form(self.header, *args, **kwargs)
+
+
 def _check_context_param(parameter):
     _name, param = parameter
     if param.annotation == EMPTY or param.annotation == Context:

@@ -30,13 +30,6 @@ def closure(*deps):
     return lambda op: With(deps, op)
 
 
-def hidden(form):
-    """Annotation for a method which can only be called at compile-time (i.e. is hidden from run-time callers)"""
-
-    form.hidden = True
-    return form
-
-
 def get(form):
     """Annotation for a callable function or method specifying that it is a GET :class:`Op`."""
 
@@ -73,8 +66,19 @@ def delete(form):
         return op.Delete(form)
 
 
+def differentiable(form):
+    """Annotation for a callable method specifying that it returns a type of differentiable :class:`Operator`."""
+
+    if _is_method(form):
+        return MethodStub(method.Operator, form)
+    else:
+        raise ValueError(f"@differentiable expects a callable method, not {form}")
+
+
 def _is_method(form):
-    if inspect.ismethod(form):
+    if not callable(form):
+        return False
+    elif inspect.ismethod(form):
         return True
 
     param_names = list(inspect.signature(form).parameters.keys())

@@ -33,7 +33,7 @@ class GradientDescent(Optimizer, Dynamic):
 
     @post
     def train(self, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
-        outputs = self.ml_model.operator(inputs)
+        outputs = self.ml_model.eval(inputs)
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
@@ -80,7 +80,7 @@ class Adam(Optimizer, Dynamic):
     def train(self, cxt, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
         var_names = {hex_id(var): name for name, var in self._ns.items()}
 
-        outputs = self.ml_model.operator(inputs)
+        outputs = self.ml_model.eval(inputs)
 
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
