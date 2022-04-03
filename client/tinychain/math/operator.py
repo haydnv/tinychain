@@ -155,7 +155,7 @@ class Mul(Dual):
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(grad))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grads))
+            grads.update(form_of(self.args).gradients(grad))
 
         return grads
 
