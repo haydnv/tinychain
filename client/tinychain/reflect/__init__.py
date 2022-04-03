@@ -102,14 +102,27 @@ def resolve_class(subject, annotation, default):
 
         return Map.expect(annotation)
     elif inspect.isclass(annotation):
-        return annotation
+        return _resolve_interface(annotation)
 
     classpath = f"{subject.__module__}.{annotation}"
     resolved = locate(classpath)
-    if resolved is None:
-        raise ValueError(f"unable to resolve class {classpath}")
+
+    if inspect.isclass(resolved):
+        return _resolve_interface(resolved)
     else:
-        return resolved
+        raise ValueError(f"unable to resolve class {classpath}")
+
+
+def _resolve_interface(cls):
+    assert inspect.isclass(cls)
+
+    from ..interface import Interface
+    from ..state import State
+
+    if issubclass(cls, Interface) and not issubclass(cls, State):
+        return type(f"{cls.__name__}State", (State, cls), {})
+    else:
+        return cls
 
 
 def _get_rtype(fn, default_rtype):
