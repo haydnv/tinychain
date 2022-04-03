@@ -34,6 +34,9 @@ class Model(Object, metaclass=Meta):
 
         Object.__init__(self, form)  # this will generate method headers
 
+        if uri(self).startswith("/state"):
+            raise ValueError(f"{self} is has no URI defined (consider setting the __uri__ attribute)")
+
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
@@ -62,6 +65,10 @@ class Model(Object, metaclass=Meta):
 
         if isinstance(form, URI) or isinstance(form, Ref):
             return to_json(form)
+
+        elif uri(self).startswith("/state"):
+            raise ValueError(f"{self} has no URI defined (consider overriding the __uri__ attribute)")
+
         else:
             return {str(uri(self)): to_json(form)}
 
