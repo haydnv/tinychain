@@ -1,6 +1,6 @@
 from ..error import BadRequest
 from ..scalar import ref
-from ..util import deanonymize, form_of, to_json
+from ..util import deanonymize, form_of, hex_id, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -72,8 +72,8 @@ class Add(Dual):
         return Numeric.add(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
         return subject + arg
 
     def gradients(self, loss):
@@ -101,8 +101,8 @@ class MatMul(Dual):
         return einsum("...ij,...jk->ik", [self.subject, self.args])
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
@@ -136,8 +136,8 @@ class Mul(Dual):
         return Numeric.mul(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
@@ -165,8 +165,8 @@ class Sub(Dual):
         return Numeric.sub(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
         return subject - arg
 
     def gradients(self, loss):
@@ -192,8 +192,8 @@ class Div(Dual):
         return Numeric.div(self.subject, self.args)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
-        arg = derivative(self.args, variable)
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
 
     def gradients(self, loss):
@@ -277,7 +277,7 @@ class Cos(Unary):
         return Trigonometric.cos(self.subject)
 
     def backward(self, variable):
-        subject = derivative(self.subject, variable)
+        subject = derivative_of(self.subject, variable)
         return subject - self.subject.sin()
 
 
@@ -371,7 +371,14 @@ class Atanh(Unary):
         return 1 / (1 - (self.subject**2))
 
 
-def derivative(state, variable=None):
+def derivative_of(state, variable=None):
+    """
+    Find the derivative of the given `state`.
+
+    If a `variable` is specified, this will be the partial derivative with respect to `variable`.
+    If the given `state` is not differentiable, this will raise a `TypeError`.
+    """
+
     from ..scalar.number import Number
     from ..collection.tensor import Dense, Sparse, Tensor
     from ..ml.optimizer import Variable
@@ -385,7 +392,7 @@ def derivative(state, variable=None):
             return Dense.ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
-            return Dense.zeros_like(state)
+            return Sparse.zeros_like(state)
 
     if isinstance(form_of(state), Operator):
         return form_of(state).backward(variable)
@@ -397,3 +404,15 @@ def derivative(state, variable=None):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")
+
+
+def gradient_of(operator, variable):
+    """Find the gradient of the given `operator` with respect to the given `variable`"""
+
+    operator = form_of(operator)
+    if not isinstance(operator, Operator):
+        raise TypeError(f"gradient_of requires an Operator, not {operator}")
+
+    grads = operator.gradients(derivative_of(variable))
+    if hex_id(variable) in grads:
+        return grads[hex_id(variable)]

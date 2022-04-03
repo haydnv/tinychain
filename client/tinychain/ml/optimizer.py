@@ -6,7 +6,7 @@ from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..math.operator import derivative, Operator
+from ..math.operator import derivative_of, Operator
 from ..scalar.number import F32, F64, UInt
 from ..scalar.ref import After
 from ..util import form_of, hex_id
@@ -38,7 +38,7 @@ class GradientDescent(Optimizer, Dynamic):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
         loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
-        gradients = form_of(outputs).gradients(derivative(loss))
+        gradients = form_of(outputs).gradients(derivative_of(loss))
 
         if not gradients:
             logging.warning(f"model {self.ml_model} operator {form_of(outputs)} has no Variables for {self} to train")
@@ -86,7 +86,7 @@ class Adam(Optimizer, Dynamic):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
         loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
-        gradients = form_of(outputs).gradients(derivative(loss))
+        gradients = form_of(outputs).gradients(derivative_of(loss))
         gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
 
         update_m = {}
