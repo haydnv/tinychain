@@ -9,6 +9,7 @@ from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .chain import Chain
 from .generic import Map, Tuple
+from .interface import Interface
 from .scalar.ref import Ref
 from .scalar.value import Nil
 from .scalar import Scalar
@@ -42,10 +43,11 @@ class Model(Object, metaclass=Meta):
                 continue
 
             if inspect.isclass(attr):
-                if issubclass(attr, Model):
-                    raise NotImplementedError("Model with Model class as an attribute")
-                elif issubclass(attr, State):
+                if issubclass(attr, State):
                     setattr(self, name, attr(form=URI("self").append(name)))
+                elif issubclass(attr, Interface):
+                    cls = type(f"{attr.__name__}State", (State, attr), {})
+                    setattr(self, name, cls(form=URI("self").append(name)))
                 else:
                     raise TypeError(f"Model does not support attributes of type {attr}")
             elif typing.get_origin(attr) is tuple:
