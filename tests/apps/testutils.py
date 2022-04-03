@@ -67,7 +67,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(name, app_or_libraries, overwrite=True, host_uri=None, wait_time=1., cache_size="5K"):
+def start_docker(name, app_or_library, overwrite=True, host_uri=None, wait_time=1., **flags):
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -78,15 +78,14 @@ def start_docker(name, app_or_libraries, overwrite=True, host_uri=None, wait_tim
 
     app_configs = []
 
-    if isinstance(app_or_libraries, tc.app.Library):
-        app_or_libraries = [app_or_libraries] + list(lib() for lib in app_or_libraries.uses().values())
+    deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 
-    for app in app_or_libraries:
-        app_path = tc.uri(app).path()
-        tc.app.write_config(app, f"{config_dir}{app_path}", overwrite)
-        app_configs.append(app_path)
+    for lib in deps:
+        lib_path = tc.uri(lib).path()
+        tc.app.write_config(lib, f"{config_dir}{lib_path}", overwrite)
+        app_configs.append(lib_path)
 
-    process = Docker(config_dir, app_configs, http_port=port, cache_size=cache_size)
+    process = Docker(config_dir, app_configs, http_port=port, **flags)
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 

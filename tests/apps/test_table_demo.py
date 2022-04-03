@@ -24,11 +24,7 @@ class Database(tc.app.App):
 class Web(tc.app.App):
     __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/web")
 
-    @staticmethod
-    def uses():
-        return {
-            "db": Database,
-        }
+    db = Database()
 
     def __init__(self):
         schema = tc.btree.Schema((tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt)))
@@ -55,11 +51,13 @@ class Web(tc.app.App):
 
 class DemoTests(unittest.TestCase):
     def setUp(self):
+        web = Web()
+
         self.hosts = []
         for i in range(3):
             port = DEFAULT_PORT + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
-            host = start_docker("table_demo", [Database(), Web()], True, host_uri, wait_time=2)
+            host = start_docker("table_demo", web, True, host_uri, wait_time=2)
             self.hosts.append(host)
 
     def testCache(self):

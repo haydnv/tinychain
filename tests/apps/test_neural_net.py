@@ -11,16 +11,12 @@ BATCH_SIZE = 20
 class NeuralNetTester(tc.app.Library):
     __uri__ = URI
 
-    @staticmethod
-    def uses():
-        return {
-            "ML": tc.ml.service.ML
-        }
+    ml = tc.ml.service.ML()
 
     @tc.post
     def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor, labels: tc.tensor.Tensor) -> tc.F32:
-        layer = tc.ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1])
-        cxt.optimizer = tc.ml.optimizer.GradientDescent(layer)
+        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
+        cxt.optimizer = self.ml.GradientDescent(layer)
         return cxt.optimizer.train(1, inputs, labels)
 
     @tc.post
@@ -55,7 +51,7 @@ class NeuralNetTester(tc.app.Library):
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_neural_net", NeuralNetTester())
+        cls.host = testutils.start_docker("test_neural_net", NeuralNetTester(), request_ttl=60)
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])

@@ -16,9 +16,6 @@ from .state import Class, Instance, Object, State
 from .util import form_of, get_ref, to_json, uri, URI
 
 
-RESERVED = set(["exports", "provides", "uses", "validate"])
-
-
 class Model(Object, metaclass=Meta):
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
@@ -105,6 +102,7 @@ class Dynamic(Instance):
             else:
                 setattr(self, name, attr)
 
+    # TODO: deduplicate with Meta.__form__
     def __form__(self):
         parent_members = dict(inspect.getmembers(Instance))
 
@@ -211,34 +209,9 @@ def model(cls):
 
 
 class Library(object):
-    @staticmethod
-    def exports():
-        """A list of :class:`Model` s provided by this `Library`"""
-        return []
-
-    @staticmethod
-    def uses():
-        """A list of other :class:`Library` and :class:`App` services referenced by this `Library`"""
-        return {}
-
     def __init__(self):
-        for name, cls in self.uses().items():
-            if not inspect.isclass(cls):
-                raise TypeError(f"Library.uses must specify a class, not {cls}")
-
-            setattr(self, name, cls())
-
-        for cls in self.exports():
-            if not inspect.isclass(cls):
-                raise TypeError(f"Library.exports must specify a class, not {cls}")
-
-            expected_uri = uri(self).append(cls.__name__)
-            if not uri(cls) or uri(cls) != expected_uri:
-                raise ValueError(f"the URI {cls} should be {expected_uri}, not {uri(cls)}")
-
-            setattr(self, cls.__name__, cls)
-
         self._methods = {}
+
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
@@ -247,24 +220,11 @@ class Library(object):
                 self._methods[name] = attr
                 setattr(self, name, attr.method(self, name))
 
-    def validate(self):
-        name = self.__class__.__name__
-
-        for cls in self.uses().values():
-            if not inspect.isclass(cls) or not issubclass(cls, Library):
-                raise ValueError(f"{name} can only use a Library or App, not {cls}")
-
-        for cls in self.exports():
-            if not inspect.isclass(cls) or not issubclass(cls, Model):
-                raise ValueError(f"{name} can only export a Model class, not {cls}")
-
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
-        self.validate()
-
         form = {}
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in RESERVED:
+            if name.startswith('_'):
                 continue
 
             if inspect.isclass(attr):
@@ -297,8 +257,6 @@ class App(Library):
                 raise RuntimeError(f"{attr} must be managed by a Chain")
 
     def __json__(self):
-        self.validate()
-
         header = Header()
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
@@ -311,7 +269,7 @@ class App(Library):
         # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}
         for name, attr in inspect.getmembers(self):
-            if name.startswith('_') or name in RESERVED:
+            if name.startswith('_'):
                 continue
 
             if inspect.isclass(attr):
@@ -348,14 +306,22 @@ class App(Library):
         return {str(uri(self)): form}
 
 
-def _is_mutable(state):
-    if not isinstance(state, State):
-        return False
+def dependencies(app_or_library_instance):
+    if inspect.isclass(app_or_library_instance):
+        raise TypeError(f"cannot discover dependencies of {app_or_library_instance}; try an instance instead")
 
-    if isinstance(state, Scalar):
-        return False
+    deps = []
+    for name, attr in inspect.getmembers(app_or_library_instance):
+        if name.startswith("_"):
+            continue
 
-    return True
+        if isinstance(attr, Library):
+            deps.extend(dependencies(attr))
+
+    if isinstance(app_or_library_instance, Library):
+        deps.append(app_or_library_instance)
+
+    return deps
 
 
 def write_config(lib, config_path, overwrite=False):
@@ -386,3 +352,13 @@ def write_config(lib, config_path, overwrite=False):
 
         with open(config_path, 'w') as config_file:
             config_file.write(json.dumps(config, indent=4))
+
+
+def _is_mutable(state):
+    if not isinstance(state, State):
+        return False
+
+    if isinstance(state, Scalar):
+        return False
+
+    return True

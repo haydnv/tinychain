@@ -8,9 +8,9 @@ from ..math import Operator
 from ..scalar.ref import After
 from ..util import deanonymize, form_of
 
+from .constants import LIB_URI
 from .interface import Differentiable
 from .variable import Variable
-from . import LIB_URI
 
 
 class Layer(Model, Differentiable):

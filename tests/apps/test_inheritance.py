@@ -41,23 +41,23 @@ class Baz(Bar, tc.app.Dynamic):
 class TestLib(tc.app.Library):
     __uri__ = URI
 
-    @staticmethod
-    def exports():
-        return [Foo, Bar]
+    Foo = Foo
+    Bar = Bar
+    Baz = Baz
 
     @tc.get
     def check_foo(self, cxt) -> tc.String:
-        cxt.foo = Foo("foo")
+        cxt.foo = self.Foo("foo")
         return cxt.foo.greet()
 
     @tc.get
     def check_bar(self, cxt) -> tc.String:
-        cxt.bar = Bar("bar")
+        cxt.bar = self.Bar("bar")
         return cxt.bar.greet()
 
     @tc.get
     def check_baz(self, cxt) -> tc.String:
-        cxt.baz = Baz("baz", ["one", "two", "three"])
+        cxt.baz = self.Baz("baz", ["one", "two", "three"])
         return cxt.baz.greet()
 
 

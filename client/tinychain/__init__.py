@@ -4,7 +4,6 @@ import tinychain.graph  # TODO: merge into app
 import tinychain.graph.edge  # TODO: merge into app
 import tinychain.host
 import tinychain.ml
-import tinychain.ml.nn
 import tinychain.ml.service
 import tinychain.scalar
 import tinychain.scalar.bound as bound

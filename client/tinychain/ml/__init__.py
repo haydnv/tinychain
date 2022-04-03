@@ -1,12 +1,3 @@
-import os
-
-from ..util import URI
-
+from .constants import LIB_URI, sigmoid
+from .service import ML
 from .variable import Variable
-
-
-LIB_URI = URI(os.getenv("TC_URI", "/lib/ml"))
-
-
-def sigmoid(x):
-    return 1 / (1 + (-x).exp())
