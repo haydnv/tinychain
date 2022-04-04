@@ -26,18 +26,23 @@ class Optimizer(Model):
 class GradientDescent(Optimizer, Dynamic):
     """A simple gradient descent optimizer with a configurable learning rate."""
 
-    def __init__(self, ml_model, learning_rate=0.001):
+    def __init__(self, ml_model, cost, learning_rate=0.001):
+        # compile-time constants
+        self._cost = cost
+        self._lr = learning_rate
+
+        # run-time state
         self.ml_model = ml_model
-        self.lr = F32(learning_rate)
+
         Dynamic.__init__(self)
 
     @post
-    def train(self, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
+    def train(self, i: UInt, inputs: Tensor) -> Tensor:
         outputs = self.ml_model.eval(inputs)
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
+        loss = self._cost(inputs, outputs)
         gradients = form_of(outputs).gradients(derivative_of(loss))
 
         if not gradients:
@@ -48,7 +53,7 @@ class GradientDescent(Optimizer, Dynamic):
         writes = []
         for var_id, delta in gradients.items():
             var = variables[var_id]
-            writes.append(var.update(delta * self.lr))
+            writes.append(var.update(delta * self._lr))
 
         return After(writes, loss)
 
@@ -60,11 +65,14 @@ class Adam(Optimizer, Dynamic):
     Based on "Adam: A Method for Stochastic Optimization" by Kingma & Ba, 2014: https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, ml_model, beta1=0.9, beta2=0.999, learning_rate=0.001, eps=1e-8):
+    def __init__(self, ml_model, cost, beta1=0.9, beta2=0.999, learning_rate=0.001, eps=1e-8):
+        # compile-time constants
+        self._cost = cost
         self._ns = namespace(ml_model, ml_model.__class__.__name__)
         if not self._ns:
             raise ValueError(f"{ml_model} has no Variables to train")
 
+        # run-time state
         self.ml_model = ml_model
         self.beta1 = F32(beta1)
         self.beta2 = F32(beta2)
@@ -77,7 +85,7 @@ class Adam(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, cxt, i: UInt, inputs: Tensor, labels: Tensor) -> Tensor:
+    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
         var_names = {hex_id(var): name for name, var in self._ns.items()}
 
         outputs = self.ml_model.eval(inputs)
@@ -85,7 +93,7 @@ class Adam(Optimizer, Dynamic):
         if not isinstance(form_of(outputs), Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = (outputs - labels)**2  # TODO: support an arbitrary cost function
+        loss = self._cost(inputs, outputs)
         gradients = form_of(outputs).gradients(derivative_of(loss))
         gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
 
