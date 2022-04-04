@@ -69,6 +69,7 @@ class Adam(Optimizer, Dynamic):
         # compile-time constants
         self._cost = cost
         self._ns = namespace(ml_model, ml_model.__class__.__name__)
+
         if not self._ns:
             raise ValueError(f"{ml_model} has no Variables to train")
 

@@ -116,6 +116,9 @@ class Dynamic(Instance):
                 continue
             elif hasattr(attr, "hidden") and attr.hidden:
                 continue
+            elif isinstance(attr, Library):
+                # it's an external dependency
+                continue
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
@@ -308,20 +311,19 @@ class App(Library):
         return {str(uri(self)): form}
 
 
-def dependencies(app_or_library_instance):
-    if inspect.isclass(app_or_library_instance):
-        raise TypeError(f"cannot discover dependencies of {app_or_library_instance}; try an instance instead")
-
+def dependencies(lib_or_model):
     deps = []
-    for name, attr in inspect.getmembers(app_or_library_instance):
+    for name, attr in inspect.getmembers(lib_or_model):
         if name.startswith("_"):
             continue
 
         if isinstance(attr, Library):
             deps.extend(dependencies(attr))
+        elif inspect.isclass(attr) and issubclass(attr, Model):
+            deps.extend(dependencies(attr))
 
-    if isinstance(app_or_library_instance, Library):
-        deps.append(app_or_library_instance)
+    if isinstance(lib_or_model, Library):
+        deps.append(lib_or_model)
 
     return deps
 
