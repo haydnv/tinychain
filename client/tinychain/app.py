@@ -87,6 +87,9 @@ class Dynamic(Instance):
         if form is not None:
             raise ValueError(f"Dynamic model {self.__class__.__name__} does not support instantiation by reference")
 
+        if not isinstance(self, Model):
+            raise TypeError(f"{self.__class__} must be a subclass of Model")
+
         # TODO: deduplicate with Meta.__form__
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
