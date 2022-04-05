@@ -452,8 +452,6 @@ class MethodSubject(object):
 def is_op_ref(fn):
     if isinstance(fn, Op) or isinstance(fn, After) or isinstance(fn, If) or isinstance(fn, Case):
         return True
-    elif hasattr(fn, "__uri__") and hasattr(fn.__class__, "__uri__") and uri(fn) == uri(fn.__class__):
-        return True
     elif hasattr(fn, "__form__"):
         return is_op_ref(form_of(fn))
     elif isinstance(fn, list) or isinstance(fn, tuple):

@@ -9,7 +9,8 @@ ENDPOINT = "/transact/hypothetical"
 class NumberTests(ClientTest):
     def testDivideByZero(self):
         cxt = tc.Context()
-        cxt.result = tc.F32(3.14) / tc.F32(0.)
+        cxt.pi = tc.F32(3.14)
+        cxt.result = cxt.pi / 0
 
         self.assertRaises(tc.error.BadRequest, lambda: self.host.post(ENDPOINT, cxt))
 
