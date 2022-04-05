@@ -144,19 +144,21 @@ def form_of(state, recurse=False):
 def get_ref(subject, name):
     """Return a named reference to the given state."""
 
+    name = URI(name)
+
     if inspect.isclass(subject):
         def ctr(*args, **kwargs):
             return subject(*args, **kwargs)
 
-        ctr.__uri__ = URI(name)
+        ctr.__uri__ = name
         ctr.__json__ = lambda: to_json(uri(ctr))
         return ctr
     elif hasattr(subject, "__ref__"):
         return subject.__ref__(name)
     elif isinstance(subject, dict):
-        return {k: get_ref(v) for k, v in subject.items()}
+        return {k: get_ref(v, name.append(k)) for k, v in subject.items()}
     elif isinstance(subject, list) or isinstance(subject, tuple):
-        return tuple(get_ref(item, i) for i, item in enumerate(subject))
+        return tuple(get_ref(item, name.append(i)) for i, item in enumerate(subject))
     else:
         return subject
 

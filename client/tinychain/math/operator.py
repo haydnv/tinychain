@@ -397,7 +397,7 @@ def derivative_of(state, variable=None):
     if isinstance(form_of(state), Operator):
         return form_of(state).backward(variable)
     elif isinstance(state, Number):
-        return type(state)(0)
+        return type(state)(form=0)
     elif isinstance(state, Tensor):
         return Sparse.zeros_like(state)
     elif isinstance(state, int) or isinstance(state, float):

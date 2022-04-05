@@ -132,7 +132,7 @@ class MapRef(Ref):
         self.map = map
         self.__uri__ = URI(name)
 
-    def __hex__(self):
+    def __id__(self):
         return hex_id(self.map)
 
     def __json__(self):
@@ -284,7 +284,7 @@ class TupleRef(Ref):
         self.tuple = tuple
         self.__uri__ = URI(name)
 
-    def __hex__(self):
+    def __id__(self):
         return hex_id(self.tuple)
 
     def __json__(self):

@@ -157,6 +157,8 @@ class Dynamic(Instance):
 
 class ModelRef(object):
     def __init__(self, instance, name):
+        assert name
+
         if hasattr(instance, "instance"):
             raise RuntimeError(f"the attribute name 'instance' is reserved (use a different name in {instance})")
 
@@ -171,13 +173,16 @@ class ModelRef(object):
                 # it's a @classmethod
                 continue
 
-            if hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
+            if name.startswith('_'):
+                if isinstance(attr, State):
+                    logging.warning(f"referencing {instance} without referencing hidden State {name}")
+
+                setattr(self, name, attr)
+            elif hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
                 stub = getattr(instance.__class__, name)
                 setattr(self, name, stub.method(self, name))
-            elif hasattr(attr, "__ref__"):
-                setattr(self, name, get_ref(attr, uri(self).append(name)))
             else:
-                setattr(self, name, attr)
+                setattr(self, name, get_ref(attr, uri(self).append(name)))
 
     def __json__(self):
         return to_json(uri(self))

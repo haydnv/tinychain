@@ -8,7 +8,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.operator import derivative_of, Operator
 from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import After
+from ..scalar.ref import After, is_op_ref
 from ..util import form_of, hex_id
 
 from .variable import Variable
@@ -37,16 +37,20 @@ class GradientDescent(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, i: UInt, inputs: Tensor) -> Tensor:
-        outputs = self.ml_model.eval(inputs)
-        if not isinstance(form_of(outputs), Operator):
+    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
+        # TODO: there shouldn't be any need to call self.ml_model.eval twice
+        cxt.outputs = self.ml_model.eval(inputs).copy()
+        operator = form_of(self.ml_model.eval(inputs))
+
+        if not isinstance(operator, Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = self._cost(inputs, outputs)
-        gradients = form_of(outputs).gradients(derivative_of(loss))
+        loss = self._cost(inputs, cxt.outputs)
+        cxt.d_loss = derivative_of(loss)
+        gradients = operator.gradients(cxt.d_loss)
 
         if not gradients:
-            logging.warning(f"model {self.ml_model} operator {form_of(outputs)} has no Variables for {self} to train")
+            logging.warning(f"model {self.ml_model} operator {operator} has no Variables for {self} to train")
 
         variables = trainable(self.ml_model)
 
@@ -80,8 +84,8 @@ class Adam(Optimizer, Dynamic):
         self.lr = F32(learning_rate)
         self.eps = F64(eps)
 
-        self.m = Map({name: Dense.zeros(var.shape) for name, var in self._ns.items()})
-        self.v = Map({name: Dense.zeros(var.shape) for name, var in self._ns.items()})
+        self.m = {name: Dense.constant(form_of(var.shape), 0) for name, var in self._ns.items()}
+        self.v = {name: Dense.constant(form_of(var.shape), 0) for name, var in self._ns.items()}
 
         Dynamic.__init__(self)
 
@@ -89,13 +93,27 @@ class Adam(Optimizer, Dynamic):
     def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
         var_names = {hex_id(var): name for name, var in self._ns.items()}
 
-        outputs = self.ml_model.eval(inputs)
+        # TODO: there shouldn't be any need to call self.ml_model.eval twice
+        cxt.outputs = self.ml_model.eval(inputs).copy()
+        operator = form_of(self.ml_model.eval(inputs))
 
-        if not isinstance(form_of(outputs), Operator):
-            raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
+        if not isinstance(operator, Operator):
+            raise ValueError(f"Optimizer can only train a differentiable Operator, not {operator}")
 
-        loss = self._cost(inputs, outputs)
-        gradients = form_of(outputs).gradients(derivative_of(loss))
+        loss = self._cost(inputs, cxt.outputs)
+        cxt.d_loss = derivative_of(loss).copy()
+        gradients = operator.gradients(cxt.d_loss)
+
+        if var_names and not gradients:
+            raise RuntimeError(f"{operator} has no gradients")
+
+        if set(var_names.keys()) - set(gradients.keys()):
+            raise RuntimeError(f"Adam optimizer has gradients for {set(gradients.keys())} but not {var_names}")
+
+        extra = set(gradients.keys()) - set(var_names.keys())
+        if extra:
+            raise RuntimeError(f"Adam optimizer found gradients {extra} without corresponding Variables")
+
         gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
 
         update_m = {}
