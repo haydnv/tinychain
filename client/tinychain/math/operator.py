@@ -404,15 +404,3 @@ def derivative_of(state, variable=None):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")
-
-
-def gradient_of(operator, variable):
-    """Find the gradient of the given `operator` with respect to the given `variable`"""
-
-    operator = form_of(operator)
-    if not isinstance(operator, Operator):
-        raise TypeError(f"gradient_of requires an Operator, not {operator}")
-
-    grads = operator.gradients(derivative_of(variable))
-    if hex_id(variable) in grads:
-        return grads[hex_id(variable)]
