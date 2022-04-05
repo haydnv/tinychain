@@ -221,6 +221,21 @@ class URI(object):
     def __eq__(self, other):
         return str(self) == str(other)
 
+    def __gt__(self, other):
+        return self.startswith(other) and len(self) > len(other)
+
+    def __ge__(self, other):
+        return self.startswith(other)
+
+    def __len__(self):
+        return len(str(self))
+
+    def __lt__(self, other):
+        return other > self
+
+    def __le__(self, other):
+        return other >= self
+
     def __hash__(self):
         return hash(str(self))
 

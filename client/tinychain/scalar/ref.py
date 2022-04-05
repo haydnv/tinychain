@@ -449,15 +449,17 @@ class MethodSubject(object):
         return f"MethodSubject {repr(self.subject)}"
 
 
-def is_op_ref(fn):
-    if isinstance(fn, Op) or isinstance(fn, After) or isinstance(fn, If) or isinstance(fn, Case):
+def is_op_ref(state_or_ref):
+    if isinstance(state_or_ref, (Op, After, If, Case)):
         return True
-    elif hasattr(fn, "__form__"):
-        return is_op_ref(form_of(fn))
-    elif isinstance(fn, list) or isinstance(fn, tuple):
-        return any(is_op_ref(item) for item in fn)
-    elif isinstance(fn, dict):
-        return any(is_op_ref(fn[k]) for k in fn)
+    elif uri(state_or_ref) and uri(type(state_or_ref)) and uri(state_or_ref) >= uri(type(state_or_ref)):
+        return True
+    elif form_of(state_or_ref) is not state_or_ref:
+        return is_op_ref(form_of(state_or_ref))
+    elif isinstance(state_or_ref, list) or isinstance(state_or_ref, tuple):
+        return any(is_op_ref(item) for item in state_or_ref)
+    elif isinstance(state_or_ref, dict):
+        return any(is_op_ref(state_or_ref[k]) for k in state_or_ref)
     else:
         return False
 
