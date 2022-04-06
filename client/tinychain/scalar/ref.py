@@ -456,7 +456,7 @@ def is_op_ref(state_or_ref):
         return True
     elif form_of(state_or_ref) is not state_or_ref:
         return is_op_ref(form_of(state_or_ref))
-    elif isinstance(state_or_ref, list) or isinstance(state_or_ref, tuple):
+    elif isinstance(state_or_ref, (list, tuple)):
         return any(is_op_ref(item) for item in state_or_ref)
     elif isinstance(state_or_ref, dict):
         return any(is_op_ref(state_or_ref[k]) for k in state_or_ref)
@@ -465,11 +465,11 @@ def is_op_ref(state_or_ref):
 
 
 def is_write_op_ref(fn):
-    if isinstance(fn, Delete) or isinstance(fn, Put):
+    if isinstance(fn, (Delete, Put)):
         return True
     elif hasattr(fn, "__form__"):
         return is_write_op_ref(form_of(fn))
-    elif isinstance(fn, list) or isinstance(fn, tuple):
+    elif isinstance(fn, (list, tuple)):
         return any(is_write_op_ref(item) for item in fn)
     elif isinstance(fn, dict):
         return any(is_write_op_ref(fn[k]) for k in fn)

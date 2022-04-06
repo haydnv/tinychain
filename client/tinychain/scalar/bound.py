@@ -62,7 +62,7 @@ class Range(object):
 
 
 def handle_bounds(bounds):
-    if bounds is None or isinstance(bounds, Ref) or isinstance(bounds, URI):
+    if bounds is None or isinstance(bounds, (Ref, URI)):
         return bounds
 
     if isinstance(bounds, State):
@@ -70,7 +70,7 @@ def handle_bounds(bounds):
         while hasattr(form, "__form__"):
             form = form_of(form)
 
-        if isinstance(form, tuple) or isinstance(form, list):
+        if isinstance(form, (tuple, list)):
             bounds = form
         else:
             return bounds

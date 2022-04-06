@@ -30,7 +30,7 @@ class BTree(Collection):
         Return a slice of this `BTree` containing all keys which begin with the given prefix.
         """
 
-        if not isinstance(prefix, Tuple) and not isinstance(prefix, tuple):
+        if not isinstance(prefix, (Tuple, tuple)):
             prefix = (prefix,)
 
         range = _handle_range(prefix)
@@ -89,12 +89,12 @@ class BTree(Collection):
 
 
 def _handle_range(range):
-    if range is None or isinstance(range, Ref) or isinstance(range, URI):
+    if range is None or isinstance(range, (Ref, URI)):
         return range
 
     if isinstance(range, State):
         form = form_of(range)
-        if isinstance(form, list) or isinstance(form, tuple):
+        if isinstance(form, (list, tuple)):
             range = form
         else:
             return range

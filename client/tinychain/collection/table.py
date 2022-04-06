@@ -193,7 +193,7 @@ def _handle_bounds(bounds):
         return {}
     elif isinstance(bounds, State):
         return _handle_bounds(form_of(bounds))
-    elif isinstance(bounds, Ref) or isinstance(bounds, URI):
+    elif isinstance(bounds, (Ref, URI)):
         return bounds
 
     return {

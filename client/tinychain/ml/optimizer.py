@@ -143,18 +143,18 @@ def namespace(model, prefix):
     if isinstance(model, Variable):
         return {prefix: model}
 
-    if isinstance(model, Map) or isinstance(model, Tuple):
+    if isinstance(model, (Map, Tuple)):
         model = form_of(model)
 
     ns = {}
 
-    if isinstance(model, list) or isinstance(model, tuple):
+    if isinstance(model, (list, tuple)):
         for i, component in enumerate(model):
             ns.update(namespace(component, f"{prefix}.{i}"))
     elif isinstance(model, dict):
         for name, component in model.items():
             ns.update(namespace(component, f"{prefix}.{name}"))
-    elif isinstance(model, Model) or isinstance(model, ModelRef):
+    elif isinstance(model, (Model, ModelRef)):
         # TODO: a ModelRef should implement the same interfaces as its Model
         for name, component in inspect.getmembers(model):
             if name.startswith("__"):
@@ -171,18 +171,18 @@ def trainable(model):
     if isinstance(model, Variable):
         return {hex_id(model): model}
 
-    if isinstance(model, Map) or isinstance(model, Tuple):
+    if isinstance(model, (Map, Tuple)):
         model = form_of(model)
 
     vars = {}
 
-    if isinstance(model, list) or isinstance(model, tuple):
+    if isinstance(model, (list, tuple)):
         for component in model:
             vars.update(trainable(component))
     elif isinstance(model, dict):
         for component in model.values():
             vars.update(trainable(component))
-    elif isinstance(model, Model) or isinstance(model, ModelRef):
+    elif isinstance(model, (Model, ModelRef)):
         # TODO: a ModelRef should implement the same interfaces as its Model
         for name, component in inspect.getmembers(model):
             if name.startswith("__"):

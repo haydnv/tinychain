@@ -45,7 +45,7 @@ class Nil(Value):
     def __json__(self):
         form = form_of(self)
 
-        if isinstance(form, Ref) or isinstance(form, URI):
+        if isinstance(form, (Ref, URI)):
             return to_json(form)
         else:
             return None

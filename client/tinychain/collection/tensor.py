@@ -1,4 +1,5 @@
 """An n-dimensional array of numbers."""
+
 import logging
 import typing
 
@@ -214,7 +215,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
         rtype = Tensor
-        if isinstance(form_of(self.shape), list) or isinstance(form_of(self.shape), tuple):
+        if isinstance(form_of(self.shape), (list, tuple)):
             if isinstance(form_of(axis), int):
                 shape = list(form_of(self.shape))
                 shape.insert(form_of(axis), 1)

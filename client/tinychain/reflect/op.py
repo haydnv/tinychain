@@ -239,10 +239,11 @@ def validate(cxt, provided):
 
         if isinstance(form, URI):
             validate_ref(form)
+
         if isinstance(form, ref.Op):
             validate_ref(form.subject)
 
-            if isinstance(form.args, list) or isinstance(form.args, tuple):
+            if isinstance(form.args, (list, tuple)):
                 for arg in form.args:
                     validate_ref(arg)
             elif isinstance(form.args, dict):

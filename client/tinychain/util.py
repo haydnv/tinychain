@@ -77,7 +77,7 @@ class Context(object):
         elif isinstance(state, dict):
             from .generic import Map
             state = Map(state)
-        elif isinstance(state, tuple) or isinstance(state, list):
+        elif isinstance(state, (tuple, list)):
             from .generic import Tuple
             state = Tuple(state)
         elif isinstance(state, str):
@@ -143,7 +143,7 @@ def depends_on(state_or_ref):
     if isinstance(state_or_ref, Ref):
         for dep in args(state_or_ref):
             deps.extend(depends_on(dep))
-    elif isinstance(state_or_ref, list) or isinstance(state_or_ref, tuple):
+    elif isinstance(state_or_ref, (list, tuple)):
         for dep in state_or_ref:
             deps.extend(depends_on(dep))
     elif isinstance(state_or_ref, dict):
@@ -441,7 +441,7 @@ def to_json(obj):
 
     if hasattr(obj, "__json__"):
         return obj.__json__()
-    elif isinstance(obj, list) or isinstance(obj, tuple):
+    elif isinstance(obj, (list, tuple)):
         return [to_json(i) for i in obj]
     elif isinstance(obj, dict):
         return {str(k): to_json(v) for k, v in obj.items()}
@@ -456,7 +456,7 @@ def deanonymize(state, context):
         return
     elif hasattr(state, "__ns__"):
         state.__ns__(context)
-    elif isinstance(state, tuple) or isinstance(state, list):
+    elif isinstance(state, (tuple, list)):
         for item in state:
             deanonymize(item, context)
     elif isinstance(state, dict):

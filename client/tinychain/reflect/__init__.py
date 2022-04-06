@@ -16,10 +16,10 @@ def is_conditional(state):
         return is_conditional(form_of(state))
     elif isinstance(state, dict):
         return any(is_conditional(value) for value in state.values())
-    elif isinstance(state, list) or isinstance(state, tuple):
+    elif isinstance(state, (list, tuple)):
         return any(is_conditional(item) for item in state)
 
-    return isinstance(state, Case) or isinstance(state, If)
+    return isinstance(state, (Case, If))
 
 
 def is_none(state):
@@ -32,11 +32,11 @@ def is_op(fn):
     from .method import Method
     from .op import Op
 
-    if isinstance(fn, Method) or isinstance(fn, Op):
+    if isinstance(fn, (Method, Op)):
         return True
     elif hasattr(fn, "__form__"):
         return is_op(form_of(fn))
-    elif isinstance(fn, list) or isinstance(fn, tuple):
+    elif isinstance(fn, (list, tuple)):
         return any(is_op(item) for item in fn)
     elif isinstance(fn, dict):
         return any(is_op(fn[k]) for k in fn)
@@ -47,11 +47,11 @@ def is_op(fn):
 def is_ref(state):
     from ..scalar.ref import MethodSubject, Ref
 
-    if isinstance(state, Ref) or isinstance(state, URI) or isinstance(state, MethodSubject):
+    if isinstance(state, (Ref, URI, MethodSubject)):
         return True
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))
-    elif isinstance(state, list) or isinstance(state, tuple):
+    elif isinstance(state, (list, tuple)):
         return any(is_ref(item) for item in state)
     elif isinstance(state, dict):
         return any(is_ref(state[k]) for k in state)
