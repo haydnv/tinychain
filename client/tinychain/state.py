@@ -5,6 +5,7 @@ import inspect
 from .base import _Base
 from .interface import Functional
 from .reflect import is_ref
+from .scalar.ref import Ref
 from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
@@ -59,7 +60,7 @@ class State(_Base):
         if hasattr(form_of(self), "__ref__"):
             return self.__class__(form=get_ref(form_of(self), name))
         else:
-            return self.__class__(form=URI(name))
+            return self.__class__(form=StateRef(self, name))
 
     def __repr__(self):
         if hasattr(self, "__form__") and self.__form__:
@@ -172,3 +173,21 @@ class Instance(Object):
 
     def copy(self):
         raise NotImplementedError("abstract method")
+
+
+class StateRef(Ref):
+    def __init__(self, state, name):
+        self.state = state
+        self.__uri__ = URI(name)
+
+    def __id__(self):
+        return hex_id(self.state)
+
+    def __json__(self):
+        return to_json(uri(self))
+
+    def __ns__(self, cxt):
+        deanonymize(self.state, cxt)
+
+    def __repr__(self):
+        return f"Ref({self.state}, {uri(self)})"

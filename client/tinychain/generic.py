@@ -5,7 +5,7 @@ from .scalar.bound import Range
 from .scalar.number import Bool, Number, UInt
 from .scalar.ref import Get, Post, Ref
 from .scalar.value import Id
-from .state import State
+from .state import State, StateRef
 from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
 
 
@@ -109,7 +109,7 @@ class Map(State):
         return self.ne(other)
 
     def __ref__(self, name):
-        return self.__class__(MapRef(self, name))
+        return self.__class__(form=MapRef(self, name))
 
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
@@ -127,22 +127,9 @@ class Map(State):
         return self._get("len", rtype=UInt)
 
 
-class MapRef(Ref):
-    def __init__(self, map, name):
-        self.map = map
-        self.__uri__ = URI(name)
-
-    def __id__(self):
-        return hex_id(self.map)
-
-    def __json__(self):
-        return to_json(uri(self))
-
+class MapRef(StateRef):
     def __getitem__(self, key):
-        return self.map[key]
-
-    def __ns__(self, cxt):
-        deanonymize(self.map, cxt)
+        return self.state[key]
 
 
 class Tuple(State, Functional):
@@ -251,7 +238,7 @@ class Tuple(State, Functional):
         return self.ne(other)
 
     def __ref__(self, name):
-        return self.__class__(TupleRef(self, name))
+        return self.__class__(form=TupleRef(self, name))
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
@@ -279,22 +266,9 @@ class Tuple(State, Functional):
         return self._get("zip", other, Tuple)
 
 
-class TupleRef(Ref):
-    def __init__(self, tuple, name):
-        self.tuple = tuple
-        self.__uri__ = URI(name)
-
-    def __id__(self):
-        return hex_id(self.tuple)
-
-    def __json__(self):
-        return to_json(uri(self))
-
+class TupleRef(StateRef):
     def __getitem__(self, i):
-        return self.tuple[i]
-
-    def __ns__(self, cxt):
-        deanonymize(self.tuple, cxt)
+        return self.state[i]
 
 
 def _index_of(i, length, default):

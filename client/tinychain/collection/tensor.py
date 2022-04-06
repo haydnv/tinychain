@@ -121,9 +121,6 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def __matmul__(self, other):
         return Tensor(MatMul(self, other))
 
-    def __ref__(self, name):
-        return type(self)(form=TensorRef(self, name))
-
     def add(self, other):
         return Tensor(Add(self, other))
 
@@ -653,21 +650,3 @@ class Reshape(Transform):
 
     def gradients(self, loss):
         return Transform.gradients(self, loss.reshape(self.subject.shape))
-
-
-class TensorRef(ref.Ref):
-    def __init__(self, tensor, name):
-        self.tensor = tensor
-        self.__uri__ = URI(name)
-
-    def __id__(self):
-        return hex_id(self.tensor)
-
-    def __json__(self):
-        return to_json(uri(self))
-
-    def __ns__(self, cxt):
-        deanonymize(self.tensor, cxt)
-
-    def __repr__(self):
-        return f"TensorRef({uri(self)})"

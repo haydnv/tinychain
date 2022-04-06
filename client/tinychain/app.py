@@ -10,7 +10,7 @@ from .reflect.meta import Meta, MethodStub
 from .chain import Chain
 from .generic import Map, Tuple
 from .interface import Interface
-from .scalar.ref import is_op_ref, Ref
+from .scalar.ref import Ref
 from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
@@ -155,7 +155,7 @@ class Dynamic(Instance):
         return f"a Dynamic model {self.__class__.__name__}"
 
 
-class ModelRef(object):
+class ModelRef(Ref):
     def __init__(self, instance, name):
         assert name
 
