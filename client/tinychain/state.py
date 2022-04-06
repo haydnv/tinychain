@@ -36,9 +36,6 @@ class State(_Base):
 
         _Base.__init__(self)
 
-    def __dbg__(self):
-        return [form_of(self)]
-
     def __json__(self):
         form = form_of(self)
 

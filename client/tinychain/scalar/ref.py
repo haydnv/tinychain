@@ -37,7 +37,7 @@ class After(Ref):
         self.when = when
         self.then = then
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.when, self.then]
 
     def __json__(self):
@@ -76,7 +76,7 @@ class Case(Ref):
         self.switch = switch
         self.case = case
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.cond, self.switch, self.case]
 
     def __json__(self):
@@ -113,7 +113,7 @@ class If(Ref):
         self.then = then
         self.or_else = or_else
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.cond, self.then, self.or_else]
 
     def __json__(self):
@@ -154,7 +154,7 @@ class While(Ref):
         self.op = op
         self.state = state
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.cond, self.op, self.state]
 
     def __json__(self):
@@ -193,7 +193,7 @@ class With(Ref):
         if hasattr(op, "rtype"):
             self.rtype = op.rtype
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.capture, self.op]
 
     def __json__(self):
@@ -215,7 +215,7 @@ class Op(Ref):
         self.subject = subject
         self.args = args
 
-    def __dbg__(self):
+    def __args__(self):
         subject = [self.subject] if is_op_ref(self.subject) else []
         return subject + [arg for arg in list(self.args) if is_op_ref(arg)]
 
@@ -342,7 +342,7 @@ class Post(Op):
 
         Op.__init__(self, subject, args)
 
-    def __dbg__(self):
+    def __args__(self):
         args = [self.subject] if is_op_ref(self.subject) else []
         return args + ([self.args.values()] if is_op_ref(self.args) else [])
 
@@ -406,7 +406,7 @@ class MethodSubject(object):
         self.subject = subject
         self.method_name = method_name
 
-    def __dbg__(self):
+    def __args__(self):
         return [self.subject] if is_op_ref(self.subject) else []
 
     def __ns__(self, cxt):

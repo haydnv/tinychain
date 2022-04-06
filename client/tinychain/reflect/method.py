@@ -51,7 +51,7 @@ class Get(Method):
     def __call__(self, key=None):
         return self.rtype(ref.Get(self.subject(), key))
 
-    def __dbg__(self):
+    def __args__(self):
         _, cxt = form_of(self)
         return [self.subject(), cxt]
 
@@ -92,7 +92,7 @@ class Put(Method):
     def __call__(self, key, value):
         return ref.Put(self.subject(), key, value)
 
-    def __dbg__(self):
+    def __args__(self):
         _, _, cxt = form_of(self)
         return [self.subject(), cxt]
 
@@ -163,7 +163,7 @@ class Post(Method):
         params = parse_args(sig, *args, **kwargs)
         return rtype(ref.Post(self.subject(), params))
 
-    def __dbg__(self):
+    def __args__(self):
         _, cxt = form_of(self)
         return [self.subject(), cxt]
 
@@ -200,7 +200,7 @@ class Delete(Method):
     def __call__(self, key=None):
         return ref.Delete(self.subject(), key)
 
-    def __dbg__(self):
+    def __args__(self):
         _, cxt = form_of(self)
         return [self.subject(), cxt]
 

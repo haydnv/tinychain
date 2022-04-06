@@ -114,11 +114,13 @@ class Context(object):
         return self._form
 
 
-# TODO: rename this
-def debug(state):
-    """Return the immediate dependencies of the given `state`."""
+def args(state_or_ref):
+    """Return the references needed to resolve the given `state_or_ref`."""
 
-    return [dep for dep in state.__dbg__() if dep is not None] if hasattr(state, "__dbg__") else []
+    if form_of(state_or_ref) is not state_or_ref:
+        return args(form_of(state_or_ref))
+
+    return state_or_ref.__args__() if hasattr(state_or_ref, "__args__") else []
 
 
 def depends_on(state_or_ref):
@@ -139,7 +141,7 @@ def depends_on(state_or_ref):
     deps = []
 
     if isinstance(state_or_ref, Ref):
-        for dep in debug(state_or_ref):
+        for dep in args(state_or_ref):
             deps.extend(depends_on(dep))
     elif isinstance(state_or_ref, list) or isinstance(state_or_ref, tuple):
         for dep in state_or_ref:
@@ -229,7 +231,7 @@ def independent(state_or_ref):
     elif isinstance(state_or_ref, (list, tuple)):
         return all(independent(item) for item in state_or_ref)
     elif isinstance(state_or_ref, Ref):
-        return not debug(state_or_ref)
+        return not args(state_or_ref)
     else:
         return True
 

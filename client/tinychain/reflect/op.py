@@ -38,7 +38,7 @@ class Get(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __dbg__(self):
+    def __args__(self):
         _, cxt = form_of(self)
         return [cxt]
 
@@ -78,7 +78,7 @@ class Put(Op):
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
 
-    def __dbg__(self):
+    def __args__(self):
         _, _, cxt = form_of(self)
         return [cxt]
 
@@ -139,7 +139,7 @@ class Post(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __dbg__(self):
+    def __args__(self):
         return [form_of(self)]
 
     def __form__(self):
@@ -179,7 +179,7 @@ class Post(Op):
 class Delete(Op):
     __uri__ = uri(op.Delete)
 
-    def __dbg__(self):
+    def __args__(self):
         _, cxt = form_of(self)
         return [cxt]
 
