@@ -114,10 +114,41 @@ class Context(object):
         return self._form
 
 
+# TODO: rename this
 def debug(state):
-    """Return the name and immediate dependencies of the given `state`."""
+    """Return the immediate dependencies of the given `state`."""
 
     return [dep for dep in state.__dbg__() if dep is not None] if hasattr(state, "__dbg__") else []
+
+
+def depends_on(state_or_ref):
+    """Return the set of all compile-time dependencies of the given `state_or_ref`"""
+
+    if form_of(state_or_ref) is not state_or_ref:
+        return depends_on(form_of(state_or_ref))
+
+    from . import reflect
+    from .scalar.ref import Ref
+
+    if independent(state_or_ref):
+        print("independent", state_or_ref)
+        return [state_or_ref]
+    else:
+        print("not independent", state_or_ref)
+
+    deps = []
+
+    if isinstance(state_or_ref, Ref):
+        for dep in debug(state_or_ref):
+            deps.extend(depends_on(dep))
+    elif isinstance(state_or_ref, list) or isinstance(state_or_ref, tuple):
+        for dep in state_or_ref:
+            deps.extend(depends_on(dep))
+    elif isinstance(state_or_ref, dict):
+        for dep in state_or_ref.values():
+            deps.extend(depends_on(dep))
+
+    return deps
 
 
 def form_of(state, recurse=False):
@@ -181,6 +212,26 @@ def hex_id(state_or_ref):
         return state_or_ref.__id__()
 
     return format(id(state_or_ref), 'x')
+
+
+def independent(state_or_ref):
+    if form_of(state_or_ref) is not state_or_ref:
+        return independent(form_of(state_or_ref))
+
+    from . import reflect
+    from .scalar.ref import Ref
+
+    if isinstance(state_or_ref, (reflect.method.Method, reflect.op.Op)) or inspect.isclass(state_or_ref):
+        return True
+
+    if isinstance(state_or_ref, dict):
+        return all(independent(value) for value in state_or_ref.values())
+    elif isinstance(state_or_ref, (list, tuple)):
+        return all(independent(item) for item in state_or_ref)
+    elif isinstance(state_or_ref, Ref):
+        return not debug(state_or_ref)
+    else:
+        return True
 
 
 class URI(object):

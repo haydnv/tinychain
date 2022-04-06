@@ -216,8 +216,8 @@ class Op(Ref):
         self.args = args
 
     def __dbg__(self):
-        subject = [self.subject] if is_ref(self.subject) else []
-        return subject + list(self.args)
+        subject = [self.subject] if is_op_ref(self.subject) else []
+        return subject + [arg for arg in list(self.args) if is_op_ref(arg)]
 
     def __json__(self):
         if hasattr(self.subject, "__form__"):
@@ -342,6 +342,10 @@ class Post(Op):
 
         Op.__init__(self, subject, args)
 
+    def __dbg__(self):
+        args = [self.subject] if is_op_ref(self.subject) else []
+        return args + ([self.args.values()] if is_op_ref(self.args) else [])
+
     def __repr__(self):
         return f"POST Op ref {self.subject} {self.args}"
 
@@ -403,11 +407,7 @@ class MethodSubject(object):
         self.method_name = method_name
 
     def __dbg__(self):
-        subject = [self.subject] if is_ref(self.subject) else []
-        return subject + self.args
-
-    def __dbg__(self):
-        return [self.subject]
+        return [self.subject] if is_op_ref(self.subject) else []
 
     def __ns__(self, cxt):
         name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
