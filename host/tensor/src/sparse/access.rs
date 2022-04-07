@@ -1,6 +1,6 @@
 use std::fmt;
 
-use afarray::{Array, CoordBlocks, CoordIntersect, CoordMerge, CoordUnique, Coords};
+use afarray::{Array, CoordBlocks, CoordMerge, CoordUnique, Coords};
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -1272,21 +1272,16 @@ where
     }
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        debug!(
-            "SparseLeftCombinator::filled_at {:?} with sources {}, {}",
-            axes, self.left, self.right
-        );
+        let ndim = self.ndim();
+        let shape: Shape = axes.iter().map(|x| self.shape()[*x]).collect();
+        let filled = self.filled(txn.clone()).await?;
+        let filled = filled.map_ok(|(coord, _value)| coord);
 
-        debug_assert_eq!(self.left.shape(), self.right.shape());
-        self.left.shape().validate_axes(&axes)?;
+        let coords = CoordBlocks::new(filled, ndim, PER_BLOCK);
+        let filled_at = coords.map_ok(move |coords| coords.get(&axes));
+        let unique = sorted_coords::<FD, FS, D, T, _>(&txn, shape.clone(), filled_at).await?;
 
-        let shape = axes.iter().map(|x| self.shape()[*x]).collect();
-        let (left, right) = try_join!(
-            self.left.filled_at(txn.clone(), axes.to_vec()),
-            self.right.filled_at(txn, axes)
-        )?;
-
-        Ok(Box::pin(CoordIntersect::new(left, right, shape, PER_BLOCK)))
+        Ok(Box::pin(CoordUnique::new(unique, shape.to_vec(), PER_BLOCK)))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {

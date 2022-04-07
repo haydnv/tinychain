@@ -31,14 +31,16 @@ class TestGraph(tc.graph.Graph):
     def recommend(self, txn, user_id: tc.U32):
         txn.vector = tc.graph.Vector.create()
         txn.user_ids = tc.After(txn.vector[user_id].write(True), txn.vector)
+
         txn.friend_ids = tc.If(
             user_id.is_some(),
             self.friend.match(txn.user_ids, 2),
             tc.error.BadRequest("invalid user ID: {{user_id}}", user_id=user_id))
 
-        txn.order_ids = self.user_order.primary(txn.friend_ids)
-        txn.product_ids = self.order_product.foreign(txn.order_ids)
-        return self.product.read_vector(txn.product_ids)
+        return txn.friend_ids
+        # txn.order_ids = self.user_order.primary(txn.friend_ids)
+        # txn.product_ids = self.order_product.foreign(txn.order_ids)
+        # return self.product.read_vector(txn.product_ids)
 
 
 class LibraryTests(unittest.TestCase):
@@ -65,7 +67,7 @@ class LibraryTests(unittest.TestCase):
                   .create_edge("order_product", tc.graph.edge.Schema("product.sku", "order.sku"))
                   .create_edge("user_order", tc.graph.edge.Schema("user.user_id", "order.user_id")))
 
-        cls.host = testutils.start_docker("test_graph", [TestGraph(schema)])
+        cls.host = testutils.start_host("test_graph", [TestGraph(schema)])
 
     def testTraversal(self):
         user1 = {"email": "user12345@example.com", "display_name": "user 12345"}
@@ -85,7 +87,8 @@ class LibraryTests(unittest.TestCase):
         order = {"user_id": 23456, "sku": 1, "quantity": 5}
         _order_id = self.host.post(URI.append("place_order"), order)
 
-        # recommended = self.host.get(URI.append("recommend"), 12345)
+        recommended = self.host.get(URI.append("recommend"), 12345)
+        print(recommended)
         # self.assertEqual(recommended, [[1, "widget 1", 399]])
 
     @classmethod
