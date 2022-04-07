@@ -504,13 +504,17 @@ where
 
     async fn filled_at<'a>(self, txn: T, axes: Vec<usize>) -> TCResult<TCBoxTryStream<'a, Coords>> {
         debug!(
-            "SparseBroadcast::filled_at {:?} (source is {})",
-            axes, self.source
+            "SparseBroadcast::filled_at {:?} (source is {}, shape is {})",
+            axes,
+            self.source,
+            self.rebase.shape()
         );
 
         if axes.is_empty() {
             return Ok(Box::pin(stream::empty()));
         }
+
+        // TODO: optimize for the case when none of the `axes` have been broadcast
 
         self.shape().validate_axes(&axes)?;
 
@@ -519,7 +523,7 @@ where
             axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>()
         });
 
-        let ndim = self.ndim();
+        let ndim = axes.len();
         let rebase = self.rebase;
         let source_axes = (0..self.source.ndim()).collect();
 
@@ -529,14 +533,22 @@ where
             .try_flatten()
             .map_ok(move |coord| {
                 trace!("broadcast source coord {:?}", coord);
-                rebase.map_coord(coord)
+                let bounds = rebase.map_coord(coord);
+                let bounds: Bounds = bounds
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(x, bound)| if axes.contains(&x) { Some(bound) } else { None })
+                    .collect();
+
+                assert_eq!(bounds.len(), ndim);
+                bounds
             })
             // TODO: can this happen in `Coords`? maybe a new stream generator type?
+            .inspect_ok(|bounds: &Bounds| trace!("broadcast coord mapped to bounds {}", bounds))
             .map_ok(move |bounds| stream::iter(bounds.affected().map(TCResult::Ok)))
             .try_flatten();
 
-        let filled_at =
-            CoordBlocks::new(filled_at, ndim, PER_BLOCK).map_ok(move |coords| coords.get(&axes));
+        let filled_at = CoordBlocks::new(filled_at, ndim, PER_BLOCK);
 
         let filled_at = sorted_coords::<FD, FS, D, T, _>(&txn, shape, filled_at).await?;
 

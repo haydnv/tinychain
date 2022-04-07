@@ -3,7 +3,7 @@ use std::iter;
 use std::ops;
 
 use afarray::Coords;
-use log::debug;
+use log::{debug, warn};
 
 use tc_error::*;
 use tcgeneric::Tuple;
@@ -32,6 +32,11 @@ impl Broadcast {
             return Err(TCError::unsupported(
                 "cannot broadcast into an empty Tensor",
             ));
+        } else if source_shape == shape {
+            warn!(
+                "broadcast a Tensor with shape {} into {}",
+                source_shape, shape
+            );
         }
 
         let ndim = shape.len();

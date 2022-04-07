@@ -36,6 +36,7 @@ where
         .create_file_unique(txn_id, TensorType::Dense)
         .await?;
 
+    let coords = coords.inspect_ok(|block| trace!("coord block len is {}", block.len()));
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
     debug!("sorted coords");
 
@@ -93,7 +94,8 @@ where
 {
     debug!("sort coords for Tensor with shape {}", shape);
 
-    let blocks = coords_to_offsets(shape, coords).map_ok(|block| ArrayExt::from(block).into());
+    let blocks =
+        coords_to_offsets(shape, coords).map_ok(|block: Offsets| ArrayExt::from(block).into());
 
     let block_list =
         BlockListFile::from_blocks(file, txn_id, None, UIntType::U64.into(), Box::pin(blocks))

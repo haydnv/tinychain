@@ -139,6 +139,7 @@ where
         let shape = axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>();
         let coords = filled_at::<FD, FS, D, T, _>(&txn, axes, self.table).await?;
 
+        let coords = coords.inspect_ok(|coord| trace!("SparseTable filled at {:?}", coord));
         let coords = CoordBlocks::new(coords, shape.len(), PER_BLOCK);
 
         if sort {
@@ -440,7 +441,8 @@ where
         let source_coords = filled_at::<FD, FS, D, T, _>(&txn, source_axes, self.table).await?;
         let coords = CoordBlocks::new(source_coords, self.source.ndim(), PER_BLOCK)
             .map_ok(move |coords| rebase.map_coords(coords))
-            .map_ok(move |coords| coords.get(&axes));
+            .map_ok(move |coords| coords.get(&axes))
+            .inspect_ok(|coords| trace!("SparseTableSlice {} coords to sort", coords.len()));
 
         let filled_at = sorted_coords::<FD, FS, D, T, _>(&txn, shape.into(), coords).await?;
         Ok(Box::pin(filled_at))
