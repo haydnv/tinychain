@@ -5,7 +5,7 @@ use std::iter::Cloned;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use futures::future::TryFutureExt;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
@@ -50,6 +50,38 @@ where
                 let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
 
                 Ok(State::Tuple(items.collect()))
+            })
+        }))
+    }
+}
+
+struct ForEachHandler<I> {
+    source: I,
+}
+
+impl<'a, I, T> Handler<'a> for ForEachHandler<I>
+where
+    I: IntoIterator<Item = T> + Send + 'a,
+    I::IntoIter: Send + 'a,
+    T: 'a,
+    State: From<T>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let op: Closure = params.require(&label("op").into())?;
+                params.expect_empty()?;
+
+                stream::iter(self.source)
+                    .map(|args| op.clone().call(txn, State::from(args)))
+                    .buffer_unordered(num_cpus::get())
+                    .try_fold((), |(), _| future::ready(Ok(())))
+                    .await?;
+
+                Ok(State::default())
             })
         }))
     }
@@ -509,6 +541,9 @@ where
                 "append" => Some(Box::new(AppendHandler::from(self))),
                 "copy" => Some(Box::new(TupleCopyHandler::from(self))),
                 "fold" => Some(Box::new(TupleFoldHandler::from(self))),
+                "for_each" => Some(Box::new(ForEachHandler {
+                    source: self.clone(),
+                })),
                 "len" => Some(Box::new(AttributeHandler::from(Number::from(
                     self.len() as u64
                 )))),
