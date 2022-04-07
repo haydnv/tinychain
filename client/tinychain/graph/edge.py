@@ -1,10 +1,12 @@
 from ..collection.tensor import einsum, Sparse
-from ..decorators import post
+from ..decorators import closure, get, post
 from ..error import BadRequest
 from ..generic import Map
-from ..scalar.number import I32, U64
-from ..scalar.ref import If, While
+from ..interface import Functional
+from ..scalar.number import I32, U32, U64
+from ..scalar.ref import After, If, While
 from ..scalar.value import String
+from ..state import State
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
@@ -39,11 +41,24 @@ class Schema(object):
 class Edge(Sparse):
     """A relationship between a primary key and itself."""
 
+    __spec__ = ((DIM, DIM), U32)
+
+    def link(self, from_id, to_id):
+        """Add a link from the :class:`Model` at `from_id` to the :class:`Model` at `to_id`"""
+
+        return self[from_id, to_id].write(True)
+
+    def unlink(self, from_id, to_id):
+        """Remove the link from the :class:`Model` at `from_id` to the :class:`Model` at `to_id`, if present."""
+
+        return self[from_id, to_id].write(False)
+
     def match(self, node_ids, degrees):
         """
-        Traverse this `Edge` breadth-first from the given `node_ids` for the given number of `degrees`.
+        Traverse this `Edge` breadth-first from the given `node_ids`.
 
-        Returns a new vector filled with the IDs of the matched nodes.
+        Returns a vector view with the IDs of the matched nodes.
+        Call `match` in a `While` loop to traverse multiple degrees of relationships.
         """
 
         @post
@@ -52,28 +67,40 @@ class Edge(Sparse):
 
         @post
         def traverse(edge: Sparse, i: U64, neighbors: Sparse):
-            neighbors += Sparse.sum(edge * neighbors, 1)
+            neighbors += (edge * neighbors).sum(1)
             return {"edge": edge, "i": i + 1, "neighbors": neighbors.copy()}
 
         node_ids = Sparse(node_ids)
         shape = node_ids.shape
         traversal = If(
-            shape.eq([DIM]),
+            node_ids.ndim == 1,
             While(cond, traverse, {"edge": self, "i": 0, "neighbors": node_ids}),
             BadRequest(String(f"an edge input vector has shape [{DIM}], not {{{shape}}}").render(shape=shape)))
 
-        return Sparse.sub(Map(traversal)["neighbors"], node_ids)
+        return Sparse(Map(traversal)["neighbors"]) - node_ids
 
 
 class ForeignKey(Sparse):
     """A relationship between a primary key and a column in another `Table`."""
 
-    def backward(self, node_ids):
+    __spec__ = ((DIM, DIM), U32)
+
+    def primary(self, node_ids):
         """Return a vector of primary node IDs, given a vector of foreign node IDs."""
 
         return einsum("ij,j->i", [self, node_ids])
 
-    def forward(self, node_ids):
+    def foreign(self, node_ids):
         """Return a vector of foreign node IDs, given a vector of primary node IDs."""
 
         return einsum("ij,i->j", [self, node_ids])
+
+
+class Vector(Sparse):
+    """A `Vector` of node IDs used to query an :class:`Edge` or `ForeignKey`"""
+
+    __spec__ = ((DIM,), U32)
+
+    @classmethod
+    def create(cls):
+        return cls(cls.__spec__)

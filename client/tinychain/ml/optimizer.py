@@ -37,17 +37,16 @@ class GradientDescent(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
-        # TODO: there shouldn't be any need to call self.ml_model.eval twice
-        cxt.outputs = self.ml_model.eval(inputs).copy()
-        operator = form_of(self.ml_model.eval(inputs))
+    def train(self, i: UInt, inputs: Tensor) -> Tensor:
+        outputs = self.ml_model.eval(inputs)
+        operator = form_of(outputs)
 
         if not isinstance(operator, Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        loss = self._cost(inputs, cxt.outputs)
-        cxt.d_loss = derivative_of(loss)
-        gradients = operator.gradients(cxt.d_loss)
+        loss = self._cost(inputs, outputs)
+        d_loss = derivative_of(loss).copy()
+        gradients = operator.gradients(d_loss)
 
         if not gradients:
             logging.warning(f"model {self.ml_model} operator {operator} has no Variables for {self} to train")
@@ -90,19 +89,18 @@ class Adam(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
+    def train(self, i: UInt, inputs: Tensor) -> Tensor:
         var_names = {hex_id(var): name for name, var in self._ns.items()}
 
-        # TODO: there shouldn't be any need to call self.ml_model.eval twice
-        cxt.outputs = self.ml_model.eval(inputs).copy()
-        operator = form_of(self.ml_model.eval(inputs))
+        outputs = self.ml_model.eval(inputs)
+        operator = form_of(outputs)
 
         if not isinstance(operator, Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {operator}")
 
-        loss = self._cost(inputs, cxt.outputs)
-        cxt.d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(cxt.d_loss)
+        loss = self._cost(inputs, outputs)
+        d_loss = derivative_of(loss).copy()
+        gradients = operator.gradients(d_loss)
 
         if var_names and not gradients:
             raise RuntimeError(f"{operator} has no gradients")
@@ -128,8 +126,8 @@ class Adam(Optimizer, Dynamic):
 
         update_v = {name: self.v[name] * self.beta2 + gradients[name]**2 * (1. - self.beta2) for name in self.v}
 
-        cxt.a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
-        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * cxt.a for name in gradients}
+        a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
+        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in gradients}
 
         updates = After([
             [self.m[name].write(new_value) for name, new_value in update_m.items()],
