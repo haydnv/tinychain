@@ -561,6 +561,7 @@ impl Persist<fs::Dir> for History {
 #[async_trait]
 impl Transact for History {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!("Chain history commit");
         join!(self.file.commit(txn_id), self.dir.commit(txn_id));
     }
 

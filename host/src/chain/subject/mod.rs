@@ -7,7 +7,7 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{join_all, try_join_all, TryFutureExt};
-use log::debug;
+use log::{debug, warn};
 use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
@@ -323,7 +323,7 @@ impl Subject {
 #[async_trait]
 impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("commit chain subject");
+        warn!("commit chain subject");
 
         match self {
             Self::Collection(subject) => subject.commit(txn_id).await,

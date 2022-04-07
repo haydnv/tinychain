@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::join;
+use log::debug;
 use sha2::digest::Output;
 use sha2::Sha256;
 
@@ -126,6 +127,7 @@ impl Persist<fs::Dir> for SyncChain {
 #[async_trait]
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!("SyncChain::commit");
         self.subject.commit(txn_id).await;
     }
 
