@@ -1,12 +1,10 @@
 from ..collection.tensor import einsum, Sparse
-from ..decorators import closure, get, post
+from ..decorators import post
 from ..error import BadRequest
 from ..generic import Map
-from ..interface import Functional
-from ..scalar.number import I32, U32, U64
-from ..scalar.ref import After, If, While
+from ..scalar.number import Bool, I32, U32, U64
+from ..scalar.ref import If, While
 from ..scalar.value import String
-from ..state import State
 
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
@@ -99,7 +97,7 @@ class ForeignKey(Sparse):
 class Vector(Sparse):
     """A `Vector` of node IDs used to query an :class:`Edge` or `ForeignKey`"""
 
-    __spec__ = ((DIM,), U32)
+    __spec__ = ((DIM,), Bool)
 
     @classmethod
     def create(cls):

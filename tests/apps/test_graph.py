@@ -37,10 +37,9 @@ class TestGraph(tc.graph.Graph):
             self.friend.match(txn.user_ids, 2),
             tc.error.BadRequest("invalid user ID: {{user_id}}", user_id=user_id))
 
-        return txn.friend_ids
-        # txn.order_ids = self.user_order.primary(txn.friend_ids)
-        # txn.product_ids = self.order_product.foreign(txn.order_ids)
-        # return self.product.read_vector(txn.product_ids)
+        txn.order_ids = self.user_order.foreign(txn.friend_ids)
+        txn.product_ids = self.order_product.foreign(txn.order_ids)
+        return self.product.read_vector(txn.product_ids)
 
 
 class LibraryTests(unittest.TestCase):
@@ -88,8 +87,7 @@ class LibraryTests(unittest.TestCase):
         _order_id = self.host.post(URI.append("place_order"), order)
 
         recommended = self.host.get(URI.append("recommend"), 12345)
-        print(recommended)
-        # self.assertEqual(recommended, [[1, "widget 1", 399]])
+        self.assertEqual(recommended, [[1, "widget 1", 399]])
 
     @classmethod
     def tearDownClass(cls) -> None:
