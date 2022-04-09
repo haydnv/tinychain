@@ -30,6 +30,7 @@ class GradientDescent(Optimizer, Dynamic):
         # compile-time constants
         self._cost = cost
         self._lr = learning_rate
+        self._model_name = ml_model.__class__.__name__
 
         # run-time state
         self.ml_model = ml_model
@@ -48,8 +49,7 @@ class GradientDescent(Optimizer, Dynamic):
         d_loss = derivative_of(loss).copy()
         gradients = operator.gradients(d_loss)
 
-        if not gradients:
-            logging.warning(f"model {self.ml_model} operator {operator} has no Variables for {self} to train")
+        validate(self.ml_model, self._model_name, operator, gradients)
 
         variables = trainable(self.ml_model)
 
@@ -71,10 +71,7 @@ class Adam(Optimizer, Dynamic):
     def __init__(self, ml_model, cost, beta1=0.9, beta2=0.999, learning_rate=0.001, eps=1e-8):
         # compile-time constants
         self._cost = cost
-        self._ns = namespace(ml_model, ml_model.__class__.__name__)
-
-        if not self._ns:
-            raise ValueError(f"{ml_model} has no Variables to train")
+        self._model_name = ml_model.__class__.__name__
 
         # run-time state
         self.ml_model = ml_model
@@ -83,15 +80,21 @@ class Adam(Optimizer, Dynamic):
         self.lr = F32(learning_rate)
         self.eps = F64(eps)
 
-        self.m = {name: Dense.constant(form_of(var.shape), 0) for name, var in self._ns.items()}
-        self.v = {name: Dense.constant(form_of(var.shape), 0) for name, var in self._ns.items()}
+        self.m = {}
+        self.v = {}
+
+        for name, var in namespace(ml_model, self._model_name).items():
+            shape = form_of(var.shape)
+            if not isinstance(shape, (list, tuple)):
+                raise ValueError(f"the shape of a Variable must be defined at compile time (found {shape})")
+
+            self.m[name] = Dense.constant(shape, 0)
+            self.v[name] = Dense.constant(shape, 0)
 
         Dynamic.__init__(self)
 
     @post
     def train(self, i: UInt, inputs: Tensor) -> Tensor:
-        var_names = {hex_id(var): name for name, var in self._ns.items()}
-
         outputs = self.ml_model.eval(inputs)
         operator = form_of(outputs)
 
@@ -102,15 +105,8 @@ class Adam(Optimizer, Dynamic):
         d_loss = derivative_of(loss).copy()
         gradients = operator.gradients(d_loss)
 
-        if var_names and not gradients:
-            raise RuntimeError(f"{operator} has no gradients")
-
-        if set(var_names.keys()) - set(gradients.keys()):
-            raise RuntimeError(f"Adam optimizer has gradients for {set(gradients.keys())} but not {var_names}")
-
-        extra = set(gradients.keys()) - set(var_names.keys())
-        if extra:
-            raise RuntimeError(f"Adam optimizer found gradients {extra} without corresponding Variables")
+        vars, var_names = validate(self.ml_model, self._model_name, operator, gradients)
+        vars = {name: vars[var_id] for var_id, name in var_names.items()}
 
         gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
 
@@ -132,14 +128,57 @@ class Adam(Optimizer, Dynamic):
         updates = After([
             [self.m[name].write(new_value) for name, new_value in update_m.items()],
             [self.v[name].write(new_value) for name, new_value in update_v.items()],
-        ], [self._ns[name].update(delta) for name, delta in update_model.items()])
+        ], [vars[name].update(delta) for name, delta in update_model.items()])
 
         return After(updates, loss)
+
+
+def validate(model, name, operator, gradients):
+    ns = {hex_id(var): name for name, var in namespace(model, name).items()}
+
+    assert isinstance(operator, Operator)
+    assert ns
+
+    missing_vars = set(ns.keys())
+    vars = {}
+    visited = []
+    unvisited = [operator.subject, operator.args]
+    while unvisited:
+        node = unvisited.pop()
+
+        if isinstance(node, Variable):
+            if hex_id(node) not in ns:
+                raise RuntimeError(f"model output {operator} references unrecognized variable {hex_id(node)}")
+
+            vars[hex_id(node)] = node
+            missing_vars.remove(hex_id(node))
+            continue
+
+        node = form_of(node)
+        if isinstance(node, Operator):
+            unvisited.append(node.subject)
+            unvisited.append(node.args)
+            visited.append(node)
+
+    if missing_vars:
+        raise RuntimeError(f"{name} operator graph disconnects from its inputs at {visited[-1]}")
+
+    missing_grads = set(ns.get(var_id, var_id) for var_id in set(ns.keys()) - set(gradients.keys()))
+    if missing_grads:
+        raise RuntimeError(f"Adam optimizer has gradients for {set(gradients.keys())} but not {missing_grads}")
+
+    extra_grads = set(ns.get(var_id, var_id) for var_id in set(gradients.keys()) - set(ns.keys()))
+    if extra_grads:
+        raise RuntimeError(f"Adam optimizer found gradients {extra_grads} without corresponding Variables")
+
+    return vars, ns
 
 
 def namespace(model, prefix):
     if isinstance(model, Variable):
         return {prefix: model}
+    elif isinstance(model, ModelRef):
+        return namespace(model.instance, prefix)
 
     if isinstance(model, (Map, Tuple)):
         model = form_of(model)
@@ -152,15 +191,14 @@ def namespace(model, prefix):
     elif isinstance(model, dict):
         for name, component in model.items():
             ns.update(namespace(component, f"{prefix}.{name}"))
-    elif isinstance(model, (Model, ModelRef)):
-        # TODO: a ModelRef should implement the same interfaces as its Model
+    elif isinstance(model, Model):
         for name, component in inspect.getmembers(model):
             if name.startswith("__"):
                 continue
 
             ns.update(namespace(component, f"{prefix}.{name}"))
     else:
-        logging.debug(f"ignoring non-trainable model component {model}")
+        logging.debug(f"ignoring non-trainable model attribute {model}")
 
     return ns
 
@@ -168,6 +206,8 @@ def namespace(model, prefix):
 def trainable(model):
     if isinstance(model, Variable):
         return {hex_id(model): model}
+    elif isinstance(model, ModelRef):
+        return trainable(model.instance)
 
     if isinstance(model, (Map, Tuple)):
         model = form_of(model)
@@ -180,14 +220,13 @@ def trainable(model):
     elif isinstance(model, dict):
         for component in model.values():
             vars.update(trainable(component))
-    elif isinstance(model, (Model, ModelRef)):
-        # TODO: a ModelRef should implement the same interfaces as its Model
+    elif isinstance(model, Model):
         for name, component in inspect.getmembers(model):
             if name.startswith("__"):
                 continue
 
             vars.update(trainable(component))
     else:
-        logging.debug(f"ignoring non-trainable model component {model}")
+        logging.debug(f"ignoring non-trainable model attribute {model}")
 
     return vars

@@ -1,5 +1,6 @@
 from ..collection import tensor
 from ..util import form_of, hex_id
+from ..scalar.number import Number
 
 
 # TODO: support Sparse and Number variable types
@@ -68,19 +69,31 @@ class Transform(tensor.Transform):
 
 class Expand(Transform, tensor.Expand):
     def invert(self, loss):
+        if isinstance(loss, Number):
+            return self.subject.invert(loss)
+
         return self.subject.invert(loss.reshape(self.subject.shape))
 
 
 class Flip(Transform, tensor.Flip):
     def invert(self, loss):
+        if isinstance(loss, Number):
+            return self.subject.invert(loss)
+
         return self.subject.invert(loss.flip(self.args))
 
 
 class Transpose(Transform, tensor.Transpose):
     def invert(self, loss):
+        if isinstance(loss, Number):
+            return self.subject.invert(loss)
+
         return self.subject.invert(loss.transpose(self.inverse_permutation))
 
 
 class Reshape(Transform, tensor.Reshape):
     def invert(self, loss):
+        if isinstance(loss, Number):
+            return self.subject.invert(loss)
+
         return self.subject.invert(loss.reshape(self.subject.shape))
