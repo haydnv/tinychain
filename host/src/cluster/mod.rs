@@ -385,7 +385,8 @@ impl Transact for Cluster {
         join_all(self.chains.iter().map(|(name, chain)| {
             debug!("cluster {} committing chain {}", self.link, name);
             chain.commit(txn_id)
-        })).await;
+        }))
+        .await;
 
         self.replicas.commit(txn_id).await;
 

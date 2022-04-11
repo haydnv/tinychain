@@ -108,11 +108,9 @@ impl FromStr for IdRef {
     #[inline]
     fn from_str(to: &str) -> TCResult<Self> {
         if !to.starts_with('$') || to.len() < 2 {
-            Err(TCError::bad_request("Invalid Ref", to))
+            Err(TCError::bad_request("invalid IdRef", to))
         } else {
-            Ok(IdRef {
-                to: to[1..].parse()?,
-            })
+            to[1..].parse().map(|to| IdRef { to }).map_err(TCError::unsupported)
         }
     }
 }

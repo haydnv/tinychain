@@ -109,7 +109,9 @@ where
                 }
             };
 
-            let block_id: fs::BlockId = name[..(name.len() - B::ext().len() - 1)].parse()?;
+            let block_id: fs::BlockId = name[..(name.len() - B::ext().len() - 1)]
+                .parse()
+                .map_err(TCError::internal)?;
 
             present.insert(block_id.clone());
 

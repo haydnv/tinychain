@@ -10,275 +10,14 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
-use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use sha2::digest::generic_array::{ArrayLength, GenericArray};
 use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 
-const RESERVED_CHARS: [&str; 21] = [
-    "/", "..", "~", "$", "`", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":", "@",
-    "#", "(", ")",
-];
-
-/// A static label which implements `Into<Id>`.
-pub struct Label {
-    id: &'static str,
-}
-
-impl Deref for Label {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.id
-    }
-}
-
-impl From<Label> for Id {
-    fn from(l: Label) -> Id {
-        Id {
-            id: l.id.to_string(),
-        }
-    }
-}
-
-impl PartialEq<Id> for Label {
-    fn eq(&self, other: &Id) -> bool {
-        self.id == other.as_str()
-    }
-}
-
-impl fmt::Display for Label {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.id)
-    }
-}
-
-/// Return a [`Label`] with the given static `str`.
-pub const fn label(id: &'static str) -> Label {
-    Label { id }
-}
-
-impl From<uuid::Uuid> for Id {
-    fn from(id: uuid::Uuid) -> Self {
-        Id { id: id.to_string() }
-    }
-}
-
-/// A generic `Id`
-///
-/// `Id` is widely used within the TinyChain host software to identify individual variables
-/// within a transaction context as well as files and directories.
-///
-/// An `Id` must be valid UTF8 and must not contain whitespace or any control character sequence
-/// like `{/, .., ~, $, \, ^, &, |, =, {, }, <, >, ', ", ?, :, @, #}`.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Id {
-    id: String,
-}
-
-impl Id {
-    /// Construct an `Id` from a hexadecimal string representation of a SHA-2 hash.
-    pub fn from_hash<T, U>(hash: GenericArray<T, U>) -> Self
-    where
-        U: ArrayLength<T>,
-        GenericArray<T, U>: AsRef<[u8]>,
-    {
-        hex::encode(hash).parse().expect("hash")
-    }
-
-    /// Borrows the String underlying this `Id`.
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        self.id.as_str()
-    }
-
-    /// Return true if this `Id` begins with the specified string.
-    pub fn starts_with(&self, prefix: &str) -> bool {
-        self.id.starts_with(prefix)
-    }
-}
-
-impl PartialEq<str> for Id {
-    fn eq(&self, other: &str) -> bool {
-        self.id == other
-    }
-}
-
-impl<'a> PartialEq<&'a str> for Id {
-    fn eq(&self, other: &&'a str) -> bool {
-        self.id == *other
-    }
-}
-
-impl PartialEq<Label> for Id {
-    fn eq(&self, other: &Label) -> bool {
-        self.id == other.id
-    }
-}
-
-impl PartialEq<Id> for &str {
-    fn eq(&self, other: &Id) -> bool {
-        self == &other.id
-    }
-}
-
-impl<D: Digest> Hash<D> for Id {
-    fn hash(self) -> Output<D> {
-        Hash::<D>::hash(self.as_str())
-    }
-}
-
-impl<'a, D: Digest> Hash<D> for &'a Id {
-    fn hash(self) -> Output<D> {
-        Hash::<D>::hash(self.as_str())
-    }
-}
-
-impl From<usize> for Id {
-    fn from(u: usize) -> Id {
-        u.to_string().parse().expect("usize")
-    }
-}
-
-impl From<u64> for Id {
-    fn from(i: u64) -> Id {
-        i.to_string().parse().expect("64-bit unsigned int")
-    }
-}
-
-#[async_trait]
-impl FromStream for Id {
-    type Context = ();
-
-    async fn from_stream<D: Decoder>(_context: (), d: &mut D) -> Result<Self, D::Error> {
-        d.decode_any(IdVisitor).await
-    }
-}
-
-struct IdVisitor;
-
-#[async_trait]
-impl de::Visitor for IdVisitor {
-    type Value = Id;
-
-    fn expecting() -> &'static str {
-        "a TinyChain Id like {\"foo\": []}"
-    }
-
-    fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
-        Id::from_str(&s).map_err(de::Error::custom)
-    }
-
-    async fn visit_map<M: de::MapAccess>(self, mut access: M) -> Result<Self::Value, M::Error> {
-        if let Some(key) = access.next_key::<String>(()).await? {
-            let value: [u8; 0] = access.next_value(()).await?;
-            if value.is_empty() {
-                Id::from_str(&key).map_err(de::Error::custom)
-            } else {
-                Err(de::Error::custom("Expected Id but found OpRef"))
-            }
-        } else {
-            Err(de::Error::custom("Unable to parse Id"))
-        }
-    }
-}
-
-impl<'en> ToStream<'en> for Id {
-    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
-        e.encode_str(&self.id)
-    }
-}
-
-impl<'en> IntoStream<'en> for Id {
-    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
-        e.encode_str(&self.id)
-    }
-}
-
-impl<'de> Deserialize<'de> for Id {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let id = String::deserialize(deserializer)?;
-        validate_id(&id).map_err(serde::de::Error::custom)?;
-        Ok(Self { id })
-    }
-}
-
-impl Serialize for Id {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.id.serialize(serializer)
-    }
-}
-
-impl FromStr for Id {
-    type Err = TCError;
-
-    fn from_str(id: &str) -> TCResult<Id> {
-        validate_id(id)?;
-        Ok(Id { id: id.to_string() })
-    }
-}
-
-impl TryCastFrom<String> for Id {
-    fn can_cast_from(id: &String) -> bool {
-        validate_id(id).is_ok()
-    }
-
-    fn opt_cast_from(id: String) -> Option<Id> {
-        id.parse().ok()
-    }
-}
-
-impl TryCastFrom<Id> for usize {
-    fn can_cast_from(id: &Id) -> bool {
-        id.as_str().parse::<usize>().is_ok()
-    }
-
-    fn opt_cast_from(id: Id) -> Option<usize> {
-        id.as_str().parse::<usize>().ok()
-    }
-}
-
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-
-fn validate_id(id: &str) -> TCResult<()> {
-    if id.is_empty() {
-        return Err(TCError::bad_request("Id cannot be empty", id));
-    }
-
-    let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();
-    if filtered != id {
-        return Err(TCError::bad_request(
-            "This value ID contains an ASCII control character",
-            filtered,
-        ));
-    }
-
-    for pattern in &RESERVED_CHARS {
-        if id.contains(pattern) {
-            return Err(TCError::bad_request(
-                format!("A value ID {} may not contain this pattern", id),
-                pattern,
-            ));
-        }
-    }
-
-    if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
-        return Err(TCError::bad_request(
-            format!("A value ID \"{}\" may not contain whitespace", id),
-            format!("{:?}", w),
-        ));
-    }
-
-    Ok(())
-}
+pub use hr_id::{label, Id, Label};
 
 /// An alias for [`Id`] used for code clarity.
 pub type PathSegment = Id;
@@ -438,13 +177,16 @@ impl FromStr for TCPathBuf {
                 .split('/')
                 .skip(1)
                 .map(PathSegment::from_str)
+                .map(|r| r.map_err(TCError::unsupported))
                 .collect::<TCResult<Vec<PathSegment>>>()?;
 
             Ok(TCPathBuf { segments })
         } else {
-            Ok(TCPathBuf {
-                segments: iter::once(to.parse()?).collect(),
-            })
+            to.parse()
+                .map(|id| TCPathBuf {
+                    segments: iter::once(id).collect(),
+                })
+                .map_err(TCError::unsupported)
         }
     }
 }

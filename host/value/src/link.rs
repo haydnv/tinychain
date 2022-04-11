@@ -456,6 +456,7 @@ impl FromStr for Link {
         let segments = segments
             .iter()
             .map(|s| s.parse())
+            .map(|r| r.map_err(TCError::unsupported))
             .collect::<TCResult<Vec<PathSegment>>>()?;
 
         Ok(Link {

@@ -324,7 +324,8 @@ impl Dir {
                     (name, DirEntry::File(entry))
                 } else if is_dir(&fs_cache).await {
                     let subdir = Dir::load(fs_cache, txn_id).await?;
-                    (name.parse()?, DirEntry::Dir(subdir))
+                    let name = name.parse().map_err(TCError::internal)?;
+                    (name, DirEntry::Dir(subdir))
                 } else {
                     return Err(TCError::internal(format!(
                         "directory {} contains both blocks and subdirectories",
@@ -572,7 +573,7 @@ fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
         .rfind('.')
         .ok_or_else(|| TCError::internal(format!("invalid file name {}", name)))?;
 
-    let stem = name[..i].parse()?;
+    let stem = name[..i].parse().map_err(TCError::internal)?;
     let class = ext_class(&name[i..])
         .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
     Ok((stem, class))
