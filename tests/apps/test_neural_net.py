@@ -68,7 +68,7 @@ class NeuralNetTester(tc.app.Library):
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_neural_net", NeuralNetTester(), request_ttl=60)
+        cls.host = testutils.start_host("test_neural_net", NeuralNetTester(), wait_time=2, request_ttl=60)
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])

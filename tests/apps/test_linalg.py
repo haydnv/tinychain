@@ -10,7 +10,7 @@ TENSOR_URI = str(tc.uri(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_neural_net", tc.math.linalg.LinearAlgebra())
+        cls.host = testutils.start_host("test_neural_net", tc.math.linalg.LinearAlgebra(), wait_time=2)
 
     def testQR_1(self):
         self._check_qr(4, 3, 1e-5)
@@ -48,6 +48,7 @@ class LinearAlgebraTests(unittest.TestCase):
             all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
         ])
 
+    # TODO: why does this cause a stack overflow on a debug build?
     def testSlogdet(self):
         x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
         expected_sign, expected_logdet = np.linalg.slogdet(x)
@@ -61,6 +62,7 @@ class LinearAlgebraTests(unittest.TestCase):
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
+    # TODO: why does this cause a stack overflow on a debug build?
     def testSvd_1x1(self):
         n = 1
         m = 1
@@ -72,7 +74,8 @@ class LinearAlgebraTests(unittest.TestCase):
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
-    def testMatrixSvd_NltM(self):
+    # TODO: why does this cause a stack overflow on a debug build?
+    def testMatrixSVD_NltM(self):
         n = 4
         m = 5
         matrix = np.random.random(n * m).reshape(n, m)
@@ -83,6 +86,7 @@ class LinearAlgebraTests(unittest.TestCase):
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
+    # TODO: why does this cause a stack overflow on a debug build?
     def testMatrixSVD_NgtM(self):
         n = 4
         m = 3
@@ -94,6 +98,7 @@ class LinearAlgebraTests(unittest.TestCase):
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
+    # TODO: why does this cause a stack overflow on a debug build?
     def testParallelSVD_NltM(self):
         num_matrices = 1
         n = 2
@@ -114,6 +119,7 @@ class LinearAlgebraTests(unittest.TestCase):
             actual = (U[i], s[i], V[i])
             self._check_svd(expected, actual)
 
+    # TODO: why does this cause a stack overflow on a debug build?
     def testParallelSVD_NgtM(self):
         num_matrices = 1
         n = 3

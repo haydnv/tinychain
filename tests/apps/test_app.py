@@ -29,7 +29,7 @@ class TestApp(tc.app.App):
 class UserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_lib", [TestApp()])
+        cls.host = testutils.start_host("test_lib", [TestApp()])
 
     def testCreateUser(self):
         details = {"first_name": "First", "last_name": "Last", "email": "email@example.com"}

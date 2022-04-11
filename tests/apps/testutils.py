@@ -95,37 +95,30 @@ class Local(tc.host.Local.Process):
 
     ADDRESS = "127.0.0.1"
 
-    def __init__(self, path, workspace, force_create=False,
-                 data_dir=None, clusters=[], port=DEFAULT_PORT, log_level="warn", cache_size="1G", request_ttl="30"):
-
-        print(f"start host process on port {port}")
+    def __init__(self, path, workspace, force_create, libs, **flags):
+        http_port = flags.get("http_port", DEFAULT_PORT)
+        print(f"start host process on port {http_port}")
 
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
 
-        if port is None or not int(port) or int(port) < 0:
-            raise ValueError(f"invalid port: {port}")
+        if http_port is None or not int(http_port) or int(http_port) < 0:
+            raise ValueError(f"invalid port: {http_port}")
 
-        if clusters and data_dir is None:
-            raise ValueError("Hosting a cluster requires specifying a data_dir")
+        if libs and "data_dir" not in flags:
+            raise ValueError("hosting a cluster requires specifying a data_dir")
 
-        if data_dir:
-            maybe_create_dir(data_dir, force_create)
+        if "data_dir" in flags:
+            maybe_create_dir(flags["data_dir"], force_create)
 
         args = [
             path,
             f"--workspace={workspace}",
             f"--address={self.ADDRESS}",
-            f"--http_port={port}",
-            f"--log_level={log_level}",
-            f"--cache_size={cache_size}",
-            f"--request_ttl={request_ttl}",
         ]
 
-        if data_dir:
-            args.append(f"--data_dir={data_dir}")
-
-        args.extend([f"--cluster={cluster}" for cluster in clusters])
+        args.extend(f"--cluster={dep}" for dep in libs)
+        args.extend(f"--{flag}={value}" for flag, value in flags.items())
 
         self._args = args
 
@@ -164,25 +157,27 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_host(name, libs=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, timeout=30):
+def start_local_host(name, app_or_library, overwrite=True, host_uri=None, cache_size="5K", wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         raise RuntimeError(f"invalid executable path: {TC_PATH}")
+
+    deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
-    elif libs and tc.uri(libs[0]).port():
-        port = tc.uri(libs[0]).port()
+    elif deps and tc.uri(deps[0]).port():
+        port = tc.uri(deps[0]).port()
 
     config_dir = os.getcwd()
     config_dir += f"/{CONFIG}/{name}/{port}"
     maybe_create_dir(config_dir, overwrite)
 
     app_configs = []
-    for lib in libs:
-        app_path = tc.uri(lib).path()
+    for dep in deps:
+        app_path = tc.uri(dep).path()
         app_path = f"{config_dir}{app_path}"
-        tc.app.write_config(lib, app_path, overwrite)
+        tc.app.write_config(dep, app_path, overwrite)
         app_configs.append(app_path)
 
     data_dir = f"/tmp/tc/tmp/{port}/{name}"
@@ -192,16 +187,20 @@ def start_host(name, libs=[], overwrite=True, host_uri=None, cache_size="5K", wa
     process = Local(
         TC_PATH,
         workspace=f"/tmp/tc/tmp/{port}/{name}",
+        libs=app_configs,
+        force_create=True,
         data_dir=data_dir,
-        clusters=app_configs,
-        port=port,
+        http_port=port,
         log_level="debug",
         cache_size=cache_size,
-        force_create=True,
-        request_ttl=timeout)
+        **flags)
 
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
+
+
+# use this alias to switch between Local and Docker host types
+start_host = start_local_host
 
 
 class PersistenceTest(object):
@@ -230,7 +229,7 @@ class PersistenceTest(object):
         for i in range(self.NUM_HOSTS):
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.uri(app).path()
-            host = start_docker(f"test_{name}_{i}", [app], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
+            host = start_host(f"test_{name}_{i}", [app], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
             hosts.append(host)
             printlines(5)
 

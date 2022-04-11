@@ -3,7 +3,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from testutils import DEFAULT_PORT, start_docker, PersistenceTest
+from testutils import DEFAULT_PORT, start_host, PersistenceTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(
@@ -82,7 +82,7 @@ class TableErrorTest(unittest.TestCase):
                 self.table = tc.chain.Block(tc.table.Table(SCHEMA))
                 tc.app.App.__init__(self)
 
-        self.host = start_docker("test_table_error", [Persistent()])
+        self.host = start_host("test_table_error", [Persistent()])
 
     def testInsert(self):
         self.assertRaises(

@@ -1,7 +1,7 @@
 import tinychain as tc
 import unittest
 
-from testutils import DEFAULT_PORT, start_docker
+from testutils import DEFAULT_PORT, start_host
 
 
 class Database(tc.app.App):
@@ -57,7 +57,7 @@ class DemoTests(unittest.TestCase):
         for i in range(3):
             port = DEFAULT_PORT + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
-            host = start_docker("table_demo", web, True, host_uri, wait_time=2)
+            host = start_host("table_demo", web, True, host_uri, wait_time=2)
             self.hosts.append(host)
 
     def testCache(self):

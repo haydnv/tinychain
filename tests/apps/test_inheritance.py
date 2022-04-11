@@ -64,7 +64,7 @@ class TestLib(tc.app.Library):
 class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = testutils.start_docker("test_inheritance", [TestLib()])
+        cls.host = testutils.start_host("test_inheritance", [TestLib()])
 
     def testApp(self):
         expected = "my name is foo"
