@@ -268,8 +268,8 @@ class Sin(Unary):
         return Trigonometric.sin(self.subject)
 
     def backward(self, variable):
-        assert not variable  # TODO: partial derivative of trigonometric functions (same below)
-        return self.subject.cos()
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return subject.cos()
 
 
 class Cos(Unary):
@@ -286,8 +286,8 @@ class Asin(Unary):
         return Trigonometric.asin(self.subject)
 
     def backward(self, variable):
-        assert not variable
-        return (1 - (self.subject**2))**-0.5
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return (1 - (subject**2))**-0.5
 
 
 class Acos(Unary):
@@ -295,8 +295,8 @@ class Acos(Unary):
         return Trigonometric.acos(self.subject)
     
     def backward(self, variable):
-        assert not variable
-        return -((1 - self.subject**2)**-0.5)
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return -((1 - subject**2)**-0.5)
 
 
 class Sinh(Unary):
@@ -304,8 +304,8 @@ class Sinh(Unary):
         return Trigonometric.sinh(self.subject)
 
     def backward(self, variable):
-        assert not variable
-        return self.subject.cosh()
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return subject.cosh()
 
 
 class Cosh(Unary):
@@ -313,8 +313,8 @@ class Cosh(Unary):
         return Trigonometric.cosh(self.subject)
     
     def backward(self, variable):
-        assert not variable
-        return self.subject.sinh()
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return subject.sinh()
 
 
 class Asinh(Unary):
@@ -322,8 +322,8 @@ class Asinh(Unary):
         return Trigonometric.asinh(self.subject)
 
     def backward(self, variable):
-        assert not variable
-        return (self.subject**2 + 1)**-0.5
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return (subject**2 + 1)**-0.5
 
 
 class Acosh(Unary):
@@ -331,8 +331,8 @@ class Acosh(Unary):
         return Trigonometric.acosh(self.subject)
     
     def backward(self, variable):
-        assert not variable
-        return ((self.subject**2) - 1)**-0.5
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return ((subject**2) - 1)**-0.5
 
 
 class Tan(Unary):
@@ -340,17 +340,17 @@ class Tan(Unary):
         return Trigonometric.tan(self.subject)
     
     def backward(self, variable):
-        assert not variable
-        return 1 / (self.subject.cos()**2)
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return 1 / (subject.cos()**2)
 
 
 class Tanh(Unary):
     def forward(self):
         return Trigonometric.tanh(self.subject)
-    
+
     def backward(self, variable):
-        assert not variable
-        return 1 / self.subject.cosh()**2
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return 1 / subject.cosh()**2
 
 
 class Atan(Unary):
@@ -358,8 +358,8 @@ class Atan(Unary):
         return Trigonometric.atan(self.subject)
 
     def backward(self, variable):
-        assert not variable
-        return 1 / (self.subject**2 + 1)
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return 1 / (subject**2 + 1)
 
 
 class Atanh(Unary):
@@ -367,8 +367,8 @@ class Atanh(Unary):
         return Trigonometric.atanh(self.subject)
     
     def backward(self, variable):
-        assert not variable
-        return 1 / (1 - (self.subject**2))
+        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        return 1 / (1 - (subject**2))
 
 
 def derivative_of(state, variable=None):
