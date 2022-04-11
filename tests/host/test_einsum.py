@@ -98,7 +98,7 @@ class Tests(unittest.TestCase):
         A = np.arange(60).reshape(3, 4, 5)
         B = np.arange(24).reshape(4, 3, 2)
         self.execute('ijk,jil->il', A, B)
-        # self.execute('ijk,jil->kj', A, B)
+        self.execute('ijk,jil->kj', A, B)
         self.execute('ijk,jil->lkij', A, B)
         self.execute('ijk,jil->lij', A, B)
 
