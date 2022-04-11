@@ -4,7 +4,7 @@ from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math import Operator
+from ..math.operator import derivative_of, Operator
 from ..scalar.number import Number
 from ..scalar.ref import After
 from ..util import deanonymize, form_of, hex_id
@@ -72,21 +72,16 @@ class ConvLayer(Layer, Dynamic):
     @differentiable
     def eval(self, inputs: Tensor) -> Tensor:
         if self._padding == 0:
-            class Convolution(Transform):
+            class Convolution(Operator):
                 def forward(self):
                     return einsum("abcd,efgh->eacd", [self.subject, self.args])
 
                 def gradients(self, loss):
-                    if isinstance(loss, Number):
-                        w_grad = self.subject * loss
-                    else:
-                        # TODO: move einsum implementation to client-side so that this will also be differentiable
-                        w_grad = einsum("abcd,eafg->abcd", [self.subject, loss])
-
-                    grads = {hex_id(self.subject): w_grad}
+                    # TODO: maintain the shape of the loss tensor during backpropagation
+                    grads = {hex_id(self.subject): self.subject * loss.sum()}
 
                     if isinstance(form_of(self.args), Operator):
-                        raise NotImplementedError
+                        grads.update(form_of(self.args).gradients(loss.sum()))
 
                     return grads
 

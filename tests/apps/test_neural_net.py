@@ -29,10 +29,10 @@ class NeuralNetTester(tc.app.Library):
 
     @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        labels = tc.tensor.Dense.constant([2, 2, 2], 2)
+        labels = 2
         layers = [
             tc.ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1], activation=tc.ml.sigmoid),
-            tc.ml.nn.ConvLayer.create([2, 3, 3], [2, 1, 1])
+            tc.ml.nn.ConvLayer.create([2, 3, 3], [5, 2, 2], padding=0, activation=tc.ml.sigmoid),
         ]
 
         cnn = tc.ml.nn.Sequential(layers)
