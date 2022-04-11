@@ -1092,7 +1092,7 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::FileClass: From<TensorType>,
 {
-    type Broadcast = DenseTensor<FD, FS, D, T, BlockListBroadcast<FD, FS, D, T, B>>;
+    type Broadcast = DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>;
     type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
     type Expand = DenseTensor<FD, FS, D, T, BlockListExpand<FD, FS, D, T, B>>;
     type Flip = DenseTensor<FD, FS, D, T, BlockListFlip<FD, FS, D, T, B>>;
@@ -1101,8 +1101,12 @@ where
     type Transpose = DenseTensor<FD, FS, D, T, B::Transpose>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        if self.shape() == &shape {
+            return Ok(self.into_inner().accessor().into());
+        }
+
         let blocks = BlockListBroadcast::new(self.blocks, shape)?;
-        Ok(DenseTensor::from(blocks))
+        Ok(DenseTensor::from(blocks.accessor()))
     }
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {

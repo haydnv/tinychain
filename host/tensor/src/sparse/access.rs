@@ -465,7 +465,7 @@ where
     D::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
-    type Slice = SparseBroadcast<FD, FS, D, T, A::Slice>;
+    type Slice = SparseAccessor<FD, FS, D, T>;
 
     fn accessor(self) -> SparseAccessor<FD, FS, D, T> {
         SparseAccessor::Broadcast(Box::new(SparseBroadcast {
@@ -533,6 +533,7 @@ where
             .try_flatten()
             .map_ok(move |coord| {
                 trace!("broadcast source coord {:?}", coord);
+
                 let bounds = rebase.map_coord(coord);
                 let bounds: Bounds = bounds
                     .into_iter()
@@ -584,13 +585,12 @@ where
         );
 
         let source = self.source.slice(source_bounds)?;
-        debug!(
-            "SparseBroadcast::slice will broadcast source slice {} to shape {}",
-            source.shape(),
-            shape
-        );
 
-        SparseBroadcast::new(source, shape)
+        if source.shape() == &shape {
+            Ok(source.accessor())
+        } else {
+            SparseBroadcast::new(source, shape).map(SparseAccess::accessor)
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<SparseAccessor<FD, FS, D, T>> {
@@ -1281,7 +1281,11 @@ where
         let filled_at = coords.map_ok(move |coords| coords.get(&axes));
         let unique = sorted_coords::<FD, FS, D, T, _>(&txn, shape.clone(), filled_at).await?;
 
-        Ok(Box::pin(CoordUnique::new(unique, shape.to_vec(), PER_BLOCK)))
+        Ok(Box::pin(CoordUnique::new(
+            unique,
+            shape.to_vec(),
+            PER_BLOCK,
+        )))
     }
 
     async fn filled_count(self, txn: T) -> TCResult<u64> {

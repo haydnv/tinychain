@@ -1074,7 +1074,7 @@ where
     D::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
-    type Broadcast = SparseTensor<FD, FS, D, T, SparseBroadcast<FD, FS, D, T, A>>;
+    type Broadcast = SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
     type Cast = SparseTensor<FD, FS, D, T, SparseCast<FD, FS, D, T, A>>;
     type Expand = SparseTensor<FD, FS, D, T, SparseExpand<FD, FS, D, T, A>>;
     type Flip = SparseTensor<FD, FS, D, T, SparseFlip<FD, FS, D, T, A>>;
@@ -1083,8 +1083,12 @@ where
     type Transpose = SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        if self.shape() == &shape {
+            return Ok(self.into_inner().accessor().into());
+        }
+
         let accessor = SparseBroadcast::new(self.accessor, shape)?;
-        Ok(accessor.into())
+        Ok(accessor.accessor().into())
     }
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {

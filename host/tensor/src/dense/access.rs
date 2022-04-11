@@ -717,7 +717,7 @@ where
     D::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    type Slice = BlockListBroadcast<FD, FS, D, T, B::Slice>;
+    type Slice = DenseAccessor<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
 
     fn accessor(self) -> DenseAccessor<FD, FS, D, T> {
@@ -760,12 +760,16 @@ where
         let shape = bounds.to_shape(self.shape())?;
         let bounds = self.rebase.invert_bounds(bounds);
         let source = self.source.slice(bounds)?;
-        BlockListBroadcast::new(source, shape)
+
+        if source.shape() == &shape {
+            Ok(source.accessor())
+        } else {
+            BlockListBroadcast::new(source, shape).map(DenseAccess::accessor)
+        }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         debug!("BlockListBroadcast::transpose {:?}", permutation);
-
         BlockListTranspose::new(self, permutation)
     }
 
