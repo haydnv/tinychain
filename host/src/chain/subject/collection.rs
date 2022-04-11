@@ -1,4 +1,4 @@
-//! A [`Collection`] which is the [`Subject`] of a [`Chain`]
+//! A [`Collection`] which is the `Subject` of a `Chain`
 
 use std::fmt;
 
@@ -31,7 +31,7 @@ use crate::txn::Txn;
 
 use super::CollectionSchema;
 
-/// A [`Collection`] which is the [`Subject`] of a [`Chain`]
+/// A [`Collection`] which is the `Subject` of a `Chain`
 #[derive(Clone)]
 pub enum SubjectCollection {
     BTree(BTreeFile),
@@ -71,7 +71,7 @@ impl SubjectCollection {
         }
     }
 
-    /// Create a new [`SubjectCollection`] with the given [`Schema`].
+    /// Create a new [`SubjectCollection`] with the given `Schema`.
     pub fn create(
         schema: CollectionSchema,
         dir: &fs::Dir,

@@ -32,6 +32,7 @@ use super::{CollectionSchema, SubjectCollection, DYNAMIC};
 const BLOCK_SIZE_HINT: usize = 4096;
 const LOCK_NAME: &str = "SubjectMap keys";
 
+/// The `Subject` of a `Chain` which is a `Map` of `Collection`s
 #[derive(Clone)]
 pub struct SubjectMap {
     dir: fs::Dir,

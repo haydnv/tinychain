@@ -7,16 +7,24 @@ Modules
 .. toctree::
    :maxdepth: 3
 
+   app
    btree
    chain
-   cluster
-   decorators
-   graph
+   generic
+   interface
+   math
+   math.interface
+   math.linalg
+   math.operator
    ml
-   ref
+   ml.nn
+   ml.optimizer
+   ml.service
+   scalar
+   scalar.number
+   scalar.ref
+   scalar.value
    state
    table
    tensor
    util
-   value
-

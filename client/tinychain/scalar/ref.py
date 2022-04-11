@@ -281,7 +281,7 @@ class Get(Op):
 
         if is_op_ref(self.args):
             (key,) = self.args
-            log_anonymous(key)
+            _log_anonymous(key)
             key = reference(cxt, key)
             self.args = (key,)
 
@@ -314,11 +314,11 @@ class Put(Op):
         deanonymize(value, cxt)
 
         if is_op_ref(key):
-            log_anonymous(key)
+            _log_anonymous(key)
             key = reference(cxt, key)
 
         if is_op_ref(value):
-            log_anonymous(value)
+            _log_anonymous(value)
             value = reference(cxt, value)
 
         self.args = (key, value)
@@ -360,7 +360,7 @@ class Post(Op):
             deanonymize(arg, cxt)
 
             if is_op_ref(arg):
-                log_anonymous(arg)
+                _log_anonymous(arg)
                 args[name] = reference(cxt, arg)
             else:
                 args[name] = arg
@@ -394,7 +394,7 @@ class Delete(Op):
         deanonymize(self.args, cxt)
 
         if is_op_ref(self.args):
-            log_anonymous(self.args)
+            _log_anonymous(self.args)
             self.args = reference(cxt, self.args)
 
 
@@ -450,6 +450,8 @@ class MethodSubject(object):
 
 
 def is_op_ref(state_or_ref):
+    """Return `True` if `state_or_ref` is a reference to an `Op`, otherwise `False`."""
+
     if isinstance(state_or_ref, (Op, After, If, Case)):
         return True
     elif uri(state_or_ref) and uri(type(state_or_ref)) and uri(state_or_ref) >= uri(type(state_or_ref)):
@@ -465,6 +467,8 @@ def is_op_ref(state_or_ref):
 
 
 def is_write_op_ref(fn):
+    """Return `True` if `state_or_ref` is a reference to a `Put` or `Delete` op, otherwise `False`."""
+
     if isinstance(fn, (Delete, Put)):
         return True
     elif hasattr(fn, "__form__"):
@@ -477,17 +481,19 @@ def is_write_op_ref(fn):
         return False
 
 
-def log_anonymous(arg):
+def _log_anonymous(arg):
     if is_write_op_ref(arg):
         logging.warning(f"assigning auto-generated name to the result of {arg}")
     elif is_op_ref(arg):
         logging.info(f"assigning auto-generated name to the result of {arg}")
 
 
-def reference(cxt, state):
-    name = f"{state.__class__.__name__}_{hex_id(state)}"
-    if name not in cxt:
-        logging.debug(f"assigned name {name} to {state} in {cxt}")
-        setattr(cxt, name, state)
+def reference(context, state):
+    """Create a reference to `state` in `context` using its `hex_id`"""
 
-    return getattr(cxt, name)
+    name = f"{state.__class__.__name__}_{hex_id(state)}"
+    if name not in context:
+        logging.debug(f"assigned name {name} to {state} in {context}")
+        setattr(context, name, state)
+
+    return getattr(context, name)

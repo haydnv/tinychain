@@ -1,8 +1,7 @@
-:mod:`cluster`
+:mod:`ml.optimizer`
 ==========================
 
-.. automodule:: tinychain.cluster
+.. automodule:: tinychain.ml.optimizer
     :members:
     :undoc-members:
-    :inherited-members:
     :show-inheritance:

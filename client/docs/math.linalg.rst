@@ -1,7 +1,8 @@
-:mod:`state`
+:mod:`math.linalg`
 ==========================
 
-.. automodule:: tinychain.state
+.. automodule:: tinychain.math.linalg
     :members:
     :undoc-members:
+    :inherited-members:
     :show-inheritance:

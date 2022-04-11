@@ -1,4 +1,4 @@
-//! The [`Subject`] of a [`Chain`]
+//! The [`Subject`] of a `Chain`
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -32,7 +32,7 @@ mod map;
 const DYNAMIC: Label = label("dynamic");
 const SUBJECT: Label = label("subject");
 
-/// The state whose transactional integrity is protected by a [`Chain`]
+/// The state whose transactional integrity is protected by a `Chain`
 #[derive(Clone)]
 pub enum Subject {
     Collection(SubjectCollection),

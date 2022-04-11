@@ -115,7 +115,11 @@ class Context(object):
 
 
 def args(state_or_ref):
-    """Return the references needed to resolve the given `state_or_ref`."""
+    """
+    Return the immediate references needed to resolve the given `state_or_ref`.
+
+    This function is not recursive. Use `depends_on` to get all compile-time dependencies of `state_or_ref`.
+    """
 
     if form_of(state_or_ref) is not state_or_ref:
         return args(form_of(state_or_ref))
@@ -129,14 +133,10 @@ def depends_on(state_or_ref):
     if form_of(state_or_ref) is not state_or_ref:
         return depends_on(form_of(state_or_ref))
 
-    from . import reflect
     from .scalar.ref import Ref
 
     if independent(state_or_ref):
-        print("independent", state_or_ref)
         return [state_or_ref]
-    else:
-        print("not independent", state_or_ref)
 
     deps = []
 
@@ -153,12 +153,8 @@ def depends_on(state_or_ref):
     return deps
 
 
-def form_of(state, recurse=False):
-    """
-    Return the form of the given `state`.
-
-    If `recurse` is `True`, this will proceed recursively through all intermediate type expectations.
-    """
+def form_of(state):
+    """Return the form of the given `state`."""
 
     if not hasattr(state, "__form__"):
         return state
@@ -168,10 +164,7 @@ def form_of(state, recurse=False):
     else:
         form = state.__form__
 
-    if recurse:
-        return form_of(form)
-    else:
-        return form
+    return form
 
 
 def get_ref(state, name):
@@ -218,6 +211,8 @@ def hex_id(state_or_ref):
 
 
 def independent(state_or_ref):
+    """Return `True` if the given `state_or_ref` does not depend on any unresolved references."""
+
     if form_of(state_or_ref) is not state_or_ref:
         return independent(form_of(state_or_ref))
 
@@ -403,8 +398,10 @@ class URI(object):
         return str(self).startswith(str(prefix))
 
 
-def print_json(obj):
-    print(json.dumps(to_json(obj), indent=4))
+def print_json(state_or_ref):
+    """Pretty-print the JSON representation of the given `state_or_ref` to stdout."""
+
+    print(json.dumps(to_json(state_or_ref), indent=4))
 
 
 def uri(subject):

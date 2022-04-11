@@ -94,7 +94,7 @@ class LinearAlgebra(Library):
 
     # TODO: vectorize to support a `Tensor` containing a batch of matrices
     @post
-    def householder(self, cxt, x: Tensor) -> Tuple:
+    def householder(self, cxt, x: Tensor) -> typing.Tuple[Tensor, Tensor]:
         """Compute the Householder vector of the given column vector `a`."""
 
         cxt.alpha = x[0]

@@ -1,8 +1,7 @@
-:mod:`decorators`
+:mod:`math.interface`
 ==========================
 
-.. automodule:: tinychain.decorators
+.. automodule:: tinychain.math.interface
     :members:
     :undoc-members:
-    :inherited-members:
     :show-inheritance:

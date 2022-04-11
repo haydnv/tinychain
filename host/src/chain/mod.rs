@@ -42,7 +42,7 @@ const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
-/// The schema of a [`Chain`] whose [`Subject`] is a [`Collection`].
+/// The schema of a [`Chain`] whose [`Subject`] is a `Collection`.
 #[derive(Clone)]
 pub enum CollectionSchema {
     BTree(tc_btree::RowSchema),
@@ -464,7 +464,7 @@ pub enum ChainViewData<'en> {
     Sync(Box<(Schema, StateView<'en>)>),
 }
 
-/// A view of a [`Chain`] within a single [`Transaction`], used for serialization.
+/// A view of a [`Chain`] within a single `Transaction`, used for serialization.
 pub struct ChainView<'en> {
     class: ChainType,
     data: ChainViewData<'en>,

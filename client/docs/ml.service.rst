@@ -1,8 +1,7 @@
-:mod:`graph`
+:mod:`ml.service`
 ==========================
 
-.. automodule:: tinychain.graph
+.. automodule:: tinychain.ml.service
     :members:
     :undoc-members:
-    :inherited-members:
     :show-inheritance:

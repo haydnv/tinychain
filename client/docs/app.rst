@@ -1,6 +1,6 @@
-:mod:`tensor`
+:mod:`app`
 ==========================
 
-.. automodule:: tinychain.collection.tensor
+.. automodule:: tinychain.app
     :members:
     :show-inheritance:

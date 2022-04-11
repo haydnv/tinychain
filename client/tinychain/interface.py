@@ -53,22 +53,22 @@ class Order(Interface):
         return self.lte(other)
 
     def gt(self, other):
-        """Return true if `self` is greater than `other`."""
+        """Return `True` if `self` is greater than `other`."""
 
         raise NotImplementedError(f"{self.__class__} must implement the `gt` method")
 
     def gte(self, other):
-        """Return true if `self` is greater than or equal to `other`."""
+        """Return `True` if `self` is greater than or equal to `other`."""
 
         raise NotImplementedError(f"{self.__class__} must implement the `gte` method")
 
     def lt(self, other):
-        """Return true if `self` is less than `other`."""
+        """Return `True` if `self` is less than `other`."""
 
         raise NotImplementedError(f"{self.__class__} must implement the `lt` method")
 
     def lte(self, other):
-        """Return true if `self` is less than or equal to `other`."""
+        """Return `True` if `self` is less than or equal to `other`."""
 
         raise NotImplementedError(f"{self.__class__} must implement the `lte` method")
 

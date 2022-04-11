@@ -1,7 +1,8 @@
-:mod:`state`
+:mod:`scalar.ref`
 ==========================
 
-.. automodule:: tinychain.state
+.. automodule:: tinychain.scalar.ref
     :members:
     :undoc-members:
+    :inherited-members:
     :show-inheritance:

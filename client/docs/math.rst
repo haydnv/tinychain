@@ -1,7 +1,8 @@
-:mod:`ref`
+:mod:`math`
 ==========================
 
-.. automodule:: tinychain.ref
+.. automodule:: tinychain.math
     :members:
+    :undoc-members:
     :inherited-members:
     :show-inheritance:

@@ -1,7 +1,8 @@
-:mod:`state`
+:mod:`interface`
 ==========================
 
-.. automodule:: tinychain.state
+.. automodule:: tinychain.interface
     :members:
     :undoc-members:
+    :inherited-members:
     :show-inheritance:

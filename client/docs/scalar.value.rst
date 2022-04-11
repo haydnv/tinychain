@@ -1,6 +1,6 @@
-:mod:`tensor`
+:mod:`scalar.value`
 ==========================
 
-.. automodule:: tinychain.collection.tensor
+.. automodule:: tinychain.scalar.value
     :members:
     :show-inheritance:

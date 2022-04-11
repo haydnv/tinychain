@@ -1,6 +1,6 @@
-:mod:`tensor`
+:mod:`generic`
 ==========================
 
-.. automodule:: tinychain.collection.tensor
+.. automodule:: tinychain.generic
     :members:
     :show-inheritance:

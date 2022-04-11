@@ -16,6 +16,7 @@ use crate::txn::Txn;
 
 use super::TCStream;
 
+/// Trait defining the source of a [`Stream`].
 #[async_trait]
 pub trait Source: Clone + Sized
 where

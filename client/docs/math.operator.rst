@@ -1,7 +1,8 @@
-:mod:`state`
+:mod:`math.operator`
 ==========================
 
-.. automodule:: tinychain.state
+.. automodule:: tinychain.math.operator
     :members:
     :undoc-members:
+    :inherited-members:
     :show-inheritance:

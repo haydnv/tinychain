@@ -145,6 +145,7 @@ impl ChainBlock {
         }
     }
 
+    /// Append a [`Mutation`] to this [`ChainBlock`]
     pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
         match self.contents.entry(txn_id) {
             Entry::Vacant(entry) => {
@@ -156,18 +157,18 @@ impl ChainBlock {
         }
     }
 
-    /// Append a DELETE op to the contents of this `ChainBlock`.
+    /// Append a DELETE op to this `ChainBlock`.
     pub fn append_delete(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value) {
         self.append(txn_id, Mutation::Delete(path, key))
     }
 
-    /// Append a PUT op to the contents of this `ChainBlock`.
+    /// Append a PUT op to the this `ChainBlock`.
     pub fn append_put(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
         debug!("ChainBlock::append_put {}: {} <- {}", path, key, value);
         self.append(txn_id, Mutation::Put(path, key, value))
     }
 
-    /// Delete all mutations listed in this `ChainBlock` prior to the given `TxnId`.
+    /// Delete all mutations in this `ChainBlock` prior to the given `TxnId`.
     pub fn clear_until(&mut self, txn_id: &TxnId) {
         let old_txn_ids: Vec<TxnId> = self
             .contents
@@ -181,7 +182,7 @@ impl ChainBlock {
         }
     }
 
-    /// The mutations listed in this `ChainBlock`.
+    /// The mutations in this `ChainBlock`.
     pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<Mutation>> {
         &self.contents
     }

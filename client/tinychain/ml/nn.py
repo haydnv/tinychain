@@ -1,11 +1,12 @@
+""":class:`NeuralNet` and :class:`Layer` :class:`Model` definitions with common implementations"""
+
 import logging
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import derivative_of, Operator
-from ..scalar.number import Number
+from ..math.operator import Operator
 from ..scalar.ref import After
 from ..util import deanonymize, form_of, hex_id
 
@@ -24,18 +25,18 @@ class ConvLayer(Layer, Dynamic):
     @classmethod
     def create(cls, inputs_shape, filter_shape, stride=1, padding=1, activation=None, optimal_std=None):
         """
-        Create a new, empty `ConvLayer` with the given shape and activation function.
+        Create a new, empty :class:`ConvLayer` with the given shape and activation function.
 
         Args:
-            `inputs_shape`: size of inputs [c_i, h_i, w_i] where
-                `c_i`: number of channels;
-                `h_i`: height's width for each channel;
-                'w_i': matrix's width for each channel.
-            `filter_shape`: size of filter [h_f, w_f, out_c] where
-                `out_c`: number of output channels;
-                `h_f`: height of the kernel;
-                'w_f`: width of the kernel.
-            `activation`: activation function.
+            `inputs_shape`: size of inputs `[c_i, h_i, w_i]` where
+                `c_i`: number of channels,
+                `h_i`: height's width for each channel,
+                'w_i': matrix's width for each channel;
+            `filter_shape`: size of filter `[h_f, w_f, out_c]` where
+                `out_c`: number of output channels,
+                `h_f`: height of the kernel,
+                'w_f`: width of the kernel;
+            `activation`: activation function
         """
 
         c_i, h_i, w_i = inputs_shape

@@ -1,8 +1,7 @@
-:mod:`value`
+:mod:`ml.nn`
 ==========================
 
-.. automodule:: tinychain.value
+.. automodule:: tinychain.ml.nn
     :members:
     :undoc-members:
-    :inherited-members:
     :show-inheritance:

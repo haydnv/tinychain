@@ -22,9 +22,9 @@ class Model(Object, metaclass=Meta):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
         elif "form" in kwargs:
-            return Instance.__new__(model(cls))
+            return Instance.__new__(_model(cls))
         else:
-            return Class.__new__(model(cls))
+            return Class.__new__(_model(cls))
 
     def __init__(self, form):
         if form is None:
@@ -78,7 +78,7 @@ class Model(Object, metaclass=Meta):
         return ModelRef(self, name)
 
 
-class Header(object):
+class _Header(object):
     pass
 
 
@@ -191,7 +191,7 @@ class ModelRef(Ref):
         return ModelRef(self.instance, name)
 
 
-def model(cls):
+def _model(cls):
     if not issubclass(cls, Model):
         raise TypeError(f"expected a subclass of Model but found {cls}")
 
@@ -270,7 +270,7 @@ class App(Library):
                 raise RuntimeError(f"{attr} must be managed by a Chain")
 
     def __json__(self):
-        header = Header()
+        header = _Header()
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue

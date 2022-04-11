@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # -- Project information -----------------------------------------------------
 
 project = 'TinyChain'
-copyright = '2021'
+copyright = '2022'
 author = 'The TinyChain Contributors'
 
 # The full version, including alpha/beta/rc tags

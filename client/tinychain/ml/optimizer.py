@@ -134,6 +134,8 @@ class Adam(Optimizer, Dynamic):
 
 
 def validate(model, name, operator, gradients):
+    """Check that the :class:`Variables` of `model` are trainable using the given `operator`."""
+
     ns = {hex_id(var): name for name, var in namespace(model, name).items()}
 
     assert isinstance(operator, Operator)
@@ -185,6 +187,8 @@ def validate(model, name, operator, gradients):
 
 
 def namespace(model, prefix):
+    """Traverse the attributes of the given `model` to create a namespace for its trainable :class:`Variable` s."""
+
     if isinstance(model, Variable):
         return {prefix: model}
     elif isinstance(model, ModelRef):
@@ -214,6 +218,8 @@ def namespace(model, prefix):
 
 
 def trainable(model):
+    """Traverse the attributes of the given `model` to discover its trainable :class:`Variable` s."""
+
     if isinstance(model, Variable):
         return {hex_id(model): model}
     elif isinstance(model, ModelRef):
