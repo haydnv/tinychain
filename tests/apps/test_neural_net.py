@@ -21,6 +21,13 @@ class NeuralNetTester(tc.app.Library):
         return cxt.optimizer.train(1, inputs)
 
     @tc.post
+    def test_cnn_zero_padding(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
+        labels = tc.tensor.Dense.constant([2, 3, 3], 2)
+        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1], padding=0)
+        cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
+        return cxt.optimizer.train(1, inputs)
+
+    @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         labels = tc.tensor.Dense.constant([2, 2, 2], 2)
         layers = [
@@ -66,6 +73,7 @@ class NeuralNetTests(unittest.TestCase):
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
         self.host.post(tc.uri(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
+        self.host.post(tc.uri(NeuralNetTester).append("test_cnn_zero_padding"), {"inputs": load_dense(inputs)})
         self.host.post(tc.uri(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
 
     def testDNN(self):

@@ -146,30 +146,40 @@ def validate(model, name, operator, gradients):
     while unvisited:
         node = unvisited.pop()
 
-        if isinstance(node, Variable):
-            if hex_id(node) not in ns:
-                raise RuntimeError(f"model output {operator} references unrecognized variable {hex_id(node)}")
+        if isinstance(form_of(node), Operator):
+            assert hex_id(node) not in missing_vars
 
-            vars[hex_id(node)] = node
-            missing_vars.remove(hex_id(node))
-            continue
-
-        node = form_of(node)
-        if isinstance(node, Operator):
+            node = form_of(node)
             unvisited.append(node.subject)
             unvisited.append(node.args)
             visited.append(node)
 
+        elif isinstance(node, Variable):
+            if hex_id(node) in missing_vars:
+                logging.debug(f"found Variable {ns[hex_id(node)]}")
+            else:
+                raise RuntimeError(f"{operator} node {node} references unknown Variable {hex_id(node)} (known: {ns})")
+
+            vars[hex_id(node)] = node
+            missing_vars.remove(hex_id(node))
+
+        else:
+            logging.debug(f"skipping non-trainable operator graph node {node}")
+
     if missing_vars:
-        raise RuntimeError(f"{name} operator graph disconnects from its inputs at {visited[-1]}")
+        missing = set(ns[var_id] for var_id in missing_vars)
+        if visited:
+            raise RuntimeError(f"{name} operator graph disconnects Variables {missing} at {visited[-1]}")
+        else:
+            raise RuntimeError(f"{name} operator graph {operator} is not connected to its Variables {missing}")
 
-    missing_grads = set(ns.get(var_id, var_id) for var_id in set(ns.keys()) - set(gradients.keys()))
+    missing_grads = set(ns[var_id] for var_id in set(ns.keys()) - set(gradients.keys()))
     if missing_grads:
-        raise RuntimeError(f"Adam optimizer has gradients for {set(gradients.keys())} but not {missing_grads}")
+        raise RuntimeError(f"optimizer has gradients for {set(gradients.keys())} but not {missing_grads}")
 
-    extra_grads = set(ns.get(var_id, var_id) for var_id in set(gradients.keys()) - set(ns.keys()))
+    extra_grads = set(gradients.keys()) - set(ns.keys())
     if extra_grads:
-        raise RuntimeError(f"Adam optimizer found gradients {extra_grads} without corresponding Variables")
+        raise RuntimeError(f"optimizer found gradients {extra_grads} without corresponding Variables")
 
     return vars, ns
 
