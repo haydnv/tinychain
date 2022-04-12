@@ -491,10 +491,10 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        // commit first to make sure there's a version of the contents for this transaction
+        let contents = self.contents.read(*txn_id).await.expect("dir contents");
+
         self.contents.commit(txn_id).await;
 
-        let contents = self.contents.read(*txn_id).await.expect("dir contents");
         join_all(contents.values().map(|entry| match entry {
             DirEntry::Dir(dir) => dir.commit(txn_id),
             DirEntry::File(file) => match file {

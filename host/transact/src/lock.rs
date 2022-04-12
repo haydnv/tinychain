@@ -241,12 +241,15 @@ impl<T: Clone + Send> TxnLock<T> {
     fn try_read(&self, txn_id: TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
         let mut state = self.lock_inner("TxnLock::try_read");
         for reserved in state.pending_writes.iter().rev() {
+            assert!(reserved <= &txn_id);
+
             if reserved > &state.last_commit && reserved < &txn_id {
                 // if there's a pending write that can change the value at this txn_id, wait it out
                 debug!(
                     self.inner.watch,
                     format!("TxnLock waiting on a pending write at {}", reserved)
                 );
+
                 return Ok(None);
             }
         }
@@ -257,6 +260,7 @@ impl<T: Clone + Send> TxnLock<T> {
                 self.inner.watch,
                 format!("TxnLock waiting on a write lock at {}", txn_id)
             );
+
             return Ok(None);
         }
 
@@ -343,6 +347,7 @@ impl<T: Clone + Send> TxnLock<T> {
                     self.inner.watch,
                     format!("TxnLock {} has a read lock in the future", self.inner.name)
                 );
+
                 return Err(TCError::conflict());
             }
         }
