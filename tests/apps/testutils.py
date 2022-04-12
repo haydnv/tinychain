@@ -200,7 +200,7 @@ def start_local_host(name, app_or_library, overwrite=True, host_uri=None, cache_
 
 
 # use this alias to switch between Local and Docker host types
-start_host = start_local_host
+start_host = start_docker
 
 
 class PersistenceTest(object):
