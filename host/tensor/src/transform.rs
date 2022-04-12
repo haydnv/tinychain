@@ -18,7 +18,6 @@ pub struct Broadcast {
     shape: Shape,
     broadcast: Vec<bool>,
     offset: usize,
-    inverted_axes: Vec<usize>,
 }
 
 impl Broadcast {
@@ -72,7 +71,6 @@ impl Broadcast {
             shape,
             broadcast,
             offset,
-            inverted_axes,
         })
     }
 
@@ -493,7 +491,6 @@ pub struct Slice {
     bounds: Bounds,
     offset: HashMap<usize, u64>,
     elided: HashMap<usize, u64>,
-    inverted_axes: Vec<usize>,
 }
 
 impl Slice {
@@ -503,7 +500,6 @@ impl Slice {
         let mut shape: Coord = Vec::with_capacity(source_shape.len());
         let mut offset = HashMap::new();
         let mut elided = HashMap::new();
-        let mut inverted_axes = Vec::with_capacity(bounds.len());
 
         for axis in 0..bounds.len() {
             match &bounds[axis] {
@@ -514,18 +510,15 @@ impl Slice {
                     let dim = range.end - range.start;
                     shape.push(dim);
                     offset.insert(axis, range.start);
-                    inverted_axes.push(axis);
                 }
                 AxisBounds::Of(indices) => {
                     shape.push(indices.len() as u64);
-                    inverted_axes.push(axis);
                 }
             }
         }
 
         for axis in bounds.len()..source_shape.len() {
             shape.push(source_shape[axis]);
-            inverted_axes.push(axis);
         }
 
         let shape: Shape = shape.into();
@@ -536,7 +529,6 @@ impl Slice {
             bounds,
             offset,
             elided,
-            inverted_axes,
         })
     }
 
@@ -810,7 +802,7 @@ mod tests {
     fn test_reshape() {
         let source = Shape::from(vec![2, 3, 4, 1]);
         let dest = Shape::from(vec![3, 8]);
-        let rebase = Reshape::new(source, dest).unwrap();
+        let rebase = Reshape::new(source, dest, "test").unwrap();
 
         assert_eq!(rebase.map_coord(vec![0, 1, 2, 0]), vec![0, 6]);
         assert_eq!(rebase.invert_coord(vec![0, 6]), vec![0, 1, 2, 0]);

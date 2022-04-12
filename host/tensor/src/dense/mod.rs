@@ -47,6 +47,8 @@ pub const PER_BLOCK: usize = 131_072;
 #[derive(Clone)]
 pub struct DenseTensor<FD, FS, D, T, B> {
     blocks: B,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 

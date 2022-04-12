@@ -40,6 +40,7 @@ impl Collate for ValueCollator {
             (Value::Bytes(l), Value::Bytes(r)) => self.bytes.compare(l, r),
             (Value::Link(l), Value::Link(r)) => self.link.compare(l, r),
             (Value::Number(l), Value::Number(r)) => self.number.compare(l, r),
+            (Value::Version(l), Value::Version(r)) => self.version.compare(l, r),
             (Value::String(l), Value::String(r)) => self.string.compare(l, r),
             (Value::Tuple(l), Value::Tuple(r)) => self.compare_slice(l.as_slice(), r.as_slice()),
             (l, r) => l.class().cmp(&r.class()),

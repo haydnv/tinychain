@@ -403,6 +403,8 @@ impl<FD, FS, D, T, B> From<B> for DenseToSparse<FD, FS, D, T, B> {
 pub struct SparseBroadcast<FD, FS, D, T, A> {
     source: A,
     rebase: transform::Broadcast,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -1384,6 +1386,8 @@ impl<FD, FS, D, T, L, R> fmt::Display for SparseLeftCombinator<FD, FS, D, T, L, 
 pub struct SparseExpand<FD, FS, D, T, A> {
     source: A,
     rebase: transform::Expand,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -1608,6 +1612,8 @@ impl<FD, FS, D, T, A> fmt::Display for SparseExpand<FD, FS, D, T, A> {
 pub struct SparseFlip<FD, FS, D, T, A> {
     source: A,
     rebase: transform::Flip,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 

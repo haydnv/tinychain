@@ -515,6 +515,8 @@ pub struct Selection<F, D, Txn, T> {
     schema: IndexSchema,
     columns: Vec<Id>,
     indices: Vec<usize>,
+
+    #[allow(dead_code)]
     phantom: Phantom<F, D, Txn>,
 }
 

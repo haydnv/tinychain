@@ -659,6 +659,8 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListConst<FD, FS, D, T, B> {
 pub struct BlockListBroadcast<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Broadcast,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -812,6 +814,8 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListBroadcast<FD, FS, D, T, B> {
 pub struct BlockListCast<FD, FS, D, T, B> {
     source: B,
     dtype: NumberType,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -1524,6 +1528,8 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListReduce<FD, FS, D, T, B> {
 pub struct BlockListReshape<FD, FS, D, T, B> {
     source: B,
     rebase: transform::Reshape,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 
@@ -1932,6 +1938,8 @@ pub struct BlockListUnary<FD, FS, D, T, B> {
     transform: fn(&Array) -> Array,
     value_transform: fn(Number) -> Number,
     dtype: NumberType,
+
+    #[allow(dead_code)]
     phantom: Phantom<FD, FS, D, T>,
 }
 

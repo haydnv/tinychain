@@ -217,15 +217,16 @@ impl<'a> Handler<'a> for OpDef {
                         return Ok(());
                     };
 
-                    let key = State::from(key);
-                    let args = std::array::IntoIter::new([(key_name, key), (value_name, value)]);
-                    let op_def = op_def
+                    let mut data: Vec<(Id, State)> = Vec::with_capacity(op_def.len() + 2);
+                    data.push((key_name, State::from(key)));
+                    data.push((value_name, value));
+                    data.extend(op_def
                         .into_iter()
-                        .map(|(id, provider)| (id, State::Scalar(provider)));
+                        .map(|(id, provider)| (id, State::Scalar(provider))));
 
-                    let data = args.chain(op_def);
                     let executor: Executor<State> = Executor::new(txn, None, data);
                     executor.capture(capture).await?;
+
                     Ok(())
                 })
             }))
