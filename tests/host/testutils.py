@@ -79,6 +79,8 @@ class Process(tc.host.Local.Process):
 
 
 def start_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
+    print(f"running a local host using the binary at {TC_PATH}")
+
     if not os.path.isfile(TC_PATH):
         raise RuntimeError(f"invalid executable path: {TC_PATH}")
 

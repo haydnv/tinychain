@@ -110,7 +110,10 @@ impl FromStr for IdRef {
         if !to.starts_with('$') || to.len() < 2 {
             Err(TCError::bad_request("invalid IdRef", to))
         } else {
-            to[1..].parse().map(|to| IdRef { to }).map_err(TCError::unsupported)
+            to[1..]
+                .parse()
+                .map(|to| IdRef { to })
+                .map_err(TCError::unsupported)
         }
     }
 }
