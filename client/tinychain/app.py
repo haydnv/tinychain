@@ -270,6 +270,10 @@ class App(Library):
                 raise RuntimeError(f"{attr} must be managed by a Chain")
 
     def __json__(self):
+        if not hasattr(self, "_methods"):
+            name = self.__class__.__name__
+            raise RuntimeError(f"{name} has not reflected over its methods--did you forget to call App.__init__?")
+
         header = _Header()
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):

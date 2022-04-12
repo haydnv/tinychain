@@ -16,37 +16,30 @@ class Process(tc.host.Local.Process):
 
     ADDRESS = "127.0.0.1"
 
-    def __init__(self, path, workspace, force_create=False,
-                 data_dir=None, clusters=[], port=DEFAULT_PORT, log_level="warn", cache_size="1G", request_ttl="30"):
-
-        print(f"start host process on port {port}")
+    def __init__(self, path, workspace, force_create=False, libs=[], **flags):
+        http_port = flags.get("http_port", DEFAULT_PORT)
+        print(f"start host process on port {http_port}")
 
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
 
-        if port is None or not int(port) or int(port) < 0:
-            raise ValueError(f"invalid port: {port}")
+        if http_port is None or not int(http_port) or int(http_port) < 0:
+            raise ValueError(f"invalid port: {http_port}")
 
-        if clusters and data_dir is None:
-            raise ValueError("Hosting a cluster requires specifying a data_dir")
+        if libs and "data_dir" not in flags:
+            raise ValueError("hosting a cluster requires specifying a data_dir")
 
-        if data_dir:
-            maybe_create_dir(data_dir, force_create)
+        if "data_dir" in flags:
+            maybe_create_dir(flags["data_dir"], force_create)
 
         args = [
             path,
             f"--workspace={workspace}",
             f"--address={self.ADDRESS}",
-            f"--http_port={port}",
-            f"--log_level={log_level}",
-            f"--cache_size={cache_size}",
-            f"--request_ttl={request_ttl}",
         ]
 
-        if data_dir:
-            args.append(f"--data_dir={data_dir}")
-
-        args.extend([f"--cluster={cluster}" for cluster in clusters])
+        args.extend(f"--cluster={lib}" for lib in libs)
+        args.extend(f"--{flag}={value}" for flag, value in flags.items())
 
         self._args = args
 
@@ -85,38 +78,45 @@ class Process(tc.host.Local.Process):
             self.stop()
 
 
-def start_host(name, clusters=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, timeout=30):
+def start_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         raise RuntimeError(f"invalid executable path: {TC_PATH}")
+
+    deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
-    elif clusters and tc.uri(clusters[0]).port():
-        port = tc.uri(clusters[0]).port()
+    elif deps and tc.uri(deps[0]).port():
+        port = tc.uri(deps[0]).port()
 
     config = []
-    for cluster in clusters:
-        cluster_config = f"config/{name}"
-        cluster_config += str(tc.uri(cluster).path())
+    for dep in deps:
+        dep_config = f"config/{name}"
+        dep_config += str(tc.uri(dep).path())
 
-        tc.write_cluster(cluster, cluster_config, overwrite)
-        config.append(cluster_config)
+        tc.app.write_config(dep, dep_config, overwrite)
+        config.append(dep_config)
 
     data_dir = f"/tmp/tc/tmp/{port}/{name}"
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
+    if "log_level" not in flags:
+        flags["log_level"] = "debug"
+
+    if "http_port" in flags:
+        assert flags["http_port"] == port
+    else:
+        flags["http_port"] = port
+
     process = Process(
         TC_PATH,
         workspace=f"/tmp/tc/tmp/{port}/{name}",
         data_dir=data_dir,
-        clusters=config,
-        port=port,
-        log_level="debug",
-        cache_size=cache_size,
+        libs=config,
         force_create=True,
-        request_ttl=timeout)
+        **flags)
 
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
