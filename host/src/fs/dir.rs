@@ -2,13 +2,16 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::future::{join_all, TryFutureExt};
 use log::debug;
 use safecast::AsType;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use tc_btree::{BTreeType, Node};
@@ -282,6 +285,7 @@ impl Eq for Contents {}
 pub struct Dir {
     cache: DirLock<CacheBlock>,
     contents: TxnLock<Contents>,
+    accesed_at: Arc<Mutex<HashSet<TxnId>>>,
 }
 
 impl Dir {
@@ -297,7 +301,13 @@ impl Dir {
         let inner = HashMap::new();
         let lock_name = format!("contents of {:?}", &*fs_dir);
         let contents = TxnLock::new(lock_name, Contents { inner });
-        Ok(Self { cache, contents })
+        let accesed_at = Arc::new(Mutex::new(HashSet::new()));
+
+        Ok(Self {
+            cache,
+            contents,
+            accesed_at,
+        })
     }
 
     pub fn load<'a>(cache: DirLock<CacheBlock>, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
@@ -338,7 +348,14 @@ impl Dir {
 
             let lock_name = format!("contents of {:?}", &*fs_dir);
             let contents = TxnLock::new(lock_name, Contents { inner });
-            Ok(Self { cache, contents })
+            let accesed_at = iter::once(txn_id).collect();
+            let accesed_at = Arc::new(Mutex::new(accesed_at));
+
+            Ok(Self {
+                cache,
+                contents,
+                accesed_at,
+            })
         })
     }
 
@@ -348,6 +365,11 @@ impl Dir {
         } else {
             fs::Dir::create_dir(self, txn_id, name).await
         }
+    }
+
+    async fn mark_accesed_at(&self, txn_id: TxnId) {
+        let mut accesed_at = self.accesed_at.lock().await;
+        accesed_at.insert(txn_id);
     }
 }
 
@@ -367,6 +389,8 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool> {
+        self.mark_accesed_at(txn_id).await;
+
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.contains_key(name))
@@ -374,6 +398,8 @@ impl fs::Dir for Dir {
     }
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
+        self.mark_accesed_at(txn_id).await;
+
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&name) {
             return Err(TCError::bad_request(
@@ -390,6 +416,8 @@ impl fs::Dir for Dir {
     }
 
     async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Dir> {
+        self.mark_accesed_at(txn_id).await;
+
         let mut contents = self.contents.write(txn_id).await?;
         let name = loop {
             let name = Uuid::new_v4().into();
@@ -413,6 +441,8 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
+        self.mark_accesed_at(txn_id).await;
+
         let mut contents = self.contents.write(txn_id).await?;
         if contents.contains_key(&file_id) {
             return Err(TCError::bad_request(
@@ -440,6 +470,8 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
+        self.mark_accesed_at(txn_id).await;
+
         let mut contents = self.contents.write(txn_id).await?;
         let file_id = loop {
             let name = Uuid::new_v4().into();
@@ -460,6 +492,8 @@ impl fs::Dir for Dir {
     }
 
     async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
+        self.mark_accesed_at(txn_id).await;
+
         let contents = self.contents.read(txn_id).await?;
         match contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
@@ -474,6 +508,8 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
+        self.mark_accesed_at(txn_id).await;
+
         let contents = self.contents.read(txn_id).await?;
         match contents.get(file_id) {
             Some(DirEntry::File(file)) => file
@@ -491,6 +527,12 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
+        let accesed_at = self.accesed_at.lock().await;
+        if !accesed_at.contains(txn_id) {
+            debug!("{} was not modified, no need to commit", self);
+            return;
+        }
+
         let contents = self.contents.read(*txn_id).await.expect("dir contents");
 
         self.contents.commit(txn_id).await;
@@ -510,6 +552,12 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        let mut accesed_at = self.accesed_at.lock().await;
+        if !accesed_at.contains(txn_id) {
+            debug!("{} was not modified, no need to finalize", self);
+            return;
+        }
+
         {
             let contents = self.contents.read(*txn_id).await.expect("dir contents");
             join_all(contents.values().map(|entry| match entry {
@@ -526,7 +574,8 @@ impl Transact for Dir {
             .await;
         }
 
-        self.contents.finalize(txn_id).await
+        self.contents.finalize(txn_id).await;
+        accesed_at.remove(txn_id);
     }
 }
 
