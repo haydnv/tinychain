@@ -1,7 +1,7 @@
-import random
-
 import aiohttp
+import argparse
 import asyncio
+import random
 import time
 import tinychain as tc
 
@@ -23,10 +23,6 @@ class Benchmark(tc.app.App):
 
         tc.app.App.__init__(self)
 
-    @tc.get
-    def btree_read(self, key: tc.UInt):
-        return self.btree[key]
-
     @tc.put
     def btree_insert(self, value: tc.UInt):
         return self.btree.insert([value])
@@ -44,20 +40,23 @@ class Benchmark(tc.app.App):
         return self.table[(key,)]
 
 
-async def _run(requests):
+async def _run(requests, concurrency=1):
     responses = []
 
     start = time.time()
-    for request in requests:
-        # TODO: batch requests
-        response = await request
-        if response.status == 200:
-            responses.append(await response.text())
-        else:
-            print(f"error {response.status}: {await response.text()}")
+    for i in range(0, len(requests), concurrency):
+        response_text = []
+        for response in await asyncio.gather(*requests[i:(i + concurrency)]):
+            if response.status == 200:
+                response_text.append(response.text())
+            else:
+                print(f"error {response.status}: {await response.text()}")
+
+        responses.extend(await asyncio.gather(*response_text))
 
     elapsed = time.time() - start
-    return responses, elapsed
+    success = (len(responses) / len(requests)) * 100
+    return responses, elapsed, success
 
 
 async def btree_insert(host, num_users):
@@ -65,10 +64,9 @@ async def btree_insert(host, num_users):
 
     async with aiohttp.ClientSession() as session:
         requests = [session.put(link, json=random.randint(0, 100000)) for _ in range(num_users)]
-        responses, elapsed = await _run(requests)
+        responses, elapsed, success = await _run(requests)
 
     qps = int(num_users / elapsed)
-    success = (len(responses) / len(requests)) * 100
     print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
 
 
@@ -82,23 +80,10 @@ async def btree_multi(host, concurrent):
             requests.append(session.post(link, json={"start": i, "stop": i + num_keys}))
             i += num_keys
 
-        responses, elapsed = await _run(requests)
+        responses, elapsed, success = await _run(requests)
 
-    success = (len(responses) / len(requests)) * 100
     qps = int((num_keys * concurrent) / elapsed)
     print(f"BTree insert {num_keys} keys x {concurrent} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
-
-
-async def btree_read(host, num_users):
-    link = str(host.link(URI.append("btree_read")))
-
-    async with aiohttp.ClientSession() as session:
-        requests = [session.get(link, json=random.randint(0, 1000)) for _ in range(num_users)]
-        responses, elapsed = await _run(requests)
-
-    qps = int(num_users / elapsed)
-    success = (len(responses) / len(requests)) * 100
-    print(f"BTree read key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
 
 
 async def table_upsert(host, concurrent):
@@ -109,62 +94,51 @@ async def table_upsert(host, concurrent):
         random.shuffle(keys)
 
         requests = [session.put(link, json=i) for i in keys]
-        responses, elapsed = await _run(requests)
+        responses, elapsed, success = await _run(requests)
 
-    success = (len(responses) / len(requests)) * 100
     qps = int(concurrent / elapsed)
     print(f"Table insert row x {concurrent} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
-async def table_read(host, concurrent):
+async def table_read(host, num_users):
     link = str(host.link(URI.append("table_read")))
 
     async with aiohttp.ClientSession() as session:
-        keys = list(range(concurrent))
+        keys = list(range(num_users))
         random.shuffle(keys)
 
         requests = [session.get(link, params={"key": random.randint(0, 1000)}) for i in keys]
-        responses, elapsed = await _run(requests)
+        responses, elapsed, success = await _run(requests, 10)
 
-    success = (len(responses) / len(requests)) * 100
-    qps = int(concurrent / elapsed)
-    print(f"Table read row x {concurrent} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    qps = int(num_users / elapsed)
+    print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
-async def main():
+async def main(pattern):
     host = start_host("benchmark", Benchmark(), cache_size=CACHE_SIZE, log_level="debug")
 
     print()
     print("running benchmark")
     print()
 
-    print("benchmarking BTree")
-    print()
+    benchmarks = [
+        btree_insert,
+        btree_multi,
+        table_upsert,
+        table_read,
+    ]
 
-    for concurrency in SCALES:
-        await btree_insert(host, concurrency)
+    for benchmark in benchmarks:
+        if pattern is None or pattern in benchmark.__name__:
+            for num_users in SCALES:
+                await benchmark(host, num_users)
 
-    print()
-
-    for concurrency in SCALES:
-        await btree_multi(host, concurrency)
-
-    print()
-
-    for concurrency in SCALES:
-        await btree_read(host, concurrency)
-
-    print("benchmarking Table")
-    print()
-
-    for concurrency in SCALES:
-        await table_upsert(host, concurrency)
-
-    print()
-
-    for concurrency in SCALES:
-        await table_read(host, concurrency)
+            print()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('-k', type=str, help='filter benchmarks to run by name')
+    args = parser.parse_args()
+
+    asyncio.run(main(args.k))
