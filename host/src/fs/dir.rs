@@ -298,8 +298,12 @@ impl Dir {
             )));
         }
 
-        let inner = HashMap::new();
+        #[cfg(debug_assertions)]
         let lock_name = format!("contents of {:?}", &*fs_dir);
+        #[cfg(not(debug_assertions))]
+        let lock_name = "contents of transactional filesystem directory";
+
+        let inner = HashMap::new();
         let contents = TxnLock::new(lock_name, Contents { inner });
         let accesed_at = Arc::new(Mutex::new(HashSet::new()));
 

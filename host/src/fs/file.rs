@@ -123,11 +123,16 @@ where
                 .map_err(io_err)?;
         }
 
+        #[cfg(debug_assertions)]
+        let lock_name = format!("block list of file {:?}", &*fs_dir);
+        #[cfg(not(debug_assertions))]
+        let lock_name = "block list of transactional file";
+
         Ok(Self {
             canon,
             versions,
             blocks: Arc::new(RwLock::new(blocks)),
-            present: TxnLock::new(format!("block listing for {:?}", &*fs_dir), present),
+            present: TxnLock::new(lock_name, present),
             phantom: PhantomData,
         })
     }

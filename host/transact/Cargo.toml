@@ -29,5 +29,5 @@ safecast = "~0.1.2"
 sha2 = "0.10"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
-tc-error = "0.4"
+tc-error = { path = "../error" }
 tc-value = { path = "../value" }

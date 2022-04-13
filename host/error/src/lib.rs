@@ -97,10 +97,10 @@ impl TCError {
 
     /// Error indicating that the request depends on a resource which is exclusively locked
     /// by another request.
-    pub fn conflict() -> Self {
+    pub fn conflict<M: fmt::Display>(message: M) -> Self {
         Self {
             code: ErrorType::Conflict,
-            message: String::default(),
+            message: message.to_string(),
         }
     }
 

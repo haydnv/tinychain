@@ -45,7 +45,7 @@ sha2 = "0.10"
 structopt = "0.3"
 tbon = "~0.3.5"
 tc-btree = { path = "btree" }
-tc-error = "0.4"
+tc-error = { path = "error" }
 tc-math = { path = "math", optional = true }
 tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact", features = ["tensor"] }

@@ -10,7 +10,7 @@ use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
 use futures::Future;
-use log::{info, trace};
+use log::trace;
 
 use tc_error::*;
 
@@ -267,12 +267,10 @@ impl<T: Clone + Send> TxnLock<T> {
         if !state.versions.contains_key(&txn_id) {
             if txn_id <= state.last_commit {
                 // if the requested time is too old, just return an error
-                info!(
-                    "transaction {} is already finalized, can't acquire read lock",
-                    txn_id
-                );
-
-                return Err(TCError::conflict());
+                return Err(TCError::conflict(format!(
+                    "transaction {} is already finalized, can't acquire read lock on {}",
+                    txn_id, self.inner.name
+                )));
             }
 
             let version = UnsafeCell::new(unsafe { (&*state.canon.get()).clone() });
@@ -303,29 +301,19 @@ impl<T: Clone + Send> TxnLock<T> {
 
         if state.last_commit >= txn_id {
             // can't write-lock a committed version
-            debug!(
-                self.inner.watch,
-                format!(
-                    "TxnLock {} has a commit at {}",
-                    self.inner.name, state.last_commit
-                )
-            );
-
-            return Err(TCError::conflict());
+            return Err(TCError::conflict(format!(
+                "cannot lock {} at {} because it's already committed at {}",
+                self.inner.name, txn_id, state.last_commit
+            )));
         }
 
         for pending in state.pending_writes.iter().rev() {
             if pending > &txn_id {
                 // can't write-lock the past
-                debug!(
-                    self.inner.watch,
-                    format!(
-                        "TxnLock {} has pending write in the future",
-                        self.inner.name
-                    )
-                );
-
-                return Err(TCError::conflict());
+                return Err(TCError::conflict(format!(
+                    "can't lock {} for writing at {} since it's already been locked at {}",
+                    self.inner.name, txn_id, pending
+                )));
             } else if pending > &state.last_commit && pending < &txn_id {
                 // if there's a past write that might still be committed, wait it out
                 debug!(
@@ -343,12 +331,10 @@ impl<T: Clone + Send> TxnLock<T> {
         if let Some(reader) = state.readers.keys().max() {
             if reader > &txn_id {
                 // can't write-lock the past
-                debug!(
-                    self.inner.watch,
-                    format!("TxnLock {} has a read lock in the future", self.inner.name)
-                );
-
-                return Err(TCError::conflict());
+                return Err(TCError::conflict(format!(
+                    "can't lock {} for writing at {} since it already has a read lock at {}",
+                    self.inner.name, txn_id, reader
+                )));
             }
         }
 
