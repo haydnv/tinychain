@@ -368,6 +368,7 @@ def write_config(lib, config_path, overwrite=False):
 
         if not config_path.parent.exists():
             os.makedirs(config_path.parent)
+            assert config_path.parent.exists()
 
         with open(config_path, 'w') as config_file:
             config_file.write(json.dumps(config, indent=4))

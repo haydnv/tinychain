@@ -7,7 +7,6 @@ import testutils
 import time
 import tinychain as tc
 
-URI = tc.URI("/app/benchmark")
 SCALES = [1, 5, 10, 100]
 DEFAULT_CONCURRENCY = 5
 BACKOFF = 0.01
@@ -64,8 +63,10 @@ class Host(object):
             return response
 
 
-class Benchmark(tc.app.App):
-    __uri__ = URI
+class DataStructures(tc.app.App):
+    __uri__ = tc.URI("http://127.0.0.1:8702") + "/app/benchmark/data_structures"
+
+    ml = tc.ml.service.ML
 
     def __init__(self):
         self.btree = tc.chain.Sync(tc.btree.BTree([("i", tc.I32)]))
@@ -99,12 +100,13 @@ class Benchmark(tc.app.App):
         return (self.tensor1 * self.tensor2.transpose()).sum()
 
     @tc.get
-    def train_neural_net(self, cxt) -> tc.F32:
+    def neural_net_train(self, cxt) -> tc.F32:
         cxt.inputs = tc.tensor.Dense.random_uniform([20, 2], 0, 1)
         cxt.labels = cxt.inputs[:, 0].logical_xor(cxt.inputs[:, 1]).expand_dims().copy()
 
-        def cost(_i, o):
-            return (o - cxt.labels)**2
+        def cost(i, o):
+            labels = i[:, 0].logical_xor(i[:, 1]).expand_dims()
+            return (o - labels)**2
 
         layers = [
             tc.ml.nn.DNNLayer.create(2, 2, tc.ml.sigmoid),
@@ -113,120 +115,115 @@ class Benchmark(tc.app.App):
         dnn = tc.ml.nn.Sequential(layers)
         cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
 
-        @tc.post
-        def cond(loss: tc.tensor.Dense):
-            return (abs(loss) >= 0.5).any()
-
-        @tc.closure(cxt.optimizer, cxt.inputs)
-        @tc.post
-        def train(step: tc.U32):
-            loss = cxt.optimizer.train(step, cxt.inputs)
-            return {"step": step + 1, "loss": loss}
-
-        cxt.training = tc.While(cond, train, {"step": 1, "loss": cxt.labels - dnn.eval(cxt.inputs)})
-        return tc.After(cxt.training, (abs(cxt.labels - cxt.optimizer.ml_model.eval(cxt.inputs)) < 0.5).all())
+        return tc.After(
+            cxt.optimizer.train(1, cxt.inputs),
+            (abs(cxt.labels - cxt.optimizer.ml_model.eval(cxt.inputs)) >= 0.5).cast(tc.U8).sum())
 
 
-async def _run(requests, concurrency):
-    responses = []
+class Benchmark(object):
+    async def run(self, requests, concurrency):
+        responses = []
 
-    start = time.time()
-    for i in range(0, len(requests), concurrency):
-        response_text = []
-        for response in await asyncio.gather(*requests[i:(i + concurrency)]):
-            if response.status == 200:
-                response_text.append(response.text())
-            else:
-                print(f"error {response.status}: {await response.text()}")
-                exit()
+        start = time.time()
+        for i in range(0, len(requests), concurrency):
+            response_text = []
+            for response in await asyncio.gather(*requests[i:(i + concurrency)]):
+                if response.status == 200:
+                    response_text.append(response.text())
+                else:
+                    print(f"error {response.status}: {await response.text()}")
+                    exit()
 
-        responses.extend(await asyncio.gather(*response_text))
+            responses.extend(await asyncio.gather(*response_text))
 
-    elapsed = time.time() - start
-    success = (len(responses) / len(requests)) * 100
-    return responses, elapsed, success
-
-
-async def btree_insert(host, num_users, concurrency):
-    requests = [host.put(URI + "/btree_insert", value=random.randint(0, 100000)) for _ in range(num_users)]
-    responses, elapsed, success = await _run(requests, concurrency)
-    qps = int(num_users / elapsed)
-    print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
+        elapsed = time.time() - start
+        success = (len(responses) / len(requests)) * 100
+        return responses, elapsed, success
 
 
-async def btree_multi(host, num_users, concurrency):
-    i = 0
-    num_keys = 1000
+class DataStructuresBenchmark(Benchmark):
+    def __init__(self):
+        self._base_path = tc.uri(DataStructures).path()
 
-    requests = []
-    for _ in range(num_users):
-        requests.append(host.post(URI + "/btree_multi", {"start": i, "stop": i + num_keys}))
-        i += num_keys
+    def _link(self, path):
+        return self._base_path + path
 
-    responses, elapsed, success = await _run(requests, concurrency)
+    async def btree_insert(self, host, num_users, concurrency):
+        requests = [host.put(self._link("/btree_insert"), value=random.randint(0, 100000)) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = int(num_users / elapsed)
+        print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
 
-    qps = int((num_keys * num_users) / elapsed)
-    print(f"BTree insert {num_keys} keys x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    async def btree_multi(self, host, num_users, concurrency):
+        i = 0
+        num_keys = 1000
 
+        requests = []
+        for _ in range(num_users):
+            requests.append(host.post(self._link("/btree_multi"), {"start": i, "stop": i + num_keys}))
+            i += num_keys
 
-async def table_upsert(host, num_users, concurrency):
-    keys = list(range(num_users))
-    random.shuffle(keys)
+        responses, elapsed, success = await self.run(requests, concurrency)
 
-    requests = [host.put(URI + "/table_upsert", value=i) for i in keys]
-    responses, elapsed, success = await _run(requests, concurrency)
+        qps = int((num_keys * num_users) / elapsed)
+        print(f"BTree insert {num_keys} keys x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    qps = int(num_users / elapsed)
-    print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    async def table_upsert(self, host, num_users, concurrency):
+        keys = list(range(num_users))
+        random.shuffle(keys)
 
+        requests = [host.put(self._link("/table_upsert"), value=i) for i in keys]
+        responses, elapsed, success = await self.run(requests, concurrency)
 
-async def table_read(host, num_users, concurrency):
-    keys = list(range(num_users))
-    random.shuffle(keys)
+        qps = int(num_users / elapsed)
+        print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    requests = [host.get(URI + "/table_read", i) for i in keys]
-    responses, elapsed, success = await _run(requests, concurrency)
+    async def table_read(self, host, num_users, concurrency):
+        keys = list(range(num_users))
+        random.shuffle(keys)
 
-    qps = int(num_users / elapsed)
-    print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+        requests = [host.get(self._link("/table_read"), i) for i in keys]
+        responses, elapsed, success = await self.run(requests, concurrency)
 
+        qps = int(num_users / elapsed)
+        print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-async def tensor_multiply(host, num_users, concurrency):
-    requests = [host.get(URI + "/tensor_multiply") for _ in range(num_users)]
-    responses, elapsed, success = await _run(requests, concurrency)
-    qps = int(num_users / elapsed)
-    print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
-          + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    async def tensor_multiply(self, host, num_users, concurrency):
+        requests = [host.get(self._link("/tensor_multiply")) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = int(num_users / elapsed)
+        print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
+              + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-
-async def train_neural_net(host, num_users, concurrency):
-    requests = [host.get(URI + "/tensor_multiply") for _ in range(num_users)]
-    responses, elapsed, success = await _run(requests, concurrency)
-    qps = int(num_users / elapsed)
-    print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    async def neural_net_train(self, host, num_users, concurrency):
+        requests = [host.get(self._link("/neural_net_train")) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = num_users / elapsed
+        print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
 
 
 async def main(pattern, scales, concurrency, cache_size):
-    host = testutils.start_host("benchmark", Benchmark(), cache_size=cache_size)
+    host = testutils.start_host("benchmark", [tc.ml.service.ML(), DataStructures()], cache_size=cache_size)
     host = Host(host)
 
     print()
     print("running benchmark")
     print()
 
+    benchmark = DataStructuresBenchmark()
     benchmarks = [
-        btree_insert,
-        btree_multi,
-        table_upsert,
-        table_read,
-        tensor_multiply,
-        train_neural_net,
+        benchmark.btree_insert,
+        benchmark.btree_multi,
+        benchmark.table_upsert,
+        benchmark.table_read,
+        benchmark.tensor_multiply,
+        benchmark.neural_net_train,
     ]
 
-    for benchmark in benchmarks:
-        if pattern is None or pattern in benchmark.__name__:
+    for test in benchmarks:
+        if pattern is None or pattern in test.__name__:
             for num_users in scales:
-                await benchmark(host, num_users, concurrency)
+                await test(host, num_users, concurrency)
 
             print()
 
