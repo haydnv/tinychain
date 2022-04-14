@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import inspect
 import json
+import logging
 import random
 import testutils
 import time
@@ -61,6 +62,9 @@ class Host(object):
                 backoff *= 2
 
             return response
+
+    def stop(self):
+        return self._host.stop()
 
 
 class DataStructures(tc.app.App):
@@ -138,8 +142,7 @@ class Benchmark(object):
                 if response.status == 200:
                     response_text.append(response.text())
                 else:
-                    print(f"error {response.status}: {await response.text()}")
-                    exit()
+                    logging.warning(f"error {response.status}: {await response.text()}")
 
             responses.extend(await asyncio.gather(*response_text))
 
@@ -147,32 +150,47 @@ class Benchmark(object):
         success = (len(responses) / len(requests)) * 100
         return responses, elapsed, success
 
+    def start(self, **flags):
+        pass
+
+    def stop(self):
+        pass
+
 
 class ConcurrentWriteBenchmarks(Benchmark):
     SCALES = [1, 5, 10, 100]
 
     def __init__(self):
         self._base_path = tc.uri(DataStructures).path()
+        self.host = None
 
     def __repr__(self):
         return "concurrent write benchmarks"
 
+    def start(self, **flags):
+        host = testutils.start_host("benchmark_writes", [tc.ml.service.ML(), DataStructures()], **flags)
+        self.host = Host(host)
+
+    def stop(self):
+        if self.host:
+            self.host.stop()
+
     def _link(self, path):
         return self._base_path + path
 
-    async def btree_insert(self, host, num_users, concurrency):
-        requests = [host.put(self._link("/btree_insert"), value=random.randint(0, 100000)) for _ in range(num_users)]
+    async def btree_insert(self, num_users, concurrency):
+        requests = [self.host.put(self._link("/btree_insert"), value=random.randint(0, 100000)) for _ in range(num_users)]
         responses, elapsed, success = await self.run(requests, concurrency)
         qps = int(num_users / elapsed)
         print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
 
-    async def btree_multi(self, host, num_users, concurrency):
+    async def btree_multi(self, num_users, concurrency):
         i = 0
         num_keys = 1000
 
         requests = []
         for _ in range(num_users):
-            requests.append(host.post(self._link("/btree_multi"), {"start": i, "stop": i + num_keys}))
+            requests.append(self.host.post(self._link("/btree_multi"), {"start": i, "stop": i + num_keys}))
             i += num_keys
 
         responses, elapsed, success = await self.run(requests, concurrency)
@@ -180,18 +198,18 @@ class ConcurrentWriteBenchmarks(Benchmark):
         qps = int((num_keys * num_users) / elapsed)
         print(f"BTree insert {num_keys} keys x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    async def table_upsert(self, host, num_users, concurrency):
+    async def table_upsert(self, num_users, concurrency):
         keys = list(range(num_users))
         random.shuffle(keys)
 
-        requests = [host.put(self._link("/table_upsert"), value=i) for i in keys]
+        requests = [self.host.put(self._link("/table_upsert"), value=i) for i in keys]
         responses, elapsed, success = await self.run(requests, concurrency)
 
         qps = int(num_users / elapsed)
         print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    async def neural_net_train(self, host, num_users, concurrency):
-        requests = [host.get(self._link("/neural_net_train")) for _ in range(num_users)]
+    async def neural_net_train(self, num_users, concurrency):
+        requests = [self.host.get(self._link("/neural_net_train")) for _ in range(num_users)]
         responses, elapsed, success = await self.run(requests, concurrency)
         qps = num_users / elapsed
         print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
@@ -202,25 +220,34 @@ class LoadBenchmarks(Benchmark):
 
     def __init__(self):
         self._base_path = tc.uri(DataStructures).path()
+        self.host = None
 
     def __repr__(self):
         return "load benchmarks"
 
+    def start(self, **flags):
+        host = testutils.start_host("benchmark_load", DataStructures(), **flags)
+        self.host = Host(host)
+
+    def stop(self):
+        if self.host:
+            return self.host.stop()
+
     def _link(self, path):
         return self._base_path + path
 
-    async def table_read(self, host, num_users, concurrency):
+    async def table_read(self, num_users, concurrency):
         keys = list(range(num_users))
         random.shuffle(keys)
 
-        requests = [host.get(self._link("/table_read"), i) for i in keys]
+        requests = [self.host.get(self._link("/table_read"), i) for i in keys]
         responses, elapsed, success = await self.run(requests, concurrency)
 
         qps = int(num_users / elapsed)
         print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    async def tensor_multiply(self, host, num_users, concurrency):
-        requests = [host.get(self._link("/tensor_multiply")) for _ in range(num_users)]
+    async def tensor_multiply(self, num_users, concurrency):
+        requests = [self.host.get(self._link("/tensor_multiply")) for _ in range(num_users)]
         responses, elapsed, success = await self.run(requests, concurrency)
         qps = int(num_users / elapsed)
         print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
@@ -228,13 +255,6 @@ class LoadBenchmarks(Benchmark):
 
 
 async def main(pattern, scales, concurrency, cache_size):
-    host = testutils.start_host("benchmark", [tc.ml.service.ML(), DataStructures()], cache_size=cache_size)
-    host = Host(host)
-
-    print()
-    print("running benchmark")
-    print()
-
     benchmarks = [
         ConcurrentWriteBenchmarks(),
         LoadBenchmarks(),
@@ -243,13 +263,21 @@ async def main(pattern, scales, concurrency, cache_size):
     for benchmark in benchmarks:
         print(f"running {benchmark}")
 
+        started = False
         for test in benchmark:
             if pattern is None or pattern in test.__name__:
+                if not started:
+                    benchmark.start(cache_size=cache_size)
+                    started = True
+                    print()
+
                 for num_users in (scales if scales else benchmark.SCALES):
-                    await test(host, num_users, concurrency)
+                    await test(num_users, concurrency)
 
                 print()
-                await asyncio.sleep(1)
+
+        if started:
+            benchmark.stop()
 
 
 if __name__ == "__main__":
