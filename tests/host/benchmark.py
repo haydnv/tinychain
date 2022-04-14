@@ -1,13 +1,13 @@
 import aiohttp
 import argparse
 import asyncio
+import inspect
 import json
 import random
 import testutils
 import time
 import tinychain as tc
 
-SCALES = [1, 5, 10, 100]
 DEFAULT_CONCURRENCY = 5
 BACKOFF = 0.01
 
@@ -121,6 +121,13 @@ class DataStructures(tc.app.App):
 
 
 class Benchmark(object):
+    def __iter__(self):
+        for name, item in inspect.getmembers(self):
+            if name.startswith('_') or hasattr(Benchmark, name) or not callable(item):
+                continue
+
+            yield item
+
     async def run(self, requests, concurrency):
         responses = []
 
@@ -141,9 +148,14 @@ class Benchmark(object):
         return responses, elapsed, success
 
 
-class DataStructuresBenchmark(Benchmark):
+class ConcurrentWriteBenchmarks(Benchmark):
+    SCALES = [1, 5, 10, 100]
+
     def __init__(self):
         self._base_path = tc.uri(DataStructures).path()
+
+    def __repr__(self):
+        return "concurrent write benchmarks"
 
     def _link(self, path):
         return self._base_path + path
@@ -178,6 +190,25 @@ class DataStructuresBenchmark(Benchmark):
         qps = int(num_users / elapsed)
         print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
+    async def neural_net_train(self, host, num_users, concurrency):
+        requests = [host.get(self._link("/neural_net_train")) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = num_users / elapsed
+        print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
+
+
+class LoadBenchmarks(Benchmark):
+    SCALES = [1, 5, 10, 100, 1000]
+
+    def __init__(self):
+        self._base_path = tc.uri(DataStructures).path()
+
+    def __repr__(self):
+        return "load benchmarks"
+
+    def _link(self, path):
+        return self._base_path + path
+
     async def table_read(self, host, num_users, concurrency):
         keys = list(range(num_users))
         random.shuffle(keys)
@@ -195,12 +226,6 @@ class DataStructuresBenchmark(Benchmark):
         print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
               + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    async def neural_net_train(self, host, num_users, concurrency):
-        requests = [host.get(self._link("/neural_net_train")) for _ in range(num_users)]
-        responses, elapsed, success = await self.run(requests, concurrency)
-        qps = num_users / elapsed
-        print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
-
 
 async def main(pattern, scales, concurrency, cache_size):
     host = testutils.start_host("benchmark", [tc.ml.service.ML(), DataStructures()], cache_size=cache_size)
@@ -210,22 +235,21 @@ async def main(pattern, scales, concurrency, cache_size):
     print("running benchmark")
     print()
 
-    benchmark = DataStructuresBenchmark()
     benchmarks = [
-        benchmark.btree_insert,
-        benchmark.btree_multi,
-        benchmark.table_upsert,
-        benchmark.table_read,
-        benchmark.tensor_multiply,
-        benchmark.neural_net_train,
+        ConcurrentWriteBenchmarks(),
+        LoadBenchmarks(),
     ]
 
-    for test in benchmarks:
-        if pattern is None or pattern in test.__name__:
-            for num_users in scales:
-                await test(host, num_users, concurrency)
+    for benchmark in benchmarks:
+        print(f"running {benchmark}")
 
-            print()
+        for test in benchmark:
+            if pattern is None or pattern in test.__name__:
+                for num_users in (scales if scales else benchmark.SCALES):
+                    await test(host, num_users, concurrency)
+
+                print()
+                await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
@@ -239,5 +263,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    num_users = [n for [n] in args.num_users] if args.num_users else SCALES
-    asyncio.run(main(args.k, num_users, args.concurrency, args.cache_size))
+    num_users = [n for [n] in args.num_users] if args.num_users else None
+    task = main(args.k, num_users, args.concurrency, args.cache_size)
+    asyncio.run(task)
