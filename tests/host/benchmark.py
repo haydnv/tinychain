@@ -63,6 +63,9 @@ class Host(object):
 
             return response
 
+    def start(self, **flags):
+        return self._host.start(**flags)
+
     def stop(self):
         return self._host.stop()
 
@@ -72,14 +75,14 @@ class DataStructures(tc.app.App):
 
     ml = tc.ml.service.ML
 
-    def __init__(self):
-        self.btree = tc.chain.Sync(tc.btree.BTree([("i", tc.I32)]))
+    def __init__(self, chain_type):
+        self.btree = chain_type(tc.btree.BTree([("i", tc.I32)]))
 
         table_schema = tc.table.Schema([("x", tc.I32)], [("y", tc.I32)]).create_index("y", ["y"])
-        self.table = tc.chain.Sync(tc.table.Table(table_schema))
+        self.table = chain_type(tc.table.Table(table_schema))
 
-        self.tensor1 = tc.chain.Sync(tc.tensor.Dense(([100, 50], tc.F32)))
-        self.tensor2 = tc.chain.Sync(tc.tensor.Dense(([50, 1], tc.F32)))
+        self.tensor1 = chain_type(tc.tensor.Dense(([100, 50], tc.F32)))
+        self.tensor2 = chain_type(tc.tensor.Dense(([50, 1], tc.F32)))
 
         tc.app.App.__init__(self)
 
@@ -158,6 +161,7 @@ class Benchmark(object):
 
 
 class ConcurrentWriteBenchmarks(Benchmark):
+    CONCURRENCY = 5
     SCALES = [1, 5, 10, 100]
 
     def __init__(self):
@@ -168,7 +172,7 @@ class ConcurrentWriteBenchmarks(Benchmark):
         return "concurrent write benchmarks"
 
     def start(self, **flags):
-        host = testutils.start_host("benchmark_writes", [tc.ml.service.ML(), DataStructures()], **flags)
+        host = testutils.start_host("benchmark_writes", [tc.ml.service.ML(), DataStructures(tc.chain.Sync)], **flags)
         self.host = Host(host)
 
     def stop(self):
@@ -216,6 +220,7 @@ class ConcurrentWriteBenchmarks(Benchmark):
 
 
 class LoadBenchmarks(Benchmark):
+    CONCURRENCY = 10
     SCALES = [1, 5, 10, 100, 1000]
 
     def __init__(self):
@@ -226,7 +231,7 @@ class LoadBenchmarks(Benchmark):
         return "load benchmarks"
 
     def start(self, **flags):
-        host = testutils.start_host("benchmark_load", DataStructures(), **flags)
+        host = testutils.start_host("benchmark_load", DataStructures(tc.chain.Sync), **flags)
         self.host = Host(host)
 
     def stop(self):
@@ -254,10 +259,66 @@ class LoadBenchmarks(Benchmark):
               + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
+class ReplicationBenchmarks(Benchmark):
+    CONCURRENCY = 1
+    SCALES = [1, 5, 10, 100]
+    NUM_HOSTS = 4
+
+    def __init__(self):
+        self._base_path = tc.uri(DataStructures).path()
+        self.hosts = []
+
+    def __repr__(self):
+        return f"replication benchmarks with {self.NUM_HOSTS} hosts"
+
+    def start(self, **flags):
+        default_port = tc.uri(DataStructures).port()
+        assert default_port
+
+        for i in range(self.NUM_HOSTS):
+            port = default_port + i
+            host_uri = tc.URI(f"http://127.0.0.1:{port}/")
+            host = testutils.start_host(
+                "benchmark_load", DataStructures(tc.chain.Block), overwrite=True, host_uri=host_uri, **flags)
+
+            self.hosts.append(Host(host))
+
+    def stop(self):
+        for host in self.hosts:
+            return host.stop()
+
+    def _link(self, path):
+        return self._base_path + path
+
+    async def blockchain_table_write(self, num_users, concurrency):
+        requests = [
+            self.hosts[0].put(self._link("/table_upsert"), value=random.randint(0, 10000))
+            for _ in range(num_users)]
+
+        responses, elapsed, success = await self.run(requests, concurrency)
+
+        qps = int(num_users / elapsed)
+        print(f"blockchain Table upsert x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+
+        print("stop replica...")
+        self.hosts[1].stop()
+
+        print("modifying chain contents--you'll see a 'bad gateway' error as the cluster discovers the stopped replica")
+        response = await self.hosts[0].put(self._link("/table_upsert"), value=random.randint(0, 10000))
+        assert response.status == 200
+
+        start = time.time()
+        wait_time = 0.5
+        self.hosts[1].start(wait_time=wait_time)
+        elapsed = time.time() - start
+        print(f"replica rejoin time w/ full table reconstruction, including {wait_time}s startup time: {elapsed:.2f}s")
+
+
 async def main(pattern, scales, concurrency, cache_size):
     benchmarks = [
         ConcurrentWriteBenchmarks(),
         LoadBenchmarks(),
+        ReplicationBenchmarks(),
     ]
 
     for benchmark in benchmarks:
@@ -272,7 +333,7 @@ async def main(pattern, scales, concurrency, cache_size):
                     print()
 
                 for num_users in (scales if scales else benchmark.SCALES):
-                    await test(num_users, concurrency)
+                    await test(num_users, (concurrency if concurrency else benchmark.CONCURRENCY))
 
                 print()
 
@@ -284,7 +345,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run benchmarks")
     parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
     parser.add_argument('--cache_size', type=str, default="2G", help="host cache size")
-    parser.add_argument('--concurrency', type=int, default=10, help="batch size for concurrent requests")
+    parser.add_argument('--concurrency', type=int, help="batch size for concurrent requests")
     parser.add_argument(
         '--num_users', type=int, nargs='+', action='append',
         help="number of unique users to simulate (this flag can be repeated)")
