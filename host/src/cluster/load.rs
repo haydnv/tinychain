@@ -124,7 +124,6 @@ pub async fn instantiate(
         actor: Arc::new(Actor::new(actor_id)),
         chains,
         classes,
-        confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
         replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
     };

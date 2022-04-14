@@ -54,7 +54,6 @@ pub struct Cluster {
     actor: Arc<Actor>,
     chains: Map<Chain>,
     classes: Map<InstanceClass>,
-    confirmed: RwLock<TxnId>,
     owned: RwLock<HashMap<TxnId, Owner>>,
     replicas: TxnLock<HashSet<Link>>,
 }
@@ -98,7 +97,6 @@ impl Cluster {
 
     /// Claim ownership of the given [`Txn`].
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
-        self.validate_txn_id(txn.id()).await?;
         debug_assert!(!txn.has_owner(), "tried to claim an owned transaction");
 
         let mut owned = self.owned.write().await;
@@ -114,7 +112,6 @@ impl Cluster {
 
     /// Claim leadership of the given [`Txn`].
     pub async fn lead(&self, txn: Txn) -> TCResult<Txn> {
-        self.validate_txn_id(txn.id()).await?;
         txn.lead(&self.actor, self.link.path().clone()).await
     }
 
@@ -186,18 +183,6 @@ impl Cluster {
         }
 
         Ok(())
-    }
-
-    async fn validate_txn_id(&self, txn_id: &TxnId) -> TCResult<()> {
-        let last_commit = self.confirmed.read().await;
-        if txn_id < &*last_commit {
-            Err(TCError::unsupported(format!(
-                "cluster at {} cannot claim transaction {} because the last commit is at {}",
-                self.link, txn_id, *last_commit
-            )))
-        } else {
-            Ok(())
-        }
     }
 
     async fn replicate(&self, txn: &Txn) -> TCResult<()> {
@@ -374,7 +359,6 @@ impl Instance for Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
-        let mut confirmed = self.confirmed.write().await;
         {
             debug!(
                 "replicas at commit: {}",
@@ -395,10 +379,6 @@ impl Transact for Cluster {
                 "replicas after commit: {}",
                 Value::from_iter(self.replicas.read(*txn_id).await.unwrap().iter().cloned())
             );
-        }
-
-        if txn_id > &*confirmed {
-            *confirmed = *txn_id;
         }
     }
 
