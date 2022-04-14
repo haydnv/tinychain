@@ -25,7 +25,7 @@ class Host(object):
         endpoint = str(tc.uri(self) + path)
 
         async with aiohttp.ClientSession() as session:
-            response = await session.get(endpoint, params={"key": json.dumps(key)})
+            response = await session.get(endpoint, params={"key": json.dumps(tc.to_json(key))})
 
             backoff = BACKOFF
             while response.status in self.RETRYABLE:
@@ -39,7 +39,7 @@ class Host(object):
         endpoint = str(tc.uri(self) + path)
 
         async with aiohttp.ClientSession() as session:
-            response = await session.put(endpoint, params={"key": json.dumps(key)}, json=value)
+            response = await session.put(endpoint, params={"key": json.dumps(tc.to_json(key))}, json=tc.to_json(value))
 
             backoff = BACKOFF
             while response.status in self.RETRYABLE:
@@ -53,7 +53,7 @@ class Host(object):
         endpoint = str(tc.uri(self) + path)
 
         async with aiohttp.ClientSession() as session:
-            response = await session.post(endpoint, json=params)
+            response = await session.post(endpoint, json=tc.to_json(params))
 
             backoff = BACKOFF
             while response.status in self.RETRYABLE:
@@ -73,8 +73,8 @@ class Benchmark(tc.app.App):
         table_schema = tc.table.Schema([("x", tc.I32)], [("y", tc.I32)]).create_index("y", ["y"])
         self.table = tc.chain.Sync(tc.table.Table(table_schema))
 
-        self.tensor1 = tc.chain.Sync(tc.tensor.Dense(((100, 50), tc.F32)))
-        self.tensor2 = tc.chain.Sync(tc.tensor.Dense(((50, 1), tc.F32)))
+        self.tensor1 = tc.chain.Sync(tc.tensor.Dense(([100, 50], tc.F32)))
+        self.tensor2 = tc.chain.Sync(tc.tensor.Dense(([50, 1], tc.F32)))
 
         tc.app.App.__init__(self)
 
@@ -97,6 +97,23 @@ class Benchmark(tc.app.App):
     @tc.get
     def tensor_multiply(self) -> tc.F32:
         return (self.tensor1 * self.tensor2.transpose()).sum()
+
+    @tc.get
+    def train_neural_net(self, cxt) -> tc.F32:
+        cxt.inputs = tc.tensor.Dense.random_uniform([20, 2], 0, 1)
+        cxt.labels = cxt.inputs[:, 0].logical_xor(cxt.inputs[:, 1]).expand_dims().copy()
+
+        def cost(_i, o):
+            return (o - cxt.labels)**2
+
+        layers = [
+            tc.ml.nn.DNNLayer.create(2, 2, tc.ml.sigmoid),
+            tc.ml.nn.DNNLayer.create(2, 1, tc.ml.sigmoid)]
+
+        dnn = tc.ml.nn.Sequential(layers)
+        cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
+        cxt.training = cxt.optimizer.train(1, cxt.inputs)
+        return tc.After(cxt.training, (cxt.optimizer.ml_model.eval(cxt.inputs) == cxt.labels).all())
 
 
 async def _run(requests, concurrency):
@@ -171,6 +188,13 @@ async def tensor_multiply(host, num_users, concurrency):
           + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
+async def train_neural_net(host, num_users, concurrency):
+    requests = [host.get(URI + "/tensor_multiply") for _ in range(num_users)]
+    responses, elapsed, success = await _run(requests, concurrency)
+    qps = int(num_users / elapsed)
+    print(f"train a neural net x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+
+
 async def main(pattern, scales, concurrency, cache_size):
     host = testutils.start_host("benchmark", Benchmark(), cache_size=cache_size)
     host = Host(host)
@@ -185,6 +209,7 @@ async def main(pattern, scales, concurrency, cache_size):
         table_upsert,
         table_read,
         tensor_multiply,
+        train_neural_net,
     ]
 
     for benchmark in benchmarks:
