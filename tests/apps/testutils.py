@@ -68,7 +68,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(name, app_or_library, overwrite=True, host_uri=None, wait_time=1., **flags):
+def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1., **flags):
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
@@ -158,7 +158,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(name, app_or_library, overwrite=True, host_uri=None, cache_size="5K", wait_time=1, **flags):
+def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         raise RuntimeError(f"invalid executable path: {TC_PATH}")
 
