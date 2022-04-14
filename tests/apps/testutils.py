@@ -9,7 +9,8 @@ import tinychain as tc
 
 CONFIG = "config"
 DEFAULT_PORT = 8702
-DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "host")
+DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "bridge")
+DOCKER_PORTS = {'8702/tcp':8702}
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
 
 
@@ -46,7 +47,7 @@ class Docker(tc.host.Local.Process):
         print(f"running new Docker container with image {image.id}")
         self.container = self.client.containers.run(
             image.id, cmd,
-            network_mode=DOCKER_NETWORK_MODE, volumes=[f"{self.config_dir}:/{CONFIG}"], detach=True)
+            network_mode=DOCKER_NETWORK_MODE, volumes=[f"{self.config_dir}:/{CONFIG}"], detach=True, ports=DOCKER_PORTS)
 
         time.sleep(wait_time)
         print(self.container.logs().decode("utf-8"))

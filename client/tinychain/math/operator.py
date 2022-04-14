@@ -83,12 +83,12 @@ class Add(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss.sum()))
+            grads.update(self.subject.invert(loss))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss.sum()))
+            grads.update(self.args.invert(loss))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -175,12 +175,12 @@ class Sub(Dual):
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(-loss.sum()))
+            grads.update(self.subject.invert(-loss))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(-loss.sum()))
+            grads.update(self.args.invert(-loss))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -235,9 +235,9 @@ class Pow(Dual):
             grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss * self.subject.ln() * self.subject**self.args))
+            grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
+            grads.update(form_of(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
 
         return grads
 
