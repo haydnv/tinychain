@@ -1,3 +1,4 @@
+import time
 import tinychain as tc
 import unittest
 
@@ -61,7 +62,10 @@ class DemoTests(unittest.TestCase):
             self.hosts.append(host)
 
     def testCache(self):
+        start = time.time()
         self.hosts[1].post("/app/web/add_movie", {"name": "Up", "year": 2009, "description": "Pixar, balloons"})
+        elapsed = (time.time() - start) * 1000
+        print(f"settled database transaction between two clusters of three hosts each in {elapsed:.2f}ms")
 
         for i in range(len(self.hosts)):
             self.assertTrue(self.hosts[i].get("/app/db/has_movie", "Up"), f"host {i} failed to update")

@@ -115,7 +115,7 @@ class Benchmark(tc.app.App):
 
         @tc.post
         def cond(loss: tc.tensor.Dense):
-            return (abs(loss) > 0.5).any()
+            return (abs(loss) >= 0.5).any()
 
         @tc.closure(cxt.optimizer, cxt.inputs)
         @tc.post
@@ -124,7 +124,7 @@ class Benchmark(tc.app.App):
             return {"step": step + 1, "loss": loss}
 
         cxt.training = tc.While(cond, train, {"step": 1, "loss": cxt.labels - dnn.eval(cxt.inputs)})
-        return tc.After(cxt.training, (cxt.optimizer.ml_model.eval(cxt.inputs) == cxt.labels).all())
+        return tc.After(cxt.training, (abs(cxt.labels - cxt.optimizer.ml_model.eval(cxt.inputs)) < 0.5).all())
 
 
 async def _run(requests, concurrency):

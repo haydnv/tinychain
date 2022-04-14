@@ -1,5 +1,6 @@
 import unittest
 import testutils
+import time
 import tinychain as tc
 
 
@@ -66,7 +67,7 @@ class LibraryTests(unittest.TestCase):
                   .create_edge("order_product", tc.graph.edge.Schema("product.sku", "order.sku"))
                   .create_edge("user_order", tc.graph.edge.Schema("user.user_id", "order.user_id")))
 
-        cls.host = testutils.start_host("test_graph", [TestGraph(schema)])
+        cls.host = testutils.start_local_host("test_graph", [TestGraph(schema)])
 
     def testTraversal(self):
         user1 = {"email": "user12345@example.com", "display_name": "user 12345"}
@@ -86,8 +87,11 @@ class LibraryTests(unittest.TestCase):
         order = {"user_id": 23456, "sku": 1, "quantity": 5}
         _order_id = self.host.post(URI.append("place_order"), order)
 
+        start = time.time()
         recommended = self.host.get(URI.append("recommend"), 12345)
         self.assertEqual(recommended, [[1, "widget 1", 399]])
+        elapsed = (time.time() - start) * 1000
+        print(f"breadth-first graph traversal ran in {elapsed:.2f} ms")
 
     @classmethod
     def tearDownClass(cls) -> None:
