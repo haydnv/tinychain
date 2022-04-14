@@ -112,7 +112,18 @@ class Benchmark(tc.app.App):
 
         dnn = tc.ml.nn.Sequential(layers)
         cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
-        cxt.training = cxt.optimizer.train(1, cxt.inputs)
+
+        @tc.post
+        def cond(loss: tc.tensor.Dense):
+            return (abs(loss) > 0.5).any()
+
+        @tc.closure(cxt.optimizer, cxt.inputs)
+        @tc.post
+        def train(step: tc.U32):
+            loss = cxt.optimizer.train(step, cxt.inputs)
+            return {"step": step + 1, "loss": loss}
+
+        cxt.training = tc.While(cond, train, {"step": 1, "loss": cxt.labels - dnn.eval(cxt.inputs)})
         return tc.After(cxt.training, (cxt.optimizer.ml_model.eval(cxt.inputs) == cxt.labels).all())
 
 
@@ -192,7 +203,7 @@ async def train_neural_net(host, num_users, concurrency):
     requests = [host.get(URI + "/tensor_multiply") for _ in range(num_users)]
     responses, elapsed, success = await _run(requests, concurrency)
     qps = int(num_users / elapsed)
-    print(f"train a neural net x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
 async def main(pattern, scales, concurrency, cache_size):
