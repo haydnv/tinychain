@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import json
 import random
+import testutils
 import time
 import tinychain as tc
 
@@ -12,12 +13,13 @@ DEFAULT_CONCURRENCY = 5
 BACKOFF = 0.01
 
 
-# TODO: merge this with tc.host.Host to allow async requests
+# TODO: move this class into a new async module in tc.host
 class Host(object):
     RETRYABLE = [409, 502, 503]
 
-    def __init__(self, uri):
-        self.__uri__ = uri
+    def __init__(self, host):
+        self.__uri__ = tc.uri(host)
+        self._host = host  # keep a reference here so it doesn't get dropped
 
     async def get(self, path, key=None):
         endpoint = str(tc.uri(self) + path)
@@ -71,6 +73,9 @@ class Benchmark(tc.app.App):
         table_schema = tc.table.Schema([("x", tc.I32)], [("y", tc.I32)]).create_index("y", ["y"])
         self.table = tc.chain.Sync(tc.table.Table(table_schema))
 
+        self.tensor1 = tc.chain.Sync(tc.tensor.Dense(((100, 50), tc.F32)))
+        self.tensor2 = tc.chain.Sync(tc.tensor.Dense(((50, 1), tc.F32)))
+
         tc.app.App.__init__(self)
 
     @tc.put
@@ -88,6 +93,10 @@ class Benchmark(tc.app.App):
     @tc.get
     def table_read(self, key: tc.UInt):
         return self.table[(key,)]
+
+    @tc.get
+    def tensor_multiply(self) -> tc.F32:
+        return (self.tensor1 * self.tensor2.transpose()).sum()
 
 
 async def _run(requests, concurrency):
@@ -111,7 +120,7 @@ async def _run(requests, concurrency):
 
 
 async def btree_insert(host, num_users, concurrency):
-    requests = [host.put("/btree_insert", value=random.randint(0, 100000)) for _ in range(num_users)]
+    requests = [host.put(URI + "/btree_insert", value=random.randint(0, 100000)) for _ in range(num_users)]
     responses, elapsed, success = await _run(requests, concurrency)
     qps = int(num_users / elapsed)
     print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
@@ -123,7 +132,7 @@ async def btree_multi(host, num_users, concurrency):
 
     requests = []
     for _ in range(num_users):
-        requests.append(host.post("/btree_multi", {"start": i, "stop": i + num_keys}))
+        requests.append(host.post(URI + "/btree_multi", {"start": i, "stop": i + num_keys}))
         i += num_keys
 
     responses, elapsed, success = await _run(requests, concurrency)
@@ -136,7 +145,7 @@ async def table_upsert(host, num_users, concurrency):
     keys = list(range(num_users))
     random.shuffle(keys)
 
-    requests = [host.put("/table_upsert", value=i) for i in keys]
+    requests = [host.put(URI + "/table_upsert", value=i) for i in keys]
     responses, elapsed, success = await _run(requests, concurrency)
 
     qps = int(num_users / elapsed)
@@ -147,35 +156,24 @@ async def table_read(host, num_users, concurrency):
     keys = list(range(num_users))
     random.shuffle(keys)
 
-    requests = [host.get("/table_read", i) for i in keys]
+    requests = [host.get(URI + "/table_read", i) for i in keys]
     responses, elapsed, success = await _run(requests, concurrency)
 
     qps = int(num_users / elapsed)
     print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
-async def main(pattern, concurrency):
-    app = Benchmark()
-    app_path = "config/benchmark" + str(tc.uri(app).path())
-    tc.app.write_config(app, app_path, overwrite=True)
-    print(f"wrote config for {app} to {app_path}")
+async def tensor_multiply(host, num_users, concurrency):
+    requests = [host.get(URI + "/tensor_multiply") for _ in range(num_users)]
+    responses, elapsed, success = await _run(requests, concurrency)
+    qps = int(num_users / elapsed)
+    print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
+          + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    host = Host(tc.URI("http://127.0.0.1:8702") + tc.uri(Benchmark))
 
-    try:
-        assert await host.get("/")
-    except Exception as e:
-        print(f"could not contact host at {tc.uri(host)}: {e}")
-        print("is there a TinyChain host running on this port? if not, you can run a command like this to start one:")
-        print(" ".join([
-            "host/target/release/tinychain",
-            "--address=127.0.0.1",
-            f"--cluster={app_path}",
-            "--workspace=/tmp/tc/tmp/8702/benchmark/tmp",
-            "--data_dir=/tmp/tc/tmp/benchmark",
-            "--http_port=8702",
-        ]))
-        exit()
+async def main(pattern, scales, concurrency, cache_size):
+    host = testutils.start_host("benchmark", Benchmark(), cache_size=cache_size)
+    host = Host(host)
 
     print()
     print("running benchmark")
@@ -186,20 +184,27 @@ async def main(pattern, concurrency):
         btree_multi,
         table_upsert,
         table_read,
+        tensor_multiply,
     ]
 
     for benchmark in benchmarks:
         if pattern is None or pattern in benchmark.__name__:
-            for num_users in SCALES:
+            for num_users in scales:
                 await benchmark(host, num_users, concurrency)
 
             print()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('-k', type=str, help='filter benchmarks to run by name')
-    parser.add_argument('--concurrency', type=int, default=10, help='batch size for concurrent requests')
+    parser = argparse.ArgumentParser(description="Run benchmarks")
+    parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
+    parser.add_argument('--cache_size', type=str, default="2G", help="host cache size")
+    parser.add_argument('--concurrency', type=int, default=10, help="batch size for concurrent requests")
+    parser.add_argument(
+        '--num_users', type=int, nargs='+', action='append',
+        help="number of unique users to simulate (this flag can be repeated)")
+
     args = parser.parse_args()
 
-    asyncio.run(main(args.k, args.concurrency))
+    num_users = [n for [n] in args.num_users] if args.num_users else SCALES
+    asyncio.run(main(args.k, num_users, args.concurrency, args.cache_size))
