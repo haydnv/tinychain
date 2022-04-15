@@ -6,7 +6,6 @@ import torch
 from torch.autograd import grad
 from tinychain.util import form_of, hex_id
 
-# LIB_URI = tc.uri(tc.math.linalg.LinearAlgebra)
 TENSOR_URI = str(tc.uri(tc.tensor.Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
 ENDPOINT = '/transact/hypothetical'
@@ -120,6 +119,175 @@ class OperatorTests(unittest.TestCase):
 
         cxt = tc.Context()
         w_tc = self.w1_tc.exp()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testLog(self):
+        w_torch = self.w1_torch.log()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.log()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testSin(self):
+        w_torch = self.w1_torch.sin()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.sin()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testCos(self):
+        w_torch = self.w1_torch.cos()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.cos()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testAsin(self):
+        w_torch = self.w1_torch.asin()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.asin()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testAcos(self):
+        w_torch = self.w1_torch.acos()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.acos()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testSinh(self):
+        w_torch = self.w1_torch.sinh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.sinh()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())    
+
+    def testCosh(self):
+        w_torch = self.w1_torch.cosh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.cosh()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testAsinh(self):
+        w_torch = self.w1_torch.asinh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.asinh()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testAcosh(self):
+        w_torch = (self.w1_torch*10).acosh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = (self.w1_tc*10).acosh()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testTan(self):
+        w_torch = self.w1_torch.tan()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.tan()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testTanh(self):
+        w_torch = self.w1_torch.tanh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.tanh()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testArctan(self):
+        w_torch = self.w1_torch.atan()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.atan()
+        y_tc = self.x_tc*w_tc
+        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+
+        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testArctanh(self):
+        w_torch = self.w1_torch.atanh()
+        y_torch = self.x_torch*w_torch
+        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        w_tc = self.w1_tc.atanh()
         y_tc = self.x_tc*w_tc
         cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))

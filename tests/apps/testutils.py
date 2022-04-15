@@ -10,7 +10,7 @@ import tinychain as tc
 CONFIG = "config"
 DEFAULT_PORT = 8702
 DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "bridge")
-DOCKER_PORTS = {'8702/tcp':8702}
+DOCKER_PORTS = {f"{DEFAULT_PORT}/tcp": DEFAULT_PORT}
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
 
 

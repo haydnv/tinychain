@@ -7,7 +7,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Operator, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import Operator, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh, Log
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -164,6 +164,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def exp(self):
         return Tensor(Exp(self))
+
+    def log(self, base=None):
+        return Tensor(Log(self, base))
 
     def sin(self):
         return Tensor(Sin(self))

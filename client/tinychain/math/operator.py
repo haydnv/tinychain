@@ -220,7 +220,7 @@ class Pow(Dual):
 
     def backward(self, variable):
         if self.args is variable:
-            return (self.subject**self.args) * self.subject.ln()
+            return (self.subject**self.args) * self.subject.log()
 
         return self.args * (self.subject**(self.args - 1))
 
@@ -255,13 +255,35 @@ class Exp(Unary):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grad = self.subject.exp() * loss
+        grads = {}
 
         if isinstance(self.subject, Variable):
-            return self.subject.invert(grad)
+            grads.update(self.subject.invert(self.subject.exp() * loss))
         elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(grad)
+            grads.update(form_of(self.subject).gradients(self.subject.exp() * loss))
 
+        return grads
+
+#TODO: Tensor.log(base!=None)
+class Log(Dual):
+    def forward(self):
+        return Numeric.log(self.subject, self.args)
+
+    def backward(self, _variable):
+        return 1 / self.subject
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = {}
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss / self.subject))
+        elif isinstance(form_of(self.subject), Operator):
+            grads.update(form_of(self.subject).gradients(loss / self.subject))
+        
+        return grads
+            
 
 class Sin(Unary):
     def forward(self):
@@ -270,6 +292,16 @@ class Sin(Unary):
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cos()
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = self.subject.cos() * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Cos(Unary):
@@ -280,6 +312,16 @@ class Cos(Unary):
         subject = derivative_of(self.subject, variable)
         return subject - self.subject.sin()
 
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = -self.subject.sin() * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
 
 class Asin(Unary):
     def forward(self):
@@ -289,14 +331,34 @@ class Asin(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (1 - (subject**2))**-0.5
 
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (1 - self.subject**2)**(-0.5) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
 
 class Acos(Unary):
     def forward(self):
         return Trigonometric.acos(self.subject)
-    
+
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return -((1 - subject**2)**-0.5)
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = -(1 - self.subject**2)**(-0.5) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Sinh(Unary):
@@ -307,14 +369,34 @@ class Sinh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cosh()
 
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = self.subject.cosh() * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
 
 class Cosh(Unary):
     def forward(self):
         return Trigonometric.cosh(self.subject)
-    
+
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.sinh()
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = self.subject.sinh() * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Asinh(Unary):
@@ -325,23 +407,53 @@ class Asinh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (subject**2 + 1)**-0.5
 
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (self.subject**2 + 1)**(-0.5) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
 
 class Acosh(Unary):
     def forward(self):
         return Trigonometric.acosh(self.subject)
-    
+
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return ((subject**2) - 1)**-0.5
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (self.subject**2 - 1)**(-0.5) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Tan(Unary):
     def forward(self):
         return Trigonometric.tan(self.subject)
-    
+
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject.cos()**2)
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = 1 / (self.subject.cos()**2) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Tanh(Unary):
@@ -350,7 +462,17 @@ class Tanh(Unary):
 
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
-        return 1 / subject.cosh()**2
+        return 1 - subject.tanh()**2
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (1 - self.subject.tanh()**2) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 class Atan(Unary):
@@ -361,14 +483,34 @@ class Atan(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject**2 + 1)
 
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (self.subject**2 + 1)**(-1) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
 
 class Atanh(Unary):
     def forward(self):
         return Trigonometric.atanh(self.subject)
-    
+
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (1 - (subject**2))
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (1 - self.subject**2)**(-1) * loss
+
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
 
 
 def derivative_of(state, variable=None):
