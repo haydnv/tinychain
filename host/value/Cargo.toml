@@ -28,6 +28,6 @@ safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 sha2 = "0.10"
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
+tcgeneric = "0.4"
+tc-error = "0.5"
 uuid = "0.8"
