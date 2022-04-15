@@ -261,6 +261,7 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
         NotImplemented => StatusCode::NOT_IMPLEMENTED,
         Timeout => StatusCode::REQUEST_TIMEOUT,
         Unauthorized => StatusCode::UNAUTHORIZED,
+        Unavailable => StatusCode::SERVICE_UNAVAILABLE,
     };
 
     let body = match encoding {

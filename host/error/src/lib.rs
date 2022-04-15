@@ -21,6 +21,7 @@ pub enum ErrorType {
     NotImplemented,
     Timeout,
     Unauthorized,
+    Unavailable,
 }
 
 impl<'en> en::IntoStream<'en> for ErrorType {
@@ -38,6 +39,7 @@ impl<'en> en::IntoStream<'en> for ErrorType {
                 Self::NotImplemented => "not_implemented",
                 Self::Timeout => "timeout",
                 Self::Unauthorized => "unauthorized",
+                Self::Unavailable => "temporarily unavailable",
             }
         )
         .into_stream(encoder)
@@ -52,18 +54,19 @@ impl fmt::Debug for ErrorType {
 
 impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::BadGateway => f.write_str("bad gateway"),
-            Self::BadRequest => f.write_str("bad request"),
-            Self::Conflict => f.write_str("conflict"),
-            Self::Forbidden => f.write_str("forbidden"),
-            Self::Internal => f.write_str("internal error"),
-            Self::MethodNotAllowed => f.write_str("method not allowed"),
-            Self::NotFound => f.write_str("not found"),
-            Self::NotImplemented => f.write_str("not implemented"),
-            Self::Timeout => f.write_str("request timeout"),
-            Self::Unauthorized => f.write_str("unauthorized"),
-        }
+        f.write_str(match self {
+            Self::BadGateway => "bad gateway",
+            Self::BadRequest => "bad request",
+            Self::Conflict => "conflict",
+            Self::Forbidden => "forbidden",
+            Self::Internal => "internal error",
+            Self::MethodNotAllowed => "method not allowed",
+            Self::NotFound => "not found",
+            Self::NotImplemented => "not implemented",
+            Self::Timeout => "request timeout",
+            Self::Unauthorized => "unauthorized",
+            Self::Unavailable => "temporarily unavailable",
+        })
     }
 }
 
@@ -167,6 +170,14 @@ impl TCError {
         Self {
             code: ErrorType::Unauthorized,
             message: format!("invalid credentials: {}", info),
+        }
+    }
+
+    /// Error indicating that this host is currently overloaded
+    pub fn unavailable<I: fmt::Display>(info: I) -> Self {
+        Self {
+            code: ErrorType::Unavailable,
+            message: info.to_string(),
         }
     }
 
