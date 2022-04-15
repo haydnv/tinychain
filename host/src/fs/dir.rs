@@ -284,8 +284,9 @@ impl Eq for Contents {}
 #[derive(Clone)]
 pub struct Dir {
     cache: DirLock<CacheBlock>,
+    // TODO: separate the TxnLock for the list of occupied keys from the FileEntry objects
     contents: TxnLock<Contents>,
-    accesed_at: Arc<Mutex<HashSet<TxnId>>>,
+    accessed: Arc<Mutex<HashSet<TxnId>>>,
 }
 
 impl Dir {
@@ -310,7 +311,7 @@ impl Dir {
         Ok(Self {
             cache,
             contents,
-            accesed_at,
+            accessed: accesed_at,
         })
     }
 
@@ -358,7 +359,7 @@ impl Dir {
             Ok(Self {
                 cache,
                 contents,
-                accesed_at,
+                accessed: accesed_at,
             })
         })
     }
@@ -372,7 +373,7 @@ impl Dir {
     }
 
     async fn mark_accesed_at(&self, txn_id: TxnId) {
-        let mut accesed_at = self.accesed_at.lock().await;
+        let mut accesed_at = self.accessed.lock().await;
         accesed_at.insert(txn_id);
     }
 }
@@ -531,10 +532,10 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        let accesed_at = self.accesed_at.lock().await;
+        let accesed_at = self.accessed.lock().await;
         if !accesed_at.contains(txn_id) {
             debug!("{} was not modified, no need to commit", self);
-            return;
+            return self.contents.commit(txn_id).await;
         }
 
         let contents = self.contents.read(*txn_id).await.expect("dir contents");
@@ -556,10 +557,10 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let mut accesed_at = self.accesed_at.lock().await;
+        let mut accesed_at = self.accessed.lock().await;
         if !accesed_at.contains(txn_id) {
             debug!("{} was not modified, no need to finalize", self);
-            return;
+            return self.contents.finalize(txn_id).await;
         }
 
         {
