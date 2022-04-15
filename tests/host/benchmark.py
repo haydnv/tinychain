@@ -63,6 +63,20 @@ class Host(object):
 
             return response
 
+    async def delete(self, path, key=None):
+        endpoint = str(tc.uri(self) + path)
+
+        async with aiohttp.ClientSession() as session:
+            response = await session.delete(endpoint, params={"key": json.dumps(tc.to_json(key))})
+
+            backoff = BACKOFF
+            while response.status in self.RETRYABLE:
+                await asyncio.sleep(backoff)
+                response = await session.get(endpoint, params={"key": json.dumps(key)})
+                backoff *= 2
+
+            return response
+
     def start(self, **flags):
         return self._host.start(**flags)
 
@@ -187,6 +201,7 @@ class ConcurrentWriteBenchmarks(Benchmark):
         responses, elapsed, success = await self.run(requests, concurrency)
         qps = int(num_users / elapsed)
         print(f"BTree insert key x {num_users} users: {elapsed:.4f} seconds @ {qps}/s, {success:.2f}% success")
+        await self.host.delete(self._link("/btree"))
 
     async def btree_multi(self, num_users, concurrency):
         i = 0
@@ -201,6 +216,7 @@ class ConcurrentWriteBenchmarks(Benchmark):
 
         qps = int((num_keys * num_users) / elapsed)
         print(f"BTree insert {num_keys} keys x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+        await self.host.delete(self._link("/btree"))
 
     async def table_upsert(self, num_users, concurrency):
         keys = list(range(num_users))
@@ -211,6 +227,7 @@ class ConcurrentWriteBenchmarks(Benchmark):
 
         qps = int(num_users / elapsed)
         print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+        await self.host.delete(self._link("/table"))
 
     async def neural_net_train(self, num_users, concurrency):
         requests = [self.host.get(self._link("/neural_net_train")) for _ in range(num_users)]
@@ -311,7 +328,10 @@ class ReplicationBenchmarks(Benchmark):
         wait_time = 0.5
         self.hosts[1].start(wait_time=wait_time)
         elapsed = time.time() - start
+
         print(f"replica rejoin time w/ full table reconstruction, including {wait_time}s startup time: {elapsed:.2f}s")
+
+        await self.hosts[0].delete(self._link("/table"))
 
 
 async def main(pattern, scales, concurrency, cache_size):

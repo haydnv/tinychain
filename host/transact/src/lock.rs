@@ -431,17 +431,14 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
 
             if has_been_read {
                 assert!(txn_id > &state.last_commit);
+                state.last_commit = *txn_id;
             }
 
             *canon = version.clone();
         }
 
         state.pending_writes.remove(txn_id);
-
-        if txn_id > &state.last_commit {
-            state.last_commit = *txn_id;
-            state.wake()
-        }
+        state.wake();
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
