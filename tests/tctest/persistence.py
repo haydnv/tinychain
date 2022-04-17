@@ -1,4 +1,5 @@
 import time
+import tinychain as tc
 
 from process import DEFAULT_PORT, start_host
 

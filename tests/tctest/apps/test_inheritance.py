@@ -83,7 +83,3 @@ class LibraryTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.host.stop()
-
-
-if __name__ == "__main__":
-    unittest.main()
