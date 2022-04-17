@@ -2,7 +2,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from persistence import PersistenceTest
+from templates import PersistenceTest
 from process import DEFAULT_PORT
 
 ENDPOINT = "/transact/hypothetical"

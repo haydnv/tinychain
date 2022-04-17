@@ -1,7 +1,7 @@
 import unittest
 import tinychain as tc
 
-from persistence import PersistenceTest
+from templates import PersistenceTest
 from process import DEFAULT_PORT
 
 

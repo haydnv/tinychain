@@ -4,7 +4,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from persistence import PersistenceTest
+from templates import PersistenceTest
 from process import DEFAULT_PORT
 
 
