@@ -1,8 +1,8 @@
 import unittest
 import tinychain as tc
 
-from templates import PersistenceTest
-from process import DEFAULT_PORT
+from .base import PersistenceTest
+from ..process import DEFAULT_PORT
 
 
 class ChainTests(PersistenceTest, unittest.TestCase):

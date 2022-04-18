@@ -2,7 +2,7 @@ import time
 import tinychain as tc
 import unittest
 
-from process import DEFAULT_PORT, start_host
+from ..process import DEFAULT_PORT, start_host
 
 
 class Database(tc.app.App):

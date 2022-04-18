@@ -1,17 +1,7 @@
-import os
 import time
 import tinychain as tc
-import unittest
 
-from process import DEFAULT_PORT, start_host
-
-TC_HOST = os.getenv("TC_HOST", "http://demo.tinychain.net")
-
-
-class ClientTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = tc.host.Host(TC_HOST)
+from ..process import DEFAULT_PORT, start_host
 
 
 class PersistenceTest(object):

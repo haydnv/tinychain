@@ -2,7 +2,7 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from templates import ClientTest
+from .base import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(

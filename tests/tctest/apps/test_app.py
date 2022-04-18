@@ -1,7 +1,7 @@
 import tinychain as tc
 import unittest
 
-from process import start_host
+from ..process import start_host
 
 URI = tc.URI("/test/app")
 

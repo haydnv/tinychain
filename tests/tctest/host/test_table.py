@@ -3,18 +3,14 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from process import start_host
+from .base import HostTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(
     [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
 
 
-class TableTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_table")
-
+class TableTests(HostTest):
     def testCreate(self):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
@@ -88,16 +84,8 @@ class TableTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
-
-class SparseTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_sparse_table")
-
+class SparseTests(HostTest):
     def testSlice(self):
         schema = tc.table.Schema([
             tc.Column("0", tc.U64),

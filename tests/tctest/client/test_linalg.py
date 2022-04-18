@@ -4,7 +4,7 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from templates import ClientTest
+from .base import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
 TENSOR_URI = str(tc.uri(tc.tensor.Dense))

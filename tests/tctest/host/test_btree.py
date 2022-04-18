@@ -3,17 +3,13 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from process import start_host
+from .base import HostTest
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
 
 
-class BTreeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_btree")
-
+class BTreeTests(HostTest):
     def testCreate(self):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
@@ -96,10 +92,6 @@ class BTreeTests(unittest.TestCase):
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expected(ordered))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
 
 def expected(rows):

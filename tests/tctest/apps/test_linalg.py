@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 import tinychain as tc
 
-from process import start_host
+from ..process import start_host
 
 LIB_URI = tc.uri(tc.math.linalg.LinearAlgebra)
 TENSOR_URI = str(tc.uri(tc.tensor.Dense))

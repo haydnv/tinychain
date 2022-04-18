@@ -5,17 +5,13 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from process import start_host
+from .base import HostTest
 
 
 ENDPOINT = "/transact/hypothetical"
 
 
-class DenseTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_dense_tensor")
-
+class DenseTests(HostTest):
     def testConstant(self):
         c = 1.414
         shape = [3, 2, 1]
@@ -414,16 +410,8 @@ class DenseTests(unittest.TestCase):
         expected = expect_dense(tc.U64, [size], np.argsort(x, None).flatten().tolist())
         self.assertEqual(actual, expected)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
-
-class SparseTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_sparse_tensor")
-
+class SparseTests(HostTest):
     def testCreate(self):
         shape = [2, 5]
         coord = [0, 0]
@@ -645,16 +633,8 @@ class SparseTests(unittest.TestCase):
         self.assertEqual(actual_am, np.argmax(x))
         self.assertEqual(actual_am0, expect_sparse(tc.U64, [3], np.argmax(x, 0)))
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
-
-class TensorTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_tensor", cache_size="1G")
-
+class TensorTests(HostTest):
     def testAdd(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
@@ -739,10 +719,6 @@ class TensorTests(unittest.TestCase):
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.concatenate([x1, x2], axis=1)
         self.assertEqual(actual, expect_dense(tc.I32, [5, 12], expected.flatten().tolist()))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
 
 def all_close(actual, expected):

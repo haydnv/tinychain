@@ -2,8 +2,8 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from templates import PersistenceTest
-from process import DEFAULT_PORT
+from .base import PersistenceTest
+from ..process import DEFAULT_PORT
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))

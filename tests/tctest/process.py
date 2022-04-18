@@ -161,7 +161,8 @@ class Local(tc.host.Local.Process):
 
 def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
-        raise RuntimeError(f"invalid executable path: {TC_PATH}")
+        hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"
+        raise RuntimeError(f"invalid executable path: {TC_PATH} ({hint})")
 
     deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 

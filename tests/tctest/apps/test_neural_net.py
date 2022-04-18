@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 import tinychain as tc
 
-from process import start_host
+from ..process import start_host
 
 URI = tc.URI("/test/ml/app")
 BATCH_SIZE = 20

@@ -1,7 +1,7 @@
 import tinychain as tc
 import unittest
 
-from templates import ClientTest
+from .base import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
 

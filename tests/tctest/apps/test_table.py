@@ -3,8 +3,8 @@ import tinychain as tc
 import unittest
 
 from num2words import num2words
-from templates import PersistenceTest
-from process import DEFAULT_PORT, start_host
+from .base import PersistenceTest
+from ..process import DEFAULT_PORT, start_host
 
 ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(

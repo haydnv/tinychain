@@ -4,8 +4,8 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from templates import PersistenceTest
-from process import DEFAULT_PORT
+from ..process import DEFAULT_PORT
+from .base import PersistenceTest
 
 
 ENDPOINT = "/transact/hypothetical"

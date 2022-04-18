@@ -5,17 +5,12 @@ import numpy as np
 import tinychain as tc
 import unittest
 
-from process import start_host
-
+from .base import HostTest
 
 ENDPOINT = "/transact/hypothetical"
 
 
-class EinsumTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.host = start_host("test_einsum", cache_size="1G")
-
+class EinsumTests(HostTest):
     def testExpandDims(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([2, 3], 0, 6)
@@ -154,10 +149,6 @@ class EinsumTests(unittest.TestCase):
         else:
             self.assertEqual(dense, expected)
             self.assertEqual(sparse, expected)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
 
 
 def expect_dense(ndarray):
