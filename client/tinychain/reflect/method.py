@@ -210,7 +210,12 @@ class Delete(Method):
 
 class Operator(Post):
     def __call__(self, *args, **kwargs):
-        return self.form(self.header, *args, **kwargs)
+        result = self.form(self.header, *args, **kwargs)
+
+        if self.rtype:
+            return self.rtype(result)
+        else:
+            return result
 
 
 def _check_context_param(parameter):
