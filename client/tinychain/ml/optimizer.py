@@ -86,7 +86,7 @@ class Adam(Optimizer, Dynamic):
         for name, var in namespace(ml_model, self._model_name).items():
             shape = form_of(var.shape)
             if not isinstance(shape, (list, tuple)):
-                raise ValueError(f"the shape of a Variable must be defined at compile time (found {shape})")
+                raise ValueError(f"the shape of Variable {name} must be defined at compile time (found {shape})")
 
             self.m[name] = Dense.constant(shape, 0)
             self.v[name] = Dense.constant(shape, 0)
