@@ -133,6 +133,36 @@ class Adam(Optimizer, Dynamic):
         return After(updates, loss)
 
 
+class _Queue(object):
+    def __init__(self, *nodes):
+        self._queue = []
+
+        for node in nodes:
+            self.push(node)
+
+    def __bool__(self):
+        return bool(self._queue)
+
+    def __getitem__(self, key):
+        return self._queue[key]
+
+    def push(self, node):
+        if node is None:
+            return
+
+        if isinstance(node, (list, tuple, Tuple)):
+            for item in node:
+                self.push(item)
+        elif isinstance(node, (dict, Map)):
+            for item in node.values():
+                self.push(item)
+        else:
+            self._queue.append(node)
+
+    def shift(self):
+        return self._queue.pop(0)
+
+
 def validate(model, name, operator, gradients):
     """Check that the :class:`Variables` of `model` are trainable using the given `operator`."""
 
@@ -143,18 +173,19 @@ def validate(model, name, operator, gradients):
 
     missing_vars = set(ns.keys())
     vars = {}
-    visited = []
-    unvisited = [operator.subject, operator.args]
+    visited = _Queue()
+    unvisited = _Queue(operator.subject, operator.args)
     while unvisited:
-        node = unvisited.pop()
+        node = unvisited.shift()
+        logging.debug(f"optimizer traversing Operator graph node {node}")
 
         if isinstance(form_of(node), Operator):
             assert hex_id(node) not in missing_vars
 
             node = form_of(node)
-            unvisited.append(node.subject)
-            unvisited.append(node.args)
-            visited.append(node)
+            unvisited.push(node.subject)
+            unvisited.push(node.args)
+            visited.push(node)
 
         elif isinstance(node, Variable):
             if hex_id(node) in missing_vars:
@@ -173,7 +204,7 @@ def validate(model, name, operator, gradients):
         if visited:
             raise RuntimeError(f"{name} operator graph disconnects Variables {missing} at {visited[-1]}")
         else:
-            raise RuntimeError(f"{name} operator graph {operator} is not connected to its Variables {missing}")
+            raise RuntimeError(f"{name} operator graph {operator} is not connected to any of its Variables {missing}")
 
     missing_grads = set(ns[var_id] for var_id in set(ns.keys()) - set(gradients.keys()))
     if missing_grads:
