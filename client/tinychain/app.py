@@ -233,6 +233,9 @@ class Library(object):
                 self._methods[name] = attr
                 setattr(self, name, attr.method(self, name))
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({uri(self)})"
+
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
         form = {}
@@ -365,6 +368,7 @@ def write_config(lib, config_path, overwrite=False):
 
         if not config_path.parent.exists():
             os.makedirs(config_path.parent)
+            assert config_path.parent.exists()
 
         with open(config_path, 'w') as config_file:
             config_file.write(json.dumps(config, indent=4))

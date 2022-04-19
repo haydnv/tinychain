@@ -45,13 +45,13 @@ sha2 = "0.10"
 structopt = "0.3"
 tbon = "~0.3.5"
 tc-btree = { path = "btree" }
-tc-error = "0.4"
+tc-error = "0.5"
 tc-math = { path = "math", optional = true }
 tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact", features = ["tensor"] }
-tc-value = { path = "value" }
+tc-value = "0.5"
 tc-table = { path = "table" }
-tcgeneric = {path = "generic" }
+tcgeneric = "0.4"
 tokio = { version = "1.17", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
 uuid = "0.8"

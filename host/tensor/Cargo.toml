@@ -24,8 +24,8 @@ pin-project = "1.0"
 safecast = "~0.1.2"
 strided = "~0.2.9"
 tc-btree = { path = "../btree" }
-tc-error = "0.4"
+tc-error = "0.5"
 tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = { path = "../value" }
+tc-value = "0.5"
 tc-table = { path = "../table" }
-tcgeneric = { path = "../generic" }
+tcgeneric = "0.4"

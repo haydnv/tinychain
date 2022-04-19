@@ -2,13 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::future::{join_all, TryFutureExt};
+use futures::join;
 use log::debug;
 use safecast::AsType;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use tc_btree::{BTreeType, Node};
@@ -248,40 +250,12 @@ impl fmt::Display for DirEntry {
     }
 }
 
-#[derive(Clone)]
-struct Contents {
-    inner: HashMap<PathSegment, DirEntry>,
-}
-
-impl Deref for Contents {
-    type Target = HashMap<PathSegment, DirEntry>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Contents {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl PartialEq for Contents {
-    fn eq(&self, other: &Self) -> bool {
-        let this: HashSet<_> = self.inner.keys().collect();
-        let that: HashSet<_> = other.inner.keys().collect();
-        this == that
-    }
-}
-
-impl Eq for Contents {}
-
 /// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: DirLock<CacheBlock>,
-    contents: TxnLock<Contents>,
+    present: TxnLock<HashSet<PathSegment>>,
+    listing: Arc<RwLock<HashMap<PathSegment, DirEntry>>>,
 }
 
 impl Dir {
@@ -294,10 +268,16 @@ impl Dir {
             )));
         }
 
-        let inner = HashMap::new();
+        #[cfg(debug_assertions)]
         let lock_name = format!("contents of {:?}", &*fs_dir);
-        let contents = TxnLock::new(lock_name, Contents { inner });
-        Ok(Self { cache, contents })
+        #[cfg(not(debug_assertions))]
+        let lock_name = "contents of transactional filesystem directory";
+
+        Ok(Self {
+            cache,
+            present: TxnLock::new(lock_name, HashSet::new()),
+            listing: Arc::new(RwLock::new(HashMap::new())),
+        })
     }
 
     pub fn load<'a>(cache: DirLock<CacheBlock>, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
@@ -306,7 +286,7 @@ impl Dir {
 
             debug!("Dir::load {:?}", &*fs_dir);
 
-            let mut inner = HashMap::new();
+            let mut listing = HashMap::new();
             for (name, fs_cache) in fs_dir.iter() {
                 if name.starts_with('.') {
                     debug!("Dir::load skipping hidden filesystem entry {}", name);
@@ -333,12 +313,19 @@ impl Dir {
                     )));
                 };
 
-                inner.insert(name, entry);
+                listing.insert(name, entry);
             }
 
+            #[cfg(debug_assertions)]
             let lock_name = format!("contents of {:?}", &*fs_dir);
-            let contents = TxnLock::new(lock_name, Contents { inner });
-            Ok(Self { cache, contents })
+            #[cfg(not(debug_assertions))]
+            let lock_name = "contents of transactional filesystem directory";
+
+            Ok(Self {
+                cache,
+                present: TxnLock::new(lock_name, listing.keys().cloned().collect()),
+                listing: Arc::new(RwLock::new(listing)),
+            })
         })
     }
 
@@ -354,9 +341,9 @@ impl Dir {
 #[async_trait]
 impl fs::Store for Dir {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        self.contents
+        self.present
             .read(txn_id)
-            .map_ok(|contents| contents.is_empty())
+            .map_ok(|names| names.is_empty())
             .await
     }
 }
@@ -367,41 +354,45 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool> {
-        self.contents
+        self.present
             .read(txn_id)
-            .map_ok(|contents| contents.contains_key(name))
+            .map_ok(|names| names.contains(name))
             .await
     }
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        let mut contents = self.contents.write(txn_id).await?;
-        if contents.contains_key(&name) {
+        let mut present = self.present.write(txn_id).await?;
+        if present.contains(&name) {
             return Err(TCError::bad_request(
                 "filesystem entry already exists",
                 name,
             ));
         }
 
-        let mut cache = self.cache.write().await;
+        let (mut cache, mut listing) = join!(self.cache.write(), self.listing.write());
         let dir_cache = cache.create_dir(name.to_string()).map_err(io_err)?;
         let subdir = Dir::new(dir_cache).await?;
-        contents.insert(name, DirEntry::Dir(subdir.clone()));
+        present.insert(name.clone());
+        listing.insert(name, DirEntry::Dir(subdir.clone()));
         Ok(subdir)
     }
 
     async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Dir> {
-        let mut contents = self.contents.write(txn_id).await?;
-        let name = loop {
+        let mut present = self.present.write(txn_id).await?;
+        let name: PathSegment = loop {
             let name = Uuid::new_v4().into();
-            if !contents.contains_key(&name) {
+            if !present.contains(&name) {
                 break name;
             }
         };
 
-        let mut cache = self.cache.write().await;
+        let (mut cache, mut listing) = join!(self.cache.write(), self.listing.write());
+        assert!(!listing.contains_key(&name));
+
         let dir_cache = cache.create_dir(name.to_string()).map_err(io_err)?;
         let subdir = Dir::new(dir_cache).await?;
-        contents.insert(name, DirEntry::Dir(subdir.clone()));
+        present.insert(name.clone());
+        listing.insert(name, DirEntry::Dir(subdir.clone()));
         Ok(subdir)
     }
 
@@ -413,21 +404,24 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
-        let mut contents = self.contents.write(txn_id).await?;
-        if contents.contains_key(&file_id) {
+        let mut present = self.present.write(txn_id).await?;
+        if present.contains(&file_id) {
             return Err(TCError::bad_request(
                 "filesystem entry already exists",
                 file_id,
             ));
         }
 
-        let mut cache = self.cache.write().await;
+        let (mut cache, mut listing) = join!(self.cache.write(), self.listing.write());
         let name = format!("{}.{}", file_id, B::ext());
         debug!("create file at {}", name);
 
+        assert!(!listing.contains_key(&file_id));
+
         let file_cache = cache.create_dir(name).map_err(io_err)?;
         let file = FileEntry::new(file_cache, class).await?;
-        contents.insert(file_id, DirEntry::File(file.clone()));
+        present.insert(file_id.clone());
+        listing.insert(file_id, DirEntry::File(file.clone()));
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
@@ -440,28 +434,36 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
-        let mut contents = self.contents.write(txn_id).await?;
-        let file_id = loop {
+        let mut present = self.present.write(txn_id).await?;
+        let file_id: PathSegment = loop {
             let name = Uuid::new_v4().into();
-            if !contents.contains_key(&name) {
+            if !present.contains(&name) {
                 break name;
             }
         };
 
-        let mut cache = self.cache.write().await;
+        let (mut cache, mut listing) = join!(self.cache.write(), self.listing.write());
         let name = format!("{}.{}", file_id, B::ext());
         debug!("create file at {}", name);
 
+        assert!(!listing.contains_key(&file_id));
+
         let file_cache = cache.create_dir(name).map_err(io_err)?;
         let file = FileEntry::new(file_cache, class).await?;
-        contents.insert(file_id, DirEntry::File(file.clone()));
+        present.insert(file_id.clone());
+        listing.insert(file_id, DirEntry::File(file.clone()));
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
 
     async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
-        let contents = self.contents.read(txn_id).await?;
-        match contents.get(name) {
+        let present = self.present.read(txn_id).await?;
+        if !present.contains(name) {
+            return Ok(None);
+        }
+
+        let listing = self.listing.read().await;
+        match listing.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
             Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
             None => Ok(None),
@@ -474,8 +476,13 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
-        let contents = self.contents.read(txn_id).await?;
-        match contents.get(file_id) {
+        let present = self.present.read(txn_id).await?;
+        if !present.contains(file_id) {
+            return Ok(None);
+        }
+
+        let listing = self.listing.read().await;
+        match listing.get(file_id) {
             Some(DirEntry::File(file)) => file
                 .clone()
                 .into_type()
@@ -491,11 +498,11 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        let contents = self.contents.read(*txn_id).await.expect("dir contents");
+        self.present.commit(txn_id).await;
 
-        self.contents.commit(txn_id).await;
+        let listing = self.listing.read().await;
 
-        join_all(contents.values().map(|entry| match entry {
+        join_all(listing.values().map(|entry| match entry {
             DirEntry::Dir(dir) => dir.commit(txn_id),
             DirEntry::File(file) => match file {
                 FileEntry::BTree(file) => file.commit(txn_id),
@@ -510,9 +517,11 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        self.present.finalize(txn_id).await;
+
         {
-            let contents = self.contents.read(*txn_id).await.expect("dir contents");
-            join_all(contents.values().map(|entry| match entry {
+            let listing = self.listing.read().await;
+            join_all(listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
                     FileEntry::BTree(file) => file.finalize(txn_id),
@@ -525,8 +534,6 @@ impl Transact for Dir {
             }))
             .await;
         }
-
-        self.contents.finalize(txn_id).await
     }
 }
 

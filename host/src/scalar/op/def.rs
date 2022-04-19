@@ -220,9 +220,11 @@ impl<'a> Handler<'a> for OpDef {
                     let mut data: Vec<(Id, State)> = Vec::with_capacity(op_def.len() + 2);
                     data.push((key_name, State::from(key)));
                     data.push((value_name, value));
-                    data.extend(op_def
-                        .into_iter()
-                        .map(|(id, provider)| (id, State::Scalar(provider))));
+                    data.extend(
+                        op_def
+                            .into_iter()
+                            .map(|(id, provider)| (id, State::Scalar(provider))),
+                    );
 
                     let executor: Executor<State> = Executor::new(txn, None, data);
                     executor.capture(capture).await?;

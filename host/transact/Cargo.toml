@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.12.0"
+version = "0.12.1"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "Traits and locking utilities for a TinyChain transaction."
@@ -28,6 +28,6 @@ rand = "0.8"
 safecast = "~0.1.2"
 sha2 = "0.10"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
-tcgeneric = { path = "../generic" }
-tc-error = "0.4"
-tc-value = { path = "../value" }
+tcgeneric = "0.4"
+tc-error = "0.5"
+tc-value = "0.5"

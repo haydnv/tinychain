@@ -1,11 +1,9 @@
 # test data
 config
-tests/__pycache__
-tests/*/__pycache__
-tests/venv
+**/__pycache__
+**/venv
 
 # IDE metadata
 .idea
 .project
-
 .vscode
