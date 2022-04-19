@@ -146,14 +146,19 @@ class _Queue(object):
     def __getitem__(self, key):
         return self._queue[key]
 
+    def __repr__(self):
+        return str(self._queue)
+
     def push(self, node):
         if node is None:
             return
+        elif isinstance(node, (Map, Tuple)):
+            return self.push(form_of(node))
 
-        if isinstance(node, (list, tuple, Tuple)):
+        if isinstance(node, (list, tuple)):
             for item in node:
                 self.push(item)
-        elif isinstance(node, (dict, Map)):
+        elif isinstance(node, dict):
             for item in node.values():
                 self.push(item)
         else:
