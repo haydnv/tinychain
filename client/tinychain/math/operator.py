@@ -69,6 +69,21 @@ class Dual(Operator):
     """A differentiable operator with two arguments"""
 
 
+class Custom(Unary):
+    """A custom operator"""
+
+    def __init__(self, subject):
+        Unary.__init__(self, subject)
+        self._op = self.forward()
+
+    def __json__(self):
+        return to_json(self._op)
+
+    def __ns__(self, context):
+        Unary.__ns__(self, context)
+        deanonymize(self._op, context)
+
+
 class Add(Dual):
     def forward(self):
         return Numeric.add(self.subject, self.args)
