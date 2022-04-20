@@ -19,11 +19,11 @@ EPS = 10**-6
 LIB_URI = URI("/lib/linalg")
 
 
-def diagonal(matrix):
-    """Return the diagonal of the given `matrix`"""
+def diagonal(tensor):
+    """Return the diagonal of the given `tensor` of matrices"""
 
-    rtype = type(matrix) if isinstance(matrix, Tensor) else Tensor
-    op = Get(MethodSubject(matrix, "diagonal"))
+    rtype = type(tensor) if isinstance(tensor, Tensor) else Tensor
+    op = Get(MethodSubject(tensor, "diagonal"))
     return rtype(op)
 
 
@@ -409,9 +409,9 @@ class LinearAlgebra(Library):
         txn.V = Dense.concatenate(txn.indices.map(getter(2)), axis=0)
 
         return (
-            txn.U.reshape(Tuple.concatenate(txn.batch_shape, txn.U.shape[1:])),
-            txn.s.reshape(Tuple.concatenate(txn.batch_shape, [Number.min(txn.N, txn.M)])),
-            txn.V.reshape(Tuple.concatenate(txn.batch_shape, txn.V.shape[1:]))
+            txn.U.reshape(Tuple.concatenate(txn.batch_shape, txn.U.shape[1:])).copy(),
+            txn.s.reshape(Tuple.concatenate(txn.batch_shape, [Number.min(txn.N, txn.M)])).copy(),
+            txn.V.reshape(Tuple.concatenate(txn.batch_shape, txn.V.shape[1:])).copy(),
         )
 
     @post

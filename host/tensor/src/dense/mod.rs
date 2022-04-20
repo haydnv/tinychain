@@ -577,15 +577,15 @@ where
     type Diagonal = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
 
     async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
-        if self.ndim() != 2 {
-            return Err(TCError::not_implemented(format!(
-                "diagonal of a {}-dimensional dense Tensor",
-                self.ndim()
-            )));
+        if self.ndim() < 2 {
+            return Err(TCError::bad_request(
+                "cannot take the diagonal of a Tensor with shape",
+                self.shape(),
+            ));
         }
 
-        let size = self.shape()[0];
-        if size != self.shape()[1] {
+        let size = self.shape()[self.ndim() - 1];
+        if size != self.shape()[self.ndim() - 2] {
             return Err(TCError::bad_request(
                 "diagonal requires a square matrix but found",
                 self.shape(),
@@ -598,19 +598,53 @@ where
             .create_file_unique(txn_id, TensorType::Dense)
             .await?;
 
+        let ndim = self.ndim();
         let dtype = self.dtype();
-        let blocks = self.blocks;
 
-        // TODO: is is really necessary to allocate a new Vec for every Coord?
-        let coords = futures::stream::iter((0..size).into_iter().map(|i| Ok(vec![i, i])));
-        let values = CoordBlocks::new(coords, 2, PER_BLOCK)
-            .map_ok(|coords| blocks.clone().read_values(txn.clone(), coords))
-            .try_buffered(num_cpus::get());
+        if ndim == 2 {
+            let blocks = self.blocks;
 
-        let shape = vec![size].into();
-        let blocks = BlockListFile::from_blocks(file, txn_id, Some(shape), dtype, values).await?;
+            // TODO: is is really necessary to allocate a new Vec for every Coord?
+            let coords = futures::stream::iter((0..size).into_iter().map(|i| Ok(vec![i, i])));
+            let values = CoordBlocks::new(coords, 2, PER_BLOCK)
+                .map_ok(|coords| blocks.clone().read_values(txn.clone(), coords))
+                .try_buffered(num_cpus::get());
 
-        Ok(blocks.into())
+            let shape = vec![size].into();
+            let blocks =
+                BlockListFile::from_blocks(file, txn_id, Some(shape), dtype, values).await?;
+
+            return Ok(blocks.into());
+        }
+
+        let dest_shape = self.shape()[0..self.ndim() - 1].to_vec().into();
+        let diagonal = BlockListFile::constant(file, *txn.id(), dest_shape, dtype.zero()).await?;
+        let dest = diagonal.clone();
+
+        let source_shape = self.shape().clone();
+        futures::stream::iter((0..size).into_iter().map(move |i| {
+            let mut source_bounds = Bounds::all(&source_shape);
+            source_bounds[ndim - 2] = i.into();
+            source_bounds[ndim - 1] = i.into();
+
+            let dest_bounds = source_bounds[0..ndim - 1].to_vec().into();
+            (source_bounds, dest_bounds)
+        }))
+        .map(move |(source_bounds, dest_bounds)| {
+            let source = self.clone();
+            let dest = dest.clone();
+            let txn = txn.clone();
+
+            async move {
+                let slice = source.slice(source_bounds)?;
+                dest.write(txn, dest_bounds, slice.blocks).await
+            }
+        })
+        .buffer_unordered(num_cpus::get())
+        .try_fold((), |_, _| future::ready(Ok(())))
+        .await?;
+
+        Ok(diagonal.into())
     }
 }
 
