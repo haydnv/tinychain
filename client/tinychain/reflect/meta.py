@@ -44,11 +44,11 @@ class Meta(type):
                         continue
 
                 logging.info(f"{attr} ({name}) overrides a parent method and will be explicitly defined in {cls}")
-            elif inspect.ismethod(attr) and attr.__self__ is cls:
+            elif inspect.ismethod(attr) and inspect.isclass(attr.__self__):
                 # it's a @classmethod
                 continue
 
-            elif isinstance(attr, State):
+            if isinstance(attr, State):
                 while isinstance(attr, State):
                     attr = form_of(attr)
 

@@ -450,7 +450,7 @@ def deanonymize(state, context):
     """Assign an auto-generated name to the given state within the given context."""
 
     if isinstance(state, Context):
-        raise ValueError(f"cannot danonymize an op context itself")
+        raise ValueError(f"cannot deanonymize an Op context itself")
 
     if inspect.isclass(state):
         return

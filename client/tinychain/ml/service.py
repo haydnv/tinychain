@@ -1,7 +1,7 @@
 from ..app import Library
 
 from .constants import LIB_URI
-from .nn import ConvLayer, DNN, DNNLayer, Layer, NeuralNet, Sequential
+from .nn import ConvLayer, DNN, DNNLayer, Layer, Linear, NeuralNet, Sequential
 from .optimizer import Adam, GradientDescent, Optimizer
 
 
@@ -19,4 +19,5 @@ class ML(Library):
     DNNLayer = DNNLayer
     DNN = DNN
     GradientDescent = GradientDescent
+    Linear = Linear
     Sequential = Sequential

@@ -1,6 +1,8 @@
 """:class:`NeuralNet` and :class:`Layer` :class:`Model` definitions with common implementations"""
 
+import functools
 import logging
+import operator
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
@@ -19,6 +21,37 @@ class Layer(Model, Differentiable):
     """A :class:`Layer` in a :class:`NeuralNet`"""
 
     __uri__ = LIB_URI + "/Layer"
+
+
+class Linear(Layer, Dynamic):
+    weights = Variable
+    bias = Variable
+
+    @classmethod
+    def create(cls, shape, activation=None, optimal_std=None):
+        size = functools.reduce(operator.mul, shape)
+        std = optimal_std(size, size) if optimal_std else size**0.5
+        weights = Variable.random_normal([1] + shape, std=std)
+        bias = Variable.random_normal([1] + shape, std=std)
+        return cls(weights, bias, activation)
+
+    def __init__(self, weights, bias, activation):
+        # compile-time constants
+        self._activation = activation
+
+        # run-time state
+        self.weights = weights
+        self.bias = bias
+
+        Dynamic.__init__(self)
+
+    @differentiable
+    def eval(self, inputs: Tensor) -> Tensor:
+        output = (inputs * self.weights) + self.bias
+        if self._activation:
+            return self._activation(output)
+        else:
+            return output
 
 
 class ConvLayer(Layer, Dynamic):
