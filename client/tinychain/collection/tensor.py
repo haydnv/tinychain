@@ -7,12 +7,12 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Operator, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh, Log
+from ..math.operator import derivative_of, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import deanonymize, hex_id, form_of, to_json, uri, URI
+from ..util import form_of, uri
 
 from .base import Collection
 
@@ -151,7 +151,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def copy(self):
         """Return a copy of this `Tensor`"""
 
-        return self.__class__(ref.Post(uri(Tensor) + "/copy_from", {"tensor": self}))
+        return self.__class__(Copy(self))
 
     def div(self, other):
         return Tensor(Div(self, other))
@@ -602,6 +602,20 @@ def where(cond, x, y):
     """
 
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+
+
+class Copy(Unary):
+    def forward(self):
+        return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
+
+    def backward(self):
+        return derivative_of(self.subject)
+
+    def gradients(self, loss):
+        if isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(loss)
+
+        return {}
 
 
 class Transform(Operator):

@@ -449,6 +449,9 @@ def to_json(obj):
 def deanonymize(state, context):
     """Assign an auto-generated name to the given state within the given context."""
 
+    if isinstance(state, Context):
+        raise ValueError(f"cannot deanonymize an Op context itself")
+
     if inspect.isclass(state):
         return
     elif hasattr(state, "__ns__"):

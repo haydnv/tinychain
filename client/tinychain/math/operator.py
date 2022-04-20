@@ -1,6 +1,8 @@
+import logging
+
 from ..error import BadRequest
 from ..scalar import ref
-from ..util import deanonymize, form_of, hex_id, to_json
+from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -10,7 +12,7 @@ class Operator(ref.Op):
 
     def __init__(self, subject, args):
         if not isinstance(subject, Numeric):
-            raise ValueError(f"the subject of a differentiable Operator must implement Numeric (got {subject})")
+            logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
         ref.Op.__init__(self, subject, args)
 
@@ -65,6 +67,21 @@ class Unary(Operator):
 
 class Dual(Operator):
     """A differentiable operator with two arguments"""
+
+
+class Custom(Unary):
+    """A custom operator"""
+
+    def __init__(self, subject):
+        Unary.__init__(self, subject)
+        self._op = self.forward()
+
+    def __json__(self):
+        return to_json(self._op)
+
+    def __ns__(self, context):
+        Unary.__ns__(self, context)
+        deanonymize(self._op, context)
 
 
 class Add(Dual):
