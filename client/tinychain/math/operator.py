@@ -96,16 +96,19 @@ class Add(Dual):
     def gradients(self, loss):
         # TODO: there should be a way to avoid this import (same below)
         from ..ml.optimizer import Variable
+        from ..scalar.number import Number
 
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss.sum()))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.subject.invert(loss if isinstance(loss, Number) else loss.sum()))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss.sum()))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.args.invert(loss if isinstance(loss, Number) else loss.sum()))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 
@@ -188,16 +191,20 @@ class Sub(Dual):
 
     def gradients(self, loss):
         from ..ml.optimizer import Variable
+        from ..scalar.number import Number
 
+        loss = loss if isinstance(loss, Number) else loss.sum()
         grads = {}
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(-loss.sum()))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.subject.invert(-(loss if isinstance(loss, Number) else loss.sum())))
         elif isinstance(form_of(self.subject), Operator):
             grads.update(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(-loss.sum()))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.args.invert(-(loss if isinstance(loss, Number) else loss.sum())))
         elif isinstance(form_of(self.args), Operator):
             grads.update(form_of(self.args).gradients(loss))
 

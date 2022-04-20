@@ -9,6 +9,7 @@ from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import differentiable
 from ..generic import Tuple
 from ..math.operator import Operator
+from ..scalar.number import Number
 from ..scalar.ref import After
 from ..util import deanonymize, form_of, hex_id
 
@@ -112,10 +113,11 @@ class ConvLayer(Layer, Dynamic):
 
                 def gradients(self, loss):
                     # TODO: maintain the shape of the loss tensor during backpropagation
-                    grads = {hex_id(self.subject): self.subject * loss.sum()}
+                    loss = loss if isinstance(loss, Number) else loss.sum()
+                    grads = {hex_id(self.subject): self.subject * loss}
 
                     if isinstance(form_of(self.args), Operator):
-                        grads.update(form_of(self.args).gradients(loss.sum()))
+                        grads.update(form_of(self.args).gradients(loss))
 
                     return grads
 
