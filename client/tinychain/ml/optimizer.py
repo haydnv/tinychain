@@ -47,18 +47,17 @@ class GradientDescent(Optimizer, Dynamic):
 
         loss = self._cost(inputs, outputs)
         d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(d_loss)
-
-        validate(self.ml_model, self._model_name, operator, gradients)
 
         variables = trainable(self.ml_model)
 
         writes = []
-        for var_id, delta in gradients.items():
-            var = variables[var_id]
-            writes.append(var.update(delta * self._lr))
+        for var_id, var in variables.items():
+            delta = d_loss * derivative_of(outputs, var)
+            writes.append((var.shape, delta.shape))
+            # writes.append(var.update(delta.sum(0) * self._lr))
 
-        return After(writes, loss)
+        # return After(writes, loss)
+        return writes
 
 
 class Adam(Optimizer, Dynamic):
@@ -101,36 +100,36 @@ class Adam(Optimizer, Dynamic):
         if not isinstance(operator, Operator):
             raise ValueError(f"Optimizer can only train a differentiable Operator, not {operator}")
 
-        loss = self._cost(inputs, outputs)
-        d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(d_loss)
-
-        vars, var_names = validate(self.ml_model, self._model_name, operator, gradients)
-        vars = {name: vars[var_id] for var_id, name in var_names.items()}
-
-        gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
-
-        update_m = {}
-        for name in self.m:
-            grad = gradients[name]
-            update_m[name] = self.m[name] * self.beta1 * grad * (1. - self.beta1)
-
-        update_v = {}
-        for name in self.v:
-            grad = gradients[name]
-            update_v[name] = self.v[name] * self.beta2 + grad**2 * (1. - self.beta2)
-
-        update_v = {name: self.v[name] * self.beta2 + gradients[name]**2 * (1. - self.beta2) for name in self.v}
-
-        a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
-        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in gradients}
-
-        updates = After([
-            [self.m[name].write(new_value) for name, new_value in update_m.items()],
-            [self.v[name].write(new_value) for name, new_value in update_v.items()],
-        ], [vars[name].update(delta) for name, delta in update_model.items()])
-
-        return After(updates, loss)
+        # loss = self._cost(inputs, outputs)
+        # d_loss = derivative_of(loss).copy()
+        # gradients = operator.gradients(d_loss)
+        #
+        # vars, var_names = validate(self.ml_model, self._model_name, operator, gradients)
+        # vars = {name: vars[var_id] for var_id, name in var_names.items()}
+        #
+        # gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
+        #
+        # update_m = {}
+        # for name in self.m:
+        #     grad = gradients[name]
+        #     update_m[name] = self.m[name] * self.beta1 * grad * (1. - self.beta1)
+        #
+        # update_v = {}
+        # for name in self.v:
+        #     grad = gradients[name]
+        #     update_v[name] = self.v[name] * self.beta2 + grad**2 * (1. - self.beta2)
+        #
+        # update_v = {name: self.v[name] * self.beta2 + gradients[name]**2 * (1. - self.beta2) for name in self.v}
+        #
+        # a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
+        # update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in gradients}
+        #
+        # updates = After([
+        #     [self.m[name].write(new_value) for name, new_value in update_m.items()],
+        #     [self.v[name].write(new_value) for name, new_value in update_v.items()],
+        # ], [vars[name].update(delta) for name, delta in update_model.items()])
+        #
+        # return After(updates, loss)
 
 
 class _Queue(object):

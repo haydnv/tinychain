@@ -362,7 +362,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         if hasattr(self.shape, "__len__"):
             if permutation is None:
-                shape = reversed(self.shape)
+                shape = list(reversed(self.shape))
             elif hasattr(permutation, "__iter__"):
                 shape = [self.shape[x] for x in permutation]
 
@@ -606,66 +606,32 @@ class Copy(Unary):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
     def backward(self):
-        return derivative_of(self.subject)
-
-    def gradients(self, loss):
-        if isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(loss)
-
-        return {}
+        return Copy(derivative_of(self.subject))
 
 
 class Transform(Operator):
     def backward(self, variable):
-        raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
-
-    def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
-
-        return form_of(self.subject).gradients(loss)
+        assert isinstance(self.subject, Tensor)
+        d = derivative_of(self.subject, variable)
+        assert isinstance(d, Tensor)
+        return Tensor(type(self)(d, self.args))
 
 
 class Expand(Transform):
     def forward(self):
         return NDArray.expand_dims(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
-        return Transform.gradients(self, loss)
-
 
 class Flip(Transform):
     def forward(self):
         return NDArray.flip(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.flip(self.args)
-        return Transform.gradients(self, loss)
-
 
 class Transpose(Transform):
-    def __init__(self, subject, permutation=None):
-        Transform.__init__(self, subject, permutation)
-
-        if permutation is None:
-            self.inverse_permutation = None
-        else:
-            self.inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(permutation)))
-
     def forward(self):
         return NDArray.transpose(self.subject, self.args)
-
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.transpose(self.inverse_permutation)
-        return Transform.gradients(self, loss)
 
 
 class Reshape(Transform):
     def forward(self):
         return NDArray.reshape(self.subject, self.args)
-
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
-        return Transform.gradients(self, loss)

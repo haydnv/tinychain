@@ -5,13 +5,12 @@ import logging
 import operator
 
 from ..app import Dynamic, Model
-from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
+from ..collection.tensor import einsum, Dense, Sparse, NDArray, Tensor, Transform
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import Operator
-from ..scalar.number import Number
+from ..math.operator import derivative_of, Operator
 from ..scalar.ref import After
-from ..util import deanonymize, form_of, hex_id
+from ..util import deanonymize, form_of
 
 from .constants import LIB_URI
 from .interface import Differentiable
@@ -106,20 +105,21 @@ class ConvLayer(Layer, Dynamic):
 
     @differentiable
     def eval(self, inputs: Tensor) -> Tensor:
+        batch_size = inputs.shape[0]
+        out_c, h_f, w_f = self._filter_shape
+
+        # TODO: replace usage of padding=0 with Linear and raise a ValueError in this case
         if self._padding == 0:
             class Convolution(Operator):
                 def forward(self):
                     return einsum("abcd,efgh->eacd", [self.subject, self.args])
 
-                def gradients(self, loss):
-                    # TODO: maintain the shape of the loss tensor during backpropagation
-                    loss = loss if isinstance(loss, Number) else loss.sum()
-                    grads = {hex_id(self.subject): self.subject * loss}
+                def backward(self, variable):
+                    if variable is not self.subject:
+                        raise NotImplementedError("derivative of convolution where padding == 0")
 
-                    if isinstance(form_of(self.args), Operator):
-                        grads.update(form_of(self.args).gradients(loss))
-
-                    return grads
+                    output_shape = [batch_size, out_c, h_f, w_f]
+                    return einsum("eacd,efgh->eacd", [Dense.ones(output_shape), self.args])
 
             bias = self.bias.reshape([1, self._filter_shape[0], 1, 1])
             output = Tensor(Convolution(self.weights, inputs)) + bias
@@ -128,13 +128,10 @@ class ConvLayer(Layer, Dynamic):
             else:
                 return output
 
-        batch_size = inputs.shape[0]
-
         padding = self._padding
         stride = self._stride
 
         c_i, h_i, w_i = self._inputs_shape
-        out_c, h_f, w_f = self._filter_shape
 
         h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
         w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
@@ -142,54 +139,29 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        class Convolution(Transform):
-            def __init__(self, weights, inputs):
-                Transform.__init__(self, weights, inputs)
+        pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
+        pad_matrix = Tensor(After(
+            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            pad_matrix))
 
-                pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
-                pad_matrix = Tensor(After(
-                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
-                    pad_matrix))
+        im2col_matrix = []
+        for i in range(h_out):
+            for j in range(w_out):
+                shape = [c_i * h_f * w_f, batch_size]
+                im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
+                im2col_matrix.append(im2col)
 
-                im2col_matrix = []
-                for i in range(h_out):
-                    for j in range(w_out):
-                        shape = [c_i * h_f * w_f, batch_size]
-                        im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
-                        im2col_matrix.append(im2col)
+        assert im2col_matrix
 
-                assert im2col_matrix
+        shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
+        im2col_matrix = Dense.concatenate(im2col_matrix, 0)
+        im2col_matrix = im2col_matrix.reshape(shape).transpose()
+        w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
 
-                shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
-
-                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
-                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
-
-            def __ns__(self, context):
-                deanonymize(self.im2col_matrix, context)
-                deanonymize(self.w_col, context)
-
-            def forward(self):
-                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
-
-            def gradients(self, loss):
-                grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
-
-                if isinstance(form_of(self.args), Operator):
-                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
-                    loss = (self.w_col.transpose() @ loss).reshape(shape)
-
-                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
-                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
-                    grad = Tensor(After(grad_slice.write(loss), grad))
-
-                    grads.update(form_of(self.args).gradients(grad))
-
-                return grads
+        convolution = w_col @ im2col_matrix
 
         shape = [out_c, h_out, w_out, batch_size]
-        in2col_multiply = Tensor(Convolution(self.weights, inputs)) + self.bias
+        in2col_multiply = convolution + self.bias
         output = in2col_multiply.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
 
         if self._activation:

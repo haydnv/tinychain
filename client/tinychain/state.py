@@ -40,7 +40,7 @@ class State(_Base):
     def __json__(self):
         form = form_of(self)
 
-        if is_ref(form):
+        if uri(self) == form or isinstance(form, Ref):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}

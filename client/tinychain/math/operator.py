@@ -46,11 +46,6 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
-    def gradients(self, loss):
-        """Return the gradients of the :class:`Variable` s that this :class:`Operator` depends on"""
-
-        raise NotImplementedError(f"{self.__class__}.gradients")
-
 
 class Unary(Operator):
     def __init__(self, subject):
@@ -93,27 +88,6 @@ class Add(Dual):
         arg = derivative_of(self.args, variable)
         return subject + arg
 
-    def gradients(self, loss):
-        # TODO: there should be a way to avoid this import (same below)
-        from ..ml.optimizer import Variable
-        from ..scalar.number import Number
-
-        grads = {}
-
-        if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.subject.invert(loss if isinstance(loss, Number) else loss.sum()))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
-
-        if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.args.invert(loss if isinstance(loss, Number) else loss.sum()))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
-
-        return grads
-
 
 class MatMul(Dual):
     def forward(self):
@@ -125,31 +99,6 @@ class MatMul(Dual):
         arg = derivative_of(self.args, variable)
         return (subject @ self.args) + (self.subject @ arg)
 
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        def transpose(matrix):
-            return type(matrix)(form=ref.If(
-                matrix.ndim == 2,
-                matrix.transpose(),
-                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
-
-        grads = {}
-
-        grad = loss @ transpose(self.args)
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
-
-        grad = transpose(self.subject) @ loss
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
-
-        return grads
-
 
 class Mul(Dual):
     def forward(self):
@@ -159,25 +108,6 @@ class Mul(Dual):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return (subject * self.args) + (self.subject * arg)
-
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        grads = {}
-
-        grad = self.args * loss
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
-
-        grad = self.subject * loss
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
-
-        return grads
 
 
 class Sub(Dual):
@@ -189,27 +119,6 @@ class Sub(Dual):
         arg = derivative_of(self.args, variable)
         return subject - arg
 
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-        from ..scalar.number import Number
-
-        loss = loss if isinstance(loss, Number) else loss.sum()
-        grads = {}
-
-        if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.subject.invert(-(loss if isinstance(loss, Number) else loss.sum())))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
-
-        if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.args.invert(-(loss if isinstance(loss, Number) else loss.sum())))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
-
-        return grads
-
 
 class Div(Dual):
     def forward(self):
@@ -219,23 +128,6 @@ class Div(Dual):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
-
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        grads = {}
-
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(self.subject * loss / self.args))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss / self.args))
-
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert((-self.subject * loss) / self.args**2))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss / self.args))
-
-        return grads
 
 
 class Pow(Dual):
@@ -248,23 +140,6 @@ class Pow(Dual):
 
         return self.args * (self.subject**(self.args - 1))
 
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        grads = {}
-
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
-
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss * self.subject.ln() * self.subject**self.args))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
-
-        return grads
-
 
 class Exp(Unary):
     def __init__(self, subject):
@@ -275,16 +150,6 @@ class Exp(Unary):
 
     def backward(self, _variable):
         return self.subject.exp()
-
-    def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        grad = self.subject.exp() * loss
-
-        if isinstance(self.subject, Variable):
-            return self.subject.invert(grad)
-        elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(grad)
 
 
 class Sin(Unary):
