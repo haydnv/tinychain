@@ -4,7 +4,6 @@ from ..util import deanonymize, form_of, hex_id, to_json
 
 from .interface import Numeric, Trigonometric
 
-
 class Operator(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
@@ -80,17 +79,17 @@ class Add(Dual):
         # TODO: there should be a way to avoid this import (same below)
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss))
+            grads.add_grads(self.subject.invert(loss))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
+            grads.add_grads(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss))
+            grads.add_grads(self.args.invert(loss))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
+            grads.add_grads(form_of(self.args).gradients(loss))
 
         return grads
 
@@ -114,19 +113,19 @@ class MatMul(Dual):
                 matrix.transpose(),
                 BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
 
-        grads = {}
+        grads = GradientDict({})
 
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
+            grads.add_grads(self.subject.invert(grad))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
+            grads.add_grads(form_of(self.subject).gradients(grad))
 
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
+            grads.add_grads(self.args.invert(grad))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
+            grads.add_grads(form_of(self.args).gradients(grad))
 
         return grads
 
@@ -143,19 +142,19 @@ class Mul(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         grad = self.args * loss
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
+            grads.add_grads(self.subject.invert(grad))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
+            grads.add_grads(form_of(self.subject).gradients(grad))
 
         grad = self.subject * loss
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
+            grads.add_grads(self.args.invert(grad))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
+            grads.add_grads(form_of(self.args).gradients(grad))
 
         return grads
 
@@ -172,17 +171,17 @@ class Sub(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(-loss))
+            grads.add_grads(self.subject.invert(-loss))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
+            grads.add_grads(form_of(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(-loss))
+            grads.add_grads(self.args.invert(-loss))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
+            grads.add_grads(form_of(self.args).gradients(loss))
 
         return grads
 
@@ -199,17 +198,17 @@ class Div(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(self.subject * loss / self.args))
+            grads.add_grads(self.subject.invert(self.subject * loss / self.args))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss / self.args))
+            grads.add_grads(form_of(self.subject).gradients(loss / self.args))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert((-self.subject * loss) / self.args**2))
+            grads.add_grads(self.args.invert((-self.subject * loss) / self.args**2))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss / self.args))
+            grads.add_grads(form_of(self.args).gradients(loss / self.args))
 
         return grads
 
@@ -227,17 +226,17 @@ class Pow(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
+            grads.add_grads(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+            grads.add_grads(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
+            grads.add_grads(self.args.invert(loss * self.subject.log() * self.subject**self.args))
         elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
+            grads.add_grads(form_of(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
 
         return grads
 
@@ -255,12 +254,12 @@ class Exp(Unary):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(self.subject.exp() * loss))
+            grads.add_grads(self.subject.invert(self.subject.exp() * loss))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(self.subject.exp() * loss))
+            grads.add_grads(form_of(self.subject).gradients(self.subject.exp() * loss))
 
         return grads
 
@@ -275,12 +274,12 @@ class Log(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = GradientDict({})
 
         if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss / self.subject))
+            grads.add_grads(self.subject.invert(loss / self.subject))
         elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss / self.subject))
+            grads.add_grads(form_of(self.subject).gradients(loss / self.subject))
         
         return grads
             
@@ -546,3 +545,12 @@ def derivative_of(state, variable=None):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")
+
+
+class GradientDict(dict):
+    def add_grads(self, grads):
+        for k, v in grads.items():
+            if k in self:
+                self[k] += v
+            else:
+                self[k] = v
