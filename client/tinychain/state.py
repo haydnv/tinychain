@@ -30,7 +30,7 @@ class State(_Base):
                 self.__uri__ = uri(form)
 
             # then discard any intermediate type expectations
-            while form_of(form) is not form:
+            while isinstance(form, State):
                 form = form_of(form)
 
             self.__form__ = form
@@ -40,7 +40,7 @@ class State(_Base):
     def __json__(self):
         form = form_of(self)
 
-        if is_ref(form):
+        if uri(form) == uri(self):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}
