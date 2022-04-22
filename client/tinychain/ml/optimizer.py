@@ -8,7 +8,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.operator import derivative_of, Operator
 from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import After, is_op_ref
+from ..scalar.ref import After
 from ..util import form_of, hex_id
 
 from .variable import Variable
@@ -19,7 +19,7 @@ class Optimizer(Model):
     __uri__ = LIB_URI.append("Optimizer")
 
     @post
-    def train(self, inputs):
+    def train(self, i, inputs):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 

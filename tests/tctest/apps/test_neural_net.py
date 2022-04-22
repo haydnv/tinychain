@@ -83,6 +83,12 @@ class NeuralNetTests(unittest.TestCase):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         self.host.post(tc.uri(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
 
+    def testTrainer(self):
+        dnn = tc.ml.nn.DNN.create([[2, 2, tc.ml.sigmoid], [2, 1]])
+        optimizer = tc.ml.optimizer.Adam(dnn, lambda i, o: (o - i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        self.host.post(tc.uri(tc.ml.service.ML).append("train"), {"optimizer": optimizer, "inputs": load_dense(inputs)})
+
     @classmethod
     def tearDownClass(cls) -> None:
         cls.host.stop()
