@@ -4,11 +4,12 @@ import logging
 from .. import error
 from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
-from ..decorators import post
+from ..decorators import closure, post
 from ..generic import Map, Tuple
 from ..math.operator import derivative_of, Operator
 from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import After
+from ..scalar.ref import After, If
+from ..state import Stream
 from ..util import form_of, hex_id
 
 from .variable import Variable
@@ -19,7 +20,7 @@ class Optimizer(Model):
     __uri__ = LIB_URI.append("Optimizer")
 
     @post
-    def train(self, i, inputs):
+    def train(self, i, inputs, parallel=1):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 
@@ -38,27 +39,49 @@ class GradientDescent(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, i: UInt, inputs: Tensor) -> Tensor:
-        outputs = self.ml_model.eval(inputs)
-        operator = form_of(outputs)
+    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
+        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
+        batch_size = inputs.shape[0]
+        txn.chunk_size = UInt(If(
+            (parallel > 0).logical_and(batch_size % parallel == 0),
+            parallel,
+            error.BadRequest(err_parallel, batch_size=batch_size, parallel=parallel)))
 
-        if not isinstance(operator, Operator):
-            raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
+        @closure(self, inputs, txn.chunk_size)
+        @post
+        def sum_deltas(cxt, batch: UInt, deltas: Map) -> Map:
+            cxt.start = batch * txn.chunk_size
+            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
+            outputs = self.ml_model.eval(inputs_batch)
+            operator = form_of(outputs)
+            print(operator)
 
-        loss = self._cost(inputs, outputs)
-        d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(d_loss)
+            if not isinstance(operator, Operator):
+                raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-        validate(self.ml_model, self._model_name, operator, gradients)
+            loss = self._cost(inputs, outputs)
+            cxt.d_loss = derivative_of(loss).copy()
+            gradients = operator.gradients(cxt.d_loss)
 
-        variables = trainable(self.ml_model)
+            validate(self.ml_model, self._model_name, operator, gradients)
+
+            return {"deltas": {
+                var_id: deltas[var_id] + gradients[var_id]
+                for var_id in gradients
+            }}
+
+        vars = trainable(self.ml_model)
+        var_ids = set(vars.keys())
+        deltas = {var_id: 0 for var_id in var_ids}
+        deltas = Stream.range((0, batch_size / txn.chunk_size)).fold("batch", {"deltas": deltas}, sum_deltas)
+        deltas = Map(deltas)["deltas"]
 
         writes = []
-        for var_id, delta in gradients.items():
-            var = variables[var_id]
-            writes.append(var.update(delta * self._lr))
+        for var_id, var in vars.items():
+            delta = Tensor(Map(deltas)[var_id])
+            writes.append(var.update(self._lr * delta))
 
-        return After(writes, loss)
+        return writes
 
 
 class Adam(Optimizer, Dynamic):

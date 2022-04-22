@@ -81,7 +81,6 @@ class Map(State):
     def __init__(self, *args, **kwargs):
         form, spec = Map._parse_args(args, kwargs)
         State.__init__(self, form)
-        assert self.__form__ == form
 
     def __eq__(self, other):
         return self.eq(other)

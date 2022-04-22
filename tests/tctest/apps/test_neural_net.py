@@ -13,18 +13,18 @@ class NeuralNetTester(tc.app.Library):
 
     ml = tc.ml.service.ML()
 
-    @tc.post
-    def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        labels = tc.tensor.Dense.constant([2, 3, 3], 2)
-        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
-        cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
-        return cxt.optimizer.train(1, inputs)
+    # @tc.post
+    # def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
+    #     labels = tc.tensor.Dense.constant([2, 3, 3], 2)
+    #     layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
+    #     cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
+    #     return cxt.optimizer.train(1, inputs, BATCH_SIZE / 2)
 
-    @tc.post
-    def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        layer = self.ml.Linear.create([2])
-        cxt.optimizer = self.ml.GradientDescent(layer, lambda i, o: (o - (i * 2))**2)
-        return cxt.optimizer.train(1, inputs)
+    # @tc.post
+    # def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
+    #     layer = self.ml.Linear.create([5])
+    #     cxt.optimizer = self.ml.GradientDescent(layer, lambda i, o: (o - (i * 2))**2)
+    #     return cxt.optimizer.train(1, inputs, BATCH_SIZE / 2)
 
     @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
@@ -77,10 +77,10 @@ class NeuralNetTests(unittest.TestCase):
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
         self.host.post(tc.uri(NeuralNetTester).append("test_dnn_layer"), {"inputs": load_dense(inputs)})
-        self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
+        # self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
 
     def testLinear(self):
-        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        inputs = np.random.random(5 * BATCH_SIZE).reshape([BATCH_SIZE, 5])
         self.host.post(tc.uri(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
 
     def testTrainer(self):

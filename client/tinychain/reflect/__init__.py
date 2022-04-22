@@ -70,7 +70,7 @@ def parse_args(sig, *args, **kwargs):
             if i < len(args):
                 params[name] = args[i]
                 i += 1
-            elif param.default == inspect.Parameter.empty:
+            elif param.default is inspect.Parameter.empty:
                 raise TypeError(f"missing required positional argument {name}")
             else:
                 params[name] = param.default
@@ -80,7 +80,7 @@ def parse_args(sig, *args, **kwargs):
                 i += 1
             elif name in kwargs:
                 params[name] = kwargs[name]
-            elif param.default == inspect.Parameter.empty:
+            elif param.default is inspect.Parameter.empty:
                 raise TypeError(f"missing required argument {name}")
             else:
                 params[name] = param.default
