@@ -118,19 +118,12 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
                 ));
             }
 
-            let ndim = tensor.ndim();
-
-            if let Some(elided) = elided {
-                if f_input.len() - ELLIPSIS.len() + elided != ndim {
-                    return Err(TCError::unsupported(
-                        "einsum got inconsistent dimensions to elide",
-                    ));
-                } else {
-                    // pass
-                }
+            let num_elided = tensor.ndim() - (f_input.len() - ELLIPSIS.len());
+            if let Some(elided) = &mut elided {
+                *elided = num_elided
             } else {
-                elided = Some(ndim - (f_input.len() - ELLIPSIS.len()));
-            }
+                elided = Some(num_elided)
+            };
 
             present_subscripts.extend(f_input[ELLIPSIS.len()..].chars());
         } else if f_input.contains(DOT) {
@@ -169,13 +162,12 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .pop_front()
         .unwrap()
         .split(',')
-        .map(|f_input| {
+        .zip(inputs)
+        .map(|(f_input, tensor)| {
             if f_input.starts_with(&ELLIPSIS[..]) {
-                format!(
-                    "{}{}",
-                    elided.as_ref().expect("elided subscripts"),
-                    &f_input[ELLIPSIS.len()..]
-                )
+                let elided = elided.as_ref().expect("elided subscripts");
+                let i = elided.len() - (tensor.ndim() - (f_input.len() - ELLIPSIS.len()));
+                format!("{}{}", &elided[i..], &f_input[ELLIPSIS.len()..])
             } else {
                 debug_assert!(!f_input.contains(DOT));
                 f_input.to_string()

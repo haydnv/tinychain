@@ -635,7 +635,8 @@ class Expand(Transform):
         return NDArray.expand_dims(self.subject, self.args)
 
     def gradients(self, loss):
-        return Transform.gradients(self, loss.reshape(self.subject.shape))
+        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
+        return Transform.gradients(self, loss)
 
 
 class Flip(Transform):
@@ -643,7 +644,8 @@ class Flip(Transform):
         return NDArray.flip(self.subject, self.args)
 
     def gradients(self, loss):
-        return Transform.gradients(self, loss.flip(self.args))
+        loss = loss if isinstance(loss, Number) else loss.flip(self.args)
+        return Transform.gradients(self, loss)
 
 
 class Transpose(Transform):
@@ -659,7 +661,8 @@ class Transpose(Transform):
         return NDArray.transpose(self.subject, self.args)
 
     def gradients(self, loss):
-        return Transform.gradients(self, loss.transpose(self.inverse_permutation))
+        loss = loss if isinstance(loss, Number) else loss.transpose(self.inverse_permutation)
+        return Transform.gradients(self, loss)
 
 
 class Reshape(Transform):
@@ -667,4 +670,5 @@ class Reshape(Transform):
         return NDArray.reshape(self.subject, self.args)
 
     def gradients(self, loss):
-        return Transform.gradients(self, loss.reshape(self.subject.shape))
+        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
+        return Transform.gradients(self, loss)

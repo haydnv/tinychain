@@ -132,6 +132,13 @@ impl fmt::Display for Schema {
     }
 }
 
+impl From<(Shape, NumberType)> for Schema {
+    fn from(schema: (Shape, NumberType)) -> Self {
+        let (shape, dtype) = schema;
+        Self { shape, dtype }
+    }
+}
+
 /// The address of an individual element in a [`Tensor`].
 pub type Coord = Vec<u64>;
 
