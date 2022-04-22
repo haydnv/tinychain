@@ -110,56 +110,53 @@ class LinearAlgebra(Library):
 
     # TODO: vectorize to support a `Tensor` containing a batch of matrices
     @post
-    def qr(self, cxt, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
+    def qr(self, txn, a: Tensor) -> typing.Tuple[Tensor, Tensor]:
         """Compute the QR decomposition of the given matrix `a`"""
 
-        cxt.shape = a.shape
-        cxt.n, cxt.m = cxt.shape.unpack(2)
+        txn.shape = a.shape
+        txn.n, txn.m = txn.shape.unpack(2)
 
-        cxt.q_init = Dense.zeros([cxt.n, cxt.n])
-        cxt.u_init = Dense.zeros([cxt.n, cxt.n])
+        txn.q_init = Dense.zeros([txn.n, txn.n])
+        txn.u_init = Dense.zeros([txn.n, txn.n])
 
-        cxt.u = Tensor(After(cxt.u_init[:, 0].write(a[:, 0]), cxt.u_init)).copy()
-        cxt.q = Tensor(
+        txn.u = Tensor(After(txn.u_init[:, 0].write(a[:, 0]), txn.u_init)).copy()
+        txn.q = Tensor(
             After(
-                After(cxt.u, cxt.q_init[:, 0].write(cxt.u_init[:, 0] / norm(cxt.u_init[:, 0]))),
-                cxt.q_init
+                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / norm(txn.u_init[:, 0]))),
+                txn.q_init
             )).copy()
 
-        @closure(a)
-        @post
-        def q_step(cxt, q: Tensor, u: Tensor, i: UInt) -> Map:
-            @closure(a)
-            @post
-            def u_step(q: Tensor, u: Tensor, i: UInt, j: UInt) -> Map:
-                return After(u[:, i].write(u[:, i].copy() - q[:, j].mul(a[:, i].mul(q[:, j]).sum())), Map(q=q, u=u, i=i))
+        @closure(a, txn.q, txn.u)
+        @get_op
+        def q_step(cxt, i: UInt) -> Tensor:
+            @closure(a, i, txn.q, txn.u)
+            @get_op
+            def u_step(j: UInt) -> Map:
+                col = txn.u[:, i].copy() - (txn.q[:, j] * (a[:, i] * txn.q[:, j]).sum())
+                return After(txn.u[:, i].write(col), {})
 
-            state_u_step = Map(q=q, u=Tensor(After(u[:, i].write(a[:, i]), u)), i=i)
-            cxt.update_u = Stream.range(i).fold('j', state_u_step, u_step)
-
-            return After(
+            cxt.update_u = After(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
+            cxt.update_q = After(
                 cxt.update_u,
-                Map(q=Tensor(After(q[:, i].write(u[:, i] / F32(norm(u[:, i]))), q)), u=Tensor(cxt.update_u['u'])))
+                txn.q[:, i].write(txn.u[:, i] / F32(norm(txn.u[:, i]))))
 
-        state_q_step = Map(q=cxt.q, u=cxt.u)
-        cxt.update_q = Stream.range((1, UInt(cxt.n))).fold('i', state_q_step, q_step)
-        cxt._q = Tensor(After(cxt.update_q, cxt.update_q['q']))
-        cxt._r = Tensor(After(cxt._q, Dense.zeros([cxt.n, cxt.m])))
+            return After(cxt.update_q, {})
 
-        @closure(cxt._r, a, cxt._q, cxt.m)
+        txn.update_q = Stream.range((1, UInt(txn.n))).for_each(q_step)
+        txn._q = Tensor(After(txn.update_q, txn.q))
+        txn._r = Dense.zeros([txn.n, txn.m])
+
+        @closure(txn._r, a, txn._q, txn.m)
         @get_op
         def r_step(i: UInt):
-            @closure(cxt._r, a, cxt._q, i, cxt.m)
+            @closure(txn._r, a, txn._q, i, txn.m)
             @get_op
             def r_step_inner(j: UInt):
-                return cxt._r[i, j].write(a[:, j].mul(cxt._q[:, i]).sum())
+                return txn._r[i, j].write((a[:, j] * txn._q[:, i]).sum())
 
-            return Stream.range((i, cxt.m)).for_each(r_step_inner)
+            return Stream.range((i, txn.m)).for_each(r_step_inner)
 
-        update_r = Stream.range(cxt.n).for_each(r_step)
-        qr_factorization = Map(After(update_r, Map(q=cxt._q, r=cxt._r)))
-
-        return qr_factorization['q'], qr_factorization['r']
+        return After(Stream.range(txn.n).for_each(r_step), (txn._q, txn._r))
 
     @post
     def plu(self, txn, x: Tensor) -> PLUFactorization:
