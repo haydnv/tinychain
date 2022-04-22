@@ -1,5 +1,5 @@
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, Mul, Pow, Sub, Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
+from ..math.operator import *
 from ..util import form_of, uri
 
 from .value import Value

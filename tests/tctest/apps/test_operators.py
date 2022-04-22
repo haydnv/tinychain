@@ -12,10 +12,6 @@ ENDPOINT = '/transact/hypothetical'
 
 
 class OperatorTests(unittest.TestCase):
-    # @classmethod
-    # def setUpClass(cls):
-    #     cls.host = testutils.start_host("test_neural_net", tc.math.linalg.LinearAlgebra(), wait_time=2)
-
     def __init__(self, *args, **kwargs):
         super(OperatorTests, self).__init__(*args, **kwargs)
         x = np.random.rand(2, 2)
@@ -294,28 +290,40 @@ class OperatorTests(unittest.TestCase):
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 
-    # TODO: make it works (chain rule)
-    @unittest.skip
     def testMultipleFunctions(self):
         y_torch = self.x_torch@self.w1_torch + self.w1_torch
-        print(f'y_torch: {y_torch}')
-        # y2_torch = y_torch@self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        y2_torch = y_torch@self.w2_torch + self.b2_torch + torch.exp(y_torch)
+        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc@self.w1_tc + self.w1_tc
-        # y_2tc = y_tc@self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
-        r1 = torch.transpose(self.x_torch, 1, 0)@torch.ones((2,2)) + 1
-        print(r1)
+        y_2tc = y_tc@self.w2_tc + self.b2_tc + y_tc.exp()
+        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
-        print(f'w1_tc_grad: {w1_tc_grad}')
-        print(f'w1_torch_grad: {w1_torch_grad}')
         self.assertTrue((abs(w1_tc_grad-[t.detach().numpy() for t in w1_torch_grad]) < 0.0001).all())
+    
+    def testDerivative(self):
+        y_torch = self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
+        dy_dw1_torch = grad(y_torch,
+                            self.w1_torch,
+                            grad_outputs=torch.ones_like(y_torch),
+                            create_graph=True,
+                            retain_graph=True)[0]
+        d2y_dw12_torch = grad(dy_dw1_torch,
+                              self.w1_torch,
+                              grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+        
+        cxt = tc.Context()
+        y_tc = self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp()
+        _dy_dw1_tc = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        _d2y_dw2_tc = form_of(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        result = HOST.post(ENDPOINT, cxt)
+        dy_dw1_tc = load_np(result['the_first_derivative'])
+        d2y_dw2_tc = load_np(result['the_second_derivative'])
 
-    # @classmethod
-    # def tearDownClass(cls) -> None:
-    #     cls.host.stop()
+        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
+        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
 
 
 def load_np(as_json, dtype=float):
