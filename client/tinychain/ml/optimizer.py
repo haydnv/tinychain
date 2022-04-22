@@ -51,10 +51,10 @@ class GradientDescent(Optimizer, Dynamic):
         @post
         def sum_deltas(cxt, batch: UInt, deltas: Map) -> Map:
             cxt.start = batch * txn.chunk_size
-            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
+            inputs_batch = inputs #[cxt.start:(cxt.start + txn.chunk_size)]
             outputs = self.ml_model.eval(inputs_batch)
             operator = form_of(outputs)
-            print(operator)
+            print("operator", operator)
 
             if not isinstance(operator, Operator):
                 raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
@@ -62,6 +62,7 @@ class GradientDescent(Optimizer, Dynamic):
             loss = self._cost(inputs, outputs)
             cxt.d_loss = derivative_of(loss).copy()
             gradients = operator.gradients(cxt.d_loss)
+            print("gradients", gradients)
 
             validate(self.ml_model, self._model_name, operator, gradients)
 

@@ -2,6 +2,7 @@ import logging
 
 from ..error import BadRequest
 from ..scalar import ref
+from ..state import StateRef
 from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
@@ -103,14 +104,14 @@ class Add(Dual):
         if isinstance(self.subject, Variable):
             # TODO: maintain the shape of the loss tensor
             grads.update(self.subject.invert(loss if isinstance(loss, Number) else loss.sum()))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
             # TODO: maintain the shape of the loss tensor
             grads.update(self.args.invert(loss if isinstance(loss, Number) else loss.sum()))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
 
         return grads
 
@@ -139,14 +140,14 @@ class MatMul(Dual):
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
 
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.args).gradients(grad))
 
         return grads
 
@@ -168,14 +169,14 @@ class Mul(Dual):
         grad = self.args * loss
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
 
         grad = self.subject * loss
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(grad))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
 
         return grads
 
@@ -199,14 +200,14 @@ class Sub(Dual):
         if isinstance(self.subject, Variable):
             # TODO: maintain the shape of the loss tensor
             grads.update(self.subject.invert(-(loss if isinstance(loss, Number) else loss.sum())))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
             # TODO: maintain the shape of the loss tensor
             grads.update(self.args.invert(-(loss if isinstance(loss, Number) else loss.sum())))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
 
         return grads
 
@@ -227,13 +228,13 @@ class Div(Dual):
 
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(self.subject * loss / self.args))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss / self.args))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss / self.args))
 
         if isinstance(self.args, Variable):
             grads.update(self.args.invert((-self.subject * loss) / self.args**2))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss / self.args))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss / self.args))
 
         return grads
 
@@ -255,13 +256,13 @@ class Pow(Dual):
 
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.update(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(loss * self.subject.ln() * self.subject**self.args))
-        elif isinstance(form_of(self.args), Operator):
-            grads.update(form_of(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
 
         return grads
 
@@ -283,8 +284,8 @@ class Exp(Unary):
 
         if isinstance(self.subject, Variable):
             return self.subject.invert(grad)
-        elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(grad)
+        elif operator(self.subject):
+            return operator(self.subject).gradients(grad)
 
 
 class Sin(Unary):
@@ -428,3 +429,16 @@ def derivative_of(state, variable=None):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")
+
+
+def operator(state_or_ref):
+    """Return the `Operator` instance which produces the given `state_or_ref`, if any"""
+
+    if isinstance(state_or_ref, Operator):
+        return state_or_ref
+
+    if form_of(state_or_ref) is not state_or_ref:
+        return operator(form_of(state_or_ref))
+
+    if isinstance(state_or_ref, StateRef):
+        return operator(state_or_ref.state)

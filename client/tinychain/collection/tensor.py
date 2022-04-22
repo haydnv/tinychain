@@ -7,7 +7,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import derivative_of, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import derivative_of, operator, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -622,7 +622,7 @@ class Copy(Unary):
         return derivative_of(self.subject)
 
     def gradients(self, loss):
-        if isinstance(form_of(self.subject), Operator):
+        if operator(self.subject):
             return form_of(self.subject).gradients(loss)
 
         return {}
@@ -633,7 +633,7 @@ class Transform(Operator):
         raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
+        if not operator(self.subject):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return {}
 

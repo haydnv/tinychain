@@ -2,16 +2,16 @@
 
 import functools
 import logging
-import operator
+import operator as py_operator
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import Operator
+from ..math.operator import Operator, operator
 from ..scalar.number import Number
 from ..scalar.ref import After
-from ..util import deanonymize, form_of, hex_id
+from ..util import deanonymize, hex_id
 
 from .constants import LIB_URI
 from .interface import Differentiable
@@ -30,7 +30,7 @@ class Linear(Layer, Dynamic):
 
     @classmethod
     def create(cls, shape, activation=None, optimal_std=None):
-        size = functools.reduce(operator.mul, shape)
+        size = functools.reduce(py_operator.mul, shape)
         std = optimal_std(size, size) if optimal_std else size**0.5
         weights = Variable.random_normal([1] + shape, std=std)
         bias = Variable.random_normal([1] + shape, std=std)
@@ -116,8 +116,8 @@ class ConvLayer(Layer, Dynamic):
                     loss = loss if isinstance(loss, Number) else loss.sum()
                     grads = {hex_id(self.subject): self.subject * loss}
 
-                    if isinstance(form_of(self.args), Operator):
-                        grads.update(form_of(self.args).gradients(loss))
+                    if operator(self.args):
+                        grads.update(operator(self.args).gradients(loss))
 
                     return grads
 
@@ -176,7 +176,7 @@ class ConvLayer(Layer, Dynamic):
             def gradients(self, loss):
                 grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
 
-                if isinstance(form_of(self.args), Operator):
+                if operator(self.args):
                     shape = [batch_size, c_i, h_i - padding, w_i - padding]
                     loss = (self.w_col.transpose() @ loss).reshape(shape)
 
@@ -184,7 +184,7 @@ class ConvLayer(Layer, Dynamic):
                     grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
                     grad = Tensor(After(grad_slice.write(loss), grad))
 
-                    grads.update(form_of(self.args).gradients(grad))
+                    grads.update(operator(self.args).gradients(grad))
 
                 return grads
 
