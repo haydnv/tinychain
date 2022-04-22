@@ -18,6 +18,9 @@ from .base import Collection
 
 
 class NDArray(Interface):
+    def slice(self, bounds):
+        return ref.Get(ref.MethodSubject(self), bounds)
+
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
@@ -44,6 +47,13 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     @classmethod
     def expect(cls, shape, dtype):
+        """
+        Define a new subclass of `cls` which captures the given shape and datatype.
+
+        It would be better to implement this function using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
+        but this is not supported on Python <= 3.8.
+        """
+
         spec = (shape, dtype)
 
         if not isinstance(shape, Tuple):
@@ -107,14 +117,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         return cls.expect(tensor.shape, tensor.dtype)((tensor.shape, tensor.dtype))
 
     def __getitem__(self, bounds):
-        parent = self
-        bounds = handle_bounds(bounds)
-
-        class Slice(Tensor):
-            def write(self, value):
-                return parent._put("", bounds, value)
-
-        return self._get("", bounds, Slice)
+        return self.slice(bounds)
 
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")
@@ -188,7 +191,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def acosh(self):
         return Tensor(Acosh(self))
-    
+
     def tan(self):
         return Tensor(Tan(self))
 
@@ -313,6 +316,16 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Return the size of this `Tensor` (the product of its `shape`)."""
 
         return self._get("size", rtype=UInt)
+
+    def slice(self, bounds):
+        parent = self
+        bounds = handle_bounds(bounds)
+
+        class WritableView(Tensor):
+            def write(self, value):
+                return parent._put("", bounds, value)
+
+        return WritableView(Slice(self, bounds))
 
     def split(self, num_or_size_splits, axis=0):
         """
@@ -669,3 +682,16 @@ class Reshape(Transform):
     def gradients(self, loss):
         loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
         return Transform.gradients(self, loss)
+
+
+class Slice(Transform):
+    def forward(self):
+        return NDArray.slice(self.subject, self.args)
+
+    def gradients(self, loss):
+        if isinstance(loss, Number):
+            return Transform.gradients(loss)
+
+        grad = type(self.subject).zeros_like(self.subject)
+        grad = ref.After(grad[self.args].write(grad))
+        return Transform.gradients(loss * grad)
