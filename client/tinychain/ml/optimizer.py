@@ -7,7 +7,7 @@ from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, post
 from ..generic import Map, Tuple
 from ..math.operator import derivative_of, Operator
-from ..scalar.number import F32, F64, UInt
+from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
 from ..state import Stream
 from ..util import form_of, hex_id
@@ -51,35 +51,34 @@ class GradientDescent(Optimizer, Dynamic):
         @post
         def sum_deltas(cxt, batch: UInt, deltas: Map) -> Map:
             cxt.start = batch * txn.chunk_size
-            inputs_batch = inputs #[cxt.start:(cxt.start + txn.chunk_size)]
+            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
             outputs = self.ml_model.eval(inputs_batch)
             operator = form_of(outputs)
-            print("operator", operator)
 
             if not isinstance(operator, Operator):
                 raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
-            loss = self._cost(inputs, outputs)
+            loss = self._cost(inputs_batch, outputs)
             cxt.d_loss = derivative_of(loss).copy()
             gradients = operator.gradients(cxt.d_loss)
-            print("gradients", gradients)
+            assert gradients
 
-            validate(self.ml_model, self._model_name, operator, gradients)
+            deltas = {
+                var_id: deltas[var_id] + (grad if isinstance(grad, Number) else grad.sum(0))
+                for var_id, grad in gradients.items()
+            }
 
-            return {"deltas": {
-                var_id: deltas[var_id] + gradients[var_id]
-                for var_id in gradients
-            }}
+            return {"deltas": deltas}
 
-        vars = trainable(self.ml_model)
-        var_ids = set(vars.keys())
+        trainable_vars = trainable(self.ml_model)
+        var_ids = set(trainable_vars.keys())
         deltas = {var_id: 0 for var_id in var_ids}
         deltas = Stream.range((0, batch_size / txn.chunk_size)).fold("batch", {"deltas": deltas}, sum_deltas)
-        deltas = Map(deltas)["deltas"]
+        deltas = Map(Map(deltas)["deltas"])
 
         writes = []
-        for var_id, var in vars.items():
-            delta = Tensor(Map(deltas)[var_id])
+        for var_id, var in trainable_vars.items():
+            delta = Tensor(deltas[var_id])
             writes.append(var.update(self._lr * delta))
 
         return writes

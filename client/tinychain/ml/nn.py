@@ -32,8 +32,8 @@ class Linear(Layer, Dynamic):
     def create(cls, shape, activation=None, optimal_std=None):
         size = functools.reduce(py_operator.mul, shape)
         std = optimal_std(size, size) if optimal_std else size**0.5
-        weights = Variable.random_normal([1] + shape, std=std)
-        bias = Variable.random_normal([1] + shape, std=std)
+        weights = Variable.random_normal(shape, std=std)
+        bias = Variable.random_normal(shape, std=std)
         return cls(weights, bias, activation)
 
     def __init__(self, weights, bias, activation):
