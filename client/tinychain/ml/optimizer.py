@@ -8,7 +8,7 @@ from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, get, post
 from ..generic import Map, Tuple
 from ..math.interface import Numeric
-from ..math.operator import derivative_of, Operator
+from ..math.operator import derivative_of, Gradients, Operator
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
 from ..scalar.value import Id

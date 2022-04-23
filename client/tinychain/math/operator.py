@@ -1,11 +1,28 @@
 import logging
+import typing
 
 from ..error import BadRequest
 from ..scalar import ref
+from ..scalar.value import Id
 from ..state import StateRef
 from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
+
+
+class Gradients(dict[Id, Numeric]):
+    def update(self, __m: typing.Mapping[Id, Numeric], **kwargs: Numeric) -> None:
+        for var_id in __m:
+            if var_id in self:
+                self[var_id] += __m[var_id]
+            else:
+                self[var_id] = __m[var_id]
+
+        for var_id in kwargs:
+            if var_id in self:
+                self[var_id] += __m[var_id]
+            else:
+                self[var_id] = __m[var_id]
 
 
 class Operator(ref.Op):
@@ -99,7 +116,7 @@ class Add(Dual):
         from ..ml.optimizer import Variable
         from ..scalar.number import Number
 
-        grads = {}
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
             # TODO: maintain the shape of the loss tensor
@@ -135,7 +152,7 @@ class MatMul(Dual):
                 matrix.transpose(),
                 BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
 
-        grads = {}
+        grads = Gradients()
 
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
@@ -164,7 +181,7 @@ class Mul(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = Gradients()
 
         grad = self.args * loss
         if isinstance(self.subject, Variable):
@@ -195,7 +212,7 @@ class Sub(Dual):
         from ..scalar.number import Number
 
         loss = loss if isinstance(loss, Number) else loss.sum()
-        grads = {}
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
             # TODO: maintain the shape of the loss tensor
@@ -224,7 +241,7 @@ class Div(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(self.subject * loss / self.args))
@@ -252,7 +269,7 @@ class Pow(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = {}
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
@@ -286,6 +303,8 @@ class Exp(Unary):
             return self.subject.invert(grad)
         elif operator(self.subject):
             return operator(self.subject).gradients(grad)
+
+        return Gradients()
 
 
 class Sin(Unary):
@@ -380,13 +399,13 @@ class Tanh(Unary):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grad = (1 - self.subject.tanh()**2) * loss
+        grad = self.backward() * loss
         if isinstance(self.subject, Variable):
             return self.subject.invert(grad)
-        elif isinstance(form_of(self.subject), Operator):
-            return form_of(self.subject).gradients(grad)
+        elif operator(self.subject):
+            return operator(self.subject).gradients(grad)
 
-        return {}
+        return Gradients()
 
 
 class Atan(Unary):
