@@ -375,7 +375,18 @@ class Tanh(Unary):
 
     def backward(self, variable):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
-        return 1 / subject.cosh()**2
+        return 1 - subject.tanh()**2
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grad = (1 - self.subject.tanh()**2) * loss
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif isinstance(form_of(self.subject), Operator):
+            return form_of(self.subject).gradients(grad)
+
+        return {}
 
 
 class Atan(Unary):
