@@ -18,25 +18,25 @@ class NeuralNetTester(tc.app.Library):
         labels = tc.tensor.Dense.constant([2, 3, 3], 2)
         layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
         cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
-        return cxt.optimizer.train(1, inputs)
+        return cxt.optimizer.train(1, inputs, BATCH_SIZE / 2)
 
     @tc.post
     def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        layer = self.ml.Linear.create([2])
+        layer = self.ml.Linear.create([5], activation=tc.ml.softmax)
+
         cxt.optimizer = self.ml.GradientDescent(layer, lambda i, o: (o - (i * 2))**2)
-        return cxt.optimizer.train(1, inputs)
+        return cxt.optimizer.train(1, inputs, BATCH_SIZE / 2)
 
     @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        labels = 2
         layers = [
             tc.ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1], activation=tc.ml.sigmoid),
             tc.ml.nn.ConvLayer.create([2, 3, 3], [5, 2, 2], activation=tc.ml.sigmoid),
         ]
 
         cnn = tc.ml.nn.Sequential(layers)
-        cxt.optimizer = tc.ml.optimizer.Adam(cnn, lambda _, o: (o - labels)**2)
-        return cxt.optimizer.train(1, inputs, labels)
+        cxt.optimizer = tc.ml.optimizer.Adam(cnn, lambda _, o: (o - 2)**2)
+        return cxt.optimizer.train(1, inputs, BATCH_SIZE / 10)
 
     @tc.post
     def test_dnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
@@ -80,7 +80,7 @@ class NeuralNetTests(unittest.TestCase):
         self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
 
     def testLinear(self):
-        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        inputs = np.random.random(5 * BATCH_SIZE).reshape([BATCH_SIZE, 5])
         self.host.post(tc.uri(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
 
     def testTrainer(self):

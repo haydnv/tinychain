@@ -174,7 +174,15 @@ class Post(Method):
         kwargs = {}
         for name in list(sig.parameters.keys())[len(args):]:
             param = sig.parameters[name]
-            dtype = resolve_class(self.form, param.annotation, State)
+
+            dtype = State
+            if param.default is inspect.Parameter.empty:
+                if param.annotation:
+                    dtype = param.annotation
+            elif isinstance(param.default, State):
+                dtype = type(param.default)
+
+            dtype = resolve_class(self.form, dtype, State)
             kwargs[name] = dtype(form=URI(name))
 
         cxt._return = self.form(*args, **kwargs)
