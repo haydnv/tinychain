@@ -1,5 +1,6 @@
 import inspect
 import logging
+import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
@@ -10,6 +11,7 @@ from ..math.interface import Numeric
 from ..math.operator import derivative_of, Operator
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
+from ..scalar.value import Id
 from ..state import State, Stream
 from ..util import form_of, hex_id
 
@@ -30,22 +32,9 @@ class Optimizer(Model):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 
-class GradientDescent(Optimizer, Dynamic):
-    """A simple gradient descent optimizer with a configurable learning rate."""
-
-    def __init__(self, ml_model, cost, learning_rate=0.001):
-        # compile-time constants
-        self._cost = cost
-        self._lr = learning_rate
-        self._model_name = ml_model.__class__.__name__
-
-        # run-time state
-        self.ml_model = ml_model
-
-        Dynamic.__init__(self)
-
+class Parallel(Optimizer, Dynamic):
     @post
-    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
+    def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> typing.Dict[Id, _Gradient]:
         err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
         batch_size = inputs.shape[0]
         txn.chunk_size = UInt(If(
@@ -80,17 +69,36 @@ class GradientDescent(Optimizer, Dynamic):
         var_ids = set(trainable_vars.keys())
         gradients = {var_id: 0 for var_id in var_ids}
         gradients = Stream.range((0, batch_size / txn.chunk_size)).fold("batch", {"grads": gradients}, sum_grads)
-        gradients = Map(Map(gradients)["grads"])  # TODO: this type information shouldn't get lost
+        return Map(gradients)["grads"]  # TODO: this type information shouldn't get lost
+
+
+class GradientDescent(Parallel):
+    """A simple gradient descent optimizer with a configurable learning rate."""
+
+    def __init__(self, ml_model, cost, learning_rate=0.001):
+        # compile-time constants
+        self._cost = cost
+        self._lr = learning_rate
+        self._model_name = ml_model.__class__.__name__
+
+        # run-time state
+        self.ml_model = ml_model
+
+        Dynamic.__init__(self)
+
+    @post
+    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
+        gradients = self.gradients(inputs, parallel)
 
         writes = []
-        for var_id, var in trainable_vars.items():
-            delta = _Gradient(gradients[var_id])
+        for var_id, var in trainable(self.ml_model).items():
+            delta = gradients[var_id]
             writes.append(var.update(self._lr * delta))
 
         return writes
 
 
-class Adam(Optimizer, Dynamic):
+class Adam(Parallel):
     """
     Adam optimizer, an adaptive learning rate optimization algorithm designed to handle sparse gradients and noisy data.
 
@@ -124,45 +132,12 @@ class Adam(Optimizer, Dynamic):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
-        batch_size = inputs.shape[0]
-        txn.chunk_size = UInt(If(
-            (parallel > 0).logical_and(batch_size % parallel == 0),
-            parallel,
-            error.BadRequest(err_parallel, batch_size=batch_size, parallel=parallel)))
-
-        @closure(self, inputs, txn.chunk_size)
-        @post
-        def sum_grads(cxt, batch: UInt, grads: Map) -> Map:
-            cxt.start = batch * txn.chunk_size
-            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
-            outputs = self.ml_model.eval(inputs_batch)
-            operator = form_of(outputs)
-
-            if not isinstance(operator, Operator):
-                raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
-
-            loss = self._cost(inputs_batch, outputs)
-            cxt.d_loss = derivative_of(loss).copy()
-            gradients = operator.gradients(cxt.d_loss)
-            assert gradients
-
-            grads = {
-                var_id: grads[var_id] + (grad if isinstance(grad, Number) else grad.sum(0))
-                for var_id, grad in gradients.items()
-            }
-
-            return {"grads": grads}
-
         trainable_vars = trainable(self.ml_model)
-        var_ids = set(trainable_vars.keys())
-        gradients = {var_id: 0 for var_id in var_ids}
-        gradients = Stream.range((0, batch_size / txn.chunk_size)).fold("batch", {"grads": gradients}, sum_grads)
-        gradients = Map(Map(gradients)["grads"])  # TODO: this type information shouldn't get lost
+        gradients = self.gradients(inputs, parallel)
 
         var_names = namespace(self.ml_model, self._model_name)
         var_names = {hex_id(var): name for name, var in var_names.items()}
-        gradients = {var_names[var_id]: _Gradient(gradients[var_id]) for var_id in var_names.keys()}
+        gradients = {var_names[var_id]: gradients[var_id] for var_id in var_names.keys()}
 
         vars_by_name = {var_names[var_id]: trainable_vars[var_id] for var_id in var_names.keys()}
 
