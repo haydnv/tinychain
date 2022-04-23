@@ -203,7 +203,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cac
 
 
 # use this alias to switch between Local and Docker host types
-start_host = start_local_host
+start_host = start_docker
 
 
 def _maybe_create_dir(path, force):
