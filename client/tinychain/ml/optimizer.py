@@ -5,7 +5,7 @@ import typing
 from .. import error
 from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
-from ..decorators import closure, post
+from ..decorators import closure, get, post
 from ..generic import Map, Tuple
 from ..math.interface import Numeric
 from ..math.operator import derivative_of, Operator
@@ -24,6 +24,9 @@ class _Gradient(State, Numeric):
     pass
 
 
+_Gradients = typing.Dict[Id, _Gradient]
+
+
 class Optimizer(Model):
     __uri__ = LIB_URI.append("Optimizer")
 
@@ -34,17 +37,19 @@ class Optimizer(Model):
 
 class Parallel(Optimizer, Dynamic):
     @post
-    def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> typing.Dict[Id, _Gradient]:
+    def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> _Gradients:
         err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
         batch_size = inputs.shape[0]
         txn.chunk_size = UInt(If(
             (parallel > 0).logical_and(batch_size % parallel == 0),
-            parallel,
+            batch_size / parallel,
             error.BadRequest(err_parallel, batch_size=batch_size, parallel=parallel)))
 
+        trainable_vars = trainable(self.ml_model)
+
         @closure(self, inputs, txn.chunk_size)
-        @post
-        def sum_grads(cxt, batch: UInt, grads: Map) -> Map:
+        @get
+        def calc_grads(cxt, batch: UInt) -> Map:
             cxt.start = batch * txn.chunk_size
             inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
             outputs = self.ml_model.eval(inputs_batch)
@@ -58,18 +63,22 @@ class Parallel(Optimizer, Dynamic):
             gradients = operator.gradients(cxt.d_loss)
             assert gradients
 
-            grads = {
-                var_id: grads[var_id] + (grad if isinstance(grad, Number) else grad.sum(0))
+            return {
+                var_id: (grad if isinstance(grad, Number) else grad.sum(0))
                 for var_id, grad in gradients.items()
             }
 
-            return {"grads": grads}
+        @post
+        def sum_grads(grads: _Gradients, sum: _Gradients) -> _Gradients:
+            return {"sum": {
+                var_id: grads[var_id] + sum[var_id]
+                for var_id in trainable_vars.keys()
+            }}
 
-        trainable_vars = trainable(self.ml_model)
         var_ids = set(trainable_vars.keys())
         gradients = {var_id: 0 for var_id in var_ids}
-        gradients = Stream.range((0, batch_size / txn.chunk_size)).fold("batch", {"grads": gradients}, sum_grads)
-        return Map(gradients)["grads"]  # TODO: this type information shouldn't get lost
+        gradients = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": gradients}, sum_grads)
+        return Map(gradients)["sum"]  # TODO: this type information shouldn't get lost
 
 
 class GradientDescent(Parallel):
@@ -132,9 +141,9 @@ class Adam(Parallel):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        trainable_vars = trainable(self.ml_model)
         gradients = self.gradients(inputs, parallel)
 
+        trainable_vars = trainable(self.ml_model)
         var_names = namespace(self.ml_model, self._model_name)
         var_names = {hex_id(var): name for name, var in var_names.items()}
         gradients = {var_names[var_id]: gradients[var_id] for var_id in var_names.keys()}
