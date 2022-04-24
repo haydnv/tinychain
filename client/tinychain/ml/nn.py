@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import math
 import operator as py_operator
 
 from ..app import Dynamic, Model
@@ -54,6 +55,7 @@ class Linear(Layer, Dynamic):
         else:
             return output
 
+
 class _Convolution(Dual):
     def __init__(self, _weights, _inputs):
         raise NotImplementedError("use ConvolutionWithPadding or ConvolutionZeroPadded")
@@ -75,6 +77,7 @@ class _Convolution(Dual):
 class ConvLayer(Layer, Dynamic):
     @classmethod
     def create(cls, inputs_shape, filter_shape, stride=1, padding=1, activation=None, optimal_std=None):
+        print(inputs_shape, filter_shape)
         """
         Create a new, empty :class:`ConvLayer` with the given shape and activation function.
 
@@ -131,16 +134,32 @@ class ConvLayer(Layer, Dynamic):
         c_i, h_i, w_i = self._inputs_shape
         out_c, h_f, w_f = self._filter_shape
 
-        h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
-        w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
-
         if self._padding == 0:
+            h_out = h_f
+            w_out = w_f
+
+            # shape is [out_c, c_i * h_i * w_i]
             class Convolution(_Convolution):
                 def __init__(self, weights, inputs):
                     Dual.__init__(self, weights, inputs)
 
+                    pad_matrix = Dense.zeros([batch_size, c_i, h_i, w_i])
+                    pad_matrix = Tensor(After(
+                        pad_matrix[:, :, 0:h_i, 0:w_i].write(self.args),
+                        pad_matrix))
+
+                    im2col_matrix = []
+                    for i in range(h_out):
+                        for j in range(w_out):
+                            shape = [c_i * h_f * w_f, batch_size]
+                            im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
+                            im2col_matrix.append(im2col)
+
+                    assert im2col_matrix
+
+                    im2col_matrix = Dense.concatenate(im2col_matrix, 0)
                     shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                    self.im2col_matrix = self.args.reshape(shape).transpose()
+                    self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
                     self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
 
                 def gradients(self, loss):
@@ -153,6 +172,9 @@ class ConvLayer(Layer, Dynamic):
 
                     return grads
         else:
+            h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
+            w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
+
             assert h_out
             assert w_out
 
@@ -174,9 +196,8 @@ class ConvLayer(Layer, Dynamic):
 
                     assert im2col_matrix
 
-                    shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
                     im2col_matrix = Dense.concatenate(im2col_matrix, 0)
-
+                    shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
                     self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
                     self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
 
