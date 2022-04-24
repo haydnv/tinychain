@@ -55,7 +55,7 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.forward")
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         """
         Return the derivative of this :class:`Operator` (may be a numeric constant or itself an :class:`Operator`).
 
@@ -106,7 +106,7 @@ class Add(Dual):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return subject + arg
@@ -138,7 +138,7 @@ class MatMul(Dual):
         from ..collection.tensor import einsum
         return einsum("...ij,...jk->ik", [self.subject, self.args])
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return (subject @ self.args) + (self.subject @ arg)
@@ -173,7 +173,7 @@ class Mul(Dual):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return (subject * self.args) + (self.subject * arg)
@@ -202,7 +202,7 @@ class Sub(Dual):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return subject - arg
@@ -233,7 +233,7 @@ class Div(Dual):
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
@@ -260,7 +260,7 @@ class Pow(Dual):
     def forward(self):
         return Numeric.pow(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         if self.args is variable:
             return (self.subject**self.args) * self.subject.ln()
 
@@ -311,7 +311,7 @@ class Sin(Unary):
     def forward(self):
         return Trigonometric.sin(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cos()
 
@@ -320,7 +320,7 @@ class Cos(Unary):
     def forward(self):
         return Trigonometric.cos(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         return subject - self.subject.sin()
 
@@ -329,7 +329,7 @@ class Asin(Unary):
     def forward(self):
         return Trigonometric.asin(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (1 - (subject**2))**-0.5
 
@@ -338,7 +338,7 @@ class Acos(Unary):
     def forward(self):
         return Trigonometric.acos(self.subject)
     
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return -((1 - subject**2)**-0.5)
 
@@ -347,7 +347,7 @@ class Sinh(Unary):
     def forward(self):
         return Trigonometric.sinh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cosh()
 
@@ -356,7 +356,7 @@ class Cosh(Unary):
     def forward(self):
         return Trigonometric.cosh(self.subject)
     
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.sinh()
 
@@ -365,7 +365,7 @@ class Asinh(Unary):
     def forward(self):
         return Trigonometric.asinh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (subject**2 + 1)**-0.5
 
@@ -374,7 +374,7 @@ class Acosh(Unary):
     def forward(self):
         return Trigonometric.acosh(self.subject)
     
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return ((subject**2) - 1)**-0.5
 
@@ -383,7 +383,7 @@ class Tan(Unary):
     def forward(self):
         return Trigonometric.tan(self.subject)
     
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject.cos()**2)
 
@@ -392,7 +392,7 @@ class Tanh(Unary):
     def forward(self):
         return Trigonometric.tanh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 - subject.tanh()**2
 
@@ -412,7 +412,7 @@ class Atan(Unary):
     def forward(self):
         return Trigonometric.atan(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject**2 + 1)
 
@@ -421,7 +421,7 @@ class Atanh(Unary):
     def forward(self):
         return Trigonometric.atanh(self.subject)
     
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (1 - (subject**2))
 

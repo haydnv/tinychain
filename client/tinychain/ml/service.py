@@ -2,7 +2,7 @@ from ..app import Library
 from ..decorators import post
 
 from .constants import LIB_URI
-from .nn import ConvLayer, DNN, DNNLayer, Layer, Linear, NeuralNet, Sequential
+from .nn import ConvLayer, DNN, Layer, Linear, NeuralNet, Sequential
 from .optimizer import Adam, GradientDescent, Optimizer
 
 
@@ -17,7 +17,6 @@ class ML(Library):
     # dynamic models (implementations)
     Adam = Adam
     ConvLayer = ConvLayer
-    DNNLayer = DNNLayer
     DNN = DNN
     GradientDescent = GradientDescent
     Linear = Linear

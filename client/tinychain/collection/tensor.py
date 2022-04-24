@@ -630,9 +630,6 @@ class Copy(Unary):
     def forward(self):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
-    def backward(self):
-        return derivative_of(self.subject)
-
     def gradients(self, loss):
         if operator(self.subject):
             return form_of(self.subject).gradients(loss)
@@ -641,7 +638,7 @@ class Copy(Unary):
 
 
 class Transform(Operator):
-    def backward(self, variable):
+    def backward(self, variable=None):
         rtype = type(self.subject) if isinstance(self.subject, Tensor) else Tensor
         d = type(self)(derivative_of(self.subject, variable), self.args)
         return rtype(form=d)

@@ -16,7 +16,7 @@ class ReLU(Unary):
     def forward(self):
         return where(self.subject > 0, self.subject, 0.)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         d = derivative_of(self.subject, variable)
         return where(d > 0, d, 0.)
 
