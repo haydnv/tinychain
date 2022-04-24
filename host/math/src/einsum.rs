@@ -120,7 +120,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
 
             let num_elided = tensor.ndim() - (f_input.len() - ELLIPSIS.len());
             if let Some(elided) = &mut elided {
-                *elided = num_elided
+                *elided = Ord::max(*elided, num_elided);
             } else {
                 elided = Some(num_elided)
             };
@@ -166,7 +166,9 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .map(|(f_input, tensor)| {
             if f_input.starts_with(&ELLIPSIS[..]) {
                 let elided = elided.as_ref().expect("elided subscripts");
-                let i = elided.len() - (tensor.ndim() - (f_input.len() - ELLIPSIS.len()));
+                let num_elided = tensor.ndim() - (f_input.len() - ELLIPSIS.len());
+                assert!(elided.len() >= num_elided);
+                let i = elided.len() - num_elided;
                 format!("{}{}", &elided[i..], &f_input[ELLIPSIS.len()..])
             } else {
                 debug_assert!(!f_input.contains(DOT));
