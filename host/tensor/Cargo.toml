@@ -12,10 +12,10 @@ keywords = ["tinychain", "tensor", "gpu", "ml", "parallel"]
 categories = ["concurrency", "data-structures", "hardware-support", "mathematics"]
 
 [dependencies]
-afarray = { path = "../../../afarray" }
+afarray = "0.14"
 arrayfire = "3.8"
 async-trait = "0.1"
-collate = { version = "0.2", features=["complex"] }
+collate = { version = "~0.2.3", features=["complex"] }
 destream = "0.5"
 futures = "0.3"
 itertools  = "0.10"
