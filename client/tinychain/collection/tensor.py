@@ -642,7 +642,9 @@ class Copy(Unary):
 
 class Transform(Operator):
     def backward(self, variable):
-        raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
+        rtype = type(self.subject) if isinstance(self.subject, Tensor) else Tensor
+        d = type(self)(derivative_of(self.subject, variable), self.args)
+        return rtype(form=d)
 
     def gradients(self, loss):
         if not operator(self.subject):

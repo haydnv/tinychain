@@ -11,18 +11,18 @@ from .interface import Numeric, Trigonometric
 
 
 class Gradients(dict[Id, Numeric]):
+    def __setitem__(self, key: Id, value: Numeric):
+        if key in self:
+            dict.__setitem__(self, key, self[key] + value)
+        else:
+            dict.__setitem__(self, key, value)
+
     def update(self, __m: typing.Mapping[Id, Numeric], **kwargs: Numeric) -> None:
         for var_id in __m:
-            if var_id in self:
-                self[var_id] += __m[var_id]
-            else:
-                self[var_id] = __m[var_id]
+            self[var_id] = __m[var_id]
 
         for var_id in kwargs:
-            if var_id in self:
-                self[var_id] += __m[var_id]
-            else:
-                self[var_id] = __m[var_id]
+            self[var_id] = __m[var_id]
 
 
 class Operator(ref.Op):

@@ -5,10 +5,10 @@ import logging
 import operator as py_operator
 
 from ..app import Dynamic, Model
-from ..collection.tensor import einsum, Dense, NDArray, Tensor, Transform
+from ..collection.tensor import einsum, Dense, NDArray, Tensor
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import Gradients, Operator, operator
+from ..math.operator import derivative_of, operator, Dual, Gradients
 from ..scalar.number import Number
 from ..scalar.ref import After
 from ..util import deanonymize, hex_id
@@ -53,6 +53,23 @@ class Linear(Layer, Dynamic):
             return self._activation(output)
         else:
             return output
+
+class _Convolution(Dual):
+    def __init__(self, _weights, _inputs):
+        raise NotImplementedError("use ConvolutionWithPadding or ConvolutionZeroPadded")
+
+    def __ns__(self, context):
+        Dual.__ns__(self, context)
+        deanonymize(self.im2col_matrix, context)
+        deanonymize(self.w_col, context)
+
+    def forward(self):
+        return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
+
+    def backward(self, variable):
+        w_col = derivative_of(self.w_col, variable)
+        im2col_matrix = derivative_of(self.im2col_matrix, variable)
+        return (w_col @ self.im2col_matrix) + (self.w_col @ im2col_matrix)
 
 
 class ConvLayer(Layer, Dynamic):
@@ -106,28 +123,6 @@ class ConvLayer(Layer, Dynamic):
 
     @differentiable
     def eval(self, inputs: Tensor) -> Tensor:
-        if self._padding == 0:
-            class Convolution(Operator):
-                def forward(self):
-                    return einsum("abcd,efgh->eacd", [self.subject, self.args])
-
-                def gradients(self, loss):
-                    # TODO: maintain the shape of the loss tensor during backpropagation
-                    loss = loss if isinstance(loss, Number) else loss.sum()
-                    grads = Gradients({hex_id(self.subject): self.subject * loss})
-
-                    if operator(self.args):
-                        grads.update(operator(self.args).gradients(loss))
-
-                    return grads
-
-            bias = self.bias.reshape([1, self._filter_shape[0], 1, 1])
-            output = Tensor(Convolution(self.weights, inputs)) + bias
-            if self._activation:
-                return self._activation(output)
-            else:
-                return output
-
         batch_size = inputs.shape[0]
 
         padding = self._padding
@@ -142,51 +137,63 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        class Convolution(Transform):
-            def __init__(self, weights, inputs):
-                Transform.__init__(self, weights, inputs)
+        if self._padding == 0:
+            class Convolution(_Convolution):
+                def __init__(self, weights, inputs):
+                    Dual.__init__(self, weights, inputs)
 
-                pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
-                pad_matrix = Tensor(After(
-                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
-                    pad_matrix))
+                    shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
+                    self.im2col_matrix = self.args.reshape(shape).transpose()
+                    self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
 
-                im2col_matrix = []
-                for i in range(h_out):
-                    for j in range(w_out):
-                        shape = [c_i * h_f * w_f, batch_size]
-                        im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
-                        im2col_matrix.append(im2col)
+                def gradients(self, loss):
+                    grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
 
-                assert im2col_matrix
+                    if operator(self.args):
+                        shape = [batch_size, c_i, h_i, w_i]
+                        loss = (self.w_col.transpose() @ loss).reshape(shape)
+                        grads.update(operator(self.args).gradients(loss))
 
-                shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
+                    return grads
+        else:
+            class Convolution(_Convolution):
+                def __init__(self, weights, inputs):
+                    Dual.__init__(self, weights, inputs)
 
-                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
-                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
+                    pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
+                    pad_matrix = Tensor(After(
+                        pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
+                        pad_matrix))
 
-            def __ns__(self, context):
-                deanonymize(self.im2col_matrix, context)
-                deanonymize(self.w_col, context)
+                    im2col_matrix = []
+                    for i in range(h_out):
+                        for j in range(w_out):
+                            shape = [c_i * h_f * w_f, batch_size]
+                            im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
+                            im2col_matrix.append(im2col)
 
-            def forward(self):
-                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
+                    assert im2col_matrix
 
-            def gradients(self, loss):
-                grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
+                    shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
+                    im2col_matrix = Dense.concatenate(im2col_matrix, 0)
 
-                if operator(self.args):
-                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
-                    loss = (self.w_col.transpose() @ loss).reshape(shape)
+                    self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
+                    self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
 
-                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
-                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
-                    grad = Tensor(After(grad_slice.write(loss), grad))
+                def gradients(self, loss):
+                    grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
 
-                    grads.update(operator(self.args).gradients(grad))
+                    if operator(self.args):
+                        shape = [batch_size, c_i, h_i - padding, w_i - padding]
+                        loss = (self.w_col.transpose() @ loss).reshape(shape)
 
-                return grads
+                        grad = Dense.zeros([batch_size, c_i, h_i, w_i])
+                        grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                        grad = Tensor(After(grad_slice.write(loss), grad))
+
+                        grads.update(operator(self.args).gradients(grad))
+
+                    return grads
 
         shape = [out_c, h_out, w_out, batch_size]
         in2col_multiply = Tensor(Convolution(self.weights, inputs)) + self.bias
