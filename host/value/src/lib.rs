@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 
 use bytes::Bytes;
 use collate::{Collate, Collator};
-use number_general::NumberCollator;
+pub use number_general::NumberCollator;
 
 use tcgeneric::Instance;
 

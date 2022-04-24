@@ -382,6 +382,18 @@ pub trait TensorReduce<D: Dir> {
     /// The result type of a reduce operation
     type Reduce: TensorInstance;
 
+    /// Return the maximum of this [`Tensor`] along the given `axis`.
+    fn max(self, axis: usize) -> TCResult<Self::Reduce>;
+
+    /// Return the maximum element in this [`Tensor`].
+    fn max_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+
+    /// Return the minimum of this [`Tensor`] along the given `axis`.
+    fn min(self, axis: usize) -> TCResult<Self::Reduce>;
+
+    /// Return the minimum element in this [`Tensor`].
+    fn min_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+
     /// Return the product of this [`Tensor`] along the given `axis`.
     fn product(self, axis: usize) -> TCResult<Self::Reduce>;
 
@@ -1072,6 +1084,34 @@ where
 {
     type Txn = T;
     type Reduce = Self;
+
+    fn max(self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.max(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.max(axis).map(Self::from),
+        }
+    }
+
+    fn max_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.max_all(txn),
+            Self::Sparse(sparse) => sparse.max_all(txn),
+        }
+    }
+
+    fn min(self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.min(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.min(axis).map(Self::from),
+        }
+    }
+
+    fn min_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.min_all(txn),
+            Self::Sparse(sparse) => sparse.min_all(txn),
+        }
+    }
 
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
         match self {

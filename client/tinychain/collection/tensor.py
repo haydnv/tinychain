@@ -266,11 +266,17 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         return self._post("xor", {"r": other}, Tensor)
 
-    @property
-    def ndim(self):
-        """Return the number of dimensions of this `Tensor`."""
+    def max(self, axis=None):
+        """Find the maxima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
 
-        return self._get("ndim", rtype=UInt)
+        rtype = Number if axis is None else Tensor
+        return self._get("max", axis, rtype)
+
+    def min(self, axis=None):
+        """Find the minima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
+
+        rtype = Number if axis is None else Tensor
+        return self._get("min", axis, rtype)
 
     def mean(self, axis=None):
         """
@@ -285,6 +291,12 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
+
+    @property
+    def ndim(self):
+        """Return the number of dimensions of this `Tensor`."""
+
+        return self._get("ndim", rtype=UInt)
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""

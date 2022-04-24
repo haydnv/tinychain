@@ -1539,6 +1539,20 @@ where
             }
 
             // reduce ops (which require borrowing)
+            "max" => {
+                return Some(Box::new(ReduceHandler::new(
+                    tensor,
+                    TensorReduce::max,
+                    TensorReduce::max_all,
+                )))
+            }
+            "min" => {
+                return Some(Box::new(ReduceHandler::new(
+                    tensor,
+                    TensorReduce::min,
+                    TensorReduce::min_all,
+                )))
+            }
             "product" => {
                 return Some(Box::new(ReduceHandler::new(
                     tensor,

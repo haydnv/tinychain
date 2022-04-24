@@ -1284,6 +1284,8 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListFlip<FD, FS, D, T, B> {
 
 #[derive(Copy, Clone)]
 pub enum Reductor {
+    Max(NumberType, u64),
+    Min(NumberType, u64),
     Product(NumberType, u64),
     Sum(NumberType, u64),
 }
@@ -1291,6 +1293,8 @@ pub enum Reductor {
 impl Reductor {
     fn dtype(&self) -> NumberType {
         match self {
+            Self::Max(dtype, _) => *dtype,
+            Self::Min(dtype, _) => *dtype,
             Self::Product(dtype, _) => *dtype,
             Self::Sum(dtype, _) => *dtype,
         }
@@ -1298,6 +1302,8 @@ impl Reductor {
 
     fn reduce_block(self, block: Array) -> TCResult<Array> {
         match self {
+            Self::Max(_dtype, stride) => block.reduce_max(stride).map_err(TCError::unsupported),
+            Self::Min(_dtype, stride) => block.reduce_min(stride).map_err(TCError::unsupported),
             Self::Product(_dtype, stride) => {
                 block.reduce_product(stride).map_err(TCError::unsupported)
             }
@@ -1307,6 +1313,8 @@ impl Reductor {
 
     fn reduce_stream(self, blocks: TCBoxTryStream<Array>) -> TCBoxTryStream<Array> {
         let reduced = match self {
+            Self::Max(dtype, stride) => afarray::reduce_max(blocks, dtype, PER_BLOCK, stride),
+            Self::Min(dtype, stride) => afarray::reduce_min(blocks, dtype, PER_BLOCK, stride),
             Self::Product(dtype, stride) => {
                 afarray::reduce_product(blocks, dtype, PER_BLOCK, stride)
             }
@@ -1338,6 +1346,32 @@ where
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
+    pub fn max(source: B, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+        let dtype = source.dtype();
+        let stride = source.size() / (source.size() / source.shape()[axis]);
+
+        Ok(BlockListReduce {
+            source,
+            rebase,
+            reductor: Reductor::Max(dtype, stride),
+            reduce_all: TensorReduce::max_all,
+        })
+    }
+
+    pub fn min(source: B, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+        let dtype = source.dtype();
+        let stride = source.size() / (source.size() / source.shape()[axis]);
+
+        Ok(BlockListReduce {
+            source,
+            rebase,
+            reductor: Reductor::Min(dtype, stride),
+            reduce_all: TensorReduce::min_all,
+        })
+    }
+
     pub fn product(source: B, axis: usize) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
         let dtype = afarray::product_dtype(source.dtype());
@@ -1457,6 +1491,8 @@ where
         let slice = self.source.slice(source_bounds)?;
 
         match reductor {
+            Reductor::Max(_, _) => BlockListReduce::max(slice, reduce_axis),
+            Reductor::Min(_, _) => BlockListReduce::min(slice, reduce_axis),
             Reductor::Product(_, _) => BlockListReduce::product(slice, reduce_axis),
             Reductor::Sum(_, _) => BlockListReduce::sum(slice, reduce_axis),
         }
