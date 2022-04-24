@@ -134,9 +134,6 @@ class ConvLayer(Layer, Dynamic):
         h_out = int(((h_i - h_f) + (2 * padding)) / (stride + 1))
         w_out = int(((w_i - w_f) + (2 * padding)) / (stride + 1))
 
-        assert h_out
-        assert w_out
-
         if self._padding == 0:
             class Convolution(_Convolution):
                 def __init__(self, weights, inputs):
@@ -156,6 +153,9 @@ class ConvLayer(Layer, Dynamic):
 
                     return grads
         else:
+            assert h_out
+            assert w_out
+
             class Convolution(_Convolution):
                 def __init__(self, weights, inputs):
                     Dual.__init__(self, weights, inputs)
