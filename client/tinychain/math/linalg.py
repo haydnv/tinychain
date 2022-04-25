@@ -24,7 +24,7 @@ def diagonal(tensor):
 
     rtype = type(tensor) if isinstance(tensor, Tensor) else Tensor
     op = Get(MethodSubject(tensor, "diagonal"))
-    return rtype(op)
+    return rtype(form=op)
 
 
 def identity(size, dtype=Bool):

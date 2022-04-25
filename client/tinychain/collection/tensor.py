@@ -154,7 +154,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def copy(self):
         """Return a copy of this `Tensor`"""
 
-        return self.__class__(Copy(self))
+        return self.__class__(form=Copy(self))
 
     def div(self, other):
         return Tensor(Div(self, other))
@@ -207,7 +207,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
-        return self.__class__(Flip(self, axis))
+        return self.__class__(form=Flip(self, axis))
 
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
@@ -613,7 +613,7 @@ def tile(tensor, multiples):
     """
 
     rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
-    return rtype(ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
+    return rtype(form=ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
 
 
 def where(cond, x, y):

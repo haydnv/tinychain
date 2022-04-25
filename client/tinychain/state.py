@@ -76,7 +76,7 @@ class State(_Base):
             raise NotImplementedError("dtype to cast into must be known at compile-time")
 
         from .scalar.ref import Get
-        return dtype(Get(dtype, self))
+        return dtype(form=Get(dtype, self))
 
     def copy(self):
         """Create a new `State` by copying this one."""

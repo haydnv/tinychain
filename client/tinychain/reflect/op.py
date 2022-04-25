@@ -64,7 +64,7 @@ class Get(Op):
 
         class GetRef(op.Get):
             def __call__(self, key):
-                return rtype(ref.Get(self, key))
+                return rtype(form=ref.Get(self, key))
 
         return GetRef(URI(name))
 
@@ -168,7 +168,7 @@ class Post(Op):
         class PostRef(op.Post):
             def __call__(self, *args, **kwargs):
                 params = parse_args(sig, *args, **kwargs)
-                return rtype(ref.Post(self, params))
+                return rtype(form=ref.Post(self, params))
 
         return PostRef(URI(name))
 

@@ -30,12 +30,12 @@ class ConvLayer(Layer, Dynamic):
         Args:
             `inputs_shape`: size of inputs `[c_i, h_i, w_i]` where
                 `c_i`: number of channels,
-                `h_i`: height's width for each channel,
-                'w_i': matrix's width for each channel;
+                `h_i`: channel height,
+                'w_i': channel width;
             `filter_shape`: size of filter `[h_f, w_f, out_c]` where
                 `out_c`: number of output channels,
-                `h_f`: height of the kernel,
-                'w_f`: width of the kernel;
+                `h_f`: kernel height,
+                'w_f`: kernel width;
             `activation`: activation function
         """
 
