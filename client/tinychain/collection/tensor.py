@@ -433,7 +433,7 @@ class Dense(Tensor):
         if axis:
             params["axis"] = axis
 
-        return cls(ref.Post(uri(cls) + "/concatenate", params))
+        return Dense(form=ref.Post(uri(cls) + "/concatenate", params))
 
     @classmethod
     def constant(cls, shape, value):

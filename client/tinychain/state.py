@@ -23,15 +23,14 @@ class State(_Base):
             if not hasattr(self, "__form__") or self.__form__ is None:
                 raise ValueError(f"instance of {self.__class__.__name__} has no form")
         else:
+            while isinstance(form, State):
+                form = form_of(form)
+
             # make sure to capture the URI of the given form
             if isinstance(form, URI):
                 self.__uri__ = form
             elif is_ref(form) and hasattr(form, "__uri__"):
                 self.__uri__ = uri(form)
-
-            # then discard any intermediate type expectations
-            while isinstance(form, State):
-                form = form_of(form)
 
             self.__form__ = form
 
