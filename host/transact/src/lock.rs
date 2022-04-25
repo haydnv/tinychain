@@ -1,513 +1,265 @@
 //! A [`TxnLock`] to support transaction-specific versioning
 
-use std::cell::UnsafeCell;
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::task::{Context, Poll, Waker};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::Future;
+use futures::join;
 use log::{debug, trace};
+use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
 
-use super::{Transact, TxnId};
+use crate::{Transact, TxnId};
 
-struct Waiters<T> {
-    waiters: BTreeMap<TxnId, VecDeque<Weak<FutureState<T>>>>,
-}
-
-impl<T> Waiters<T> {
-    fn new() -> Self {
-        Self {
-            waiters: BTreeMap::new(),
-        }
-    }
-
-    fn push(&mut self, txn_id: TxnId, waiter: Weak<FutureState<T>>) {
-        match self.waiters.entry(txn_id) {
-            Entry::Vacant(entry) => {
-                let mut waiters = VecDeque::with_capacity(2);
-                waiters.push_back(waiter);
-                entry.insert(waiters);
-            }
-            Entry::Occupied(mut waiters) => waiters.get_mut().push_back(waiter),
-        }
-    }
-
-    fn waker(&mut self) -> Option<Waker> {
-        for (_txn_id, waiters) in self.waiters.iter_mut() {
-            let mut i = 0;
-            while i < waiters.len() {
-                if let Some(state) = waiters[i].upgrade() {
-                    let waker = state.waker.lock().expect("TxnLock waiter");
-                    if let Some(waker) = waker.deref() {
-                        return Some(waker.clone());
-                    }
-                    i += 1;
-                } else {
-                    waiters.remove(i);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn finalize(&mut self, txn_id: &TxnId) {
-        self.waiters.remove(txn_id);
-    }
-}
-
-/// An immutable read guard for a transactional state.
 pub struct TxnLockReadGuard<T> {
-    lock: TxnLock<T>,
-    txn_id: TxnId,
-}
-
-impl<T> TxnLockReadGuard<T> {
-    fn new(lock: TxnLock<T>, txn_id: TxnId) -> Self {
-        Self { lock, txn_id }
-    }
+    guard: OwnedRwLockReadGuard<T>,
 }
 
 impl<T> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
-    fn deref(&self) -> &T {
-        unsafe {
-            let state = self.lock.lock_inner("TxnLockReadGuard::deref");
-            &*state
-                .versions
-                .get(&self.txn_id)
-                .expect("TxnLock read version")
-                .get()
-        }
+    fn deref(&self) -> &Self::Target {
+        self.guard.deref()
     }
 }
 
-impl<T> Drop for TxnLockReadGuard<T> {
-    fn drop(&mut self) {
-        trace!("TxnLockReadGuard::drop {}", self.lock.inner.name);
-
-        let mut state = self.lock.lock_inner("TxnLockReadGuard::drop");
-
-        assert_ne!(state.writer, Some(self.txn_id));
-
-        let num_readers = state
-            .readers
-            .get_mut(&self.txn_id)
-            .expect("read lock count");
-
-        *num_readers -= 1;
-
-        trace!(
-            "TxnLockReadGuard::drop {} has {} readers remaining",
-            self.lock.inner.name,
-            num_readers
-        );
-
-        if num_readers == &0 {
-            if let Some(waker) = state.waker() {
-                std::mem::drop(state);
-                waker.wake();
-            }
-        }
-    }
-}
-
-/// An exclusive write lock for a transactional state.
 pub struct TxnLockWriteGuard<T> {
-    lock: TxnLock<T>,
-    txn_id: TxnId,
+    guard: OwnedRwLockWriteGuard<T>,
 }
 
-impl<T> TxnLockWriteGuard<T> {
-    fn new(lock: TxnLock<T>, txn_id: TxnId) -> Self {
-        Self { lock, txn_id }
-    }
-}
-
-impl<T: Clone> Deref for TxnLockWriteGuard<T> {
+impl<T> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
-    fn deref(&self) -> &T {
-        let state = self.lock.lock_inner("TxnLockWriteGuard::deref");
-
-        unsafe {
-            &*state
-                .versions
-                .get(&self.txn_id)
-                .expect("TxnLock write version")
-                .get()
-        }
+    fn deref(&self) -> &Self::Target {
+        self.guard.deref()
     }
 }
 
-impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
-    fn deref_mut(&mut self) -> &mut T {
-        let mut state = self.lock.lock_inner("TxnLockWriteGuard::deref");
-        state.pending_writes.insert(self.txn_id);
-
-        unsafe {
-            &mut *state
-                .versions
-                .get(&self.txn_id)
-                .expect("TxnLock mutable write version")
-                .get()
-        }
-    }
-}
-
-impl<T> Drop for TxnLockWriteGuard<T> {
-    fn drop(&mut self) {
-        trace!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
-
-        let mut state = self.lock.lock_inner("TxnLockWriteGuard::drop");
-        if let Some(readers) = state.readers.get(&self.txn_id) {
-            assert_eq!(readers, &0);
-        }
-
-        state.writer = None;
-
-        if let Some(waker) = state.waker() {
-            std::mem::drop(state);
-            waker.wake();
-        }
-    }
-}
-
-struct LockState<T> {
-    canon: UnsafeCell<T>,
-    versions: BTreeMap<TxnId, UnsafeCell<T>>,
-    last_commit: TxnId,
-    readers: BTreeMap<TxnId, usize>,
-    writer: Option<TxnId>,
-    pending_writes: BTreeSet<TxnId>,
-    waiters: Waiters<T>,
-}
-
-impl<T> LockState<T> {
-    fn waker(&mut self) -> Option<Waker> {
-        self.waiters.waker()
+impl<T> DerefMut for TxnLockWriteGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard.deref_mut()
     }
 }
 
 struct Inner<T> {
     name: String,
-    state: Mutex<LockState<T>>,
+    canon: RwLock<T>,
+    versions: Mutex<HashMap<TxnId, Arc<RwLock<T>>>>,
+    reserved: Arc<RwLock<Option<TxnId>>>,
+    last_commit: RwLock<Option<TxnId>>,
 }
 
-/// A lock which provides transaction-specific versions of the locked state.
+#[derive(Clone)]
 pub struct TxnLock<T> {
     inner: Arc<Inner<T>>,
 }
 
-impl<T> Clone for TxnLock<T> {
-    fn clone(&self) -> Self {
-        TxnLock {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<T> TxnLock<T> {
-    /// Create a new lock.
-    pub fn new<I: fmt::Display>(name: I, value: T) -> TxnLock<T> {
-        Self::new_inner(name, value)
-    }
-
-    fn new_inner<I: fmt::Display>(name: I, value: T) -> TxnLock<T> {
-        let state = LockState {
-            canon: UnsafeCell::new(value),
-            versions: BTreeMap::new(),
-            last_commit: super::id::MIN_ID,
-            readers: BTreeMap::new(),
-            writer: None,
-            pending_writes: BTreeSet::new(),
-            waiters: Waiters::new(),
-        };
-
-        let inner = Inner {
-            name: name.to_string(),
-            state: Mutex::new(state),
-        };
-
-        TxnLock {
-            inner: Arc::new(inner),
+impl<T: Clone> TxnLock<T> {
+    /// Create a new transactional lock.
+    pub fn new<I: fmt::Display>(name: I, canon: T) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                name: name.to_string(),
+                canon: RwLock::new(canon),
+                versions: Mutex::new(HashMap::new()),
+                reserved: Arc::new(RwLock::new(None)),
+                last_commit: RwLock::new(None),
+            }),
         }
     }
 
-    #[inline]
-    fn lock_inner(&self, expect: &'static str) -> MutexGuard<LockState<T>> {
-        self.inner.state.lock().expect(expect)
-    }
-}
-
-impl<T: Clone + Send> TxnLock<T> {
     /// Try to acquire a read lock.
-    pub fn read(&self, txn_id: TxnId) -> TxnLockReadFuture<T> {
-        let future_state = Arc::new(FutureState {
-            txn_id,
-            lock: self.clone(),
-            waker: Mutex::new(None),
-        });
+    pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
+        debug!("read {} at {}", self.inner.name, txn_id);
 
-        let mut lock_state = self.lock_inner("TxnLock::read");
-        lock_state
-            .waiters
-            .push(txn_id, Arc::downgrade(&future_state));
-
-        TxnLockReadFuture {
-            state: future_state,
-        }
-    }
-
-    fn try_read(&self, txn_id: TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
-        let mut state = self.lock_inner("TxnLock::try_read");
-        for reserved in state.pending_writes.iter().rev() {
-            assert!(reserved <= &txn_id);
-
-            if reserved > &state.last_commit && reserved < &txn_id {
-                // if there's a pending write that can change the value at this txn_id, wait it out
-                debug!("TxnLock waiting on a pending write at {}", reserved);
-                return Ok(None);
-            }
-        }
-
-        if state.writer == Some(txn_id) {
-            // if there's an active writer for this txn_id, wait it out
-            debug!("TxnLock waiting on a write lock at {}", txn_id);
-            return Ok(None);
-        }
-
-        if !state.versions.contains_key(&txn_id) {
-            if txn_id <= state.last_commit {
-                // if the requested time is too old, just return an error
-                return Err(TCError::conflict(format!(
-                    "transaction {} is already finalized, can't acquire read lock on {}",
-                    txn_id, self.inner.name
-                )));
-            }
-
-            let version = UnsafeCell::new(unsafe { (&*state.canon.get()).clone() });
-            state.versions.insert(txn_id, version);
-        }
-
-        *state.readers.entry(txn_id).or_insert(0) += 1;
-        Ok(Some(TxnLockReadGuard::new(self.clone(), txn_id)))
-    }
-
-    /// Try to acquire a write lock.
-    pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
-        let future_state = Arc::new(FutureState {
-            txn_id,
-            lock: self.clone(),
-            waker: Mutex::new(None),
-        });
-
-        let mut lock_state = self.lock_inner("TxnLock.write");
-        lock_state
-            .waiters
-            .push(txn_id, Arc::downgrade(&future_state));
-
-        TxnLockWriteFuture {
-            state: future_state,
-        }
-    }
-
-    fn try_write(&self, txn_id: TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        let mut state = self.lock_inner("TxnLock::try_write");
-
-        if state.last_commit >= txn_id {
-            // can't write-lock a committed version
-            return Err(TCError::conflict(format!(
-                "cannot lock {} at {} because it's already committed at {}",
-                self.inner.name, txn_id, state.last_commit
-            )));
-        }
-
-        for pending in state.pending_writes.iter().rev() {
-            if pending > &txn_id {
-                // can't write-lock the past
-                return Err(TCError::conflict(format!(
-                    "can't lock {} for writing at {} since it's already been locked at {}",
-                    self.inner.name, txn_id, pending
-                )));
-            } else if pending > &state.last_commit && pending < &txn_id {
-                // if there's a past write that might still be committed, wait it out
-                debug!(
-                    "TxnLock {} has a pending write at {}",
-                    self.inner.name, pending
-                );
-                return Ok(None);
-            }
-        }
-
-        if let Some(reader) = state.readers.keys().max() {
-            if reader > &txn_id {
-                // can't write-lock the past
-                return Err(TCError::conflict(format!(
-                    "can't lock {} for writing at {} since it already has a read lock at {}",
-                    self.inner.name, txn_id, reader
-                )));
-            }
-        }
-
-        if let Some(readers) = state.readers.get(&txn_id) {
-            // if there's an active read lock for this txn_id, wait it out
-            if readers > &0 {
-                debug!(
-                    "TxnLock {} has {} active readers at {}",
-                    self.inner.name, readers, txn_id
-                );
-                return Ok(None);
-            }
-        }
-
-        if let Some(writer) = &state.writer {
-            // if there's an active write lock, wait it out
-            debug!(
-                "TxnLock {} has an active write lock at {}",
-                self.inner.name, writer
+        if let Some(version) = {
+            trace!("lock {} version collection", self.inner.name);
+            let versions = self.inner.versions.lock().await;
+            versions.get(&txn_id).cloned()
+        } {
+            trace!(
+                "there's already a version of {} at {}",
+                self.inner.name,
+                txn_id
             );
-            return Ok(None);
+
+            // if there's already a version at this TxnId, it's always fine to read
+            let guard = version.clone().read_owned().await;
+            trace!("locked {} for reading at {}", self.inner.name, txn_id);
+            return Ok(TxnLockReadGuard { guard });
+            // the code below is responsible for making sure that no new version is created
+            // in the case that there's a write pending
         }
 
-        if !state.versions.contains_key(&txn_id) {
-            let version = UnsafeCell::new(unsafe { (&*state.canon.get()).clone() });
-            state.versions.insert(txn_id, version);
-        }
+        trace!(
+            "creating a new version of {} at {}...",
+            self.inner.name,
+            txn_id
+        );
 
-        state.writer = Some(txn_id);
-        Ok(Some(TxnLockWriteGuard::new(self.clone(), txn_id)))
-    }
-}
+        let reserved = self.inner.reserved.read().await;
+        if let Some(reserved) = reserved.deref() {
+            debug!("{} is reserved at {}", self.inner.name, reserved);
 
-#[async_trait]
-impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
-
-        let mut state = self.lock_inner("TxnLock::commit");
-
-        let canon = unsafe { &mut *state.canon.get() };
-        let (updated, version) = if let Some(cell) = state.versions.get(txn_id) {
-            let version = unsafe { &*cell.get() };
-
-            if state.pending_writes.contains(txn_id) {
-                (version != canon, version)
+            if reserved > &txn_id {
+                return Err(TCError::conflict(format!(
+                    "cannot lock {} for reading at {} since it's already locked for writing at {}",
+                    self.inner.name, txn_id, reserved
+                )));
             } else {
-                assert!(version == canon);
-                (false, version)
-            }
-        } else {
-            // it's valid to request a read lock for the first time between commit & finalize
-            // so make sure to keep this version around
-            let cell = UnsafeCell::new(canon.clone());
-            let version = unsafe { &*cell.get() };
-            state.versions.insert(*txn_id, cell);
-            (false, version)
-        };
+                trace!(
+                    "TxnLock::read checking the last commit ID for {}",
+                    self.inner.name
+                );
 
-        for pending in &state.pending_writes {
-            if pending < txn_id {
-                // there's a write pending in the past
-                // if committing it would change the locked value, then it will crash on commit
-                // (this is handled by the code below)
-            } else if pending > txn_id {
-                // there's a write pending in the future
-                // so make sure no changes were made in this version
-                if updated {
-                    panic!(
-                        "attempted to commit an out-of-order write to {} at {}",
-                        self.inner.name, txn_id
-                    );
+                if let Some(last_commit) = &*self.inner.last_commit.read().await {
+                    if reserved > last_commit && reserved < &txn_id {
+                        return Err(TCError::conflict(format!(
+                            "cannot lock {} for reading at {} since it has a pending write at {}",
+                            self.inner.name, txn_id, reserved
+                        )));
+                    }
                 }
             }
         }
 
-        if updated {
-            let has_been_read = if let Some(reserved) = state.readers.keys().last() {
-                reserved > txn_id
-            } else {
-                false
-            };
+        trace!("reading canonical version of {}", self.inner.name);
+        let version = self.inner.canon.read().await;
 
-            if has_been_read {
-                assert!(txn_id > &state.last_commit);
-                state.last_commit = *txn_id;
+        trace!("creating new version of {} at {}", self.inner.name, txn_id);
+        let mut versions = self.inner.versions.lock().await;
+        let version = Arc::new(RwLock::new(version.deref().clone()));
+        let guard = version.clone().read_owned().await;
+
+        versions.insert(txn_id, version);
+
+        trace!("created new version of {} at {}", self.inner.name, txn_id);
+        Ok(TxnLockReadGuard { guard })
+    }
+
+    /// Try to acquire a write lock.
+    pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
+        debug!("write {} at {}", self.inner.name, txn_id);
+
+        let mut reserved = self.inner.reserved.clone().write_owned().await;
+        let last_commit = self.inner.last_commit.read().await;
+
+        // allow acquiring multiple write locks in sequence within a single transaction
+        trace!("check if {} is reserved for writing...", self.inner.name);
+
+        if let Some(reserved) = &*reserved {
+            trace!("{} is reserved at {}", self.inner.name, reserved);
+
+            if reserved == &txn_id {
+                trace!(
+                    "look up version of {} at {} for writing",
+                    self.inner.name,
+                    txn_id
+                );
+
+                let version = {
+                    let versions = self.inner.versions.lock().await;
+                    versions.get(&txn_id).expect("version").clone()
+                };
+
+                trace!("getting next version of {} at {}", self.inner.name, txn_id);
+                let guard = version.clone().write_owned().await;
+                trace!("got write lock on {} at {}", self.inner.name, txn_id);
+                return Ok(TxnLockWriteGuard { guard });
+            } else if let Some(last_commit) = &*last_commit {
+                if reserved > last_commit {
+                    return Err(TCError::conflict(format!(
+                        "cannot write-lock {} at {} because it already has a pending write at {}",
+                        self.inner.name, txn_id, reserved
+                    )));
+                } else if &txn_id <= last_commit {
+                    return Err(TCError::conflict(format!(
+                        "cannot lock {} for writing at {} because it was already committed at {}",
+                        self.inner.name, txn_id, last_commit
+                    )));
+                }
             }
+        }
 
+        trace!("reserving {} for writing at {}...", self.inner.name, txn_id);
+        *reserved = Some(txn_id);
+
+        trace!(
+            "TxnLock::write checking the last commit ID for {}",
+            self.inner.name
+        );
+
+        trace!("getting the version of {} at {}", self.inner.name, txn_id);
+        let version = {
+            let mut versions = self.inner.versions.lock().await;
+
+            match versions.entry(txn_id) {
+                Entry::Occupied(entry) => entry.get().clone(),
+                Entry::Vacant(entry) => {
+                    trace!(
+                        "create new version of {} for {} and lock for writing",
+                        self.inner.name,
+                        txn_id
+                    );
+
+                    let version = self.inner.canon.read().await;
+                    let version = Arc::new(RwLock::new(version.deref().clone()));
+                    entry.insert(version.clone());
+                    version
+                }
+            }
+        };
+
+        trace!(
+            "lock existing version of {} for writing at {}",
+            self.inner.name,
+            txn_id
+        );
+
+        let guard = version.write_owned().await;
+        Ok(TxnLockWriteGuard { guard })
+    }
+}
+
+#[async_trait]
+impl<T: Clone + Send + Sync> Transact for TxnLock<T> {
+    async fn commit(&self, txn_id: &TxnId) {
+        debug!("commit {} at {}!", self.inner.name, txn_id);
+        let (mut commit_id, mut canon) =
+            join!(self.inner.last_commit.write(), self.inner.canon.write());
+
+        trace!("prepared to commit {} at {}", self.inner.name, txn_id);
+
+        if let Some(last_commit) = &*commit_id {
+            assert!(txn_id > last_commit);
+        }
+
+        if let Some(version) = {
+            let versions = self.inner.versions.lock().await;
+            versions.get(txn_id).cloned()
+        } {
+            trace!(
+                "TxnLock::commit {} reading version {}",
+                self.inner.name,
+                txn_id
+            );
+
+            let version = version.read().await;
             *canon = version.clone();
         }
 
-        state.pending_writes.remove(txn_id);
-        if let Some(waker) = state.waker() {
-            std::mem::drop(state);
-            waker.wake();
-        }
+        *commit_id = Some(*txn_id);
+
+        debug!("committed {} committed at {}", self.inner.name, txn_id);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("TxnLock {} finalize {}", &self.inner.name, txn_id);
-        let mut state = self.lock_inner("TxnLock::finalize");
-        state.versions.remove(txn_id);
-        state.pending_writes.remove(txn_id);
-        state.waiters.finalize(&txn_id);
-    }
-}
+        debug!("finalize {} at {}", self.inner.name, txn_id);
 
-struct FutureState<T> {
-    lock: TxnLock<T>,
-    txn_id: TxnId,
-    waker: Mutex<Option<Waker>>,
-}
-
-pub struct TxnLockReadFuture<T> {
-    state: Arc<FutureState<T>>,
-}
-
-impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
-    type Output = TCResult<TxnLockReadGuard<T>>;
-
-    fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
-        trace!("TxnLockReadFuture::poll {}", self.state.txn_id);
-
-        match self.state.lock.try_read(self.state.txn_id) {
-            Ok(Some(guard)) => Poll::Ready(Ok(guard)),
-            Err(cause) => Poll::Ready(Err(cause)),
-            Ok(None) => {
-                trace!("TxnLockReadFuture::poll {} lock not ready", self.state.txn_id);
-                *self.state.waker.lock().expect("TxnLock read waker") = Some(cxt.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
-pub struct TxnLockWriteFuture<T> {
-    state: Arc<FutureState<T>>,
-}
-
-impl<T: Clone + Send> Future for TxnLockWriteFuture<T> {
-    type Output = TCResult<TxnLockWriteGuard<T>>;
-
-    fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
-        trace!("TxnLockWriteFuture::poll {}", self.state.txn_id);
-
-        match self.state.lock.try_write(self.state.txn_id) {
-            Ok(Some(guard)) => Poll::Ready(Ok(guard)),
-            Err(cause) => Poll::Ready(Err(cause)),
-            Ok(None) => {
-                trace!("TxnLockWriteFuture::poll {} lock not ready", self.state.txn_id);
-                *self.state.waker.lock().expect("TxnLock write waiter") = Some(cxt.waker().clone());
-                Poll::Pending
-            }
-        }
+        let mut versions = self.inner.versions.lock().await;
+        versions.remove(txn_id);
     }
 }
