@@ -1548,8 +1548,8 @@ where
             shape.push(*l)
         } else {
             return Err(TCError::unsupported(format!(
-                "cannot broadcast dimension {} into {}",
-                l, r
+                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?})",
+                l, r, left_shape, right_shape,
             )));
         }
     }

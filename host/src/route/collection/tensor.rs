@@ -760,7 +760,10 @@ impl<'a> Handler<'a> for RandomNormalHandler {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let shape: Vec<u64> = params.require(&label("shape").into())?;
+                let shape: Value = params.require(&label("shape").into())?;
+                let shape: Shape =
+                    shape.try_cast_into(|v| TCError::bad_request("invalid shape", v))?;
+
                 let mean = params.option(&label("mean").into(), || MEAN.into())?;
                 let std = params.option(&label("std").into(), || STD.into())?;
                 params.expect_empty()?;
