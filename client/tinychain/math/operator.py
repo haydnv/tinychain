@@ -1,10 +1,29 @@
 import logging
+import typing
 
 from ..error import BadRequest
 from ..scalar import ref
+from ..scalar.value import Id
+from ..state import StateRef
 from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
+
+
+class Gradients(typing.Dict[Id, Numeric]):
+    def __setitem__(self, key: Id, value: Numeric):
+        if key in self:
+            dict.__setitem__(self, key, self[key] + value)
+        else:
+            dict.__setitem__(self, key, value)
+
+    def update(self, __m: typing.Mapping[Id, Numeric], **kwargs: Numeric) -> None:
+        for var_id in __m:
+            self[var_id] = __m[var_id]
+
+        for var_id in kwargs:
+            self[var_id] = __m[var_id]
+
 
 class Operator(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
@@ -36,7 +55,7 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.forward")
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         """
         Return the derivative of this :class:`Operator` (may be a numeric constant or itself an :class:`Operator`).
 
@@ -68,6 +87,17 @@ class Dual(Operator):
     """A differentiable operator with two arguments"""
 
 
+class Trig(Unary):
+  def gradients(self, loss):
+        from ..ml.optimizer import Variable
+        if isinstance(self.subject, Variable):
+          return self.subject.invert(loss)
+        elif isinstance(form_of(self.subject), Operator):
+          return form_of(self.subject).gradients(loss)
+        else:
+          return Gradients()
+
+
 class Custom(Unary):
     """A custom operator"""
 
@@ -87,7 +117,7 @@ class Add(Dual):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return subject + arg
@@ -97,17 +127,19 @@ class Add(Dual):
         from ..ml.optimizer import Variable
         from ..scalar.number import Number
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(loss))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(loss))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.subject.invert(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert(loss))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(loss))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.args.invert(loss))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
 
         return grads
 
@@ -117,7 +149,7 @@ class MatMul(Dual):
         from ..collection.tensor import einsum
         return einsum("...ij,...jk->ik", [self.subject, self.args])
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return (subject @ self.args) + (self.subject @ arg)
@@ -131,19 +163,19 @@ class MatMul(Dual):
                 matrix.transpose(),
                 BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         grad = loss @ transpose(self.args)
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(grad))
+            grads.update(self.subject.invert(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
 
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(grad))
+            grads.update(self.args.invert(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.args).gradients(grad))
 
         return grads
 
@@ -152,7 +184,7 @@ class Mul(Dual):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return (subject * self.args) + (self.subject * arg)
@@ -160,19 +192,19 @@ class Mul(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         grad = self.args * loss
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(grad))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(grad))
+            grads.update(self.subject.invert(grad))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
 
         grad = self.subject * loss
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert(grad))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(grad))
+            grads.update(self.args.invert(grad))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
 
         return grads
 
@@ -181,7 +213,7 @@ class Sub(Dual):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return subject - arg
@@ -190,17 +222,20 @@ class Sub(Dual):
         from ..ml.optimizer import Variable
         from ..scalar.number import Number
 
-        grads = GradientDict({})
+        #loss = loss if isinstance(loss, Number) else loss.sum()
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(-loss))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(loss))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.subject.invert(-loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert(-loss))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(loss))
+            # TODO: maintain the shape of the loss tensor
+            grads.update(self.args.invert(-loss))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
 
         return grads
 
@@ -209,7 +244,7 @@ class Div(Dual):
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
@@ -217,17 +252,17 @@ class Div(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(self.subject * loss / self.args))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(loss / self.args))
+            grads.update(self.subject.invert(self.subject * loss / self.args))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss / self.args))
 
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert((-self.subject * loss) / self.args**2))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(loss / self.args))
+            grads.update(self.args.invert((-self.subject * loss) / self.args**2))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss / self.args))
 
         return grads
 
@@ -236,7 +271,7 @@ class Pow(Dual):
     def forward(self):
         return Numeric.pow(self.subject, self.args)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         if self.args is variable:
             return (self.subject**self.args) * self.subject.log()
 
@@ -245,17 +280,17 @@ class Pow(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+            grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads.add_grads(self.args.invert(loss * self.subject.log() * self.subject**self.args))
-        elif isinstance(form_of(self.args), Operator):
-            grads.add_grads(form_of(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
+            grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
+        elif operator(self.args):
+            grads.update(operator(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
 
         return grads
 
@@ -273,12 +308,12 @@ class Exp(Unary):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(self.subject.exp() * loss))
+            grads.update(self.subject.invert(self.subject.exp() * loss))
         elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(self.subject.exp() * loss))
+            grads.update(operator(self.subject).gradients(self.subject.exp() * loss))
 
         return grads
 
@@ -293,32 +328,21 @@ class Log(Dual):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grads = GradientDict({})
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            grads.add_grads(self.subject.invert(loss / self.subject))
-        elif isinstance(form_of(self.subject), Operator):
-            grads.add_grads(form_of(self.subject).gradients(loss / self.subject))
-        
+            grads.update(self.subject.invert(loss / self.subject))
+        elif operator(self.subject):
+            operator(self.subject).gradients(loss / self.subject)
+
         return grads
-            
-
-class Trig(Unary):
-  def gradients(self, loss):
-        from ..ml.optimizer import Variable
-        if isinstance(self.subject, Variable):
-          return self.subject.invert(loss)
-        elif isinstance(form_of(self.subject), Operator):
-          return form_of(self.subject).gradients(loss)
-        else:
-          return GradientDict({})
 
 
 class Sin(Trig):
     def forward(self):
         return Trigonometric.sin(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cos()
 
@@ -331,7 +355,7 @@ class Cos(Trig):
     def forward(self):
         return Trigonometric.cos(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         return subject - self.subject.sin()
 
@@ -344,7 +368,7 @@ class Asin(Trig):
     def forward(self):
         return Trigonometric.asin(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (1 - (subject**2))**-0.5
 
@@ -356,8 +380,8 @@ class Asin(Trig):
 class Acos(Trig):
     def forward(self):
         return Trigonometric.acos(self.subject)
-
-    def backward(self, variable):
+    
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return -((1 - subject**2)**-0.5)
 
@@ -370,7 +394,7 @@ class Sinh(Trig):
     def forward(self):
         return Trigonometric.sinh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cosh()
 
@@ -382,8 +406,8 @@ class Sinh(Trig):
 class Cosh(Trig):
     def forward(self):
         return Trigonometric.cosh(self.subject)
-
-    def backward(self, variable):
+    
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.sinh()
 
@@ -396,7 +420,7 @@ class Asinh(Trig):
     def forward(self):
         return Trigonometric.asinh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (subject**2 + 1)**-0.5
 
@@ -408,8 +432,8 @@ class Asinh(Trig):
 class Acosh(Trig):
     def forward(self):
         return Trigonometric.acosh(self.subject)
-
-    def backward(self, variable):
+    
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return ((subject**2) - 1)**-0.5
 
@@ -421,8 +445,8 @@ class Acosh(Trig):
 class Tan(Trig):
     def forward(self):
         return Trigonometric.tan(self.subject)
-
-    def backward(self, variable):
+    
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject.cos()**2)
 
@@ -435,20 +459,27 @@ class Tanh(Trig):
     def forward(self):
         return Trigonometric.tanh(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 - subject.tanh()**2
 
     def gradients(self, loss):
-        grad = (1 - self.subject.tanh()**2) * loss
-        return Trig.gradients(self, grad)
+        from ..ml.optimizer import Variable
+
+        grad = self.backward() * loss
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(grad)
+        elif operator(self.subject):
+            return operator(self.subject).gradients(grad)
+
+        return Gradients()
 
 
 class Atan(Trig):
     def forward(self):
         return Trigonometric.atan(self.subject)
 
-    def backward(self, variable):
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject**2 + 1)
 
@@ -460,8 +491,8 @@ class Atan(Trig):
 class Atanh(Trig):
     def forward(self):
         return Trigonometric.atanh(self.subject)
-
-    def backward(self, variable):
+    
+    def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (1 - (subject**2))
 
@@ -505,10 +536,14 @@ def derivative_of(state, variable=None):
         raise TypeError(f"the derivative of {state} is not defined")
 
 
-class GradientDict(dict):
-    def add_grads(self, grads):
-        for k, v in grads.items():
-            if k in self:
-                self[k] += v
-            else:
-                self[k] = v
+def operator(state_or_ref):
+    """Return the `Operator` instance which produces the given `state_or_ref`, if any"""
+
+    if isinstance(state_or_ref, Operator):
+        return state_or_ref
+
+    if form_of(state_or_ref) is not state_or_ref:
+        return operator(form_of(state_or_ref))
+
+    if isinstance(state_or_ref, StateRef):
+        return operator(state_or_ref.state)

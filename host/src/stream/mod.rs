@@ -4,7 +4,6 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use destream::en;
-use futures::future;
 use futures::stream::TryStreamExt;
 use log::debug;
 use sha2::digest::{Digest, Output};
@@ -87,16 +86,15 @@ impl TCStream {
     pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
         debug!("Stream::for_each {}", op);
 
-        let stream = self.into_stream(txn.clone()).await?;
+        let mut stream = self.into_stream(txn.clone()).await?;
 
-        stream
-            .map_ok(move |args| {
-                debug!("Stream::for_each calling op with args {}", args);
-                op.clone().call(&txn, args)
-            })
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |(), _none| future::ready(Ok(())))
-            .await
+        while let Some(args) = stream.try_next().await? {
+            debug!("Stream::for_each calling op with args {}", args);
+            let result = op.clone().call(&txn, args).await?;
+            debug!("Stream::for_each got result {}", result);
+        }
+
+        Ok(())
     }
 
     /// Compute the SHA256 hash of this `TCStream`.

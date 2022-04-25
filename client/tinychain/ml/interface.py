@@ -11,4 +11,4 @@ class Differentiable(Interface):
     def eval(self, inputs: Tensor) -> Tensor:
         """Evaluate this :class:`Differentiable` with respect to the given `inputs`."""
 
-        return error.NotImplemented(f"{self.__class__.__name__}")
+        return error.NotImplemented(f"Differentiable interface for {self.__class__.__name__}")

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
@@ -5,6 +6,7 @@ use std::ops::{Add, Div, Mul, Sub};
 use afarray::{Array, ArrayInstance, CoordBlocks};
 use arrayfire as af;
 use async_trait::async_trait;
+use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -16,7 +18,8 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
-    Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+    Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
+    Trigonometry, UIntType,
 };
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
@@ -1076,6 +1079,52 @@ where
 {
     type Txn = T;
     type Reduce = DenseTensor<FD, FS, D, T, BlockListReduce<FD, FS, D, T, B>>;
+
+    fn max(self, axis: usize) -> TCResult<Self::Reduce> {
+        BlockListReduce::max(self.blocks, axis).map(DenseTensor::from)
+    }
+
+    fn max_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            let zero = self.dtype().zero();
+            let blocks = self.blocks.clone().block_stream(txn).await?;
+            let collator = NumberCollator::default();
+
+            blocks
+                .map_ok(|array| array.max())
+                .try_fold(zero, move |max, block_max| {
+                    future::ready(Ok(match collator.compare(&max, &block_max) {
+                        Ordering::Greater => max,
+                        Ordering::Equal => max,
+                        Ordering::Less => block_max,
+                    }))
+                })
+                .await
+        })
+    }
+
+    fn min(self, axis: usize) -> TCResult<Self::Reduce> {
+        BlockListReduce::min(self.blocks, axis).map(DenseTensor::from)
+    }
+
+    fn min_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            let zero = self.dtype().zero();
+            let blocks = self.blocks.clone().block_stream(txn).await?;
+            let collator = NumberCollator::default();
+
+            blocks
+                .map_ok(|array| array.max())
+                .try_fold(zero, move |min, block_min| {
+                    future::ready(Ok(match collator.compare(&min, &block_min) {
+                        Ordering::Less => min,
+                        Ordering::Equal => min,
+                        Ordering::Greater => block_min,
+                    }))
+                })
+                .await
+        })
+    }
 
     fn product(self, axis: usize) -> TCResult<Self::Reduce> {
         BlockListReduce::product(self.blocks, axis).map(DenseTensor::from)

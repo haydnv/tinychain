@@ -7,7 +7,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import derivative_of, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh, Log
+from ..math.operator import derivative_of, operator, Gradients, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -18,6 +18,9 @@ from .base import Collection
 
 
 class NDArray(Interface):
+    def slice(self, bounds):
+        return ref.Get(ref.MethodSubject(self), bounds)
+
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
@@ -44,6 +47,13 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     @classmethod
     def expect(cls, shape, dtype):
+        """
+        Define a new subclass of `cls` which captures the given shape and datatype.
+
+        It would be better to implement this function using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
+        but this is not supported on Python <= 3.8.
+        """
+
         spec = (shape, dtype)
 
         if not isinstance(shape, Tuple):
@@ -107,14 +117,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         return cls.expect(tensor.shape, tensor.dtype)((tensor.shape, tensor.dtype))
 
     def __getitem__(self, bounds):
-        parent = self
-        bounds = handle_bounds(bounds)
-
-        class Slice(Tensor):
-            def write(self, value):
-                return parent._put("", bounds, value)
-
-        return self._get("", bounds, Slice)
+        return self.slice(bounds)
 
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")
@@ -151,7 +154,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def copy(self):
         """Return a copy of this `Tensor`"""
 
-        return self.__class__(Copy(self))
+        return self.__class__(form=Copy(self))
 
     def div(self, other):
         return Tensor(Div(self, other))
@@ -191,7 +194,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def acosh(self):
         return Tensor(Acosh(self))
-    
+
     def tan(self):
         return Tensor(Tan(self))
 
@@ -207,7 +210,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
-        return self.__class__(Flip(self, axis))
+        return self.__class__(form=Flip(self, axis))
 
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
@@ -266,11 +269,17 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         return self._post("xor", {"r": other}, Tensor)
 
-    @property
-    def ndim(self):
-        """Return the number of dimensions of this `Tensor`."""
+    def max(self, axis=None):
+        """Find the maxima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
 
-        return self._get("ndim", rtype=UInt)
+        rtype = Number if axis is None else Tensor
+        return self._get("max", axis, rtype)
+
+    def min(self, axis=None):
+        """Find the minima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
+
+        rtype = Number if axis is None else Tensor
+        return self._get("min", axis, rtype)
 
     def mean(self, axis=None):
         """
@@ -285,6 +294,12 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
+
+    @property
+    def ndim(self):
+        """Return the number of dimensions of this `Tensor`."""
+
+        return self._get("ndim", rtype=UInt)
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
@@ -316,6 +331,16 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Return the size of this `Tensor` (the product of its `shape`)."""
 
         return self._get("size", rtype=UInt)
+
+    def slice(self, bounds):
+        parent = self
+        bounds = handle_bounds(bounds)
+
+        class WritableView(Tensor):
+            def write(self, value):
+                return parent._put("", bounds, value)
+
+        return WritableView(Slice(self, bounds))
 
     def split(self, num_or_size_splits, axis=0):
         """
@@ -411,7 +436,7 @@ class Dense(Tensor):
         if axis:
             params["axis"] = axis
 
-        return cls(ref.Post(uri(cls) + "/concatenate", params))
+        return Dense(form=ref.Post(uri(cls) + "/concatenate", params))
 
     @classmethod
     def constant(cls, shape, value):
@@ -591,7 +616,7 @@ def tile(tensor, multiples):
     """
 
     rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
-    return rtype(ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
+    return rtype(form=ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
 
 
 def where(cond, x, y):
@@ -608,26 +633,25 @@ class Copy(Unary):
     def forward(self):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
-    def backward(self):
-        return derivative_of(self.subject)
-
     def gradients(self, loss):
-        if isinstance(form_of(self.subject), Operator):
+        if operator(self.subject):
             return form_of(self.subject).gradients(loss)
 
-        return {}
+        return Gradients()
 
 
 class Transform(Operator):
-    def backward(self, variable):
-        raise RuntimeError(f"{self.__class__.__name__} is a tensor transform and has no derivative")
+    def backward(self, variable=None):
+        rtype = type(self.subject) if isinstance(self.subject, Tensor) else Tensor
+        d = type(self)(derivative_of(self.subject, variable), self.args)
+        return rtype(form=d)
 
     def gradients(self, loss):
-        if not isinstance(form_of(self.subject), Operator):
+        if not operator(self.subject):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return {}
+            return Gradients()
 
-        return form_of(self.subject).gradients(loss)
+        return operator(self.subject).gradients(loss)
 
 
 class Expand(Transform):
@@ -672,3 +696,16 @@ class Reshape(Transform):
     def gradients(self, loss):
         loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
         return Transform.gradients(self, loss)
+
+
+class Slice(Transform):
+    def forward(self):
+        return NDArray.slice(self.subject, self.args)
+
+    def gradients(self, loss):
+        if isinstance(loss, Number):
+            return Transform.gradients(loss)
+
+        grad = type(self.subject).zeros_like(self.subject)
+        grad = ref.After(grad[self.args].write(grad), grad)
+        return Transform.gradients(self, loss * grad)

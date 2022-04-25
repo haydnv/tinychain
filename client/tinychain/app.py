@@ -32,8 +32,8 @@ class Model(Object, metaclass=Meta):
 
         Object.__init__(self, form)  # this will generate method headers
 
-        if uri(self).startswith("/state"):
-            raise ValueError(f"{self} is has no URI defined (consider setting the __uri__ attribute)")
+        if not uri(self):
+            raise ValueError(f"{self} has no URI defined (consider setting the __uri__ attribute)")
 
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):

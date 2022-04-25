@@ -266,6 +266,18 @@ class DenseTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I32, shape, x.round().astype(int).flatten()))
 
+    def testMax(self):
+        shape = [2, 1, 3, 4]
+        axis = 2
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Dense.arange(shape, 0., 24.)
+        cxt.result = cxt.big.max(axis)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.max(np.arange(0, 24).reshape(shape), axis)
+        self.assertEqual(actual, expect_dense(tc.F64, expected.shape, expected.flatten()))
+
     def testSum(self):
         shape = [4, 2, 3, 5]
         axis = 2

@@ -21,7 +21,7 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other + self
 
-        return self.__class__(Add(self, other))
+        return self.__class__(form=Add(self, other))
 
     def div(self, other):
         """Return the quotient of `self` and `other`."""
@@ -30,10 +30,10 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other * (1 / self)
 
-        return self.__class__(Div(self, other))
+        return self.__class__(form=Div(self, other))
 
     def exp(self):
-        return self.__class__(Exp(self))
+        return self.__class__(form=Exp(self))
 
     def modulo(self, other):
         """Return the remainder of `self` divided by `other`."""
@@ -52,7 +52,7 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return other * self
 
-        return self.__class__(Mul(self, other))
+        return self.__class__(form=Mul(self, other))
 
     def pow(self, other):
         """Raise `self` to the power of `other`."""
@@ -62,7 +62,7 @@ class Number(Value, Numeric, Trigonometric):
             raise NotImplementedError("Number**Tensor is not supported; " +
                                       f"construct a constant Tensor from {self} instead")
 
-        return self.__class__(Pow(self, other))
+        return self.__class__(form=Pow(self, other))
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""
@@ -71,43 +71,43 @@ class Number(Value, Numeric, Trigonometric):
         if isinstance(other, Tensor):
             return -(other - self)
 
-        return self.__class__(Sub(self, other))
+        return self.__class__(form=Sub(self, other))
 
     def sin(self):
-        return self.__class__(Sin(self))
+        return self.__class__(form=Sin(self))
 
     def cos(self):
-        return self.__class__(Cos(self))
+        return self.__class__(form=Cos(self))
 
     def asin(self):
-        return self.__class__(Asin(self))
+        return self.__class__(form=Asin(self))
 
     def acos(self):
-        return self.__class__(Acos(self))
+        return self.__class__(form=Acos(self))
 
     def sinh(self):
-        return self.__class__(Sinh(self))
+        return self.__class__(form=Sinh(self))
 
     def cosh(self):
-        return self.__class__(Cosh(self))
+        return self.__class__(form=Cosh(self))
 
     def asinh(self):
-        return self.__class__(Asinh(self))
+        return self.__class__(form=Asinh(self))
 
     def acosh(self):
-        return self.__class__(Acosh(self))
+        return self.__class__(form=Acosh(self))
 
     def tan(self):
-        return self.__class__(Tan(self))
+        return self.__class__(form=Tan(self))
 
     def tanh(self):
-        return self.__class__(Tanh(self))
+        return self.__class__(form=Tanh(self))
 
     def atan(self):
-        return self.__class__(Atan(self))
+        return self.__class__(form=Atan(self))
 
     def atanh(self):
-        return self.__class__(Atanh(self))
+        return self.__class__(form=Atanh(self))
 
 
 class Bool(Number):

@@ -160,7 +160,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cache_size="5K", wait_time=1, **flags):
+def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"
         raise RuntimeError(f"invalid executable path: {TC_PATH} ({hint})")
@@ -196,7 +196,6 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cac
         data_dir=data_dir,
         http_port=port,
         log_level="debug",
-        cache_size=cache_size,
         **flags)
 
     process.start(wait_time)
@@ -204,7 +203,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, cac
 
 
 # use this alias to switch between Local and Docker host types
-start_host = start_docker
+start_host = start_local_host
 
 
 def _maybe_create_dir(path, force):

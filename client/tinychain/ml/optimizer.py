@@ -1,29 +1,87 @@
 import inspect
 import logging
+import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
-from ..decorators import post
+from ..decorators import closure, get, post
 from ..generic import Map, Tuple
+from ..math.interface import Numeric
 from ..math.operator import derivative_of, Operator
-from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import After, is_op_ref
+from ..scalar.number import F32, F64, Number, UInt
+from ..scalar.ref import After, If
+from ..scalar.value import Id
+from ..state import State, Stream
 from ..util import form_of, hex_id
 
 from .variable import Variable
 from . import LIB_URI
 
 
+# this helper class handles the case of both a Number and a Tensor as a gradient
+class _Gradient(State, Numeric):
+    pass
+
+
+_Gradients = typing.Dict[Id, _Gradient]
+
+
 class Optimizer(Model):
     __uri__ = LIB_URI.append("Optimizer")
 
     @post
-    def train(self, inputs):
+    def train(self, i, inputs, parallel=1):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 
-class GradientDescent(Optimizer, Dynamic):
+class Parallel(Optimizer, Dynamic):
+    @post
+    def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> _Gradients:
+        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
+        batch_size = inputs.shape[0]
+        txn.chunk_size = UInt(If(
+            (parallel > 0).logical_and(batch_size % parallel == 0),
+            batch_size / parallel,
+            error.BadRequest(err_parallel, batch_size=batch_size, parallel=parallel)))
+
+        trainable_vars = trainable(self.ml_model)
+
+        @closure(self, inputs, txn.chunk_size)
+        @get
+        def calc_grads(cxt, batch: UInt) -> Map:
+            cxt.start = batch * txn.chunk_size
+            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
+            outputs = self.ml_model.eval(inputs_batch)
+            operator = form_of(outputs)
+
+            if not isinstance(operator, Operator):
+                raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
+
+            loss = self._cost(inputs_batch, outputs)
+            cxt.d_loss = derivative_of(loss).copy()
+            gradients = operator.gradients(cxt.d_loss)
+            assert gradients
+
+            return {
+                var_id: (grad if isinstance(grad, Number) else grad.sum(0))
+                for var_id, grad in gradients.items()
+            }
+
+        @post
+        def sum_grads(grads: _Gradients, sum: _Gradients) -> _Gradients:
+            return {"sum": {
+                var_id: grads[var_id] + sum[var_id]
+                for var_id in trainable_vars.keys()
+            }}
+
+        var_ids = set(trainable_vars.keys())
+        gradients = {var_id: 0 for var_id in var_ids}
+        gradients = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": gradients}, sum_grads)
+        return Map(gradients)["sum"]  # TODO: this type information shouldn't get lost
+
+
+class GradientDescent(Parallel):
     """A simple gradient descent optimizer with a configurable learning rate."""
 
     def __init__(self, ml_model, cost, learning_rate=0.001):
@@ -38,30 +96,18 @@ class GradientDescent(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, i: UInt, inputs: Tensor) -> Tensor:
-        outputs = self.ml_model.eval(inputs)
-        operator = form_of(outputs)
-
-        if not isinstance(operator, Operator):
-            raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
-
-        loss = self._cost(inputs, outputs)
-        d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(d_loss)
-
-        validate(self.ml_model, self._model_name, operator, gradients)
-
-        variables = trainable(self.ml_model)
+    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
+        gradients = self.gradients(inputs, parallel)
 
         writes = []
-        for var_id, delta in gradients.items():
-            var = variables[var_id]
-            writes.append(var.update(delta * self._lr))
+        for var_id, var in trainable(self.ml_model).items():
+            delta = gradients[var_id]
+            writes.append(var.update(self._lr * delta))
 
-        return After(writes, loss)
+        return writes
 
 
-class Adam(Optimizer, Dynamic):
+class Adam(Parallel):
     """
     Adam optimizer, an adaptive learning rate optimization algorithm designed to handle sparse gradients and noisy data.
 
@@ -94,21 +140,15 @@ class Adam(Optimizer, Dynamic):
         Dynamic.__init__(self)
 
     @post
-    def train(self, i: UInt, inputs: Tensor) -> Tensor:
-        outputs = self.ml_model.eval(inputs)
-        operator = form_of(outputs)
+    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
+        gradients = self.gradients(inputs, parallel)
 
-        if not isinstance(operator, Operator):
-            raise ValueError(f"Optimizer can only train a differentiable Operator, not {operator}")
+        trainable_vars = trainable(self.ml_model)
+        var_names = namespace(self.ml_model, self._model_name)
+        var_names = {hex_id(var): name for name, var in var_names.items()}
+        gradients = {var_names[var_id]: gradients[var_id] for var_id in var_names.keys()}
 
-        loss = self._cost(inputs, outputs)
-        d_loss = derivative_of(loss).copy()
-        gradients = operator.gradients(d_loss)
-
-        vars, var_names = validate(self.ml_model, self._model_name, operator, gradients)
-        vars = {name: vars[var_id] for var_id, name in var_names.items()}
-
-        gradients = {var_names[var_id]: delta for var_id, delta in gradients.items()}
+        vars_by_name = {var_names[var_id]: trainable_vars[var_id] for var_id in var_names.keys()}
 
         update_m = {}
         for name in self.m:
@@ -128,9 +168,9 @@ class Adam(Optimizer, Dynamic):
         updates = After([
             [self.m[name].write(new_value) for name, new_value in update_m.items()],
             [self.v[name].write(new_value) for name, new_value in update_v.items()],
-        ], [vars[name].update(delta) for name, delta in update_model.items()])
+        ], [vars_by_name[name].update(delta) for name, delta in update_model.items()])
 
-        return After(updates, loss)
+        return updates
 
 
 class _Queue(object):
@@ -166,60 +206,6 @@ class _Queue(object):
 
     def shift(self):
         return self._queue.pop(0)
-
-
-def validate(model, name, operator, gradients):
-    """Check that the :class:`Variables` of `model` are trainable using the given `operator`."""
-
-    ns = {hex_id(var): name for name, var in namespace(model, name).items()}
-
-    assert isinstance(operator, Operator)
-    assert ns
-
-    missing_vars = set(ns.keys())
-    vars = {}
-    visited = _Queue()
-    unvisited = _Queue(operator.subject, operator.args)
-    while unvisited:
-        node = unvisited.shift()
-        logging.debug(f"optimizer traversing Operator graph node {node}")
-
-        if isinstance(form_of(node), Operator):
-            assert hex_id(node) not in missing_vars
-
-            node = form_of(node)
-            unvisited.push(node.subject)
-            unvisited.push(node.args)
-            visited.push(node)
-
-        elif isinstance(node, Variable):
-            if hex_id(node) in missing_vars:
-                logging.debug(f"found Variable {ns[hex_id(node)]}")
-            else:
-                raise RuntimeError(f"{operator} node {node} references unknown Variable {hex_id(node)} (known: {ns})")
-
-            vars[hex_id(node)] = node
-            missing_vars.remove(hex_id(node))
-
-        else:
-            logging.debug(f"skipping non-trainable operator graph node {node}")
-
-    if missing_vars:
-        missing = set(ns[var_id] for var_id in missing_vars)
-        if visited:
-            raise RuntimeError(f"{name} operator graph disconnects Variables {missing} at {visited[-1]}")
-        else:
-            raise RuntimeError(f"{name} operator graph {operator} is not connected to any of its Variables {missing}")
-
-    missing_grads = set(ns[var_id] for var_id in set(ns.keys()) - set(gradients.keys()))
-    if missing_grads:
-        raise RuntimeError(f"optimizer has gradients for {set(gradients.keys())} but not {missing_grads}")
-
-    extra_grads = set(gradients.keys()) - set(ns.keys())
-    if extra_grads:
-        raise RuntimeError(f"optimizer found gradients {extra_grads} without corresponding Variables")
-
-    return vars, ns
 
 
 def namespace(model, prefix):

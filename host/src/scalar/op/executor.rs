@@ -167,12 +167,11 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
         }
 
         self.scope.remove(&capture).ok_or_else(|| {
-            let msg = format!(
+            TCError::not_found(format!(
                 "captured state {} in context {}",
                 capture,
                 self.scope.keys().collect::<Tuple<&Id>>()
-            );
-            TCError::not_found(msg)
+            ))
         })
     }
 }

@@ -49,7 +49,7 @@ class Get(Method):
         self.rtype = _get_rtype(self.form, State)
 
     def __call__(self, key=None):
-        return self.rtype(ref.Get(self.subject(), key))
+        return self.rtype(form=ref.Get(self.subject(), key))
 
     def __args__(self):
         _, cxt = form_of(self)
@@ -161,7 +161,7 @@ class Post(Method):
             sig = sig[1:]
 
         params = parse_args(sig, *args, **kwargs)
-        return rtype(ref.Post(self.subject(), params))
+        return rtype(form=ref.Post(self.subject(), params))
 
     def __args__(self):
         _, cxt = form_of(self)
@@ -174,7 +174,15 @@ class Post(Method):
         kwargs = {}
         for name in list(sig.parameters.keys())[len(args):]:
             param = sig.parameters[name]
-            dtype = resolve_class(self.form, param.annotation, State)
+
+            dtype = State
+            if param.default is inspect.Parameter.empty:
+                if param.annotation:
+                    dtype = param.annotation
+            elif isinstance(param.default, State):
+                dtype = type(param.default)
+
+            dtype = resolve_class(self.form, dtype, State)
             kwargs[name] = dtype(form=URI(name))
 
         cxt._return = self.form(*args, **kwargs)
@@ -213,7 +221,7 @@ class Operator(Post):
         result = self.form(self.header, *args, **kwargs)
 
         if self.rtype:
-            return self.rtype(result)
+            return self.rtype(form=result)
         else:
             return result
 

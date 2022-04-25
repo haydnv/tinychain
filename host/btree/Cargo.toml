@@ -1,6 +1,6 @@
 [package]
 name = "tc-btree"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's BTree collection type"
@@ -13,7 +13,7 @@ categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
 async-trait = "0.1"
-collate = "~0.1.10"
+collate = "~0.2.3"
 destream = "0.5"
 futures = "0.3"
 log = { version = "0.4", features = ["release_max_level_warn"] }
@@ -21,6 +21,6 @@ num_cpus = "1.13"
 safecast = "0.1"
 tc-error = "0.5"
 tc-transact = { path = "../transact" }
-tc-value = "0.5"
+tc-value = { path = "../value" }
 tcgeneric = "0.4"
 uuid = { version = "0.8", features=["v4"] }

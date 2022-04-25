@@ -23,15 +23,14 @@ class State(_Base):
             if not hasattr(self, "__form__") or self.__form__ is None:
                 raise ValueError(f"instance of {self.__class__.__name__} has no form")
         else:
+            while isinstance(form, State):
+                form = form_of(form)
+
             # make sure to capture the URI of the given form
             if isinstance(form, URI):
                 self.__uri__ = form
             elif is_ref(form) and hasattr(form, "__uri__"):
                 self.__uri__ = uri(form)
-
-            # then discard any intermediate type expectations
-            while form_of(form) is not form:
-                form = form_of(form)
 
             self.__form__ = form
 
@@ -40,7 +39,7 @@ class State(_Base):
     def __json__(self):
         form = form_of(self)
 
-        if is_ref(form):
+        if uri(form) == uri(self):
             return to_json(form)
         else:
             return {str(uri(self)): [to_json(form)]}
@@ -76,7 +75,7 @@ class State(_Base):
             raise NotImplementedError("dtype to cast into must be known at compile-time")
 
         from .scalar.ref import Get
-        return dtype(Get(dtype, self))
+        return dtype(form=Get(dtype, self))
 
     def copy(self):
         """Create a new `State` by copying this one."""
