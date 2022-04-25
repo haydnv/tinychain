@@ -39,14 +39,14 @@ impl<T> Waiters<T> {
         }
     }
 
-    fn wake(&mut self) {
+    fn waker(&mut self) -> Option<Waker> {
         for (_txn_id, waiters) in self.waiters.iter_mut() {
             let mut i = 0;
             while i < waiters.len() {
                 if let Some(state) = waiters[i].upgrade() {
                     let waker = state.waker.lock().expect("TxnLock waiter");
                     if let Some(waker) = waker.deref() {
-                        waker.wake_by_ref();
+                        return Some(waker.clone());
                     }
                     i += 1;
                 } else {
@@ -54,6 +54,8 @@ impl<T> Waiters<T> {
                 }
             }
         }
+
+        None
     }
 
     fn finalize(&mut self, txn_id: &TxnId) {
@@ -110,7 +112,10 @@ impl<T> Drop for TxnLockReadGuard<T> {
         );
 
         if num_readers == &0 {
-            state.wake();
+            if let Some(waker) = state.waker() {
+                std::mem::drop(state);
+                waker.wake();
+            }
         }
     }
 }
@@ -168,7 +173,11 @@ impl<T> Drop for TxnLockWriteGuard<T> {
         }
 
         state.writer = None;
-        state.wake();
+
+        if let Some(waker) = state.waker() {
+            std::mem::drop(state);
+            waker.wake();
+        }
     }
 }
 
@@ -183,8 +192,8 @@ struct LockState<T> {
 }
 
 impl<T> LockState<T> {
-    fn wake(&mut self) {
-        self.waiters.wake()
+    fn waker(&mut self) -> Option<Waker> {
+        self.waiters.waker()
     }
 }
 
@@ -438,7 +447,10 @@ impl<T: PartialEq + Clone + Send> Transact for TxnLock<T> {
         }
 
         state.pending_writes.remove(txn_id);
-        state.wake();
+        if let Some(waker) = state.waker() {
+            std::mem::drop(state);
+            waker.wake();
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -464,10 +476,13 @@ impl<T: Clone + Send> Future for TxnLockReadFuture<T> {
     type Output = TCResult<TxnLockReadGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
+        trace!("TxnLockReadFuture::poll {}", self.state.txn_id);
+
         match self.state.lock.try_read(self.state.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
+                trace!("TxnLockReadFuture::poll {} lock not ready", self.state.txn_id);
                 *self.state.waker.lock().expect("TxnLock read waker") = Some(cxt.waker().clone());
                 Poll::Pending
             }
@@ -483,10 +498,13 @@ impl<T: Clone + Send> Future for TxnLockWriteFuture<T> {
     type Output = TCResult<TxnLockWriteGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Self::Output> {
+        trace!("TxnLockWriteFuture::poll {}", self.state.txn_id);
+
         match self.state.lock.try_write(self.state.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
+                trace!("TxnLockWriteFuture::poll {} lock not ready", self.state.txn_id);
                 *self.state.waker.lock().expect("TxnLock write waiter") = Some(cxt.waker().clone());
                 Poll::Pending
             }

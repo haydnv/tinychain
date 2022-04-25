@@ -83,9 +83,6 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
         return "concurrent write benchmarks"
 
     def start(self, **flags):
-        if "stack_size" not in flags:
-            flags["stack_size"] = "24M"
-
         host = start_local_host("benchmark_writes", [tc.ml.service.ML(), DataStructures(tc.chain.Sync)], **flags)
         self.host = benchmark.Host(host)
 
