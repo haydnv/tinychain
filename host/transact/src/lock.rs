@@ -51,7 +51,8 @@ struct Inner<T> {
     name: String,
     canon: RwLock<T>,
     versions: Mutex<HashMap<TxnId, Arc<RwLock<T>>>>,
-    reserved: Arc<RwLock<Option<TxnId>>>,
+    latest_read: Arc<RwLock<Option<TxnId>>>,
+    pending_write: Arc<RwLock<Option<TxnId>>>,
     last_commit: RwLock<Option<TxnId>>,
     tx: Sender<TxnId>,
 }
@@ -71,7 +72,8 @@ impl<T: Clone> TxnLock<T> {
                 name: name.to_string(),
                 canon: RwLock::new(canon),
                 versions: Mutex::new(HashMap::new()),
-                reserved: Arc::new(RwLock::new(None)),
+                latest_read: Arc::new(RwLock::new(None)),
+                pending_write: Arc::new(RwLock::new(None)),
                 last_commit: RwLock::new(None),
                 tx,
             }),
@@ -85,20 +87,24 @@ impl<T: Clone> TxnLock<T> {
         );
 
         {
-            let reserved = self.inner.reserved.read().await;
-            if let Some(pending) = &*reserved {
-                if pending >= txn_id {
-                    return Ok(reserved);
+            let pending = self.inner.pending_write.read().await;
+            if let Some(pending_id) = &*pending {
+                if pending_id >= txn_id {
+                    return Ok(pending);
                 } else {
-                    debug!("{} has a pending write at {}", self.inner.name, pending);
+                    debug!(
+                        "can't read {} at {} since there is a write pending at {}",
+                        self.inner.name, txn_id, pending_id
+                    );
                 }
             } else {
-                return Ok(reserved);
+                return Ok(pending);
             }
         }
 
         let mut rx = self.inner.tx.subscribe();
         loop {
+            trace!("awaiting commit of {}...", self.inner.name);
             let commit_id = rx.recv().map_err(TCError::internal).await?;
 
             if &commit_id >= txn_id {
@@ -108,15 +114,15 @@ impl<T: Clone> TxnLock<T> {
                 )));
             }
 
-            let reserved = self.inner.reserved.read().await;
-            if let Some(pending) = &*reserved {
-                if pending >= txn_id {
-                    return Ok(reserved);
+            let pending = self.inner.pending_write.read().await;
+            if let Some(pending_id) = &*pending {
+                if pending_id >= txn_id {
+                    return Ok(pending);
                 } else {
-                    debug!("{} has a pending write at {}", self.inner.name, pending);
+                    debug!("{} has a pending write at {}", self.inner.name, pending_id);
                 }
             } else {
-                return Ok(reserved);
+                return Ok(pending);
             }
         }
     }
@@ -151,6 +157,13 @@ impl<T: Clone> TxnLock<T> {
             txn_id
         );
 
+        let mut latest_read = self.inner.latest_read.write().await;
+        if let Some(latest) = &mut *latest_read {
+            if *latest < txn_id {
+                *latest = txn_id;
+            }
+        }
+
         trace!("reading canonical version of {}", self.inner.name);
         let version = self.inner.canon.read().await;
 
@@ -172,7 +185,7 @@ impl<T: Clone> TxnLock<T> {
         );
 
         {
-            let reserved = self.inner.reserved.write().await;
+            let reserved = self.inner.pending_write.write().await;
             if let Some(pending) = &*reserved {
                 if pending == txn_id {
                     return Ok(reserved);
@@ -198,7 +211,7 @@ impl<T: Clone> TxnLock<T> {
                 )));
             }
 
-            let reserved = self.inner.reserved.write().await;
+            let reserved = self.inner.pending_write.write().await;
             if let Some(pending) = &*reserved {
                 if pending == txn_id {
                     return Ok(reserved);
@@ -279,7 +292,7 @@ impl<T: Eq + Clone + Send + Sync> Transact for TxnLock<T> {
         let (mut commit_id, mut canon, mut reserved) = join!(
             self.inner.last_commit.write(),
             self.inner.canon.write(),
-            self.inner.reserved.write()
+            self.inner.pending_write.write()
         );
 
         trace!("prepared to commit {} at {}", self.inner.name, txn_id);
