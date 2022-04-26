@@ -72,7 +72,7 @@ class DataStructures(tc.app.App):
 
 
 class ConcurrentWriteBenchmarks(benchmark.Benchmark):
-    CONCURRENCY = 5
+    CONCURRENCY = 10
     SCALES = [1, 5, 10, 100]
 
     def __init__(self):
@@ -174,7 +174,7 @@ class LoadBenchmarks(benchmark.Benchmark):
 
 
 class ReplicationBenchmarks(benchmark.Benchmark):
-    CONCURRENCY = 1
+    CONCURRENCY = 10
     SCALES = [1, 5, 10, 100]
     NUM_HOSTS = 4
 
