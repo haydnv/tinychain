@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's representation of a value which can be collated and stored. Unstable."

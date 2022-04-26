@@ -10,7 +10,7 @@ from ..util import deanonymize, form_of, to_json
 from .interface import Numeric, Trigonometric
 
 
-class Gradients(typing.Dict[Id, Numeric]):
+class Gradients(dict):
     def __setitem__(self, key: Id, value: Numeric):
         if key in self:
             dict.__setitem__(self, key, self[key] + value)

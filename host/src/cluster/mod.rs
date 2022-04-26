@@ -359,13 +359,6 @@ impl Instance for Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
-        {
-            debug!(
-                "replicas at commit: {}",
-                Value::from_iter(self.replicas.read(*txn_id).await.unwrap().iter().cloned())
-            );
-        }
-
         join_all(self.chains.iter().map(|(name, chain)| {
             debug!("cluster {} committing chain {}", self.link, name);
             chain.commit(txn_id)
@@ -373,13 +366,6 @@ impl Transact for Cluster {
         .await;
 
         self.replicas.commit(txn_id).await;
-
-        {
-            debug!(
-                "replicas after commit: {}",
-                Value::from_iter(self.replicas.read(*txn_id).await.unwrap().iter().cloned())
-            );
-        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

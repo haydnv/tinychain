@@ -188,6 +188,9 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
+    if "log_level" not in flags:
+        flags["log_level"] = "debug"
+
     process = Local(
         TC_PATH,
         workspace=f"/tmp/tc/tmp/{port}/{name}",
@@ -195,7 +198,6 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
         force_create=True,
         data_dir=data_dir,
         http_port=port,
-        log_level="debug",
         **flags)
 
     process.start(wait_time)
@@ -203,7 +205,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
 
 
 # use this alias to switch between Local and Docker host types
-start_host = start_local_host
+start_host = start_docker
 
 
 def _maybe_create_dir(path, force):
