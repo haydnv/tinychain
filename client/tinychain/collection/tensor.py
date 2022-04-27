@@ -1,5 +1,5 @@
 """An n-dimensional array of numbers."""
-
+import inspect
 import logging
 import typing
 
@@ -109,12 +109,6 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """
 
         return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/load", ((shape, dtype), data)))
-
-    @classmethod
-    def zeros_like(cls, tensor):
-        """Return a `Tensor` filled with zeros, with the same shape and data type as the given `tensor`."""
-
-        return cls.expect(tensor.shape, tensor.dtype)((tensor.shape, tensor.dtype))
 
     def __getitem__(self, bounds):
         return self.slice(bounds)
@@ -446,30 +440,28 @@ class Dense(Tensor):
         return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/constant", (shape, value)))
 
     @classmethod
-    def ones(cls, shape, dtype=F32):
-        """
-        Return a `Dense` tensor filled with ones.
+    def ones(cls, shape):
+        """Construct a `Dense` tensor with dtype :class:`F64` filled with ones."""
 
-        If `dtype` is not specified, the data type will be :class:`F32`.
-        """
-
-        return cls.expect(shape, dtype).constant(shape, Number(1).cast(dtype))
+        return cls.expect(shape, F64).constant(shape, 1.)
 
     @classmethod
     def ones_like(cls, tensor):
         """Return a `Dense` tensor filled with ones, with the same shape and data type as the given `tensor`."""
 
-        return cls.expect(tensor.shape, tensor.dtype).constant(tensor.shape, Number(1).cast(tensor.dtype))
+        return cls.ones(tensor.shape)
 
     @classmethod
-    def zeros(cls, shape, dtype=F32):
-        """
-        Return a `Dense` tensor filled with zeros.
+    def zeros(cls, shape):
+        """Construct a `Dense` tensor with dtype :class:`F64` filled with ones."""
 
-        If `dtype` is not specified, the data type will be :class:`F32`.
-        """
+        return cls.expect(shape, F64).constant(shape, 0.)
 
-        return cls.expect(shape, dtype).constant(shape, Number(0).cast(dtype))
+    @classmethod
+    def zeros_like(cls, tensor):
+        """Return a `Dense` tensor filled with zeros, with the same shape and data type as the given `tensor`."""
+
+        return cls.zeros(tensor.shape)
 
     @classmethod
     def random_normal(cls, shape, mean=0.0, std=1.0):
@@ -706,6 +698,6 @@ class Slice(Transform):
         if isinstance(loss, Number):
             return Transform.gradients(loss)
 
-        grad = type(self.subject).zeros_like(self.subject)
+        grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
         grad = ref.After(grad[self.args].write(grad), grad)
         return Transform.gradients(self, loss * grad)
