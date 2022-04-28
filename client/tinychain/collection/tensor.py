@@ -1,5 +1,5 @@
 """An n-dimensional array of numbers."""
-import inspect
+
 import logging
 import typing
 
@@ -699,5 +699,5 @@ class Slice(Transform):
             return Transform.gradients(loss)
 
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-        grad = ref.After(grad[self.args].write(grad), grad)
-        return Transform.gradients(self, loss * grad)
+        grad = Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad, "")))
+        return Transform.gradients(self, grad)

@@ -1,15 +1,13 @@
 from ..collection import tensor
 from ..util import form_of, hex_id
 from ..scalar.number import Number
+from ..scalar.ref import After, MethodSubject
 
 
 # TODO: support Sparse and Number variable types
 
 class Variable(tensor.Dense):
     """A trainable variable in a machine learning model."""
-
-    def __getitem__(self, bounds):
-        return Variable(tensor.Dense.__getitem__(self, bounds))
 
     def cast(self, number_type):
         return Variable(tensor.Dense.cast(self, number_type))
@@ -45,6 +43,16 @@ class Variable(tensor.Dense):
     def reshape(self, shape):
         shape = tuple(dim for dim in form_of(shape))
         return Variable.expect(shape, self.dtype)(Reshape(self, shape))
+
+    def slice(self, bounds):
+        parent = self
+        bounds = tensor.handle_bounds(bounds)
+
+        class WritableView(Variable):
+            def write(self, value):
+                return parent._put("", bounds, value)
+
+        return WritableView(Slice(self, bounds))
 
     def transpose(self, permutation=None):
         if permutation is None:
@@ -97,3 +105,16 @@ class Reshape(Transform, tensor.Reshape):
             return self.subject.invert(loss)
 
         return self.subject.invert(loss.reshape(self.subject.shape))
+
+
+class Slice(Transform):
+    def forward(self):
+        return tensor.NDArray.slice(self.subject, self.args)
+
+    def gradients(self, loss):
+        if isinstance(loss, Number):
+            return Transform.gradients(loss)
+
+        grad = tensor.Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
+        grad = tensor.Dense(After(grad[self.args].write(loss), MethodSubject(grad, "")))
+        return self.subject.invert(grad)
