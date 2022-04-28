@@ -1,6 +1,7 @@
 import numpy as np
-import unittest
+import time
 import tinychain as tc
+import unittest
 
 from ..process import start_host
 
@@ -49,7 +50,6 @@ class LinearAlgebraTests(unittest.TestCase):
             all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
         ])
 
-    # TODO: why does this cause a stack overflow on a debug build?
     def testSlogdet(self):
         x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
         expected_sign, expected_logdet = np.linalg.slogdet(x)
@@ -63,52 +63,67 @@ class LinearAlgebraTests(unittest.TestCase):
         self.assertTrue((actual_sign == expected_sign).all())
         self.assertTrue((abs((actual_logdet - expected_logdet)) < 1e-4).all())
 
-    # TODO: why does this cause a stack overflow on a debug build?
-    def testSvd_1x1(self):
+    def testSVD_1x1(self):
         n = 1
         m = 1
         matrix = np.random.random(n * m).reshape(n, m)
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
+        start = time.time()
         result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30))
+        elapsed = time.time() - start
+
+        print(f"{n}x{m} SVD ran in {elapsed}s")
+
         U, s, V = result
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
-    # TODO: why does this cause a stack overflow on a debug build?
     def testMatrixSVD_NltM(self):
         n = 4
         m = 5
         matrix = np.random.random(n * m).reshape(n, m)
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
+        start = time.time()
         result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30))
+        elapsed = time.time() - start
+
+        print(f"{n}x{m} SVD ran in {elapsed}s")
+
         U, s, V = result
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
-    # TODO: why does this cause a stack overflow on a debug build?
     def testMatrixSVD_NgtM(self):
         n = 4
         m = 3
         matrix = np.random.random(n * m).reshape(n, m)
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
+        start = time.time()
         result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=200))
+        elapsed = time.time() - start
+
+        print(f"{n}x{m} SVD ran in {elapsed}s")
+
         U, s, V = result
         actual = (load_np(U), load_np(s), load_np(V))
         self._check_svd(matrix, actual)
 
-    # TODO: why does this cause a stack overflow on a debug build?
     def testParallelSVD_NltM(self):
-        num_matrices = 1
+        num_matrices = 100
         n = 2
         m = 3
         shape = [num_matrices, n, m]
         matrices = np.random.random(np.product(shape)).reshape(shape)
         tensor = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
 
+        start = time.time()
         result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=10))
+        elapsed = time.time() - start
+
+        print(f"{num_matrices}x{n}x{m} SVD ran in {elapsed}s")
 
         U, s, V = result
         U = load_np(U)
@@ -120,18 +135,22 @@ class LinearAlgebraTests(unittest.TestCase):
             actual = (U[i], s[i], V[i])
             self._check_svd(expected, actual)
 
-    # TODO: why does this cause a stack overflow on a debug build?
     def testParallelSVD_NgtM(self):
-        num_matrices = 1
+        num_matrices = 10
         n = 3
         m = 2
         shape = [num_matrices, n, m]
         matrices = np.random.random(np.product(shape)).reshape(shape)
         tensor = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
 
+        start = time.time()
         result = self.host.post(
             LIB_URI.append("svd"),
             tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=30))
+
+        elapsed = time.time() - start
+
+        print(f"{num_matrices}x{n}x{m} SVD ran in {elapsed}s")
 
         U, s, V = result
         U = load_np(U)
