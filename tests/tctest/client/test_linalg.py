@@ -58,7 +58,7 @@ class LinearAlgebraTests(ClientTest):
 
         cxt = tc.Context()
         cxt.matrices = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.I32)
-        cxt.result = tc.linalg.norm(tensor=cxt.matrices)
+        cxt.result = tc.linalg.batch_norm(cxt.matrices)
 
         expected = [np.linalg.norm(matrix) for matrix in matrices]
 
