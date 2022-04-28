@@ -55,7 +55,7 @@ class DenseTests(HostTest):
 
     def testSliceAndWriteTensor(self):
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.zeros([2, 2, 5], tc.I32)
+        cxt.big = tc.tensor.Dense.zeros([2, 2, 5])
         cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
         cxt.result = tc.After(cxt.big[1, :2].write(cxt.small[0]), cxt.big)
 
@@ -63,7 +63,7 @@ class DenseTests(HostTest):
 
         expected = np.zeros([2, 2, 5], np.int64)
         expected[1, 0:2] = np.arange(1, 11).reshape(2, 5)[0]
-        expected = expect_dense(tc.I32, [2, 2, 5], expected.flatten())
+        expected = expect_dense(tc.F64, [2, 2, 5], expected.flatten())
 
         self.assertEqual(actual, expected)
 
@@ -205,8 +205,8 @@ class DenseTests(HostTest):
         trailing = [10]
 
         cxt = tc.Context()
-        cxt.big_ones = tc.tensor.Dense.ones(big, tc.U8)
-        cxt.big_zeros = tc.tensor.Dense.zeros(big, tc.U8)
+        cxt.big_ones = tc.tensor.Dense.ones(big)
+        cxt.big_zeros = tc.tensor.Dense.zeros(big)
         cxt.true = tc.tensor.Dense.ones(trailing)
         cxt.false = tc.tensor.Dense.zeros(trailing)
         cxt.result = [
@@ -613,7 +613,7 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.small = tc.tensor.Sparse.load([2, 3, 4, 1], data, tc.I32)
-        cxt.big = cxt.small * tc.tensor.Dense.ones(shape, tc.I32)
+        cxt.big = cxt.small * tc.tensor.Dense.ones(shape)
         cxt.slice = cxt.big[:-1, 1:4, 1]
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -624,7 +624,7 @@ class SparseTests(HostTest):
         expected = expected * np.ones(shape)
         expected = expected[:-1, 1:4, 1]
 
-        expected = expect_sparse(tc.I32, expected.shape, expected)
+        expected = expect_sparse(tc.F64, expected.shape, expected)
         self.assertEqual(actual, expected)
 
     def testArgmax(self):
@@ -693,7 +693,7 @@ class TensorTests(HostTest):
 
         cxt = tc.Context()
         cxt.sparse = tc.tensor.Sparse.zeros([1, y, z])
-        cxt.dense = tc.tensor.Dense.ones([x, 1, z], tc.I32)
+        cxt.dense = tc.tensor.Dense.ones([x, 1, z])
         cxt.result = (cxt.sparse - cxt.dense).sum()
 
         actual = self.host.post(ENDPOINT, cxt)
