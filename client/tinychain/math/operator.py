@@ -333,7 +333,7 @@ class Log(Dual):
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(loss / self.subject))
         elif operator(self.subject):
-            operator(self.subject).gradients(loss / self.subject)
+            grads.update(operator(self.subject).gradients(loss / self.subject))
 
         return grads
 

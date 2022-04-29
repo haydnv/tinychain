@@ -7,7 +7,7 @@ from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.interface import Numeric, Trigonometric
-from ..math.operator import derivative_of, operator, Gradients, Operator, Unary, Add, Div, Exp, MatMul, Mul, Pow, Sub, Sin, Cos, Asin, Acos, Sinh, Cosh, Asinh, Acosh, Tan, Tanh, Atan, Atanh
+from ..math.operator import *
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
@@ -32,7 +32,9 @@ class NDArray(Interface):
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
-
+    
+    def sum(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, 'sum'), axis)
 
 class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
@@ -370,7 +372,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return self._get("sum", axis, rtype)
+        return Tensor(Sum(self, axis))#self._get("sum", axis, rtype)
 
     def transpose(self, permutation=None):
         """
@@ -701,3 +703,31 @@ class Slice(Transform):
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
         grad = Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad, "")))
         return Transform.gradients(self, grad)
+
+
+# TODO: make it work for multiple functions
+class Sum(Dual):
+    def forward(self):
+        return NDArray.sum(self.subject, axis=self.args)
+
+    def backward(self, variable=None):
+        from tinychain.collection.tensor import Dense
+
+        return Dense.ones_like(self.subject)
+    
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = Gradients()
+        old_shape = self.subject.shape
+        if isinstance(self.args, int):
+            axis = [self.args]
+        else:
+            axis = self.args
+        new_shape = [1 if i in axis else old_shape[i] for i in range(len(old_shape))]
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(Dense.ones_like(self.subject)*loss.reshape((new_shape))))#loss.expand_dims(self.args)))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(Dense.ones_like(self.subject)*loss.reshape((new_shape))))
+
+        return grads
