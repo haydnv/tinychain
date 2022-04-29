@@ -58,9 +58,7 @@ def batch_norm(matrices):
 
 # TODO: replace this helper class with a `typing.TypedDict`
 class PLUFactorization(Map):
-    """
-    PLU factorization of a given `[N, N]` matrix.
-    """
+    """PLU factorization of a given `[N, N]` matrix."""
 
     @property
     def p(self) -> Tensor:
