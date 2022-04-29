@@ -88,14 +88,14 @@ class Dual(Operator):
 
 
 class Trig(Unary):
-  def gradients(self, loss):
+    def gradients(self, loss):
         from ..ml.optimizer import Variable
         if isinstance(self.subject, Variable):
-          return self.subject.invert(loss)
+            return self.subject.invert(loss)
         elif operator(self.subject):
-          return operator(self.subject).gradients(loss)
+            return operator(self.subject).gradients(loss)
         else:
-          return Gradients()
+            return Gradients()
 
 
 class Custom(Unary):
@@ -111,17 +111,6 @@ class Custom(Unary):
     def __ns__(self, context):
         Unary.__ns__(self, context)
         deanonymize(self._op, context)
-
-
-class Trig(Unary):
-  def gradients(self, loss):
-        from ..ml.optimizer import Variable
-        if isinstance(self.subject, Variable):
-          return self.subject.invert(loss)
-        elif operator(self.subject):
-          return operator(self.subject).gradients(loss)
-        else:
-          return Gradients()
 
 
 class Add(Dual):
@@ -289,12 +278,12 @@ class Pow(Dual):
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
         elif operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+            grads.update(operator(self.subject).gradients(loss * self.args * self.subject**(self.args - 1)))
 
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
         elif operator(self.args):
-            grads.update(operator(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
+            grads.update(operator(self.args).gradients(loss * self.subject.log() * self.subject**self.args))
 
         return grads
 
@@ -322,7 +311,7 @@ class Exp(Unary):
         return grads
 
 
-#TODO: Tensor.log(base!=None)
+# TODO: Tensor.log(base!=None)
 class Log(Dual):
     def forward(self):
         return Numeric.log(self.subject, self.args)
@@ -341,6 +330,17 @@ class Log(Dual):
             grads.update(operator(self.subject).gradients(loss / self.subject))
 
         return grads
+
+
+class Trig(Unary):
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+        if isinstance(self.subject, Variable):
+            return self.subject.invert(loss)
+        elif operator(self.subject):
+            return operator(self.subject).gradients(loss)
+        else:
+            return Gradients()
 
 
 class Sin(Trig):
@@ -385,7 +385,7 @@ class Asin(Trig):
 class Acos(Trig):
     def forward(self):
         return Trigonometric.acos(self.subject)
-    
+
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return -((1 - subject**2)**-0.5)
@@ -411,7 +411,7 @@ class Sinh(Trig):
 class Cosh(Trig):
     def forward(self):
         return Trigonometric.cosh(self.subject)
-    
+
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.sinh()
@@ -437,7 +437,7 @@ class Asinh(Trig):
 class Acosh(Trig):
     def forward(self):
         return Trigonometric.acosh(self.subject)
-    
+
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return ((subject**2) - 1)**-0.5
@@ -450,7 +450,7 @@ class Acosh(Trig):
 class Tan(Trig):
     def forward(self):
         return Trigonometric.tan(self.subject)
-    
+
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject.cos()**2)
@@ -496,7 +496,7 @@ class Atan(Trig):
 class Atanh(Trig):
     def forward(self):
         return Trigonometric.atanh(self.subject)
-    
+
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (1 - (subject**2))

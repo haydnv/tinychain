@@ -6,7 +6,6 @@ import typing
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
-from ..math.interface import Numeric, Trigonometric
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
@@ -18,8 +17,6 @@ from .base import Collection
 
 
 class NDArray(Interface):
-    def slice(self, bounds):
-        return ref.Get(ref.MethodSubject(self), bounds)
 
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
@@ -29,6 +26,12 @@ class NDArray(Interface):
 
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+
+    def slice(self, bounds):
+        return ref.Get(ref.MethodSubject(self), bounds)
+
+    def sum(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, "sum"), axis)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -370,7 +373,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return self._get("sum", axis, rtype)
+        return rtype(form=Sum(self, axis))
 
     def transpose(self, permutation=None):
         """
@@ -630,6 +633,38 @@ class Copy(Unary):
             return form_of(self.subject).gradients(loss)
 
         return Gradients()
+
+
+class Reduce(Dual):
+    # TODO: move common functionality from reduce operators into this parent class
+    pass
+
+
+class Sum(Reduce):
+    def forward(self):
+        return NDArray.sum(self.subject, axis=self.args)
+
+    def backward(self, variable=None):
+        return derivative_of(self.subject).sum(self.args)
+
+    def gradients(self, loss):
+        if self.args is None:
+            # TODO: is this correct?
+            loss = self.backward() * (loss / self.subject.size)
+        else:
+            axis = self.args
+            shape = self.subject.shape[:axis] + [1] + self.subject.shape[(axis + 1):]
+            loss = self.backward() * loss.reshape(shape)
+
+        from ..ml.optimizer import Variable
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+
+        return grads
 
 
 class Transform(Operator):
