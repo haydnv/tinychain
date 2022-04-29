@@ -5,7 +5,7 @@ from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
 from ..state import StateRef
-from ..util import deanonymize, form_of, to_json, hex_id
+from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -87,6 +87,17 @@ class Dual(Operator):
     """A differentiable operator with two arguments"""
 
 
+class Trig(Unary):
+  def gradients(self, loss):
+        from ..ml.optimizer import Variable
+        if isinstance(self.subject, Variable):
+          return self.subject.invert(loss)
+        elif operator(self.subject):
+          return operator(self.subject).gradients(loss)
+        else:
+          return Gradients()
+
+
 class Custom(Unary):
     """A custom operator"""
 
@@ -102,6 +113,17 @@ class Custom(Unary):
         deanonymize(self._op, context)
 
 
+class Trig(Unary):
+  def gradients(self, loss):
+        from ..ml.optimizer import Variable
+        if isinstance(self.subject, Variable):
+          return self.subject.invert(loss)
+        elif operator(self.subject):
+          return operator(self.subject).gradients(loss)
+        else:
+          return Gradients()
+
+
 class Add(Dual):
     def forward(self):
         return Numeric.add(self.subject, self.args)
@@ -114,19 +136,16 @@ class Add(Dual):
     def gradients(self, loss):
         # TODO: there should be a way to avoid this import (same below)
         from ..ml.optimizer import Variable
-        from ..scalar.number import Number
 
         grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.subject.invert(loss if isinstance(loss, Number) else loss.sum()))
+            grads.update(self.subject.invert(loss))
         elif operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.args.invert(loss if isinstance(loss, Number) else loss.sum()))
+            grads.update(self.args.invert(loss))
         elif operator(self.args):
             grads.update(operator(self.args).gradients(loss))
 
@@ -209,20 +228,16 @@ class Sub(Dual):
 
     def gradients(self, loss):
         from ..ml.optimizer import Variable
-        from ..scalar.number import Number
 
-        loss = loss if isinstance(loss, Number) else loss.sum()
         grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.subject.invert(-(loss if isinstance(loss, Number) else loss.sum())))
+            grads.update(self.subject.invert(-loss))
         elif operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
-            grads.update(self.args.invert(-(loss if isinstance(loss, Number) else loss.sum())))
+            grads.update(self.args.invert(-loss))
         elif operator(self.args):
             grads.update(operator(self.args).gradients(loss))
 
@@ -262,7 +277,7 @@ class Pow(Dual):
 
     def backward(self, variable=None):
         if self.args is variable:
-            return (self.subject**self.args) * self.subject.ln()
+            return (self.subject**self.args) * self.subject.log()
 
         return self.args * (self.subject**(self.args - 1))
 
@@ -277,9 +292,9 @@ class Pow(Dual):
             grads.update(operator(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
 
         if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss * self.subject.ln() * self.subject**self.args))
+            grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
         elif operator(self.args):
-            grads.update(operator(self.args).gradients(loss * self.subject.ln() * self.subject ** self.args))
+            grads.update(operator(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
 
         return grads
 
@@ -297,17 +312,38 @@ class Exp(Unary):
     def gradients(self, loss):
         from ..ml.optimizer import Variable
 
-        grad = self.subject.exp() * loss
+        grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            return self.subject.invert(grad)
+            grads.update(self.subject.invert(self.subject.exp() * loss))
         elif operator(self.subject):
-            return operator(self.subject).gradients(grad)
+            grads.update(operator(self.subject).gradients(self.subject.exp() * loss))
 
-        return Gradients()
+        return grads
 
 
-class Sin(Unary):
+#TODO: Tensor.log(base!=None)
+class Log(Dual):
+    def forward(self):
+        return Numeric.log(self.subject, self.args)
+
+    def backward(self, _variable):
+        return 1 / self.subject
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss / self.subject))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss / self.subject))
+
+        return grads
+
+
+class Sin(Trig):
     def forward(self):
         return Trigonometric.sin(self.subject)
 
@@ -315,8 +351,12 @@ class Sin(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cos()
 
+    def gradients(self, loss):
+        grad = self.subject.cos() * loss
+        return Trig.gradients(self, grad)
 
-class Cos(Unary):
+
+class Cos(Trig):
     def forward(self):
         return Trigonometric.cos(self.subject)
 
@@ -324,8 +364,12 @@ class Cos(Unary):
         subject = derivative_of(self.subject, variable)
         return subject - self.subject.sin()
 
+    def gradients(self, loss):
+        grad = -self.subject.sin() * loss
+        return Trig.gradients(self, grad)
 
-class Asin(Unary):
+
+class Asin(Trig):
     def forward(self):
         return Trigonometric.asin(self.subject)
 
@@ -333,8 +377,12 @@ class Asin(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (1 - (subject**2))**-0.5
 
+    def gradients(self, loss):
+        grad = (1 - self.subject**2)**(-0.5) * loss
+        return Trig.gradients(self, grad)
 
-class Acos(Unary):
+
+class Acos(Trig):
     def forward(self):
         return Trigonometric.acos(self.subject)
     
@@ -342,8 +390,12 @@ class Acos(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return -((1 - subject**2)**-0.5)
 
+    def gradients(self, loss):
+        grad = -(1 - self.subject**2)**(-0.5) * loss
+        return Trig.gradients(self, grad)
 
-class Sinh(Unary):
+
+class Sinh(Trig):
     def forward(self):
         return Trigonometric.sinh(self.subject)
 
@@ -351,8 +403,12 @@ class Sinh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.cosh()
 
+    def gradients(self, loss):
+        grad = self.subject.cosh() * loss
+        return Trig.gradients(self, grad)
 
-class Cosh(Unary):
+
+class Cosh(Trig):
     def forward(self):
         return Trigonometric.cosh(self.subject)
     
@@ -360,8 +416,12 @@ class Cosh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return subject.sinh()
 
+    def gradients(self, loss):
+        grad = self.subject.sinh() * loss
+        return Trig.gradients(self, grad)
 
-class Asinh(Unary):
+
+class Asinh(Trig):
     def forward(self):
         return Trigonometric.asinh(self.subject)
 
@@ -369,8 +429,12 @@ class Asinh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return (subject**2 + 1)**-0.5
 
+    def gradients(self, loss):
+        grad = (self.subject**2 + 1)**(-0.5) * loss
+        return Trig.gradients(self, grad)
 
-class Acosh(Unary):
+
+class Acosh(Trig):
     def forward(self):
         return Trigonometric.acosh(self.subject)
     
@@ -378,8 +442,12 @@ class Acosh(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return ((subject**2) - 1)**-0.5
 
+    def gradients(self, loss):
+        grad = (self.subject**2 - 1)**(-0.5) * loss
+        return Trig.gradients(self, grad)
 
-class Tan(Unary):
+
+class Tan(Trig):
     def forward(self):
         return Trigonometric.tan(self.subject)
     
@@ -387,8 +455,12 @@ class Tan(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject.cos()**2)
 
+    def gradients(self, loss):
+        grad = 1 / (self.subject.cos()**2) * loss
+        return Trig.gradients(self, grad)
 
-class Tanh(Unary):
+
+class Tanh(Trig):
     def forward(self):
         return Trigonometric.tanh(self.subject)
 
@@ -408,7 +480,7 @@ class Tanh(Unary):
         return Gradients()
 
 
-class Atan(Unary):
+class Atan(Trig):
     def forward(self):
         return Trigonometric.atan(self.subject)
 
@@ -416,14 +488,22 @@ class Atan(Unary):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (subject**2 + 1)
 
+    def gradients(self, loss):
+        grad = (self.subject**2 + 1)**(-1) * loss
+        return Trig.gradients(self, grad)
 
-class Atanh(Unary):
+
+class Atanh(Trig):
     def forward(self):
         return Trigonometric.atanh(self.subject)
     
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
         return 1 / (1 - (subject**2))
+
+    def gradients(self, loss):
+        grad = (1 - self.subject**2)**(-1) * loss
+        return Trig.gradients(self, grad)
 
 
 def derivative_of(state, variable=None):

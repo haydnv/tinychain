@@ -61,7 +61,9 @@ class Parallel(Optimizer, Dynamic):
             loss = self._cost(inputs_batch, outputs)
             cxt.d_loss = derivative_of(loss).copy()
             gradients = operator.gradients(cxt.d_loss)
-            assert gradients
+
+            if not gradients:
+                raise ValueError(f"operator {operator} has no gradients")
 
             return {
                 var_id: (grad if isinstance(grad, Number) else grad.sum(0))
