@@ -5,7 +5,7 @@ from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
 from ..state import StateRef
-from ..util import deanonymize, form_of, to_json, hex_id
+from ..util import deanonymize, form_of, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -92,8 +92,8 @@ class Trig(Unary):
         from ..ml.optimizer import Variable
         if isinstance(self.subject, Variable):
           return self.subject.invert(loss)
-        elif isinstance(form_of(self.subject), Operator):
-          return form_of(self.subject).gradients(loss)
+        elif operator(self.subject):
+          return operator(self.subject).gradients(loss)
         else:
           return Gradients()
 
@@ -118,8 +118,8 @@ class Trig(Unary):
         from ..ml.optimizer import Variable
         if isinstance(self.subject, Variable):
           return self.subject.invert(loss)
-        elif isinstance(form_of(self.subject), Operator):
-          return form_of(self.subject).gradients(loss)
+        elif operator(self.subject):
+          return operator(self.subject).gradients(loss)
         else:
           return Gradients()
 
@@ -136,18 +136,15 @@ class Add(Dual):
     def gradients(self, loss):
         # TODO: there should be a way to avoid this import (same below)
         from ..ml.optimizer import Variable
-        from ..scalar.number import Number
 
         grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
             grads.update(self.subject.invert(loss))
         elif operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
             grads.update(self.args.invert(loss))
         elif operator(self.args):
             grads.update(operator(self.args).gradients(loss))
@@ -231,19 +228,15 @@ class Sub(Dual):
 
     def gradients(self, loss):
         from ..ml.optimizer import Variable
-        from ..scalar.number import Number
 
-        #loss = loss if isinstance(loss, Number) else loss.sum()
         grads = Gradients()
 
         if isinstance(self.subject, Variable):
-            # TODO: maintain the shape of the loss tensor
             grads.update(self.subject.invert(-loss))
         elif operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
 
         if isinstance(self.args, Variable):
-            # TODO: maintain the shape of the loss tensor
             grads.update(self.args.invert(-loss))
         elif operator(self.args):
             grads.update(operator(self.args).gradients(loss))
@@ -323,10 +316,11 @@ class Exp(Unary):
 
         if isinstance(self.subject, Variable):
             grads.update(self.subject.invert(self.subject.exp() * loss))
-        elif isinstance(form_of(self.subject), Operator):
+        elif operator(self.subject):
             grads.update(operator(self.subject).gradients(self.subject.exp() * loss))
 
         return grads
+
 
 #TODO: Tensor.log(base!=None)
 class Log(Dual):
