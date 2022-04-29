@@ -216,7 +216,7 @@ class Op(Ref):
         self.args = args
 
     def __args__(self):
-        subject = [self.subject] if is_op_ref(self.subject) else []
+        subject = [self.subject] if is_op_ref(self.subject, allow_literals=False) else []
         return subject + [arg for arg in list(self.args) if is_op_ref(arg)]
 
     def __json__(self):
@@ -449,15 +449,26 @@ class MethodSubject(object):
         return f"MethodSubject {repr(self.subject)}"
 
 
-def is_op_ref(state_or_ref):
+def is_literal(state):
+    if isinstance(state, (list, tuple)):
+        return all(is_literal(item) for item in state)
+    elif isinstance(state, dict):
+        return all(is_literal(value) for value in state.values())
+
+    return isinstance(state, (bool, float, int, str))
+
+
+def is_op_ref(state_or_ref, allow_literals=True):
     """Return `True` if `state_or_ref` is a reference to an `Op`, otherwise `False`."""
 
-    if isinstance(state_or_ref, (Op, After, If, Case)):
+    if allow_literals and is_literal(state_or_ref):
+        return False
+    elif isinstance(state_or_ref, (Op, After, If, Case)):
         return True
     elif uri(state_or_ref) and uri(type(state_or_ref)) and uri(state_or_ref) >= uri(type(state_or_ref)):
         return True
     elif form_of(state_or_ref) is not state_or_ref:
-        return is_op_ref(form_of(state_or_ref))
+        return is_op_ref(form_of(state_or_ref), allow_literals)
     elif isinstance(state_or_ref, (list, tuple)):
         return any(is_op_ref(item) for item in state_or_ref)
     elif isinstance(state_or_ref, dict):
