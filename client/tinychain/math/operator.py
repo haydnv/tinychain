@@ -5,7 +5,7 @@ from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
 from ..state import StateRef
-from ..util import deanonymize, form_of, to_json
+from ..util import deanonymize, form_of, to_json, hex_id
 
 from .interface import Numeric, Trigonometric
 
@@ -509,7 +509,7 @@ def derivative_of(state, variable=None):
     If the given `state` is not differentiable, this will raise a `TypeError`.
     """
 
-    from ..scalar.number import Number
+    from ..scalar.number import F32, Number
     from ..collection.tensor import Dense, Sparse, Tensor
     from ..ml.optimizer import Variable
 
@@ -522,14 +522,14 @@ def derivative_of(state, variable=None):
             return Dense.ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
-            return Sparse.zeros_like(state)
+            return Sparse.create(state, F32)
 
-    if isinstance(form_of(state), Operator):
-        return form_of(state).backward(variable)
+    if operator(state):
+        return operator(state).backward(variable)
     elif isinstance(state, Number):
         return type(state)(form=0)
     elif isinstance(state, Tensor):
-        return Sparse.zeros_like(state)
+        return Sparse.create(state, F32)
     elif isinstance(state, int) or isinstance(state, float):
         return 0
     else:
