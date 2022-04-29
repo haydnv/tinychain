@@ -30,6 +30,7 @@ class State(_Base):
             if isinstance(form, URI):
                 self.__uri__ = form
             elif is_ref(form) and hasattr(form, "__uri__"):
+                assert uri(form)
                 self.__uri__ = uri(form)
 
             self.__form__ = form
