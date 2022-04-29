@@ -355,12 +355,3 @@ def load_np(as_json, dtype=float):
 
 if __name__ == "__main__":
     unittest.main()
-    # cxt = tc.Context()
-    # _a = np.random.rand(3, 3)
-    # a = Dense.load(_a.shape, _a.flatten().tolist())
-    # cxt.a = a 
-    # b = a * 0
-    # cxt.b = tc.After(b[1, 1].write(11), b)
-    # #cxt.a = a
-    # result = HOST.post(ENDPOINT, cxt)
-    # print(result)
