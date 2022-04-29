@@ -15,6 +15,9 @@ use tc_error::*;
 
 use crate::{Transact, TxnId, MIN_ID};
 
+#[derive(Copy, Clone)]
+struct Wake;
+
 pub struct TxnLockReadGuard<T> {
     lock: TxnLock<T>,
     txn_id: TxnId,
@@ -66,7 +69,7 @@ impl<T> Drop for TxnLockReadGuard<T> {
         );
 
         if num_readers == &0 {
-            self.lock.wake(self.txn_id);
+            self.lock.wake();
         }
     }
 }
@@ -124,7 +127,7 @@ impl<T> Drop for TxnLockWriteGuard<T> {
         }
 
         lock_state.writer = None;
-        self.lock.wake(self.txn_id);
+        self.lock.wake();
     }
 }
 
@@ -273,7 +276,7 @@ impl<T: Clone + Eq> LockState<T> {
 struct Inner<T> {
     name: String,
     state: Mutex<LockState<T>>,
-    tx: Sender<TxnId>,
+    tx: Sender<Wake>,
 }
 
 #[derive(Clone)]
@@ -308,8 +311,8 @@ impl<T> TxnLock<T> {
         }
     }
 
-    fn wake(&self, txn_id: TxnId) -> usize {
-        match self.inner.tx.send(txn_id) {
+    fn wake(&self) -> usize {
+        match self.inner.tx.send(Wake) {
             Err(broadcast::error::SendError(_)) => 0,
             Ok(num_subscribed) => num_subscribed,
         }
@@ -321,16 +324,18 @@ impl<T: Clone> TxnLock<T> {
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
         debug!("read {} at {}", self.inner.name, txn_id);
 
-        let mut rx = self.inner.tx.subscribe();
-        let version = loop {
-            {
-                let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
-                if let Some(versions) = lock_state.try_read(&txn_id)? {
-                    break versions.get(txn_id);
+        let version = {
+            let mut rx = self.inner.tx.subscribe();
+            loop {
+                {
+                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+                    if let Some(versions) = lock_state.try_read(&txn_id)? {
+                        break versions.get(txn_id);
+                    }
                 }
-            }
 
-            let _updated = rx.recv().map_err(TCError::internal).await?;
+                let _updated = rx.recv().map_err(TCError::internal).await?;
+            }
         };
 
         let guard = version.read_owned().await;
@@ -341,16 +346,18 @@ impl<T: Clone> TxnLock<T> {
     pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
         debug!("write {} at {}", self.inner.name, txn_id);
 
-        let mut rx = self.inner.tx.subscribe();
-        let version = loop {
-            {
-                let mut lock_state = self.inner.state.lock().expect("TxnLock::await_writable");
-                if let Some(versions) = lock_state.try_write(&txn_id)? {
-                    break versions.get(txn_id);
-                };
-            }
+        let version = {
+            let mut rx = self.inner.tx.subscribe();
+            loop {
+                {
+                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_writable");
+                    if let Some(versions) = lock_state.try_write(&txn_id)? {
+                        break versions.get(txn_id);
+                    };
+                }
 
-            rx.recv().map_err(TCError::internal).await?;
+                rx.recv().map_err(TCError::internal).await?;
+            }
         };
 
         let guard = version.write_owned().await;
@@ -368,7 +375,7 @@ impl<T: Eq + Clone + Send + Sync> Transact for TxnLock<T> {
             lock_state.commit(txn_id);
         }
 
-        self.wake(*txn_id);
+        self.wake();
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -379,6 +386,6 @@ impl<T: Eq + Clone + Send + Sync> Transact for TxnLock<T> {
             lock_state.finalize(txn_id);
         }
 
-        self.wake(*txn_id);
+        self.wake();
     }
 }
