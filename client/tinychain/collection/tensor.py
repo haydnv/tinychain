@@ -644,20 +644,34 @@ class Reduce(Dual):
     pass
 
 
+# TODO: make it work for multiple functions and for .sum(axis=tuple)
 class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, axis=self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject).sum(self.args)
+        from tinychain.collection.tensor import Dense
+
+        return Dense.ones_like(self.subject)
 
     def gradients(self, loss):
         if self.args is None:
-            # TODO: is this correct?
-            loss = self.backward() * (loss / self.subject.size)
+            loss = self.backward() * loss
         else:
             axis = self.args
-            shape = self.subject.shape[:axis] + [1] + self.subject.shape[(axis + 1):]
+            if isinstance(self.subject.shape, Tensor):
+                old_shape = form_of(self.subject.shape)
+            else: 
+                old_shape = self.subject.shape
+            if isinstance(self.args, int):
+                if self.args >= 0: 
+                    axis = [self.args]
+                else: 
+                    axis = [len(old_shape)+self.args]
+            else:
+                axis = self.args
+
+            shape = [1 if i in axis else old_shape[i] for i in range(len(old_shape))]
             loss = self.backward() * loss.reshape(shape)
 
         from ..ml.optimizer import Variable
