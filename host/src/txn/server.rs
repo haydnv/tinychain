@@ -93,7 +93,7 @@ impl TxnServer {
             .create_dir(txn_id.to_string())
             .map_err(fs::io_err)?;
 
-        fs::Dir::new(cache).await
+        Ok(fs::Dir::new(cache))
     }
 }
 
