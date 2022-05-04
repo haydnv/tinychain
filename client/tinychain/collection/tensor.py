@@ -1,6 +1,6 @@
 """An n-dimensional array of numbers."""
 
-from ..decorators import closure, get, post
+from ..decorators import post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
 from ..math.operator import *
@@ -17,12 +17,7 @@ class Shape(Tuple):
     __spec__ = typing.Tuple[U64, ...]
 
     def reduce_shape(self, axes):
-        @get
-        def dim(args: typing.Tuple[UInt, U64]) -> U64:
-            x, i = args
-            return ref.If(Tuple(axes).contains(x), 1, i)
-
-        return Shape.range((0, self.len())).zip(self).map(dim)
+        return ref.Post(uri(Tensor).append("reduce_shape"), {"shape": self, "axes": axes})
 
 
 class NDArray(Interface):

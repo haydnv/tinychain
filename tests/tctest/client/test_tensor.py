@@ -86,14 +86,6 @@ class ExampleTests(ClientTest):
 
 
 class TensorTests(ClientTest):
-    def testShape(self):
-        cxt = tc.Context()
-        cxt.shape = tc.tensor.Shape([2, 3, 4, 5, 6, 7])
-        cxt.reduced = cxt.shape.reduce_shape([2, 4])
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [2, 3, 1, 5, 1, 7])
-
     def testWhere(self):
         size = 5
         x = np.random.random(size).astype(bool)

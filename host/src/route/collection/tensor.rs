@@ -948,6 +948,40 @@ impl<T> From<T> for SplitHandler<T> {
     }
 }
 
+struct ReduceShapeHandler;
+
+impl<'a> Handler<'a> for ReduceShapeHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let mut shape: Vec<u64> = params.require(&label("shape").into())?;
+                let axes: Value = params.require(&label("axes").into())?;
+                params.expect_empty()?;
+
+                let ndim = shape.len();
+                let axes = match axes {
+                    Value::Number(axis) => cast_axis(Value::Number(axis), ndim).map(|x| vec![x]),
+                    Value::Tuple(axes) => axes
+                        .into_iter()
+                        .map(|axis| cast_axis(axis, ndim))
+                        .collect::<TCResult<Vec<usize>>>(),
+
+                    other => Err(TCError::bad_request("invalid value for axes", other)),
+                }?;
+
+                for axis in axes {
+                    shape[axis] = 1;
+                }
+
+                Ok(Value::Tuple(shape.into_iter().map(Value::from).collect()).into())
+            })
+        }))
+    }
+}
+
 struct TileHandler;
 
 impl<'a> Handler<'a> for TileHandler {
@@ -1821,6 +1855,7 @@ impl Route for Static {
             "load" if path.len() == 1 => Some(Box::new(LoadHandler { class: None })),
             "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
             "tile" if path.len() == 1 => Some(Box::new(TileHandler)),
+            "reduce_shape" if path.len() == 1 => Some(Box::new(ReduceShapeHandler)),
             _ => None,
         }
     }
