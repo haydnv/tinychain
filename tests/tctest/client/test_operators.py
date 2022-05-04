@@ -361,9 +361,13 @@ class OperatorTests(unittest.TestCase):
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
-
+        
 
 def load_np(as_json, dtype=float):
     shape = as_json[TENSOR_URI][0][0]
     ndarray = np.array(as_json[TENSOR_URI][1], dtype)
     return ndarray.reshape(shape)
+
+
+if __name__ == "__main__":
+    unittest.main()
