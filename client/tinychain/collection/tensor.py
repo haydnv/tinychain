@@ -659,19 +659,16 @@ class Sum(Reduce):
             loss = self.backward() * loss
         else:
             axis = self.args
-            if isinstance(self.subject.shape, Tensor):
-                old_shape = form_of(self.subject.shape)
-            else: 
+            if isinstance(self.subject.shape, Shape):
                 old_shape = self.subject.shape
-            if isinstance(self.args, int):
-                if self.args >= 0: 
-                    axis = [self.args]
-                else: 
-                    axis = [len(old_shape)+self.args]
-            else:
-                axis = self.args
-
-            shape = [1 if i in axis else old_shape[i] for i in range(len(old_shape))]
+                len_shape = self.subject.shape.len()
+            else: 
+                old_shape = Shape(self.subject.shape)
+                len_shape = len(self.subject.shape)
+            if self.args < 0: 
+                axis = len_shape + self.args
+                
+            shape = old_shape.reduce_shape([axis])
             loss = self.backward() * loss.reshape(shape)
 
         from ..ml.optimizer import Variable
