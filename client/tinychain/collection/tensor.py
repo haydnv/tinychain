@@ -21,9 +21,6 @@ class Shape(Tuple):
 
 
 class NDArray(Interface):
-    def slice(self, bounds):
-        return ref.Get(ref.MethodSubject(self), bounds)
-
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
@@ -32,6 +29,12 @@ class NDArray(Interface):
 
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+
+    def slice(self, bounds):
+        return ref.Get(ref.MethodSubject(self), bounds)
+
+    def sum(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, "sum"), axis)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -373,7 +376,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return self._get("sum", axis, rtype)
+        return rtype(form=Sum(self, axis))
 
     def transpose(self, permutation=None):
         """
@@ -633,6 +636,49 @@ class Copy(Unary):
             return form_of(self.subject).gradients(loss)
 
         return Gradients()
+
+
+class Reduce(Dual):
+    # TODO: move common functionality from reduce operators into this parent class
+    pass
+
+
+# TODO: make it work for multiple functions and for .sum(axis=tuple)
+class Sum(Reduce):
+    def forward(self):
+        return NDArray.sum(self.subject, axis=self.args)
+
+    def backward(self, variable=None):
+        from tinychain.collection.tensor import Dense
+
+        return Dense.ones_like(self.subject)
+
+    def gradients(self, loss):
+        if self.args is None:
+            loss = self.backward() * loss
+        else:
+            axis = self.args
+            if isinstance(self.subject.shape, Shape):
+                old_shape = self.subject.shape
+                len_shape = self.subject.shape.len()
+            else: 
+                old_shape = Shape(self.subject.shape)
+                len_shape = len(self.subject.shape)
+            if self.args < 0: 
+                axis = len_shape + self.args
+                
+            shape = old_shape.reduce_shape([axis])
+            loss = self.backward() * loss.reshape(shape)
+
+        from ..ml.optimizer import Variable
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+
+        return grads
 
 
 class Transform(Operator):
