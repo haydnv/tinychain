@@ -1,12 +1,8 @@
 """An n-dimensional array of numbers."""
 
-import logging
-import typing
-
-from ..decorators import post
+from ..decorators import closure, get, post
 from ..generic import Map, Tuple
 from ..interface import Equality, Interface, Order
-from ..math.interface import Numeric, Trigonometric
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
@@ -15,6 +11,18 @@ from ..state import Class, Stream
 from ..util import form_of, uri
 
 from .base import Collection
+
+
+class Shape(Tuple):
+    __spec__ = typing.Tuple[U64, ...]
+
+    def reduce_shape(self, axes):
+        @get
+        def dim(args: typing.Tuple[UInt, U64]) -> U64:
+            x, i = args
+            return ref.If(Tuple(axes).contains(x), 1, i)
+
+        return Shape.range((0, self.len())).zip(self).map(dim)
 
 
 class NDArray(Interface):
@@ -38,7 +46,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
-    __spec__ = (typing.Tuple[U64, ...], Number)
+    __spec__ = (Shape, Number)
 
     @classmethod
     def trig_rtype(cls):
@@ -56,8 +64,8 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         spec = (shape, dtype)
 
-        if not isinstance(shape, Tuple):
-            shape = Tuple(shape)
+        if not isinstance(shape, Shape):
+            shape = Shape(shape)
 
         class _Tensor(cls):
             __spec__ = spec
@@ -318,7 +326,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def shape(self):
         """Return the shape of this `Tensor`."""
 
-        return self._get("shape", rtype=Tuple.expect(typing.Tuple[U64, ...]))
+        return self._get("shape", rtype=Shape)
 
     @property
     def size(self):

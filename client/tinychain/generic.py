@@ -138,6 +138,10 @@ class Tuple(State, Functional):
     __spec__ = (State, ...)
 
     @classmethod
+    def cast_from(cls, items):
+        return cls(Get(cls, items))
+
+    @classmethod
     def expect(cls, spec):
         if typing.get_args(spec):
             spec = typing.get_args(spec)
@@ -198,7 +202,8 @@ class Tuple(State, Functional):
         return to_json(form_of(self))
 
     def __getitem__(self, i):
-        rtype = self.__spec__[0] if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis else State
+        spec = typing.get_args(self.__spec__) if typing.get_args(self.__spec__) else self.__spec__
+        rtype = spec[0] if len(spec) == 2 and spec[1] is Ellipsis else State
 
         if isinstance(i, slice):
             if i.step is not None:
@@ -217,12 +222,12 @@ class Tuple(State, Functional):
             return self._get("", Range.from_slice(i), Tuple.expect(typing.Tuple[rtype, ...]))
 
         if isinstance(i, int):
-            if len(self.__spec__) == 2 and self.__spec__[1] is Ellipsis:
-                rtype = self.__spec__[0]
-            elif i >= len(self.__spec__):
+            if len(spec) == 2 and spec[1] is Ellipsis:
+                rtype = spec[0]
+            elif i >= len(spec):
                 raise IndexError(f"index {i} is out of bounds for {self}")
             else:
-                rtype = self.__spec__[i]
+                rtype = spec[i]
 
             if hasattr(self.__form__, "__getitem__"):
                 item = self.__form__[i]
@@ -238,6 +243,9 @@ class Tuple(State, Functional):
 
     def __ref__(self, name):
         return self.__class__(form=TupleRef(self, name))
+
+    def contains(self, item):
+        return self._get("contains", item, Bool)
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
