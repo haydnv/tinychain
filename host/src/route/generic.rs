@@ -55,6 +55,41 @@ where
     }
 }
 
+struct ContainsHandler<'a, T> {
+    tuple: &'a Tuple<T>,
+}
+
+impl<'a, T> Handler<'a> for ContainsHandler<'a, T>
+where
+    T: Clone + Send + Sync,
+    State: From<T>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let present = self
+                    .tuple
+                    .iter()
+                    .cloned()
+                    .map(State::from)
+                    .filter_map(Value::opt_cast_from)
+                    .any(|item| item == key);
+
+                Ok(present.into())
+            })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a Tuple<T>> for ContainsHandler<'a, T> {
+    fn from(tuple: &'a Tuple<T>) -> Self {
+        Self { tuple }
+    }
+}
+
 struct ForEachHandler<I> {
     source: I,
 }
@@ -539,6 +574,7 @@ where
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "append" => Some(Box::new(AppendHandler::from(self))),
+                "contains" => Some(Box::new(ContainsHandler::from(self))),
                 "copy" => Some(Box::new(TupleCopyHandler::from(self))),
                 "fold" => Some(Box::new(TupleFoldHandler::from(self))),
                 "for_each" => Some(Box::new(ForEachHandler {
