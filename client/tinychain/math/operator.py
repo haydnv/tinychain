@@ -5,7 +5,7 @@ from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
 from ..state import StateRef
-from ..util import deanonymize, form_of, to_json
+from ..util import deanonymize, form_of, same_as, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -518,12 +518,13 @@ def derivative_of(state, variable=None):
     from ..collection.tensor import Dense, Sparse, Tensor
     from ..ml.optimizer import Variable
 
+    if same_as(state, variable):
+        # it's a partial derivative and this is the free variable
+        return Dense.ones_like(state)
+
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
-            return Dense.ones_like(state)
-        elif state is variable:
-            # it's a partial derivative, but this is the free variable
             return Dense.ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
@@ -535,7 +536,7 @@ def derivative_of(state, variable=None):
         return type(state)(form=0)
     elif isinstance(state, Tensor):
         return Sparse.create(state, F32)
-    elif isinstance(state, int) or isinstance(state, float):
+    elif isinstance(state, (bool, int, float)):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")

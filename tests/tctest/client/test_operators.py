@@ -5,7 +5,8 @@ import torch
 
 from torch.autograd import grad
 from tinychain.collection.tensor import Dense
-from tinychain.util import form_of, hex_id
+from tinychain.math.operator import operator
+from tinychain.util import hex_id
 
 TENSOR_URI = str(tc.uri(Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
@@ -39,7 +40,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc + self.w1_tc + self.b1_tc
         y_2tc = y_tc + self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -52,7 +53,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc-self.w1_tc + self.b1_tc
         y_2tc = y_tc-self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -65,7 +66,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc/self.w1_tc + self.b1_tc
         y_2tc = y_tc/self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -78,7 +79,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc**self.w1_tc + self.b1_tc
         y_2tc = y_tc**self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -91,7 +92,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc*self.w1_tc + self.b1_tc
         y_2tc = y_tc*self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -104,7 +105,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc@self.w1_tc + self.b1_tc
         y_2tc = y_tc@self.w2_tc + self.b2_tc
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -117,7 +118,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.exp()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -130,7 +131,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.log()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -143,7 +144,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.sin()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -156,7 +157,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.cos()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -169,7 +170,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.asin()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -182,7 +183,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.acos()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         response = HOST.post(ENDPOINT, cxt)
         w1_tc_grad = load_np(response)
 
@@ -196,7 +197,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.sinh()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())    
@@ -209,7 +210,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.cosh()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -222,7 +223,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.asinh()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -236,7 +237,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = (self.w1_tc*10)
         y_tc = (self.x_tc*w_tc).acosh()
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 
@@ -248,7 +249,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.tan()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -261,7 +262,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.tanh()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -274,7 +275,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.atan()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -287,7 +288,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         w_tc = self.w1_tc.atanh()
         y_tc = self.x_tc*w_tc
-        cxt.result = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -300,7 +301,7 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = self.x_tc@self.w1_tc + self.w1_tc
         y_2tc = y_tc@self.w2_tc + self.b2_tc + y_tc.exp()
-        cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
         self.assertTrue((abs(w1_tc_grad-[t.detach().numpy() for t in w1_torch_grad]) < 0.0001).all())
 
@@ -317,8 +318,8 @@ class OperatorTests(unittest.TestCase):
 
         cxt = tc.Context()
         y_tc = self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp()
-        _dy_dw1_tc = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
-        _d2y_dw2_tc = form_of(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        _dy_dw1_tc = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        _d2y_dw2_tc = operator(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])
@@ -339,9 +340,9 @@ class OperatorTests(unittest.TestCase):
                               grad_outputs=torch.ones_like(dy_dw1_torch[..., 1]))[0]
         cxt = tc.Context()
         y_tc = (self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp())*12
-        _dy_dw1_tc = form_of(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        _dy_dw1_tc = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
         __dy_dw1_tc = _dy_dw1_tc[:, 1]
-        _d2y_dw2_tc = form_of(__dy_dw1_tc).gradients(tc.tensor.Dense.ones(__dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        _d2y_dw2_tc = operator(__dy_dw1_tc).gradients(tc.tensor.Dense.ones(__dy_dw1_tc.shape))[hex_id(self.w1_tc)]
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])

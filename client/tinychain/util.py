@@ -127,6 +127,20 @@ def args(state_or_ref):
     return state_or_ref.__args__() if hasattr(state_or_ref, "__args__") else []
 
 
+def deref(state):
+    from .scalar.ref import MethodSubject
+    from .state import StateRef
+
+    if form_of(state) is not state:
+        return deref(form_of(state))
+    elif isinstance(state, StateRef):
+        return deref(state.state)
+    elif isinstance(state, MethodSubject):
+        return deref(state.subject)
+    else:
+        return state
+
+
 def depends_on(state_or_ref):
     """Return the set of all compile-time dependencies of the given `state_or_ref`"""
 
@@ -230,6 +244,26 @@ def independent(state_or_ref):
         return not args(state_or_ref)
     else:
         return True
+
+
+def same_as(a, b):
+    """Return `True` if `a` references the same :class:`State` as `b`, otherwise `False`."""
+
+    from .scalar.ref import is_literal
+
+    a = deref(a)
+    b = deref(b)
+
+    if type(a) is type(b) and hasattr(a, "__same__"):
+        return a.__same__(b)
+    elif isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(same_as(a_item, b_item) for a_item, b_item in zip(a, b))
+    elif isinstance(a, dict) and isinstance(b, dict):
+        return set(a.keys()) == set(b.keys()) and all(same_as(a[k], b[k]) for k in a)
+    elif is_literal(a) and is_literal(b):
+        return a == b
+    else:
+        return a is b
 
 
 class URI(object):

@@ -3,10 +3,10 @@ import typing
 from .interface import Functional
 from .scalar.bound import Range
 from .scalar.number import Bool, Number, UInt
-from .scalar.ref import Get, Post, Ref
+from .scalar.ref import Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
-from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from .util import form_of, get_ref, to_json, uri
 
 
 # TODO: implement `Functional` for `Map`
