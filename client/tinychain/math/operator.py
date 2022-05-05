@@ -182,7 +182,7 @@ class MatMul(Dual):
         grad = transpose(self.subject) @ loss
         if isinstance(self.args, Variable):
             grads.update(self.args.invert(grad))
-        elif operator(self.subject):
+        elif operator(self.args):
             grads.update(operator(self.args).gradients(grad))
 
         return grads

@@ -350,12 +350,12 @@ class OperatorTests(unittest.TestCase):
         self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
 
     def testSum(self):
-        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0)**0.5
+        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**0.5   
         w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
-        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
+        y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
         y_2tc = y_tc.sum(0)**0.5
         cxt.result = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
