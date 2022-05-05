@@ -643,7 +643,6 @@ class Reduce(Dual):
     pass
 
 
-# TODO: make it work for multiple functions and for .sum(axis=tuple)
 class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, axis=self.args)

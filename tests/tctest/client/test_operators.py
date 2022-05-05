@@ -372,6 +372,32 @@ class OperatorTests(unittest.TestCase):
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 
+# TODO: make it work
+    def testSum2ndDerivative(self):
+        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**2 
+        dy_dw1_torch = grad(y2_torch, 
+                            self.w1_torch, 
+                            grad_outputs=torch.ones_like(y2_torch),
+                            create_graph=True,
+                            retain_graph=True)[0]
+        d2y_dw12_torch = grad(dy_dw1_torch,
+                              self.w1_torch,
+                              grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+
+        cxt = tc.Context()
+        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
+        y_2tc = y_tc.sum(0)**2
+        _dy_dw1_tc = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        _d2y_dw2_tc = form_of(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        result = HOST.post(ENDPOINT, cxt)
+        dy_dw1_tc = load_np(result['the_first_derivative'])
+        d2y_dw2_tc = load_np(result['the_second_derivative'])
+
+        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
+        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
+
 
 def load_np(as_json, dtype=float):
     shape = as_json[TENSOR_URI][0][0]
