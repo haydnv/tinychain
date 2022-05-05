@@ -957,8 +957,12 @@ impl<'a> Handler<'a> for ReduceShapeHandler {
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let mut shape: Vec<u64> = params.require(&label("shape").into())?;
+                let shape: Value = params.require(&label("shape").into())?;
+                let mut shape: Vec<u64> =
+                    shape.try_cast_into(|v| TCError::bad_request("invalid shape", v))?;
+
                 let axes: Value = params.require(&label("axes").into())?;
+
                 params.expect_empty()?;
 
                 let ndim = shape.len();

@@ -10,9 +10,9 @@ import tinychain as tc
 
 CONFIG = "config"
 DEFAULT_PORT = 8702
+DOCKERFILE = os.getenv("TC_DOCKER", "tests/tctest/Dockerfile")
 DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "host")
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
-DOCKERFILE = "tests/tctest/Dockerfile"
 
 
 class Docker(tc.host.Local.Process):
@@ -204,7 +204,10 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
 
 
 # use this alias to switch between Local and Docker host types
-start_host = start_docker
+if DOCKERFILE == "0":
+    start_host = start_local_host
+else:
+    start_host = start_docker
 
 
 def _maybe_create_dir(path, force):
