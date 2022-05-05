@@ -35,6 +35,9 @@ class NDArray(Interface):
 
     def sum(self, axis=None):
         return ref.Get(ref.MethodSubject(self, "sum"), axis)
+    
+    def norm(self, axis=None):
+        return (self**2).sum(axis).pow(0.5)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -124,6 +127,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def __matmul__(self, other):
         return Tensor(MatMul(self, other))
+    
+    def abs(self):
+        return Tensor(Abs(self))
 
     def add(self, other):
         return Tensor(Add(self, other))
@@ -294,6 +300,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
+    
+    def norm(self, axis=None):
+        return Tensor(Norm(self, axis))
 
     @property
     def ndim(self):
@@ -643,6 +652,26 @@ class Reduce(Dual):
     pass
 
 
+class Norm(Dual):
+    def forward(self):
+        return NDArray.norm(self.subject, self.args)
+    
+    def backward(self, variable=None):
+        return self.subject / self.subject.norm(self.args)
+    
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss * self.subject / self.subject.norm(self.args)))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss * self.subject / self.subject.norm(self.args)))
+        
+        return grads
+        
+
 # TODO: make it work for multiple functions and for .sum(axis=tuple)
 class Sum(Reduce):
     def forward(self):
@@ -691,7 +720,7 @@ class Transform(Operator):
         if not operator(self.subject):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return Gradients()
-
+        
         return operator(self.subject).gradients(loss)
 
 
