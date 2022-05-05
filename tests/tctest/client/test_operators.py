@@ -3,10 +3,9 @@ import unittest
 import tinychain as tc
 import torch
 
-from torch.autograd import grad
+from torch.autograd import grad as grad_torch
 from tinychain.collection.tensor import Dense
-from tinychain.math.operator import operator
-from tinychain.util import hex_id
+from tinychain.math.operator import gradients as grad_tc
 
 TENSOR_URI = str(tc.uri(Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
@@ -35,12 +34,12 @@ class OperatorTests(unittest.TestCase):
     def testAdd(self):
         y_torch = self.x_torch + self.w1_torch + self.b1_torch
         y2_torch = y_torch+self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc + self.w1_tc + self.b1_tc
         y_2tc = y_tc + self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -48,12 +47,12 @@ class OperatorTests(unittest.TestCase):
     def testSub(self):
         y_torch = self.x_torch-self.w1_torch + self.b1_torch
         y2_torch = y_torch-self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc-self.w1_tc + self.b1_tc
         y_2tc = y_tc-self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -61,12 +60,12 @@ class OperatorTests(unittest.TestCase):
     def testDiv(self):
         y_torch = self.x_torch/self.w1_torch + self.b1_torch
         y2_torch = y_torch/self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc/self.w1_tc + self.b1_tc
         y_2tc = y_tc/self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -74,12 +73,12 @@ class OperatorTests(unittest.TestCase):
     def testPow(self):
         y_torch = self.x_torch**self.w1_torch + self.b1_torch
         y2_torch = y_torch**self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc**self.w1_tc + self.b1_tc
         y_2tc = y_tc**self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -87,12 +86,12 @@ class OperatorTests(unittest.TestCase):
     def testMul(self):
         y_torch = self.x_torch*self.w1_torch + self.b1_torch
         y2_torch = y_torch*self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc*self.w1_tc + self.b1_tc
         y_2tc = y_tc*self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -100,12 +99,12 @@ class OperatorTests(unittest.TestCase):
     def testMatMul(self):
         y_torch = self.x_torch@self.w1_torch + self.b1_torch
         y2_torch = y_torch@self.w2_torch + self.b2_torch
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc@self.w1_tc + self.b1_tc
         y_2tc = y_tc@self.w2_tc + self.b2_tc
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -113,25 +112,26 @@ class OperatorTests(unittest.TestCase):
     def testExp(self):
         w_torch = self.w1_torch.exp()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.exp()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 
+
     def testLog(self):
         w_torch = self.w1_torch.log()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.log()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -139,12 +139,12 @@ class OperatorTests(unittest.TestCase):
     def testSin(self):
         w_torch = self.w1_torch.sin()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.sin()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -152,12 +152,12 @@ class OperatorTests(unittest.TestCase):
     def testCos(self):
         w_torch = self.w1_torch.cos()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.cos()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -165,12 +165,12 @@ class OperatorTests(unittest.TestCase):
     def testAsin(self):
         w_torch = self.w1_torch.asin()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.asin()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -178,12 +178,12 @@ class OperatorTests(unittest.TestCase):
     def testAcos(self):
         w_torch = self.w1_torch.acos()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.acos()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         response = HOST.post(ENDPOINT, cxt)
         w1_tc_grad = load_np(response)
 
@@ -192,12 +192,12 @@ class OperatorTests(unittest.TestCase):
     def testSinh(self):
         w_torch = self.w1_torch.sinh()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.sinh()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())    
@@ -205,12 +205,12 @@ class OperatorTests(unittest.TestCase):
     def testCosh(self):
         w_torch = self.w1_torch.cosh()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.cosh()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -218,12 +218,12 @@ class OperatorTests(unittest.TestCase):
     def testAsinh(self):
         w_torch = self.w1_torch.asinh()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.asinh()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -232,24 +232,24 @@ class OperatorTests(unittest.TestCase):
     def testAcosh(self):
         w_torch = (self.w1_torch*10)
         y_torch = (self.x_torch*w_torch).acosh()
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = (self.w1_tc*10)
         y_tc = (self.x_tc*w_tc).acosh()
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 
     def testTan(self):
         w_torch = self.w1_torch.tan()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.tan()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -257,12 +257,12 @@ class OperatorTests(unittest.TestCase):
     def testTanh(self):
         w_torch = self.w1_torch.tanh()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.tanh()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -270,12 +270,12 @@ class OperatorTests(unittest.TestCase):
     def testArctan(self):
         w_torch = self.w1_torch.atan()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.atan()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -283,12 +283,12 @@ class OperatorTests(unittest.TestCase):
     def testArctanh(self):
         w_torch = (self.w1_torch).atanh()
         y_torch = self.x_torch*w_torch
-        w1_torch_grad = grad(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
         w_tc = self.w1_tc.atanh()
         y_tc = self.x_tc*w_tc
-        cxt.result = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
@@ -296,30 +296,30 @@ class OperatorTests(unittest.TestCase):
     def testMultipleFunctions(self):
         y_torch = self.x_torch@self.w1_torch + self.w1_torch
         y2_torch = y_torch@self.w2_torch + self.b2_torch + torch.exp(y_torch)
-        w1_torch_grad = grad(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
         y_tc = self.x_tc@self.w1_tc + self.w1_tc
         y_2tc = y_tc@self.w2_tc + self.b2_tc + y_tc.exp()
-        cxt.result = operator(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
+        cxt.result = grad_tc(y_2tc, tc.tensor.Dense.ones(y_2tc.shape), self.w1_tc)
         w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
         self.assertTrue((abs(w1_tc_grad-[t.detach().numpy() for t in w1_torch_grad]) < 0.0001).all())
 
     def testDerivative(self):
         y_torch = self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
-        dy_dw1_torch = grad(y_torch,
+        dy_dw1_torch = grad_torch(y_torch,
                             self.w1_torch,
                             grad_outputs=torch.ones_like(y_torch),
                             create_graph=True,
                             retain_graph=True)[0]
-        d2y_dw12_torch = grad(dy_dw1_torch,
+        d2y_dw12_torch = grad_torch(dy_dw1_torch,
                               self.w1_torch,
                               grad_outputs=torch.ones_like(dy_dw1_torch))[0]
 
         cxt = tc.Context()
         y_tc = self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp()
-        _dy_dw1_tc = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
-        _d2y_dw2_tc = operator(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        _dy_dw1_tc = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
+        _d2y_dw2_tc = grad_tc(_dy_dw1_tc, tc.tensor.Dense.ones(_dy_dw1_tc.shape), self.w1_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])
@@ -330,19 +330,19 @@ class OperatorTests(unittest.TestCase):
     
     def testSlice(self):
         y_torch = (self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch))*12
-        dy_dw1_torch = grad(y_torch,
+        dy_dw1_torch = grad_torch(y_torch,
                             self.w1_torch,
                             grad_outputs=torch.ones_like(y_torch),
                             create_graph=True,
                             retain_graph=True)[0]
-        d2y_dw12_torch = grad(dy_dw1_torch[..., 1],
+        d2y_dw12_torch = grad_torch(dy_dw1_torch[..., 1],
                               self.w1_torch,
                               grad_outputs=torch.ones_like(dy_dw1_torch[..., 1]))[0]
         cxt = tc.Context()
         y_tc = (self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp())*12
-        _dy_dw1_tc = operator(y_tc).gradients(tc.tensor.Dense.ones(y_tc.shape))[hex_id(self.w1_tc)]
+        _dy_dw1_tc = grad_tc(y_tc, tc.tensor.Dense.ones(y_tc.shape), self.w1_tc)
         __dy_dw1_tc = _dy_dw1_tc[:, 1]
-        _d2y_dw2_tc = operator(__dy_dw1_tc).gradients(tc.tensor.Dense.ones(__dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        _d2y_dw2_tc = grad_tc(__dy_dw1_tc, tc.tensor.Dense.ones(__dy_dw1_tc.shape), self.w1_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])

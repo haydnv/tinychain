@@ -8,7 +8,7 @@ from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, get, post
 from ..generic import Map, Tuple
 from ..math.interface import Numeric
-from ..math.operator import derivative_of, Operator
+from ..math.operator import derivative_of, gradients, Operator
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
 from ..scalar.value import Id
@@ -53,21 +53,17 @@ class Parallel(Optimizer, Dynamic):
             cxt.start = batch * txn.chunk_size
             inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
             outputs = self.ml_model.eval(inputs_batch)
-            operator = form_of(outputs)
-
-            if not isinstance(operator, Operator):
-                raise ValueError(f"Optimizer can only train a differentiable Operator, not {form_of(outputs)}")
 
             loss = self._cost(inputs_batch, outputs)
             cxt.d_loss = derivative_of(loss).copy()
-            gradients = operator.gradients(cxt.d_loss)
+            grads = gradients(outputs, cxt.d_loss)
 
-            if not gradients:
-                raise ValueError(f"operator {operator} has no gradients")
+            if not grads:
+                raise ValueError(f"model output {outputs} has no gradients")
 
             return {
                 var_id: (grad if isinstance(grad, Number) else grad.sum(0))
-                for var_id, grad in gradients.items()
+                for var_id, grad in grads.items()
             }
 
         @post
@@ -78,9 +74,9 @@ class Parallel(Optimizer, Dynamic):
             }}
 
         var_ids = set(trainable_vars.keys())
-        gradients = {var_id: 0 for var_id in var_ids}
-        gradients = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": gradients}, sum_grads)
-        return Map(gradients)["sum"]  # TODO: this type information shouldn't get lost
+        grads = {var_id: 0 for var_id in var_ids}
+        grads = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": grads}, sum_grads)
+        return Map(grads)["sum"]  # TODO: this type information shouldn't get lost
 
 
 class GradientDescent(Parallel):
@@ -99,11 +95,11 @@ class GradientDescent(Parallel):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        gradients = self.gradients(inputs, parallel)
+        grads = self.gradients(inputs, parallel)
 
         writes = []
         for var_id, var in trainable(self.ml_model).items():
-            delta = gradients[var_id]
+            delta = grads[var_id]
             writes.append(var.update(self._lr * delta))
 
         return writes
@@ -143,29 +139,29 @@ class Adam(Parallel):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        gradients = self.gradients(inputs, parallel)
+        grads = self.gradients(inputs, parallel)
 
         trainable_vars = trainable(self.ml_model)
         var_names = namespace(self.ml_model, self._model_name)
         var_names = {hex_id(var): name for name, var in var_names.items()}
-        gradients = {var_names[var_id]: gradients[var_id] for var_id in var_names.keys()}
+        grads = {var_names[var_id]: grads[var_id] for var_id in var_names.keys()}
 
         vars_by_name = {var_names[var_id]: trainable_vars[var_id] for var_id in var_names.keys()}
 
         update_m = {}
         for name in self.m:
-            grad = gradients[name]
+            grad = grads[name]
             update_m[name] = self.m[name] * self.beta1 * grad * (1. - self.beta1)
 
         update_v = {}
         for name in self.v:
-            grad = gradients[name]
+            grad = grads[name]
             update_v[name] = self.v[name] * self.beta2 + grad**2 * (1. - self.beta2)
 
-        update_v = {name: self.v[name] * self.beta2 + gradients[name]**2 * (1. - self.beta2) for name in self.v}
+        update_v = {name: self.v[name] * self.beta2 + grads[name]**2 * (1. - self.beta2) for name in self.v}
 
         a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
-        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in gradients}
+        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in grads}
 
         updates = After([
             [self.m[name].write(new_value) for name, new_value in update_m.items()],

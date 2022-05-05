@@ -128,6 +128,8 @@ def args(state_or_ref):
 
 
 def deref(state):
+    """Return the :class:`Ref`, :class:`URI`, or constant which will be used to resolve the given :class:`State`."""
+
     from .scalar.ref import MethodSubject
     from .state import StateRef
 

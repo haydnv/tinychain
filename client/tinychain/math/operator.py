@@ -5,7 +5,7 @@ from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
 from ..state import StateRef
-from ..util import deanonymize, form_of, same_as, to_json
+from ..util import deanonymize, form_of, hex_id, same_as, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -540,6 +540,37 @@ def derivative_of(state, variable=None):
         return 0
     else:
         raise TypeError(f"the derivative of {state} is not defined")
+
+
+def gradients(differentiable, output, variables=None):
+    """
+    Return the gradient of a `differentiable` operator graph with respect the `output`.
+
+    If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
+    If a list of variables is given, a list of gradients in the same order will be returned.
+    If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each :class:`Variable`
+    in the graph will be returned.
+    """
+
+    if not operator(differentiable):
+        raise ValueError(f"not a differentiable state: {differentiable}")
+
+    grads = operator(differentiable).gradients(output)
+
+    if variables is None:
+        return grads
+
+    if not isinstance(variables, (list, tuple)):
+        if hex_id(variables) not in grads:
+            raise KeyError(f"{variables} is not reachable")
+
+        return grads[hex_id(variables)]
+
+    missing = [var for var in variables if hex_id(var) not in grads]
+    if missing:
+        raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
+    else:
+        return [grads[hex_id(var)] for var in variables]
 
 
 def operator(state_or_ref):
