@@ -4,8 +4,7 @@ import typing
 from ..error import BadRequest
 from ..scalar import ref
 from ..scalar.value import Id
-from ..state import StateRef
-from ..util import deanonymize, form_of, hex_id, same_as, to_json
+from ..util import deanonymize, deref, hex_id, same_as, to_json
 
 from .interface import Numeric, Trigonometric
 
@@ -64,8 +63,14 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
+    # TODO: support computing gradients w/r/t arbitrary states in the operator graph
     def gradients(self, loss):
-        """Return the gradients of the :class:`Variable` s that this :class:`Operator` depends on"""
+        """
+        Return the :class:`Gradients` this :class:`Operator` with respect to the given `variables`.
+
+        If no `variables` are specified, this will return the `Gradients` of each :class:`Variable` that this
+        `Operator` depends on.
+        """
 
         raise NotImplementedError(f"{self.__class__}.gradients")
 
@@ -87,17 +92,6 @@ class Dual(Operator):
     """A differentiable operator with two arguments"""
 
 
-class Trig(Unary):
-  def gradients(self, loss):
-        from ..ml.optimizer import Variable
-        if isinstance(self.subject, Variable):
-          return self.subject.invert(loss)
-        elif operator(self.subject):
-          return operator(self.subject).gradients(loss)
-        else:
-          return Gradients()
-
-
 class Custom(Unary):
     """A custom operator"""
 
@@ -114,14 +108,11 @@ class Custom(Unary):
 
 
 class Trig(Unary):
-  def gradients(self, loss):
-        from ..ml.optimizer import Variable
-        if isinstance(self.subject, Variable):
-          return self.subject.invert(loss)
-        elif operator(self.subject):
-          return operator(self.subject).gradients(loss)
+    def gradients(self, loss):
+        if operator(self.subject):
+            return operator(self.subject).gradients(loss)
         else:
-          return Gradients()
+            return Gradients({hex_id(self.subject): loss})
 
 
 class Add(Dual):
@@ -134,20 +125,17 @@ class Add(Dual):
         return subject + arg
 
     def gradients(self, loss):
-        # TODO: there should be a way to avoid this import (same below)
-        from ..ml.optimizer import Variable
-
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
 
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss))
-        elif operator(self.args):
+        if operator(self.args):
             grads.update(operator(self.args).gradients(loss))
+        else:
+            grads[hex_id(self.args)] = loss
 
         return grads
 
@@ -163,8 +151,6 @@ class MatMul(Dual):
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
         def transpose(matrix):
             return type(matrix)(form=ref.If(
                 matrix.ndim == 2,
@@ -174,16 +160,16 @@ class MatMul(Dual):
         grads = Gradients()
 
         grad = loss @ transpose(self.args)
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
 
         grad = transpose(self.subject) @ loss
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
-        elif operator(self.subject):
+        if operator(self.args):
             grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
 
         return grads
 
@@ -198,21 +184,19 @@ class Mul(Dual):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
         grads = Gradients()
 
         grad = self.args * loss
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(grad))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
 
         grad = self.subject * loss
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(grad))
-        elif operator(self.args):
+        if operator(self.args):
             grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
 
         return grads
 
@@ -227,19 +211,17 @@ class Sub(Dual):
         return subject - arg
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(-loss))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = -loss
 
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(-loss))
-        elif operator(self.args):
+        if operator(self.args):
             grads.update(operator(self.args).gradients(loss))
+        else:
+            grads[hex_id(self.args)] = -loss
 
         return grads
 
@@ -254,19 +236,17 @@ class Div(Dual):
         return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(self.subject * loss / self.args))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss / self.args))
+        else:
+            grads[hex_id(self.subject)] = self.subject * loss / self.args
 
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert((-self.subject * loss) / self.args**2))
-        elif operator(self.args):
+        if operator(self.args):
             grads.update(operator(self.args).gradients(loss / self.args))
+        else:
+            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
         return grads
 
@@ -282,19 +262,19 @@ class Pow(Dual):
         return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss * self.args * self.subject**(self.args - 1)))
-        elif operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss * self.args * self.subject ** (self.args - 1)))
+        grad = loss * self.args * self.subject**(self.args - 1)
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
 
-        if isinstance(self.args, Variable):
-            grads.update(self.args.invert(loss * self.subject.log() * self.subject**self.args))
-        elif operator(self.args):
-            grads.update(operator(self.args).gradients(loss * self.subject.log() * self.subject ** self.args))
+        grad = loss * self.subject.log() * self.subject**self.args
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
 
         return grads
 
@@ -306,23 +286,22 @@ class Exp(Unary):
     def forward(self):
         return Numeric.exp(self.subject)
 
-    def backward(self, _variable):
+    def backward(self, _variable=None):
         return self.subject.exp()
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
+        loss *= self.backward()
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(self.subject.exp() * loss))
-        elif operator(self.subject):
-            grads.update(operator(self.subject).gradients(self.subject.exp() * loss))
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
 
         return grads
 
 
-#TODO: Tensor.log(base!=None)
+# TODO: Tensor.log(base!=None)
 class Log(Dual):
     def forward(self):
         return Numeric.log(self.subject, self.args)
@@ -331,14 +310,13 @@ class Log(Dual):
         return 1 / self.subject
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
+        loss /= self.subject
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss / self.subject))
-        elif operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss / self.subject))
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
 
         return grads
 
@@ -348,12 +326,12 @@ class Sin(Trig):
         return Trigonometric.sin(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return subject.cos()
 
     def gradients(self, loss):
-        grad = self.subject.cos() * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Cos(Trig):
@@ -365,8 +343,8 @@ class Cos(Trig):
         return subject - self.subject.sin()
 
     def gradients(self, loss):
-        grad = -self.subject.sin() * loss
-        return Trig.gradients(self, grad)
+        loss *= -self.subject.sin()
+        return Trig.gradients(self, loss)
 
 
 class Asin(Trig):
@@ -374,25 +352,25 @@ class Asin(Trig):
         return Trigonometric.asin(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return (1 - (subject**2))**-0.5
 
     def gradients(self, loss):
-        grad = (1 - self.subject**2)**(-0.5) * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Acos(Trig):
     def forward(self):
         return Trigonometric.acos(self.subject)
-    
+
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return -((1 - subject**2)**-0.5)
 
     def gradients(self, loss):
-        grad = -(1 - self.subject**2)**(-0.5) * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Sinh(Trig):
@@ -400,25 +378,25 @@ class Sinh(Trig):
         return Trigonometric.sinh(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return subject.cosh()
 
     def gradients(self, loss):
-        grad = self.subject.cosh() * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Cosh(Trig):
     def forward(self):
         return Trigonometric.cosh(self.subject)
-    
+
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return subject.sinh()
 
     def gradients(self, loss):
-        grad = self.subject.sinh() * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Asinh(Trig):
@@ -426,38 +404,38 @@ class Asinh(Trig):
         return Trigonometric.asinh(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return (subject**2 + 1)**-0.5
 
     def gradients(self, loss):
-        grad = (self.subject**2 + 1)**(-0.5) * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Acosh(Trig):
     def forward(self):
         return Trigonometric.acosh(self.subject)
-    
+
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return ((subject**2) - 1)**-0.5
 
     def gradients(self, loss):
-        grad = (self.subject**2 - 1)**(-0.5) * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Tan(Trig):
     def forward(self):
         return Trigonometric.tan(self.subject)
-    
+
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return 1 / (subject.cos()**2)
 
     def gradients(self, loss):
-        grad = 1 / (self.subject.cos()**2) * loss
-        return Trig.gradients(self, grad)
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Tanh(Trig):
@@ -465,19 +443,12 @@ class Tanh(Trig):
         return Trigonometric.tanh(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return 1 - subject.tanh()**2
 
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
-
-        grad = self.backward() * loss
-        if isinstance(self.subject, Variable):
-            return self.subject.invert(grad)
-        elif operator(self.subject):
-            return operator(self.subject).gradients(grad)
-
-        return Gradients()
+        loss *= self.backward()
+        return Trig.gradients(self, loss)
 
 
 class Atan(Trig):
@@ -485,25 +456,25 @@ class Atan(Trig):
         return Trigonometric.atan(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return 1 / (subject**2 + 1)
 
     def gradients(self, loss):
-        grad = (self.subject**2 + 1)**(-1) * loss
-        return Trig.gradients(self, grad)
+        loss *= (self.subject**2 + 1)**(-1)
+        return Trig.gradients(self, loss)
 
 
 class Atanh(Trig):
     def forward(self):
         return Trigonometric.atanh(self.subject)
-    
+
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if self.subject is variable else self.subject
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
         return 1 / (1 - (subject**2))
 
     def gradients(self, loss):
-        grad = (1 - self.subject**2)**(-1) * loss
-        return Trig.gradients(self, grad)
+        loss *= (1 - self.subject**2)**(-1)
+        return Trig.gradients(self, loss)
 
 
 def derivative_of(state, variable=None):
@@ -542,27 +513,26 @@ def derivative_of(state, variable=None):
         raise TypeError(f"the derivative of {state} is not defined")
 
 
-def gradients(differentiable, output, variables=None):
+def gradients(differentiable, loss, variables=None):
     """
-    Return the gradient of a `differentiable` operator graph with respect the `output`.
+    Return the gradient of a `differentiable` operator graph with respect the `loss`.
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
-    If a list of variables is given, a list of gradients in the same order will be returned.
-    If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each :class:`Variable`
-    in the graph will be returned.
+    If a list of variables is given, a corresponding list of gradients will be returned.
+    If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
     if not operator(differentiable):
         raise ValueError(f"not a differentiable state: {differentiable}")
 
-    grads = operator(differentiable).gradients(output)
+    grads = operator(differentiable).gradients(loss)
 
     if variables is None:
         return grads
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
-            raise KeyError(f"{variables} is not reachable")
+            raise KeyError(f"{variables} is not reachable from operator {differentiable}")
 
         return grads[hex_id(variables)]
 
@@ -578,9 +548,5 @@ def operator(state_or_ref):
 
     if isinstance(state_or_ref, Operator):
         return state_or_ref
-
-    if form_of(state_or_ref) is not state_or_ref:
-        return operator(form_of(state_or_ref))
-
-    if isinstance(state_or_ref, StateRef):
-        return operator(state_or_ref.state)
+    elif deref(state_or_ref) is not state_or_ref:
+        return operator(deref(state_or_ref))

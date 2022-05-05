@@ -1,6 +1,6 @@
 from ..collection import tensor
+from ..math import Gradients
 from ..util import form_of, hex_id
-from ..scalar.number import Number
 from ..scalar.ref import After, MethodSubject
 
 
@@ -28,12 +28,6 @@ class Variable(tensor.Dense):
 
     def flip(self, axis):
         return self.__class__(form=Flip(self, axis))
-
-    def invert(self, loss):
-        if isinstance(form_of(self), Transform):
-            return form_of(self).invert(loss)
-        else:
-            return {hex_id(self): loss}
 
     def update(self, delta):
         """Decrement the value of this `Variable` by `delta`."""
@@ -64,6 +58,7 @@ class Variable(tensor.Dense):
         return Variable.expect(shape, self.dtype)(Transpose(self, permutation))
 
 
+# TODO: merge with the Transform operators in the tensor package
 class Transform(tensor.Transform):
     def __init__(self, subject, args):
         if not isinstance(subject, Variable):
@@ -71,50 +66,48 @@ class Transform(tensor.Transform):
 
         tensor.Transform.__init__(self, subject, args)
 
+    def gradients(self, loss):
+        if isinstance(loss, tensor.NDArray):
+            loss = self.invert(loss)
+
+        if isinstance(form_of(self.subject), Transform):
+            return form_of(self.subject).gradients(loss)
+        else:
+            grads = Gradients()
+            grads[hex_id(self.subject)] = loss
+            return grads
+
+    def invert(self):
+        raise NotImplementedError(f"{self.__class__}.invert")
+
     def update(self):
         raise NotImplementedError(f"{self.__class__}.update")
 
 
 class Expand(Transform, tensor.Expand):
     def invert(self, loss):
-        if isinstance(loss, Number):
-            return self.subject.invert(loss)
-
-        return self.subject.invert(loss.reshape(self.subject.shape))
+        return loss.reshape(self.subject.shape)
 
 
 class Flip(Transform, tensor.Flip):
     def invert(self, loss):
-        if isinstance(loss, Number):
-            return self.subject.invert(loss)
-
-        return self.subject.invert(loss.flip(self.args))
+        return loss.flip(self.args)
 
 
 class Transpose(Transform, tensor.Transpose):
     def invert(self, loss):
-        if isinstance(loss, Number):
-            return self.subject.invert(loss)
-
-        return self.subject.invert(loss.transpose(self.inverse_permutation))
+        return loss.transpose(self.inverse_permutation)
 
 
 class Reshape(Transform, tensor.Reshape):
     def invert(self, loss):
-        if isinstance(loss, Number):
-            return self.subject.invert(loss)
-
-        return self.subject.invert(loss.reshape(self.subject.shape))
+        return loss.reshape(self.subject.shape)
 
 
 class Slice(Transform):
     def forward(self):
         return tensor.NDArray.slice(self.subject, self.args)
 
-    def gradients(self, loss):
-        if isinstance(loss, Number):
-            return Transform.gradients(loss)
-
+    def invert(self, loss):
         grad = tensor.Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-        grad = tensor.Dense(After(grad[self.args].write(loss), MethodSubject(grad, "")))
-        return self.subject.invert(grad)
+        return tensor.Dense(After(grad[self.args].write(loss), MethodSubject(grad)))

@@ -5,10 +5,11 @@ import logging
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, NDArray, Tensor
 from ..decorators import differentiable
+from ..error import BadRequest
 from ..generic import Tuple
-from ..math.operator import derivative_of, operator, Dual
-from ..scalar.ref import After
-from ..util import deanonymize
+from ..math.operator import derivative_of, gradients, operator, Dual, Gradients
+from ..scalar.ref import After, If, MethodSubject
+from ..util import deanonymize, hex_id
 
 from .constants import LIB_URI
 from .interface import Differentiable
@@ -96,60 +97,30 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        class Convolution(Dual):
-            def __init__(self, weights, inputs):
-                Dual.__init__(self, weights, inputs)
+        w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
 
-                pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
-                pad_matrix = Tensor(After(
-                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
-                    pad_matrix))
+        pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
+        pad_matrix = Tensor(After(
+            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            pad_matrix))
 
-                im2col_matrix = []
-                for i in range(h_out):
-                    for j in range(w_out):
-                        shape = [c_i * h_f * w_f, batch_size]
-                        im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
-                        im2col_matrix.append(im2col)
+        im2col_matrix = []
+        for i in range(h_out):
+            for j in range(w_out):
+                shape = [c_i * h_f * w_f, batch_size]
+                im2col = NDArray.reshape(pad_matrix[:, :, i:i + h_f, j:j + w_f], shape)
+                im2col_matrix.append(im2col)
 
-                assert im2col_matrix
+        assert im2col_matrix
 
-                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
-                shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
-                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
-
-            def __ns__(self, context):
-                Dual.__ns__(self, context)
-                deanonymize(self.im2col_matrix, context)
-                deanonymize(self.w_col, context)
-
-            def forward(self):
-                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
-
-            def backward(self, variable=None):
-                w_col = derivative_of(self.w_col, variable)
-                im2col_matrix = derivative_of(self.im2col_matrix, variable)
-                return (w_col @ self.im2col_matrix) + (self.w_col @ im2col_matrix)
-
-            def gradients(self, loss):
-                grads = self.w_col.invert(loss @ self.im2col_matrix.transpose())
-
-                if operator(self.args):
-                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
-                    loss = (self.w_col.transpose() @ loss).reshape(shape)
-
-                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
-                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
-                    grad = Tensor(After(grad_slice.write(loss), grad))
-
-                    grads.update(operator(self.args).gradients(grad))
-
-                return grads
+        shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
+        im2col_matrix = Dense.concatenate(im2col_matrix, 0)
+        im2col_matrix = im2col_matrix.reshape(shape).transpose()
 
         shape = [out_c, h_out, w_out, batch_size]
-        in2col_multiply = Tensor(Convolution(self.weights, inputs)) + self.bias
-        output = in2col_multiply.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
+        im2col_multiply = w_col @ im2col_matrix
+        output = im2col_multiply + self.bias
+        output = output.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
 
         if self._activation:
             return self._activation(output)
