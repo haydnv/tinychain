@@ -209,7 +209,7 @@ class Tuple(State, Functional):
             if i.step is not None:
                 raise NotImplementedError(f"slice with step: {i}")
 
-            if len(self.__spec__) == 2 and self.__spec__[1] is not Ellipsis:
+            if len(spec) == 2 and spec[1] is not Ellipsis:
                 # the contents are constants, so compute the slice now if possible
                 if hasattr(self.__form__, "__getitem__"):
                     constant_start = slice.start is None or isinstance(slice.start, int)
