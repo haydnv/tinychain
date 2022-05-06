@@ -30,8 +30,8 @@ class NDArray(Interface):
     def flip(self, axis):
         return ref.Get(ref.MethodSubject(self, "flip"), axis)
 
-    def norm(self):
-        return ref.Get(ref.MethodSubject(self, "norm"))
+    def norm(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, "norm"), axis)
 
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
@@ -306,10 +306,14 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         return self._post("ne", {"r": other}, Tensor)
 
-    def norm(self):
-        """Compute the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices."""
+    def norm(self, axis=None):
+        """
+        With no `axis`, computes the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices.
 
-        return Tensor(Norm(self))
+        For a vector norm, specify the `axis` of the vector.
+        """
+
+        return Tensor(Norm(self, axis))
 
     def pow(self, other):
         return Tensor(Pow(self, other))
@@ -643,9 +647,9 @@ class Copy(Unary):
         return Gradients()
 
 
-class Norm(Unary):
+class Norm(Dual):
     def forward(self):
-        return NDArray.norm(self.subject)
+        return NDArray.norm(self.subject, self.args)
 
     def backward(self, variable=None):
         raise NotImplementedError("derivative of norm")
