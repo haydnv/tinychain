@@ -1288,6 +1288,54 @@ impl<'a> Handler<'a> for LogHandler {
     }
 }
 
+struct NormHandler {
+    tensor: Tensor,
+}
+
+impl<'a> Handler<'a> for NormHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                if self.tensor.ndim() < 2 {
+                    Err(TCError::bad_request(
+                        "norm requires a matrix or batch of matrices, not",
+                        self.tensor,
+                    ))
+                } else if self.tensor.ndim() == 2 {
+                    let squared = self.tensor.pow_const(2i32.into())?;
+                    let summed = squared.sum_all(txn.clone()).await?;
+                    Ok(Value::from(summed.pow(0.5f32.into())).into())
+                } else {
+                    self.tensor
+                        .pow_const(2i32.into())
+                        .and_then(|pow| {
+                            let axis = pow.ndim() - 1;
+                            pow.sum(axis)
+                        })
+                        .and_then(|pow| {
+                            let axis = pow.ndim() - 1;
+                            pow.sum(axis)
+                        })
+                        .and_then(|sum| sum.pow_const(0.5f32.into()))
+                        .map(Collection::from)
+                        .map(State::from)
+                }
+            })
+        }))
+    }
+}
+
+impl From<Tensor> for NormHandler {
+    fn from(tensor: Tensor) -> Self {
+        Self { tensor }
+    }
+}
+
 struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
     tensor: &'a T,
     reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
@@ -1835,6 +1883,7 @@ where
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
 
             // other
+            "norm" => Some(Box::new(NormHandler::from(Tensor::from(tensor)))),
             "split" => Some(Box::new(SplitHandler::from(tensor))),
 
             _ => None,
