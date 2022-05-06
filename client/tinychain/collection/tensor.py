@@ -8,7 +8,7 @@ from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import form_of, uri
+from ..util import form_of, hex_id, uri
 
 from .base import Collection
 
@@ -470,11 +470,7 @@ class Dense(Tensor):
     def concatenate(cls, tensors, axis=None):
         """Create a new `Dense` tensor by concatenating the given `tensors` along the given `axis`."""
 
-        params = {"tensors": tensors}
-        if axis:
-            params["axis"] = axis
-
-        return Dense(form=ref.Post(uri(cls) + "/concatenate", params))
+        return Dense(form=Concatenate(tensors, axis))
 
     @classmethod
     def constant(cls, shape, value):
@@ -663,6 +659,41 @@ def where(cond, x, y):
     """
 
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+
+
+class Concatenate(Dual):
+    def forward(self):
+        params = {"tensors": self.subject}
+        if self.args:
+            params["axis"] = self.args
+
+        # TODO: support concatenating Sparse tensors
+        return Dense(form=ref.Post(uri(Dense) + "/concatenate", params))
+
+    def backward(self, variable=None):
+        return Concatenate([derivative_of(t, variable) for t in self.subject], self.args)
+
+    def gradients(self, loss):
+        from ..ml import Variable  # TODO: remove this import
+
+        grads = Gradients()
+
+        axis = self.args if self.args else 0
+        if axis is None:
+            num_or_size_slices = len(self.subject)
+        else:
+            num_or_size_slices = [t.shape[axis] for t in self.subject]
+
+        losses = loss.split(num_or_size_slices, axis)
+        assert len(losses) == len(self.subject)
+
+        for (tensor, loss) in zip(self.subject, losses):
+            if operator(tensor):
+                grads.update(operator(tensor).gradients(loss))
+            elif isinstance(tensor, Variable):
+                grads[hex_id(tensor)] = loss
+
+        return grads
 
 
 class Copy(Unary):

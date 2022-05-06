@@ -454,6 +454,8 @@ def is_literal(state):
         return all(is_literal(item) for item in state)
     elif isinstance(state, dict):
         return all(is_literal(value) for value in state.values())
+    elif state is None:
+        return True
 
     return isinstance(state, (bool, float, int, str))
 
