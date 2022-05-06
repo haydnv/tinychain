@@ -86,6 +86,38 @@ class ExampleTests(ClientTest):
 
 
 class TensorTests(ClientTest):
+    def testSplitByNumber(self):
+        splits = 3
+        shape = (6, 30)
+        x = np.ones(shape, dtype=np.int64)
+
+        cxt = tc.Context()
+        cxt.x1 = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I64)
+        cxt.x2 = cxt.x1.split(3, axis=0)
+        cxt.result = [tc.tensor.Tensor(cxt.x2[i]).shape for i in range(3)]
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(actual, [[shape[0] // splits, 30]] * splits)
+
+    def testSplitBySizes(self):
+        input_shape = [3, 4, 1, 1]
+        split = [2, 2]
+        axis = 1
+
+        x = np.random.random(np.product(input_shape)).reshape(input_shape)
+
+        cxt = tc.Context()
+        cxt.input = tc.tensor.Dense.load(x.shape, x.flatten().tolist())
+        cxt.splits = cxt.input.split(split, axis=axis)
+        cxt.result = [cxt.splits[i].shape for i in range(len(split))]
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = [input_shape] * len(split)
+        for i, dim in enumerate(split):
+            expected[i][axis] = dim
+
+        self.assertEqual(actual, expected)
+
     def testWhere(self):
         size = 5
         x = np.random.random(size).astype(bool)

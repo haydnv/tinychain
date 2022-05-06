@@ -351,15 +351,48 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """
         Split this `Tensor` into multiple slices along the given `axis`.
 
+        This method requires a constant `num_or_size_splits`, `axis`, and `self.shape[axis]`.
+
         If `num_or_size_splits` is a `Number`, the `tensor` will be sliced along `axis` `num_or_size_splits` times;
-        if `self.shape[axis] % num_or_size_splits != 0` then a `BadRequest` error will be raised.
+        if `self.shape[axis] % num_or_size_splits != 0` then a `ValueError` error will be raised.
 
         If `num_or_size_splits` is a `Tuple` with length `n` then the `tensor` will be split into `n` new `Tensor` s
         each with `shape[axis] == num_or_size_splits[axis]`; if the sum of `num_or_size_splits` is not equal to
-        `self.shape[axis]` then a `BadRequest` error will be raised.
+        `self.shape[axis]` then a `ValueError` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), typing.Tuple[Tensor, ...])
+        num_or_size_splits = form_of(num_or_size_splits)
+        if not ref.is_literal(num_or_size_splits):
+            raise ValueError(f"Tensor.split requires a constant num_or_size_splits, not {num_or_size_splits}")
+
+        if not ref.is_literal(axis):
+            raise ValueError(f"Tensor.split requires a constant axis, not {axis}")
+
+        dim = form_of(self.shape[axis])
+        if not int(dim) == dim:
+            raise RuntimeError(f"Tensor.split requires a constant dimension to split")
+
+        if isinstance(num_or_size_splits, (list, tuple)):
+            if sum(num_or_size_splits) != dim:
+                raise ValueError(f"{num_or_size_splits} does not match the dimension {dim} of axis {axis}")
+
+        elif int(num_or_size_splits) == num_or_size_splits:
+            if dim % num_or_size_splits != 0:
+                raise ValueError(f"split dimension {dim} is not divisible by {num_or_size_splits}")
+
+            slice_dim = dim // num_or_size_splits
+            num_or_size_splits = [slice_dim] * num_or_size_splits
+
+        else:
+            raise ValueError(f"invalid num_or_size_splits: {num_or_size_splits}")
+
+        start = 0
+        slices = []
+        for slice_dim in num_or_size_splits:
+            bounds = ([slice(None)] * axis) + [slice(start, start + slice_dim)]
+            slices.append(self[bounds])
+
+        return slices
 
     def std(self, axis=None):
         """
