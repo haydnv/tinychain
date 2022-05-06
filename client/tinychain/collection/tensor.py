@@ -656,9 +656,7 @@ class Sum(Reduce):
         return NDArray.sum(self.subject, axis=self.args)
 
     def backward(self, variable=None):
-        from tinychain.collection.tensor import Dense
-
-        return Dense.ones_like(self.subject)
+        return derivative_of(self.subject).sum(self.args)
 
     def gradients(self, loss):
         if self.args is None:
@@ -666,16 +664,14 @@ class Sum(Reduce):
         else:
             axis = self.args
             if isinstance(self.subject.shape, Shape):
-                old_shape = self.subject.shape
                 len_shape = self.subject.shape.len()
             else: 
-                old_shape = Shape(self.subject.shape)
                 len_shape = len(self.subject.shape)
             if self.args < 0: 
                 axis = len_shape + self.args
                 
-            shape = old_shape.reduce_shape([axis])
-            loss = self.backward() * loss.reshape(shape)
+            shape = self.subject.shape.reduce_shape([axis])
+            loss = Dense.ones_like(self.subject) * loss.reshape(shape)
 
         from ..ml.optimizer import Variable
         grads = Gradients()
