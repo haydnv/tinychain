@@ -44,18 +44,6 @@ def set_diagonal(matrix, diag):
     return matrix.write(zero_diag + new_diag)
 
 
-def norm(matrix):
-    """Compute the 2D Frobenius (aka Euclidean) norm of the given `matrix`."""
-
-    return (matrix**2).sum()**0.5
-
-
-def batch_norm(matrices):
-    """Compute the 2D Frobenius (aka Euclidean) norms of each matrix in the given batch of `matrices`."""
-
-    return (matrices**2).sum(-1).sum(-1)**0.5
-
-
 # TODO: replace this helper class with a `typing.TypedDict`
 class PLUFactorization(Map):
     """PLU factorization of a given `[N, N]` matrix."""
@@ -118,7 +106,7 @@ class LinearAlgebra(Library):
         txn.u = Tensor(After(txn.u_init[:, 0].write(a[:, 0]), txn.u_init)).copy()
         txn.q = Tensor(
             After(
-                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / norm(txn.u_init[:, 0]))),
+                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / txn.u_init[:, 0].norm())),
                 txn.q_init
             )).copy()
 
@@ -134,7 +122,7 @@ class LinearAlgebra(Library):
             cxt.update_u = After(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
             cxt.update_q = After(
                 cxt.update_u,
-                txn.q[:, i].write(txn.u[:, i] / norm(txn.u[:, i])))
+                txn.q[:, i].write(txn.u[:, i] / txn.u[:, i].norm()))
 
             return After(cxt.update_q, {})
 
