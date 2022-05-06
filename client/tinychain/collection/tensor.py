@@ -38,6 +38,9 @@ class NDArray(Interface):
 
     def sum(self, axis=None):
         return ref.Get(ref.MethodSubject(self, "sum"), axis)
+    
+    def norm(self, axis=None):
+        return (self**2).sum(axis).pow(0.5)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -127,6 +130,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def __matmul__(self, other):
         return Tensor(MatMul(self, other))
+    
+    def abs(self):
+        return Tensor(Abs(self))
 
     def add(self, other):
         return Tensor(Add(self, other))
@@ -297,6 +303,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
+    
+    def norm(self, axis=None):
+        return Tensor(Norm(self, axis))
 
     @property
     def ndim(self):
@@ -312,10 +321,17 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def norm(self, axis=None):
         """
         With no `axis`, computes the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices.
+<<<<<<< HEAD
 
         For a vector norm, specify the `axis` of the vector.
         """
 
+=======
+
+        For a vector norm, specify the `axis` of the vector.
+        """
+
+>>>>>>> 8102c3a83172213cd85c3514816e15c51af87e53
         return Tensor(Norm(self, axis))
 
     def pow(self, other):
@@ -673,8 +689,14 @@ class Norm(Dual):
             grads.update(operator(self.subject).gradients(loss * self.subject / self.subject.norm(self.args)))
         
         return grads
+<<<<<<< HEAD
 
 
+=======
+        
+
+# TODO: make it work for multiple functions and for .sum(axis=tuple)
+>>>>>>> 8102c3a83172213cd85c3514816e15c51af87e53
 class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, axis=self.args)
@@ -718,7 +740,7 @@ class Transform(Operator):
         if not operator(self.subject):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return Gradients()
-
+        
         return operator(self.subject).gradients(loss)
 
 

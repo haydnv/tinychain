@@ -322,6 +322,29 @@ class Exp(Unary):
         return grads
 
 
+class Abs(Unary):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Numeric.abs(self.subject)
+
+    def backward(self, _variable):
+        return self.subject/self.subject.abs()
+
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss * (self.subject/self.subject.abs())))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss * (self.subject/self.subject.abs())))
+        
+        return grads
+
+
 #TODO: Tensor.log(base!=None)
 class Log(Dual):
     def forward(self):
