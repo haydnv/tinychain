@@ -6,13 +6,16 @@ Reference types.
 import logging
 
 from ..reflect import is_conditional, is_ref
-from ..util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from ..util import deanonymize, form_of, get_ref, hex_id, same_as, to_json, uri, URI
 
 
 class Ref(object):
     """A reference to a :class:`State`. Prefer to construct a subclass like :class:`If` or :class:`Get`."""
 
     __uri__ = URI("/state/scalar/ref")
+
+    def __same__(self, other):
+        return same_as(self.__args__(), other.__args__())
 
 
 class After(Ref):
@@ -232,6 +235,9 @@ class Op(Ref):
 
     def __ns__(self, cxt):
         deanonymize(self.subject, cxt)
+
+    def __same__(self, other):
+        return same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
 
 class Get(Op):

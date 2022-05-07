@@ -780,66 +780,67 @@ class Transform(Operator):
         d = type(self)(derivative_of(self.subject, variable), self.args)
         return rtype(form=d)
 
+    def invert(self, loss):
+        raise NotImplementedError(f"{self.__class__.__name__}.invert")
+
     def gradients(self, loss):
-        if not operator(self.subject):
-            logging.info(f"{self.subject} is assumed to be constant and has no gradient")
-            return Gradients()
-        
-        return operator(self.subject).gradients(loss)
+        if isinstance(loss, NDArray):
+            loss = self.invert(loss)
+
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
+
+        return grads
 
 
 class Expand(Transform):
     def forward(self):
         return NDArray.expand_dims(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
-        return Transform.gradients(self, loss)
+    def invert(self, loss):
+        return loss.reshape(self.subject.shape)
 
 
 class Flip(Transform):
     def forward(self):
         return NDArray.flip(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.flip(self.args)
-        return Transform.gradients(self, loss)
+    def invert(self, loss):
+        return loss.flip(self.args)
 
 
 class Transpose(Transform):
     def __init__(self, subject, permutation=None):
         Transform.__init__(self, subject, permutation)
 
-        if permutation is None:
-            self.inverse_permutation = None
-        else:
-            self.inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(permutation)))
-
     def forward(self):
         return NDArray.transpose(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.transpose(self.inverse_permutation)
-        return Transform.gradients(self, loss)
+    def invert(self, loss):
+        if self.args is None:
+            inverse_permutation = None
+        else:
+            inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
+
+        return loss.transpose(inverse_permutation)
 
 
 class Reshape(Transform):
     def forward(self):
         return NDArray.reshape(self.subject, self.args)
 
-    def gradients(self, loss):
-        loss = loss if isinstance(loss, Number) else loss.reshape(self.subject.shape)
-        return Transform.gradients(self, loss)
+    def invert(self, loss):
+        return loss.reshape(self.subject.shape)
 
 
 class Slice(Transform):
     def forward(self):
         return NDArray.slice(self.subject, self.args)
 
-    def gradients(self, loss):
-        if isinstance(loss, Number):
-            return Transform.gradients(loss)
-
+    def invert(self, loss):
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-        grad = Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad, "")))
-        return Transform.gradients(self, grad)
+        return Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad)))
