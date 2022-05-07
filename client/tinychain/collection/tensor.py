@@ -38,9 +38,6 @@ class NDArray(Interface):
 
     def sum(self, axis=None):
         return ref.Get(ref.MethodSubject(self, "sum"), axis)
-    
-    def norm(self, axis=None):
-        return (self**2).sum(axis).pow(0.5)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)

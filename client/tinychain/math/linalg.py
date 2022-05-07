@@ -106,7 +106,7 @@ class LinearAlgebra(Library):
         txn.u = Tensor(After(txn.u_init[:, 0].write(a[:, 0]), txn.u_init)).copy()
         txn.q = Tensor(
             After(
-                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / txn.u_init[:, 0].norm())),
+                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / norm(txn.u_init[:, 0]))),
                 txn.q_init
             )).copy()
 
@@ -122,7 +122,7 @@ class LinearAlgebra(Library):
             cxt.update_u = After(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
             cxt.update_q = After(
                 cxt.update_u,
-                txn.q[:, i].write(txn.u[:, i] / txn.u[:, i].norm()))
+                txn.q[:, i].write(txn.u[:, i] / norm(txn.u[:, i])))
 
             return After(cxt.update_q, {})
 
@@ -408,6 +408,10 @@ class LinearAlgebra(Library):
             A.ndim == 2,
             self.svd_matrix(A=A, l=l, epsilon=epsilon, max_iter=max_iter),
             self.svd_parallel(A=A, l=l, epsilon=epsilon, max_iter=max_iter))
+
+
+def norm(x):
+    return (x**2).sum()**0.5
 
 
 def _is_square(x):

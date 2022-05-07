@@ -1236,12 +1236,7 @@ impl<'a> Handler<'a> for NormHandler {
                         .map(State::Collection)
                 }
 
-                if self.tensor.ndim() < 2 {
-                    Err(TCError::bad_request(
-                        "norm requires a matrix or batch of matrices, not",
-                        self.tensor,
-                    ))
-                } else if self.tensor.ndim() == 2 {
+                if self.tensor.ndim() <= 2 {
                     let squared = self.tensor.pow_const(2i32.into())?;
                     let summed = squared.sum_all(txn.clone()).await?;
                     Ok(Value::from(summed.pow(0.5f32.into())).into())
