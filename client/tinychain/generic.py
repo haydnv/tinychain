@@ -2,7 +2,6 @@ import typing
 
 from .interface import Functional
 from .scalar.bound import Range
-from .scalar.number import Bool, Number, UInt
 from .scalar.ref import Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
@@ -113,6 +112,7 @@ class Map(State):
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
 
+        from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -123,6 +123,7 @@ class Map(State):
     def len(self):
         """Return the number of elements in this `Map`."""
 
+        from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
 
@@ -175,6 +176,7 @@ class Tuple(State, Functional):
         `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
         """
 
+        from .scalar.number import Number
         return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
 
     def __new__(cls, form):
@@ -248,11 +250,13 @@ class Tuple(State, Functional):
         return self.__class__(form=TupleRef(self, name))
 
     def contains(self, item):
+        from .scalar.number import Bool
         return self._get("contains", item, Bool)
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
 
+        from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -263,6 +267,7 @@ class Tuple(State, Functional):
     def len(self):
         """Return the number of elements in this `Tuple`."""
 
+        from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
     def unpack(self, length):

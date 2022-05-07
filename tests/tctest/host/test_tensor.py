@@ -11,16 +11,6 @@ from .base import HostTest
 ENDPOINT = "/transact/hypothetical"
 
 
-class ShapeTests(HostTest):
-    def testShape(self):
-        cxt = tc.Context()
-        cxt.shape = tc.tensor.Shape([2, 3, 4, 5, 6, 7])
-        cxt.reduced = cxt.shape.reduce_shape([2, 4])
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [2, 3, 1, 5, 1, 7])
-
-
 class DenseTests(HostTest):
     def testConstant(self):
         c = 1.414

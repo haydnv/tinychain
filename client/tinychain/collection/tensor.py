@@ -1,23 +1,17 @@
 """An n-dimensional array of numbers."""
 
 from ..decorators import post
-from ..generic import Map, Tuple
+from ..generic import Map
 from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
-from ..scalar.number import Bool, F32, F64, Number, UInt, U64
+from ..scalar.number import Bool, F32, F64, Number, UInt
 from ..scalar import ref
+from ..shape import Shape
 from ..state import Class, Stream
 from ..util import form_of, hex_id, uri
 
 from .base import Collection
-
-
-class Shape(Tuple):
-    __spec__ = typing.Tuple[U64, ...]
-
-    def reduce_shape(self, axes):
-        return ref.Post(uri(Tensor).append("reduce_shape"), {"shape": self, "axes": axes})
 
 
 class NDArray(Interface):
@@ -226,14 +220,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def expand_dims(self, axis=None):
         """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
 
-        rtype = Tensor
-        if isinstance(form_of(self.shape), (list, tuple)):
-            if isinstance(form_of(axis), int):
-                shape = list(form_of(self.shape))
-                shape.insert(form_of(axis), 1)
-                rtype = Tensor.expect(shape, self.dtype)
-
-        return rtype(form=Expand(self, axis))
+        return Tensor(form=Expand(self, axis))
 
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
@@ -300,9 +287,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
-    
-    def norm(self, axis=None):
-        return Tensor(Norm(self, axis))
 
     @property
     def ndim(self):
@@ -336,11 +320,14 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def reshape(self, shape):
         """Return a view of this `Tensor` with the given `shape`."""
 
-        return Tensor.expect(shape, self.dtype)(form=Reshape(self, shape))
+        return Tensor(form=Reshape(self, shape))
 
     @property
     def shape(self):
         """Return the shape of this `Tensor`."""
+
+        if hasattr(form_of(self), "shape"):
+            return form_of(self).shape
 
         return self._get("shape", rtype=Shape)
 
@@ -445,12 +432,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
             elif hasattr(permutation, "__iter__"):
                 shape = [self.shape[x] for x in permutation]
 
-        if shape is None:
-            rtype = Tensor
-        else:
-            rtype = Tensor.expect(shape, dtype)
-
-        return rtype(form=Transpose(self, permutation))
+        return Tensor(form=Transpose(self, permutation))
 
     def write(self, value):
         """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
@@ -750,23 +732,20 @@ class Sum(Reduce):
         return NDArray.sum(self.subject, axis=self.args)
 
     def backward(self, variable=None):
-        # TODO: add a keep_dims option to reduce operations
-        return derivative_of(self.subject).sum(self.args).expand_dims(self.args)
+        return derivative_of(self.subject).sum(self.args)
 
     def gradients(self, loss):
         if self.args is None:
             loss = self.backward() * loss
         else:
-            shape = self.subject.shape.reduce_shape([self.args])
-            loss = Dense.ones_like(self.subject) * loss.reshape(shape)
+            loss = Dense.ones_like(self.subject) * loss.expand_dims(self.args)
 
-        from ..ml.optimizer import Variable
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss))
-        elif operator(self.subject):
+        if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
 
         return grads
 
