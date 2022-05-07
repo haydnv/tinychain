@@ -144,7 +144,7 @@ class DenseTests(HostTest):
         self.assertEqual(expected.shape, tuple(actual[tc.uri(tc.tensor.Dense)][0][0]))
         self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
 
-    def testNorm(self):
+    def testNorm_matrix(self):
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
         expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
@@ -152,6 +152,19 @@ class DenseTests(HostTest):
         cxt = tc.Context()
         cxt.matrices = load_dense(matrices, tc.I32)
         cxt.actual = cxt.matrices.norm()
+        cxt.expected = load_dense(expected, tc.F32)
+        cxt.passed = (cxt.actual == cxt.expected).all()
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
+
+    def testNorm_column(self):
+        shape = [2, 3, 4]
+        matrices = np.arange(24).reshape(shape)
+        expected = np.stack([np.linalg.norm(matrix, axis=-1) for matrix in matrices])
+
+        cxt = tc.Context()
+        cxt.matrices = load_dense(matrices, tc.I32)
+        cxt.actual = cxt.matrices.norm(-1)
         cxt.expected = load_dense(expected, tc.F32)
         cxt.passed = (cxt.actual == cxt.expected).all()
 

@@ -21,20 +21,26 @@ class Shape(Tuple):
 
 
 class NDArray(Interface):
-    def slice(self, bounds):
-        return ref.Get(ref.MethodSubject(self), bounds)
-
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
     def flip(self, axis):
         return ref.Get(ref.MethodSubject(self, "flip"), axis)
 
-    def norm(self):
-        return ref.Get(ref.MethodSubject(self, "norm"))
+    def norm(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, "norm"), axis)
 
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+
+    def slice(self, bounds):
+        return ref.Get(ref.MethodSubject(self), bounds)
+
+    def sum(self, axis=None):
+        return ref.Get(ref.MethodSubject(self, "sum"), axis)
+    
+    def norm(self, axis=None):
+        return (self**2).sum(axis).pow(0.5)
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -124,6 +130,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def __matmul__(self, other):
         return Tensor(MatMul(self, other))
+    
+    def abs(self):
+        return Tensor(Abs(self))
 
     def add(self, other):
         return Tensor(Add(self, other))
@@ -294,6 +303,9 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
     def mul(self, other):
         return Tensor(Mul(self, other))
+    
+    def norm(self, axis=None):
+        return Tensor(Norm(self, axis))
 
     @property
     def ndim(self):
@@ -306,10 +318,14 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
 
         return self._post("ne", {"r": other}, Tensor)
 
-    def norm(self):
-        """Compute the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices."""
+    def norm(self, axis=None):
+        """
+        With no `axis`, computes the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices.
 
-        return Tensor(Norm(self))
+        For a vector norm, specify the `axis` of the vector.
+        """
+
+        return Tensor(Norm(self, axis))
 
     def pow(self, other):
         return Tensor(Pow(self, other))
@@ -414,7 +430,7 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return self._get("sum", axis, rtype)
+        return rtype(form=Sum(self, axis))
 
     def transpose(self, permutation=None):
         """
@@ -707,15 +723,55 @@ class Copy(Unary):
         return Gradients()
 
 
-class Norm(Unary):
+class Reduce(Dual):
+    # TODO: move common functionality from reduce operators into this parent class
+    pass
+
+
+class Norm(Dual):
     def forward(self):
-        return NDArray.norm(self.subject)
+        return NDArray.norm(self.subject, self.args)
+    
+    def backward(self, variable=None):
+        return self.subject / self.subject.norm(self.args)
+    
+    def gradients(self, loss):
+        from ..ml.optimizer import Variable
+
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss * self.subject / self.subject.norm(self.args)))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss * self.subject / self.subject.norm(self.args)))
+        
+        return grads
+
+
+class Sum(Reduce):
+    def forward(self):
+        return NDArray.sum(self.subject, axis=self.args)
 
     def backward(self, variable=None):
-        raise NotImplementedError("derivative of norm")
+        # TODO: add a keep_dims option to reduce operations
+        return derivative_of(self.subject).sum(self.args).expand_dims(self.args)
 
     def gradients(self, loss):
-        raise NotImplementedError("gradients of norm")
+        if self.args is None:
+            loss = self.backward() * loss
+        else:
+            shape = self.subject.shape.reduce_shape([self.args])
+            loss = Dense.ones_like(self.subject) * loss.reshape(shape)
+
+        from ..ml.optimizer import Variable
+        grads = Gradients()
+
+        if isinstance(self.subject, Variable):
+            grads.update(self.subject.invert(loss))
+        elif operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+
+        return grads
 
 
 class Transform(Operator):
@@ -728,7 +784,7 @@ class Transform(Operator):
         if not operator(self.subject):
             logging.info(f"{self.subject} is assumed to be constant and has no gradient")
             return Gradients()
-
+        
         return operator(self.subject).gradients(loss)
 
 

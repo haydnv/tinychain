@@ -1225,7 +1225,16 @@ impl<'a> Handler<'a> for NormHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                key.expect_none()?;
+                if key.is_some() {
+                    let axis = cast_axis(key, self.tensor.ndim())?;
+                    return self
+                        .tensor
+                        .pow_const(2i32.into())
+                        .and_then(|pow| pow.sum(axis))
+                        .and_then(|sum| sum.pow_const(0.5f32.into()))
+                        .map(Collection::Tensor)
+                        .map(State::Collection)
+                }
 
                 if self.tensor.ndim() < 2 {
                     Err(TCError::bad_request(
@@ -1248,8 +1257,8 @@ impl<'a> Handler<'a> for NormHandler {
                             pow.sum(axis)
                         })
                         .and_then(|sum| sum.pow_const(0.5f32.into()))
-                        .map(Collection::from)
-                        .map(State::from)
+                        .map(Collection::Tensor)
+                        .map(State::Collection)
                 }
             })
         }))
