@@ -52,21 +52,6 @@ class LinearAlgebraTests(ClientTest):
 
         self.assertTrue(np.allclose(expected.flatten(), actual))
 
-    def testNorm(self):
-        shape = [2, 3, 4]
-        matrices = np.arange(24).reshape(shape)
-
-        cxt = tc.Context()
-        cxt.matrices = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.I32)
-        cxt.result = tc.linalg.batch_norm(cxt.matrices)
-
-        expected = [np.linalg.norm(matrix) for matrix in matrices]
-
-        actual = self.host.post(ENDPOINT, cxt)
-        actual = actual[tc.uri(tc.tensor.Dense)][1]
-
-        self.assertEqual(actual, expected)
-
 
 def expect_dense(x, dtype):
     return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}

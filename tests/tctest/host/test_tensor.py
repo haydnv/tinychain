@@ -144,6 +144,32 @@ class DenseTests(HostTest):
         self.assertEqual(expected.shape, tuple(actual[tc.uri(tc.tensor.Dense)][0][0]))
         self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
 
+    def testNorm_matrix(self):
+        shape = [2, 3, 4]
+        matrices = np.arange(24).reshape(shape)
+        expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
+
+        cxt = tc.Context()
+        cxt.matrices = load_dense(matrices, tc.I32)
+        cxt.actual = cxt.matrices.norm()
+        cxt.expected = load_dense(expected, tc.F32)
+        cxt.passed = (cxt.actual == cxt.expected).all()
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
+
+    def testNorm_column(self):
+        shape = [2, 3, 4]
+        matrices = np.arange(24).reshape(shape)
+        expected = np.stack([np.linalg.norm(matrix, axis=-1) for matrix in matrices])
+
+        cxt = tc.Context()
+        cxt.matrices = load_dense(matrices, tc.I32)
+        cxt.actual = cxt.matrices.norm(-1)
+        cxt.expected = load_dense(expected, tc.F32)
+        cxt.passed = (cxt.actual == cxt.expected).all()
+
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
+
     def testPow(self):
         cxt = tc.Context()
         cxt.left = tc.tensor.Dense.load([1, 2], [1, 2], tc.I64)
@@ -164,38 +190,6 @@ class DenseTests(HostTest):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_dense(tc.I64, shape, np.arange(-2, 4, 2))
-        self.assertEqual(actual, expected)
-
-    def testSplitByNumber(self):
-        splits = 3
-        shape = (6, 30)
-        x = np.ones(shape, dtype=np.int64)
-
-        cxt = tc.Context()
-        cxt.x1 = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I64)
-        cxt.x2 = cxt.x1.split(3, axis=0)
-        cxt.result = [tc.tensor.Tensor(cxt.x2[i]).shape for i in range(3)]
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [[shape[0] // splits, 30]] * splits)
-
-    def testSplitBySizes(self):
-        input_shape = [3, 4, 1, 1]
-        split = [1, 1]
-        axis = 1
-
-        x = np.random.random(np.product(input_shape)).reshape(input_shape)
-
-        cxt = tc.Context()
-        cxt.input = tc.tensor.Dense.load(x.shape, x.flatten().tolist())
-        cxt.splits = cxt.input.split(split, axis=axis)
-        cxt.result = [cxt.splits[i].shape for i in range(len(split))]
-
-        actual = self.host.post(ENDPOINT, cxt)
-
-        expected = [input_shape] * len(split)
-        for i, dim in enumerate(split):
-            expected[i][axis] = dim
-
         self.assertEqual(actual, expected)
 
     def testLogarithm(self):

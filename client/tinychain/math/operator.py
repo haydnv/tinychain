@@ -302,15 +302,40 @@ class Exp(Unary):
 
 
 # TODO: Tensor.log(base!=None)
+class Abs(Unary):
+    def __init__(self, subject):
+        Operator.__init__(self, subject, None)
+
+    def forward(self):
+        return Numeric.abs(self.subject)
+
+    def backward(self, _variable=None):
+        return self.subject / self.subject.abs()
+
+    def gradients(self, loss):
+        loss *= self.backward()
+
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients())
+        else:
+            grads[hex_id(self.subject)] = loss
+
+        return grads
+
+
+#TODO: Tensor.log(base!=None)
 class Log(Dual):
     def forward(self):
         return Numeric.log(self.subject, self.args)
 
-    def backward(self, _variable):
+    def backward(self, _variable=None):
         return 1 / self.subject
 
     def gradients(self, loss):
-        loss /= self.subject
+        loss *= self.backward()
+
         grads = Gradients()
 
         if operator(self.subject):

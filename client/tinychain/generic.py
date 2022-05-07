@@ -202,6 +202,9 @@ class Tuple(State, Functional):
         return to_json(form_of(self))
 
     def __getitem__(self, i):
+        if i is None:
+            raise ValueError(f"invalid tuple index: {i}")
+
         spec = typing.get_args(self.__spec__) if typing.get_args(self.__spec__) else self.__spec__
         rtype = spec[0] if len(spec) == 2 and spec[1] is Ellipsis else State
 
