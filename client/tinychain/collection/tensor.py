@@ -8,7 +8,7 @@ from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
 from ..scalar import ref
 from ..state import Class, Stream
-from ..util import form_of, uri
+from ..util import form_of, hex_id, uri
 
 from .base import Collection
 
@@ -367,15 +367,48 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
         """
         Split this `Tensor` into multiple slices along the given `axis`.
 
+        This method requires a constant `num_or_size_splits`, `axis`, and `self.shape[axis]`.
+
         If `num_or_size_splits` is a `Number`, the `tensor` will be sliced along `axis` `num_or_size_splits` times;
-        if `self.shape[axis] % num_or_size_splits != 0` then a `BadRequest` error will be raised.
+        if `self.shape[axis] % num_or_size_splits != 0` then a `ValueError` error will be raised.
 
         If `num_or_size_splits` is a `Tuple` with length `n` then the `tensor` will be split into `n` new `Tensor` s
         each with `shape[axis] == num_or_size_splits[axis]`; if the sum of `num_or_size_splits` is not equal to
-        `self.shape[axis]` then a `BadRequest` error will be raised.
+        `self.shape[axis]` then a `ValueError` error will be raised.
         """
 
-        return self._get("split", (num_or_size_splits, axis), typing.Tuple[Tensor, ...])
+        num_or_size_splits = form_of(num_or_size_splits)
+        if not ref.is_literal(num_or_size_splits):
+            raise ValueError(f"Tensor.split requires a constant num_or_size_splits, not {num_or_size_splits}")
+
+        if not ref.is_literal(axis):
+            raise ValueError(f"Tensor.split requires a constant axis, not {axis}")
+
+        dim = form_of(self.shape[axis])
+        if not int(dim) == dim:
+            raise RuntimeError(f"Tensor.split requires a constant dimension to split")
+
+        if isinstance(num_or_size_splits, (list, tuple)):
+            if sum(num_or_size_splits) != dim:
+                raise ValueError(f"{num_or_size_splits} does not match the dimension {dim} of axis {axis}")
+
+        elif int(num_or_size_splits) == num_or_size_splits:
+            if dim % num_or_size_splits != 0:
+                raise ValueError(f"split dimension {dim} is not divisible by {num_or_size_splits}")
+
+            slice_dim = dim // num_or_size_splits
+            num_or_size_splits = [slice_dim] * num_or_size_splits
+
+        else:
+            raise ValueError(f"invalid num_or_size_splits: {num_or_size_splits}")
+
+        start = 0
+        slices = []
+        for slice_dim in num_or_size_splits:
+            bounds = ([slice(None)] * axis) + [slice(start, start + slice_dim)]
+            slices.append(self[bounds])
+
+        return slices
 
     def std(self, axis=None):
         """
@@ -453,11 +486,7 @@ class Dense(Tensor):
     def concatenate(cls, tensors, axis=None):
         """Create a new `Dense` tensor by concatenating the given `tensors` along the given `axis`."""
 
-        params = {"tensors": tensors}
-        if axis:
-            params["axis"] = axis
-
-        return Dense(form=ref.Post(uri(cls) + "/concatenate", params))
+        return Dense(form=Concatenate(tensors, axis))
 
     @classmethod
     def constant(cls, shape, value):
@@ -646,6 +675,41 @@ def where(cond, x, y):
     """
 
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+
+
+class Concatenate(Dual):
+    def forward(self):
+        params = {"tensors": self.subject}
+        if self.args:
+            params["axis"] = self.args
+
+        # TODO: support concatenating Sparse tensors
+        return Dense(form=ref.Post(uri(Dense) + "/concatenate", params))
+
+    def backward(self, variable=None):
+        return Concatenate([derivative_of(t, variable) for t in self.subject], self.args)
+
+    def gradients(self, loss):
+        from ..ml import Variable  # TODO: remove this import
+
+        grads = Gradients()
+
+        axis = self.args if self.args else 0
+        if axis is None:
+            num_or_size_slices = len(self.subject)
+        else:
+            num_or_size_slices = [t.shape[axis] for t in self.subject]
+
+        losses = loss.split(num_or_size_slices, axis)
+        assert len(losses) == len(self.subject)
+
+        for (tensor, loss) in zip(self.subject, losses):
+            if operator(tensor):
+                grads.update(operator(tensor).gradients(loss))
+            elif isinstance(tensor, Variable):
+                grads[hex_id(tensor)] = loss
+
+        return grads
 
 
 class Copy(Unary):

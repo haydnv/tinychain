@@ -359,6 +359,23 @@ class OperatorTests(unittest.TestCase):
         self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
         self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
 
+    def testConcat(self):
+        y_torch = torch.cat([self.w1_torch, self.b1_torch])
+
+        torch_grad = grad(
+            y_torch, [self.w1_torch, self.b1_torch], grad_outputs=torch.ones_like(y_torch))
+
+        cxt = tc.Context()
+        y_tc = tc.tensor.Dense.concatenate([self.w1_tc, self.b1_tc])
+        cxt.result = tc.math.operator.operator(y_tc).gradients(tc.tensor.Dense.ones([4, 2]))
+
+        tc_grad = HOST.post(ENDPOINT, cxt)
+
+        self.assertEqual(len(torch_grad), len(tc_grad))
+        for (expected, actual) in zip(torch_grad, tc_grad.values()):
+            actual = load_np(actual)
+            self.assertTrue((abs(actual - expected.numpy()) < 0.0001).all())
+
     def testSum(self):
         y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
         y2_torch = torch.sum(y_torch, 0) ** 0.5
