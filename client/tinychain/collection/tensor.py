@@ -321,17 +321,10 @@ class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
     def norm(self, axis=None):
         """
         With no `axis`, computes the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices.
-<<<<<<< HEAD
 
         For a vector norm, specify the `axis` of the vector.
         """
 
-=======
-
-        For a vector norm, specify the `axis` of the vector.
-        """
-
->>>>>>> 8102c3a83172213cd85c3514816e15c51af87e53
         return Tensor(Norm(self, axis))
 
     def pow(self, other):
@@ -689,34 +682,21 @@ class Norm(Dual):
             grads.update(operator(self.subject).gradients(loss * self.subject / self.subject.norm(self.args)))
         
         return grads
-<<<<<<< HEAD
 
 
-=======
-        
-
-# TODO: make it work for multiple functions and for .sum(axis=tuple)
->>>>>>> 8102c3a83172213cd85c3514816e15c51af87e53
 class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, axis=self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject).sum(self.args)
+        # TODO: add a keep_dims option to reduce operations
+        return derivative_of(self.subject).sum(self.args).expand_dims(self.args)
 
     def gradients(self, loss):
         if self.args is None:
             loss = self.backward() * loss
         else:
-            axis = self.args
-            if isinstance(self.subject.shape, Shape):
-                len_shape = self.subject.shape.len()
-            else: 
-                len_shape = len(self.subject.shape)
-            if self.args < 0: 
-                axis = len_shape + self.args
-                
-            shape = self.subject.shape.reduce_shape([axis])
+            shape = self.subject.shape.reduce_shape([self.args])
             loss = Dense.ones_like(self.subject) * loss.reshape(shape)
 
         from ..ml.optimizer import Variable
