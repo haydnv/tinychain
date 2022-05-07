@@ -1,6 +1,6 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from ..interface import Order
+from ..interface import Compare, Order
 from ..util import form_of, to_json, uri, URI
 
 from .base import Scalar
@@ -9,7 +9,7 @@ from .ref import Ref
 
 # Scalar value types
 
-class Value(Scalar, Order):
+class Value(Scalar, Compare, Order):
     """A scalar `Value` which supports equality and collation."""
 
     __uri__ = uri(Scalar) + "/value"

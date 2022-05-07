@@ -40,6 +40,8 @@ class Order(Interface):
         from .scalar.ref import If
         return cls(If(l <= r, l, r))
 
+
+class Compare(Equality):
     def __gt__(self, other):
         return self.gt(other)
 

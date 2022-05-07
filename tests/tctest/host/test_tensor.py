@@ -145,6 +145,7 @@ class DenseTests(HostTest):
         self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
 
     def testNorm_matrix(self):
+        threshold = 0.0001
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
         expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
@@ -153,11 +154,13 @@ class DenseTests(HostTest):
         cxt.matrices = load_dense(matrices, tc.I32)
         cxt.actual = cxt.matrices.norm()
         cxt.expected = load_dense(expected, tc.F32)
-        cxt.passed = (cxt.actual == cxt.expected).all()
+        cxt.result = (cxt.actual, cxt.expected)
+        cxt.passed = (abs(cxt.actual - cxt.expected) < threshold).all()
 
         self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testNorm_column(self):
+        threshold = 0.0001
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
         expected = np.stack([np.linalg.norm(matrix, axis=-1) for matrix in matrices])
@@ -166,7 +169,7 @@ class DenseTests(HostTest):
         cxt.matrices = load_dense(matrices, tc.I32)
         cxt.actual = cxt.matrices.norm(-1)
         cxt.expected = load_dense(expected, tc.F32)
-        cxt.passed = (cxt.actual == cxt.expected).all()
+        cxt.passed = (abs(cxt.actual - cxt.expected) < threshold).all()
 
         self.assertTrue(self.host.post(ENDPOINT, cxt))
 

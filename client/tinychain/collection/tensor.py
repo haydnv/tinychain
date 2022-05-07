@@ -2,7 +2,7 @@
 
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..interface import Equality, Interface, Order
+from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt, U64
@@ -43,7 +43,7 @@ class NDArray(Interface):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
 
 
-class Tensor(Collection, Equality, Numeric, Order, Trigonometric, NDArray):
+class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
@@ -728,7 +728,7 @@ class Reduce(Dual):
 class Norm(Dual):
     def forward(self):
         return NDArray.norm(self.subject, self.args)
-    
+
     def backward(self, variable=None):
         return self.subject / self.subject.norm(self.args)
     
