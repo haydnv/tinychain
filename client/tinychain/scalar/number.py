@@ -14,6 +14,11 @@ class Number(Value, Numeric, Trigonometric):
     def trig_rtype(cls):
         return cls
 
+    @property
+    def shape(self):
+        from ..shape import Shape
+        return Shape(tuple())
+
     def add(self, other):
         """Return the sum of `self` and `other`."""
 

@@ -15,6 +15,9 @@ class Ex(Bound):
     def __init__(self, value):
         self.value = value
 
+    def __repr__(self):
+        return f"ex {self.value}"
+
     def __json__(self):
         return to_json(["ex", self.value])
 
@@ -25,12 +28,18 @@ class In(Bound):
     def __init__(self, value):
         self.value = value
 
+    def __repr__(self):
+        return f"in {self.value}"
+
     def __json__(self):
         return to_json(["in", self.value])
 
 
 class Un(Bound):
     """An unbounded side of a :class:`Range`"""
+
+    def __repr__(self):
+        return "..."
 
     def __json__(self):
         return Nil
@@ -39,9 +48,15 @@ class Un(Bound):
 class Range(object):
     """A selection range of one or two :class:`Bound`s."""
 
+    def __repr__(self):
+        return f"Range {self.start} to {self.end}"
+
     @staticmethod
     def from_slice(s):
         return Range(In(s.start), Ex(s.stop))
+
+    def to_slice(self):
+        return slice(form_of(self.start.value), form_of(self.end.value))
 
     def __init__(self, start=None, end=None):
         if start is not None and not isinstance(start, Bound):

@@ -9,6 +9,7 @@ from .reflect import MethodStub
 class _Base(object):
     def __init__(self):
         # TODO: is there a better place for this?
+
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue

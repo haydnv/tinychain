@@ -2,8 +2,7 @@ import typing
 
 from .interface import Functional
 from .scalar.bound import Range
-from .scalar.number import Bool, Number, UInt
-from .scalar.ref import Get, Post
+from .scalar.ref import is_literal, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
 from .util import form_of, get_ref, to_json, uri
@@ -113,6 +112,7 @@ class Map(State):
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
 
+        from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -123,6 +123,7 @@ class Map(State):
     def len(self):
         """Return the number of elements in this `Map`."""
 
+        from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
 
@@ -161,6 +162,9 @@ class Tuple(State, Functional):
                 def __iter__(self):
                     return (self[i] for i in range(len(self)))
 
+                def __reversed__(self):
+                    return cls(tuple(self[i] for i in reversed(range(len(self)))))
+
             return _Tuple
 
     @classmethod
@@ -175,25 +179,24 @@ class Tuple(State, Functional):
         `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
         """
 
+        from .scalar.number import Number
         return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
 
     def __new__(cls, form):
-        if isinstance(form, Tuple):
-            return State.__new__(cls)
-        elif hasattr(form, "__iter__"):
+        if hasattr(form, "__iter__"):
             spec = tuple(type(s) if isinstance(s, State) else State for s in form)
             return State.__new__(cls.expect(spec))
         else:
             return State.__new__(cls)
 
     def __init__(self, form):
-        if isinstance(form, Tuple):
+        while isinstance(form, Tuple):
             form = form_of(form)
 
         return State.__init__(self, form)
 
     def __add__(self, other):
-        return Tuple.concatenate(self, other)
+        return self.concatenate(self, other)
 
     def __eq__(self, other):
         return self.eq(other)
@@ -212,17 +215,18 @@ class Tuple(State, Functional):
             if i.step is not None:
                 raise NotImplementedError(f"slice with step: {i}")
 
+            start = form_of(i.start)
+            stop = form_of(i.stop)
+
             if len(spec) == 2 and spec[1] is not Ellipsis:
                 # the contents are constants, so compute the slice now if possible
-                if hasattr(self.__form__, "__getitem__"):
-                    constant_start = slice.start is None or isinstance(slice.start, int)
-                    constant_stop = slice.stop is None or isinstance(slice.stop, int)
-                    if constant_start and constant_stop:
-                        start = _index_of(slice.start, len(self), 0)
-                        stop = _index_of(slice.stop, len(self), len(self))
-                        return Tuple([self[i] for i in range(start, stop)])
+                if hasattr(form_of(self), "__getitem__"):
+                    if is_literal(start) and is_literal(stop):
+                        start = _index_of(start, len(self), 0)
+                        stop = _index_of(stop, len(self), len(self))
+                        return self.__class__([self[i] for i in range(start, stop)])
 
-            return self._get("", Range.from_slice(i), Tuple.expect(typing.Tuple[rtype, ...]))
+            return self._get("", Range.from_slice(i), self.__class__.expect(typing.Tuple[rtype, ...]))
 
         if isinstance(i, int):
             if len(spec) == 2 and spec[1] is Ellipsis:
@@ -232,8 +236,8 @@ class Tuple(State, Functional):
             else:
                 rtype = spec[i]
 
-            if hasattr(self.__form__, "__getitem__"):
-                item = self.__form__[i]
+            if hasattr(form_of(self), "__getitem__"):
+                item = form_of(self)[i]
                 if uri(self) == uri(self.__class__):
                     return item
                 else:
@@ -248,11 +252,13 @@ class Tuple(State, Functional):
         return self.__class__(form=TupleRef(self, name))
 
     def contains(self, item):
+        from .scalar.number import Bool
         return self._get("contains", item, Bool)
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
 
+        from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
@@ -263,6 +269,7 @@ class Tuple(State, Functional):
     def len(self):
         """Return the number of elements in this `Tuple`."""
 
+        from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
     def unpack(self, length):
@@ -273,7 +280,7 @@ class Tuple(State, Functional):
     def zip(self, other):
         """Construct a new `Tuple` of 2-tuples of the form `(self[i], other[i]) for i in self.len()`."""
 
-        return self._get("zip", other, Tuple)
+        return self._get("zip", other, type(self))
 
 
 class TupleRef(StateRef):

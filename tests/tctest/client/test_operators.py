@@ -410,8 +410,8 @@ class OperatorTests(unittest.TestCase):
         cxt = tc.Context()
         y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
         y_2tc = y_tc.sum(0)**0.5
-        _dy_dw1_tc = form_of(y_2tc).gradients(tc.tensor.Dense.ones(y_2tc.shape))[hex_id(self.w1_tc)]
-        _d2y_dw2_tc = form_of(_dy_dw1_tc).gradients(tc.tensor.Dense.ones(_dy_dw1_tc.shape))[hex_id(self.w1_tc)]
+        _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
+        _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])
