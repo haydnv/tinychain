@@ -2,7 +2,7 @@ import typing
 
 from .interface import Functional
 from .scalar.bound import Range
-from .scalar.ref import Get, Post
+from .scalar.ref import is_literal, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
 from .util import form_of, get_ref, to_json, uri
@@ -162,6 +162,9 @@ class Tuple(State, Functional):
                 def __iter__(self):
                     return (self[i] for i in range(len(self)))
 
+                def __reversed__(self):
+                    return cls(tuple(self[i] for i in reversed(range(len(self)))))
+
             return _Tuple
 
     @classmethod
@@ -180,9 +183,7 @@ class Tuple(State, Functional):
         return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
 
     def __new__(cls, form):
-        if isinstance(form, Tuple):
-            return State.__new__(cls)
-        elif hasattr(form, "__iter__"):
+        if hasattr(form, "__iter__"):
             spec = tuple(type(s) if isinstance(s, State) else State for s in form)
             return State.__new__(cls.expect(spec))
         else:
@@ -214,17 +215,18 @@ class Tuple(State, Functional):
             if i.step is not None:
                 raise NotImplementedError(f"slice with step: {i}")
 
+            start = form_of(i.start)
+            stop = form_of(i.stop)
+
             if len(spec) == 2 and spec[1] is not Ellipsis:
                 # the contents are constants, so compute the slice now if possible
-                if hasattr(self.__form__, "__getitem__"):
-                    constant_start = slice.start is None or isinstance(slice.start, int)
-                    constant_stop = slice.stop is None or isinstance(slice.stop, int)
-                    if constant_start and constant_stop:
-                        start = _index_of(slice.start, len(self), 0)
-                        stop = _index_of(slice.stop, len(self), len(self))
-                        return Tuple([self[i] for i in range(start, stop)])
+                if hasattr(form_of(self), "__getitem__"):
+                    if is_literal(start) and is_literal(stop):
+                        start = _index_of(start, len(self), 0)
+                        stop = _index_of(stop, len(self), len(self))
+                        return self.__class__([self[i] for i in range(start, stop)])
 
-            return self._get("", Range.from_slice(i), Tuple.expect(typing.Tuple[rtype, ...]))
+            return self._get("", Range.from_slice(i), self.__class__.expect(typing.Tuple[rtype, ...]))
 
         if isinstance(i, int):
             if len(spec) == 2 and spec[1] is Ellipsis:
@@ -234,8 +236,8 @@ class Tuple(State, Functional):
             else:
                 rtype = spec[i]
 
-            if hasattr(self.__form__, "__getitem__"):
-                item = self.__form__[i]
+            if hasattr(form_of(self), "__getitem__"):
+                item = form_of(self)[i]
                 if uri(self) == uri(self.__class__):
                     return item
                 else:

@@ -20,7 +20,6 @@ def sum(functional) -> Numeric:
 
     from ..decorators import post
     from ..generic import Map
-    from ..shape import Shape
 
     s = functional.fold('n', Map(s=0), post(lambda n, s: Map(s=Numeric.add(n, s))))['s']
     return type("Sum", (State, Numeric), {})(s)

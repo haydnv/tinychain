@@ -460,6 +460,8 @@ def is_literal(state):
         return all(is_literal(item) for item in state)
     elif isinstance(state, dict):
         return all(is_literal(value) for value in state.values())
+    elif isinstance(state, slice):
+        return is_literal(state.start) and is_literal(state.stop)
     elif state is None:
         return True
 

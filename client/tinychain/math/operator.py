@@ -49,6 +49,10 @@ class Operator(ref.Op):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.subject}, {self.args})"
 
+    @property
+    def shape(self):
+        raise NotImplementedError(f"{self.__class__.__name__}.shape")
+
     def forward(self):
         """Return the result of evaluating this `Operator`"""
 
@@ -88,10 +92,6 @@ class Unary(Operator):
             self.subject = ref.reference(context, self.subject)
 
 
-class Dual(Operator):
-    """A differentiable operator with two arguments"""
-
-
 class Custom(Unary):
     """A custom operator"""
 
@@ -107,204 +107,11 @@ class Custom(Unary):
         deanonymize(self._op, context)
 
 
-class Trig(Unary):
-    def gradients(self, loss):
-        if operator(self.subject):
-            return operator(self.subject).gradients(loss)
-        else:
-            return Gradients({hex_id(self.subject): loss})
-
-
-class Add(Dual):
-    def forward(self):
-        return Numeric.add(self.subject, self.args)
-
-    def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
-        return subject + arg
-
-    def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss))
-        else:
-            grads[hex_id(self.args)] = loss
-
-        return grads
-
-
-class MatMul(Dual):
-    def forward(self):
-        from ..collection.tensor import einsum
-        return einsum("...ij,...jk->ik", [self.subject, self.args])
-
-    def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
-        return (subject @ self.args) + (self.subject @ arg)
-
-    def gradients(self, loss):
-        def transpose(matrix):
-            return type(matrix)(form=ref.If(
-                matrix.ndim == 2,
-                matrix.transpose(),
-                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
-
-        grads = Gradients()
-
-        grad = loss @ transpose(self.args)
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = transpose(self.subject) @ loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
-
-
-class Mul(Dual):
-    def forward(self):
-        return Numeric.mul(self.subject, self.args)
-
-    def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
-        return (subject * self.args) + (self.subject * arg)
-
-    def gradients(self, loss):
-        grads = Gradients()
-
-        grad = self.args * loss
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = self.subject * loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
-
-
-class Sub(Dual):
-    def forward(self):
-        return Numeric.sub(self.subject, self.args)
-
-    def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
-        return subject - arg
-
-    def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = -loss
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss))
-        else:
-            grads[hex_id(self.args)] = -loss
-
-        return grads
-
-
-class Div(Dual):
-    def forward(self):
-        return Numeric.div(self.subject, self.args)
-
-    def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
-        return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
-
-    def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss / self.args))
-        else:
-            grads[hex_id(self.subject)] = self.subject * loss / self.args
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss / self.args))
-        else:
-            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
-
-        return grads
-
-
-class Pow(Dual):
-    def forward(self):
-        return Numeric.pow(self.subject, self.args)
-
-    def backward(self, variable=None):
-        if self.args is variable:
-            return (self.subject**self.args) * self.subject.log()
-
-        return self.args * (self.subject**(self.args - 1))
-
-    def gradients(self, loss):
-        grads = Gradients()
-
-        grad = loss * self.args * self.subject**(self.args - 1)
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = loss * self.subject.log() * self.subject**self.args
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
-
-
-class Exp(Unary):
-    def __init__(self, subject):
-        Operator.__init__(self, subject, None)
-
-    def forward(self):
-        return Numeric.exp(self.subject)
-
-    def backward(self, _variable=None):
-        return self.subject.exp()
-
-    def gradients(self, loss):
-        loss *= self.backward()
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
-
-
 # TODO: Tensor.log(base!=None)
 class Abs(Unary):
-    def __init__(self, subject):
-        Operator.__init__(self, subject, None)
+    @property
+    def shape(self):
+        return self.subject.shape
 
     def forward(self):
         return Numeric.abs(self.subject)
@@ -325,17 +132,19 @@ class Abs(Unary):
         return grads
 
 
-#TODO: Tensor.log(base!=None)
-class Log(Dual):
+class Exp(Unary):
+    @property
+    def shape(self):
+        return self.subject.shape
+
     def forward(self):
-        return Numeric.log(self.subject, self.args)
+        return Numeric.exp(self.subject)
 
     def backward(self, _variable=None):
-        return 1 / self.subject
+        return self.subject.exp()
 
     def gradients(self, loss):
         loss *= self.backward()
-
         grads = Gradients()
 
         if operator(self.subject):
@@ -344,6 +153,18 @@ class Log(Dual):
             grads[hex_id(self.subject)] = loss
 
         return grads
+
+
+class Trig(Unary):
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def gradients(self, loss):
+        if operator(self.subject):
+            return operator(self.subject).gradients(loss)
+        else:
+            return Gradients({hex_id(self.subject): loss})
 
 
 class Sin(Trig):
@@ -500,6 +321,218 @@ class Atanh(Trig):
     def gradients(self, loss):
         loss *= (1 - self.subject**2)**(-1)
         return Trig.gradients(self, loss)
+
+
+class Dual(Operator):
+    """A differentiable operator with two arguments"""
+
+
+#TODO: Tensor.log(base!=None)
+class Log(Dual):
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        return Numeric.log(self.subject, self.args)
+
+    def backward(self, _variable=None):
+        return 1 / self.subject
+
+    def gradients(self, loss):
+        loss *= self.backward()
+
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
+
+        return grads
+
+
+class MatMul(Dual):
+    @property
+    def shape(self):
+        from ..shape import Shape
+        return Shape([self.subject.shape[0], self.args.shape[1]])
+
+    def forward(self):
+        from ..collection.tensor import einsum
+        return einsum("ij,jk->ik", [self.subject, self.args])
+
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
+        return (subject @ self.args) + (self.subject @ arg)
+
+    def gradients(self, loss):
+        def transpose(matrix):
+            return type(matrix)(form=ref.If(
+                matrix.ndim == 2,
+                matrix.transpose(),
+                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
+
+        grads = Gradients()
+
+        grad = loss @ transpose(self.args)
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
+
+        grad = transpose(self.subject) @ loss
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
+
+        return grads
+
+
+class Pow(Dual):
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        return Numeric.pow(self.subject, self.args)
+
+    def backward(self, variable=None):
+        if self.args is variable:
+            return (self.subject**self.args) * self.subject.log()
+
+        return self.args * (self.subject**(self.args - 1))
+
+    def gradients(self, loss):
+        grads = Gradients()
+
+        grad = loss * self.args * self.subject**(self.args - 1)
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
+
+        grad = loss * self.subject.log() * self.subject**self.args
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
+
+        return grads
+
+
+class Broadcast(Operator):
+    @property
+    def shape(self):
+        if ref.is_literal(self.args):
+            # it's a constant number
+            return self.subject.shape
+
+        return self.subject.shape.broadcast(self.args.shape)
+
+
+class Add(Broadcast):
+    def forward(self):
+        return Numeric.add(self.subject, self.args)
+
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
+        return subject + arg
+
+    def gradients(self, loss):
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
+
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
+        else:
+            grads[hex_id(self.args)] = loss
+
+        return grads
+
+
+class Mul(Broadcast):
+    def forward(self):
+        return Numeric.mul(self.subject, self.args)
+
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
+        return (subject * self.args) + (self.subject * arg)
+
+    def gradients(self, loss):
+        grads = Gradients()
+
+        grad = self.args * loss
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(grad))
+        else:
+            grads[hex_id(self.subject)] = grad
+
+        grad = self.subject * loss
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(grad))
+        else:
+            grads[hex_id(self.args)] = grad
+
+        return grads
+
+
+class Sub(Broadcast):
+    def forward(self):
+        return Numeric.sub(self.subject, self.args)
+
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
+        return subject - arg
+
+    def gradients(self, loss):
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = -loss
+
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(loss))
+        else:
+            grads[hex_id(self.args)] = -loss
+
+        return grads
+
+
+class Div(Broadcast):
+    def forward(self):
+        return Numeric.div(self.subject, self.args)
+
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable)
+        arg = derivative_of(self.args, variable)
+        return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
+
+    def gradients(self, loss):
+        grads = Gradients()
+
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss / self.args))
+        else:
+            grads[hex_id(self.subject)] = self.subject * loss / self.args
+
+        if operator(self.args):
+            grads.update(operator(self.args).gradients(loss / self.args))
+        else:
+            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
+
+        return grads
 
 
 def derivative_of(state, variable=None):

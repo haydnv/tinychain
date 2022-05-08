@@ -326,8 +326,8 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def shape(self):
         """Return the shape of this `Tensor`."""
 
-        if hasattr(form_of(self), "shape"):
-            return form_of(self).shape
+        if operator(self):
+            return operator(self).shape
 
         return self._get("shape", rtype=Shape)
 
@@ -423,15 +423,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
         """
 
-        dtype = self.dtype
-        shape = None
-
-        if hasattr(self.shape, "__len__"):
-            if permutation is None:
-                shape = reversed(self.shape)
-            elif hasattr(permutation, "__iter__"):
-                shape = [self.shape[x] for x in permutation]
-
         return Tensor(form=Transpose(self, permutation))
 
     def write(self, value):
@@ -462,7 +453,7 @@ class Dense(Tensor):
         return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/range", (shape, start, stop)))
 
     @classmethod
-    def concatenate(cls, tensors, axis=None):
+    def concatenate(cls, tensors, axis=0):
         """Create a new `Dense` tensor by concatenating the given `tensors` along the given `axis`."""
 
         return Dense(form=Concatenate(tensors, axis))
@@ -657,6 +648,10 @@ def where(cond, x, y):
 
 
 class Concatenate(Dual):
+    @property
+    def shape(self):
+        return Shape.concatenate([t.shape for t in self.subject], self.args)
+
     def forward(self):
         params = {"tensors": self.subject}
         if self.args:
@@ -692,6 +687,10 @@ class Concatenate(Dual):
 
 
 class Copy(Unary):
+    @property
+    def shape(self):
+        return self.subject.shape
+
     def forward(self):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
@@ -702,29 +701,37 @@ class Copy(Unary):
         return Gradients()
 
 
-class Reduce(Dual):
-    # TODO: move common functionality from reduce operators into this parent class
-    pass
-
-
 class Norm(Dual):
+    @property
+    def shape(self):
+        if self.args is None:
+            return self.subject.shape[:-2]
+        else:
+            return self.subject.shape.reduce(self.args)
+
     def forward(self):
         return NDArray.norm(self.subject, self.args)
 
     def backward(self, variable=None):
         return self.subject / self.subject.norm(self.args)
-    
+
     def gradients(self, loss):
-        from ..ml.optimizer import Variable
+        loss *= self.backward()
 
         grads = Gradients()
 
-        if isinstance(self.subject, Variable):
-            grads.update(self.subject.invert(loss * self.subject / self.subject.norm(self.args)))
-        elif operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss * self.subject / self.subject.norm(self.args)))
-        
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
+        else:
+            grads[hex_id(self.subject)] = loss
+
         return grads
+
+
+class Reduce(Dual):
+    @property
+    def shape(self):
+        return self.subject.shape.reduce(self.args)
 
 
 class Sum(Reduce):
@@ -774,6 +781,16 @@ class Transform(Operator):
 
 
 class Expand(Transform):
+    @property
+    def shape(self):
+        if not hasattr(self.subject, "__len__"):
+            raise RuntimeError(f"the expanded shape of {self.subject} requires a constant number of dimensions")
+
+        if not ref.is_literal(self.args):
+            raise ValueError(f"the shape of an expanded Tensor requires a constant axis, not {self.args}")
+
+        return Shape(self.subject.shape[:self.args] + [1] + self.subject.shape[self.args:])
+
     def forward(self):
         return NDArray.expand_dims(self.subject, self.args)
 
@@ -782,6 +799,10 @@ class Expand(Transform):
 
 
 class Flip(Transform):
+    @property
+    def shape(self):
+        return self.subject.shape
+
     def forward(self):
         return NDArray.flip(self.subject, self.args)
 
@@ -792,6 +813,10 @@ class Flip(Transform):
 class Transpose(Transform):
     def __init__(self, subject, permutation=None):
         Transform.__init__(self, subject, permutation)
+
+    @property
+    def shape(self):
+        return self.subject.shape.transpose(self.args)
 
     def forward(self):
         return NDArray.transpose(self.subject, self.args)
@@ -806,6 +831,10 @@ class Transpose(Transform):
 
 
 class Reshape(Transform):
+    @property
+    def shape(self):
+        return Shape(self.args)
+
     def forward(self):
         return NDArray.reshape(self.subject, self.args)
 
@@ -814,6 +843,10 @@ class Reshape(Transform):
 
 
 class Slice(Transform):
+    @property
+    def shape(self):
+        return self.subject.shape.slice(self.args)
+
     def forward(self):
         return NDArray.slice(self.subject, self.args)
 

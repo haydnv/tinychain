@@ -9,13 +9,20 @@ from .reflect import MethodStub
 class _Base(object):
     def __init__(self):
         # TODO: is there a better place for this?
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
+
+        builtins = set(dir(object))
+        for name in dir(self):
+            if name.startswith('_') or name in builtins:
                 continue
 
-            if isinstance(attr, MethodStub):
-                method = attr.method(self, name)
-                setattr(self, name, method)
+            try:
+                attr = getattr(self, name)
+                if isinstance(attr, MethodStub):
+                    method = attr.method(self, name)
+                    setattr(self, name, method)
+            except RuntimeError:
+                # this is most likely just a constant access of a non-constant attribute
+                pass
 
     def _get(self, name, key=None, rtype=None):
         from .scalar.ref import Get, MethodSubject
