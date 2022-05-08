@@ -1,115 +1,118 @@
 from ..collection.tensor import Tensor
-from ..util import hex_id, same_as
+from ..scalar.ref import Op
+from ..util import deref, hex_id, same_as
 
 from .operator import operator
 
 
-def dedupe(state):
-    """De-duplicate results in the given operator graph in-place."""
+class Function(object):
+    def __init__(self, result):
+        self.result = result
 
-    if not operator(state):
-        raise ValueError(f"a math function requires an Operator, not {state}")
+        self.nodes = {}
+        self.edges = []
 
-    visited = {}
-    unvisited = [state]
-    while unvisited:
-        node = unvisited.pop(0)
-        op = operator(node)
+        self._traverse()
 
-        if operator(op.subject) and hex_id(op.subject) not in visited:
-            unvisited.append(op.subject)
+    def _traverse(self):
+        assert not self.nodes
+        assert not self.edges
 
-        if operator(op.args) and hex_id(op.args) not in visited:
-            unvisited.append(op.args)
+        unvisited = self._unvisited()
+        while unvisited:
+            node = unvisited.pop(0)
+            op = operator(node)
 
-        visited[hex_id(node)] = node
+            if operator(op.subject):
+                self.edges.append((node, op.subject))
+                if hex_id(op.subject) not in self.nodes:
+                    unvisited.append(op.subject)
 
-    canon = {}
-    for node_id, node in visited.items():
-        dupes = [v for v in visited.values() if same_as(node, v)]
-        canon[node_id] = visited[min(hex_id(n) for n in dupes)]
+            if operator(op.args):
+                self.edges.append((node, op.args))
+                if hex_id(op.args) not in self.nodes:
+                    unvisited.append(op.args)
 
-    visited = {}
-    unvisited = [state]
-    while unvisited:
-        node = operator(unvisited.pop(0))
+            self.nodes[hex_id(node)] = node
 
-        if operator(node.subject):
-            visited[hex_id(node.subject)] = node
-            operator(node).subject = canon[hex_id(node.subject)]
+    def _unvisited(self):
+        if isinstance(self.result, (list, tuple)):
+            unvisited = list(self.result)
+        elif isinstance(self.result, dict):
+            unvisited = list(self.result.values())
+        elif isinstance(deref(self.result), Op):
+            unvisited = [self.result]
 
-        if operator(node.args):
-            visited[hex_id(node.subject)] = node
-            operator(node).args = canon[hex_id(node.args)]
+        return [state for state in unvisited if operator(state)]
 
-    return state
+    def dedupe(self):
+        canon = {}
+        for node_id, node in self.nodes.items():
+            dupes = [v for v in self.nodes.values() if same_as(node, v)]
+            canon[node_id] = self.nodes[min(hex_id(n) for n in dupes)]
 
+        visited = {}
+        unvisited = self._unvisited()
+        while unvisited:
+            node = unvisited.pop(0)
+            op = operator(node)
 
-def memoize(state):
-    """Memoize intermediate states with more than one edge in the given operator graph, in-place."""
+            if operator(op.subject):
+                if not hex_id(op.subject) in visited:
+                    unvisited.append(op.subject)
 
-    if not operator(state):
-        raise ValueError(f"a math function requires an Operator, not {state}")
+                op.subject = canon[hex_id(op.subject)]
 
-    edges = []
+            if operator(op.args):
+                if not hex_id(op.args) in visited:
+                    unvisited.append(op.args)
 
-    visited = {}
-    unvisited = [state]
-    while unvisited:
-        node = unvisited.pop(0)
-        op = operator(node)
+                op.args = canon[hex_id(op.args)]
 
-        if operator(op.subject):
-            edges.append((node, op.subject))
-            if hex_id(op.subject) not in visited:
-                unvisited.append(op.subject)
+            visited[hex_id(node)] = node
 
-        if operator(op.args):
-            edges.append((node, op.args))
-            if hex_id(op.args) not in visited:
-                unvisited.append(op.args)
+        return self.result
 
-        visited[hex_id(node)] = node
+    def memoize(self):
+        counts = {node_id: 0 for node_id in self.nodes}
+        for f, _t in self.edges:
+            counts[hex_id(f)] += 1
 
-    counts = {node_id: 0 for node_id in visited}
-    for f, _t in edges:
-        counts[hex_id(f)] += 1
+        copies = {
+            node_id: self.nodes[node_id].copy() for node_id, count in counts.items()
+            if count > 1 and isinstance(self.nodes[node_id], Tensor)
+        }
 
-    copies = {
-        node_id: visited[node_id].copy() for node_id, count in counts.items()
-        if count > 1 and isinstance(visited[node_id], Tensor)
-    }
+        visited = {}
+        unvisited = self._unvisited()
+        while unvisited:
+            node = unvisited.pop(0)
+            op = operator(node)
 
-    visited = {}
-    unvisited = [state]
-    while unvisited:
-        node = unvisited.pop(0)
-        op = operator(node)
+            if hex_id(op.subject) in copies:
+                if hex_id(op.subject) not in visited:
+                    unvisited.append(op.subject)
 
-        if hex_id(op.subject) in copies:
-            if hex_id(op.subject) not in visited:
-                unvisited.append(op.subject)
+                op.subject = copies[hex_id(op.subject)]
 
-            op.subject = copies[hex_id(op.subject)]
+            if hex_id(op.args) in copies:
+                if hex_id(op.args) not in visited:
+                    unvisited.append(op.args)
 
-        if hex_id(op.args) in copies:
-            if hex_id(op.args) not in visited:
-                unvisited.append(op.args)
+                op.args = copies[hex_id(op.args)]
 
-            op.args = copies[hex_id(op.args)]
+            visited[hex_id(node)] = node
 
-        visited[hex_id(node)] = node
+        return self.result
 
-    return state
+    def optimize(self):
+        """
+        Perform an in-place optimization of this :class:`Function`.
 
+        This will consolidate logically equivalent operations and memoize intermediate states where needed.
+        """
 
-def optimize(state):
-    """
-    Perform an in-place optimization of the given differentiable `state`.
+        self.dedupe()
+        self.memoize()
 
-    This will consolidate logically equivalent operations and memoize intermediate states where needed.
-    """
-
-    dedupe(state)
-    memoize(state)
-    return state
+        return self.result
