@@ -7,8 +7,9 @@ from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, get, post
 from ..generic import Map, Tuple
+from ..math.equation import optimize
 from ..math.interface import Numeric
-from ..math.operator import derivative_of, gradients
+from ..math.operator import derivative_of, gradients, operator
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
 from ..scalar.value import Id
@@ -56,7 +57,9 @@ class Parallel(Optimizer, Dynamic):
 
             loss = self._cost(inputs_batch, outputs)
             cxt.d_loss = derivative_of(loss).copy()
-            grads = gradients(outputs, cxt.d_loss)
+            grads = {
+                grad_id: optimize(grad) if operator(grad) else grad
+                for grad_id, grad in gradients(outputs, cxt.d_loss).items()}
 
             if not grads:
                 raise ValueError(f"model output {outputs} has no gradients")
