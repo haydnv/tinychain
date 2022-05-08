@@ -356,11 +356,11 @@ class MatMul(Dual):
     @property
     def shape(self):
         from ..shape import Shape
-        return Shape([self.subject.shape[0], self.args.shape[1]])
+        return self.subject.shape[:-2] + Shape((self.subject.shape[-1], self.args.shape[-2]))
 
     def forward(self):
         from ..collection.tensor import einsum
-        return einsum("ij,jk->ik", [self.subject, self.args])
+        return einsum("...ij,...jk->ik", [self.subject, self.args])
 
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)

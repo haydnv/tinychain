@@ -1,6 +1,7 @@
 """The base class of :class:`State` and :class:`Interface`"""
 
 import inspect
+import logging
 import typing
 
 from .reflect import MethodStub
@@ -20,9 +21,8 @@ class _Base(object):
                 if isinstance(attr, MethodStub):
                     method = attr.method(self, name)
                     setattr(self, name, method)
-            except RuntimeError:
-                # this is most likely just a constant access of a non-constant attribute
-                pass
+            except (RuntimeError, ValueError) as e:
+                logging.debug(f"constant access of a non-constant attribute: {e}")
 
     def _get(self, name, key=None, rtype=None):
         from .scalar.ref import Get, MethodSubject

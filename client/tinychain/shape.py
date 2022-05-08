@@ -19,7 +19,10 @@ class Shape(Tuple):
             return State.__new__(cls)
 
     def __add__(self, other):
-        return Shape(form_of(self) + form_of(other))
+        if hasattr(self, "__len__") and hasattr(other, "__len__"):
+            return Shape(tuple(form_of(self)) + tuple(form_of(other)))
+        else:
+            raise ValueError(f"can only append Shapes with a constant number of dimensions, not {self} and {other}")
 
     def __getitem__(self, x):
         if x is None:
@@ -182,9 +185,13 @@ class Shape(Tuple):
 
                 shape.append(stop - start)
             elif isinstance(bound, (int, Number)):
-                shape.append(1)
+                # no-op -- dimension elided
+                pass
             else:
                 raise ValueError(f"invalid axis bound: {bound}")
+
+        for x in range(len(bounds), self.ndim(True, "slice")):
+            shape.append(self[x])
 
         return Shape(shape)
 
