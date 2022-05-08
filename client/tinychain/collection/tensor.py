@@ -1,4 +1,5 @@
 """An n-dimensional array of numbers."""
+import logging
 
 from ..decorators import post
 from ..generic import Map
@@ -327,7 +328,10 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         """Return the shape of this `Tensor`."""
 
         if operator(self):
-            return operator(self).shape
+            try:
+                return operator(self).shape
+            except (RuntimeError, ValueError):
+                logging.debug(f"shape of {self} is not constant")
 
         return self._get("shape", rtype=Shape)
 
@@ -650,6 +654,9 @@ def where(cond, x, y):
 class Concatenate(Dual):
     @property
     def shape(self):
+        if not hasattr(self.subject, "__len__"):
+            raise ValueError(f"the concatenation of {self.subject} does not have a constant shape")
+
         return Shape.concatenate([t.shape for t in self.subject], self.args)
 
     def forward(self):

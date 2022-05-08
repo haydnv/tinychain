@@ -65,6 +65,8 @@ class Shape(Tuple):
     def concatenate(cls, shapes, axis=0):
         if not shapes:
             raise ValueError("cannot concatenate an empty list of shapes")
+        elif not hasattr(shapes, "__len__"):
+            raise ValueError(f"can only concatenate a constant list of shapes, not {shapes}")
 
         ndim = shapes[0].ndim(True, "concatenate")
         for shape in shapes:
@@ -198,7 +200,6 @@ class Shape(Tuple):
     def transpose(self, permutation=None):
         if permutation is None:
             if not hasattr(self, "__reversed__"):
-                print(self, self.__spec__)
                 raise RuntimeError(f"Shape.transpose requires a constant-length shape, not {self}")
 
             return reversed(self)

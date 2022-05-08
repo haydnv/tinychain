@@ -190,13 +190,13 @@ class Tuple(State, Functional):
             return State.__new__(cls)
 
     def __init__(self, form):
-        if isinstance(form, Tuple):
+        while isinstance(form, Tuple):
             form = form_of(form)
 
         return State.__init__(self, form)
 
     def __add__(self, other):
-        return Tuple.concatenate(self, other)
+        return self.concatenate(self, other)
 
     def __eq__(self, other):
         return self.eq(other)
@@ -280,7 +280,7 @@ class Tuple(State, Functional):
     def zip(self, other):
         """Construct a new `Tuple` of 2-tuples of the form `(self[i], other[i]) for i in self.len()`."""
 
-        return self._get("zip", other, Tuple)
+        return self._get("zip", other, type(self))
 
 
 class TupleRef(StateRef):

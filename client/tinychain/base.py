@@ -1,7 +1,6 @@
 """The base class of :class:`State` and :class:`Interface`"""
 
 import inspect
-import logging
 import typing
 
 from .reflect import MethodStub
@@ -11,18 +10,13 @@ class _Base(object):
     def __init__(self):
         # TODO: is there a better place for this?
 
-        builtins = set(dir(object))
-        for name in dir(self):
-            if name.startswith('_') or name in builtins:
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
                 continue
 
-            try:
-                attr = getattr(self, name)
-                if isinstance(attr, MethodStub):
-                    method = attr.method(self, name)
-                    setattr(self, name, method)
-            except (RuntimeError, ValueError) as e:
-                logging.debug(f"constant access of a non-constant attribute: {e}")
+            if isinstance(attr, MethodStub):
+                method = attr.method(self, name)
+                setattr(self, name, method)
 
     def _get(self, name, key=None, rtype=None):
         from .scalar.ref import Get, MethodSubject
