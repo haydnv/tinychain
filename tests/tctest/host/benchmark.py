@@ -134,8 +134,8 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
 
 
 class LoadBenchmarks(benchmark.Benchmark):
-    CONCURRENCY = 10
-    SCALES = [1, 5, 10, 100, 1000]
+    CONCURRENCY = 100
+    SCALES = [1, 5, 10, 100, 1000, 10000]
 
     def __init__(self):
         self._base_path = tc.uri(DataStructures).path()

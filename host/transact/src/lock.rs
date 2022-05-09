@@ -6,7 +6,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use log::{debug, trace};
 use tokio::sync::broadcast::{self, Sender};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
@@ -334,7 +333,9 @@ impl<T: Clone> TxnLock<T> {
                     }
                 }
 
-                let _updated = rx.recv().map_err(TCError::internal).await?;
+                if let Err(cause) = rx.recv().await {
+                    debug!("TxnLock wake error: {}", cause);
+                }
             }
         };
 
@@ -356,7 +357,9 @@ impl<T: Clone> TxnLock<T> {
                     };
                 }
 
-                rx.recv().map_err(TCError::internal).await?;
+                if let Err(cause) = rx.recv().await {
+                    debug!("TxnLock wake error: {}", cause);
+                }
             }
         };
 
