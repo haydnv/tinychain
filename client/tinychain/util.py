@@ -249,7 +249,7 @@ def independent(state_or_ref):
 
 
 def same_as(a, b):
-    """Return `True` if `a` references the same :class:`State` as `b`, otherwise `False`."""
+    """Return `True` if `a` is logically equivalent to `b`, otherwise `False`."""
 
     from .scalar.ref import is_literal
 
