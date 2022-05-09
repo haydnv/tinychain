@@ -712,6 +712,30 @@ impl TryFrom<State> for Collection {
     }
 }
 
+impl TryFrom<State> for Scalar {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Self> {
+        match state {
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
+                .collect::<TCResult<Map<Scalar>>>()
+                .map(Scalar::Map),
+
+            State::Scalar(scalar) => Ok(scalar),
+
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|state| Scalar::try_from(state))
+                .collect::<TCResult<Tuple<Scalar>>>()
+                .map(Scalar::Tuple),
+
+            other => Err(TCError::bad_request("expected a Scalar, not", other)),
+        }
+    }
+}
+
 impl TryFrom<State> for Map<State> {
     type Error = TCError;
 
