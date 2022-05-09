@@ -861,6 +861,7 @@ class Slice(Transform):
 
         # TODO: is there a better way to do this?
         class SliceGradient(Unary):
+            @property
             def shape(self):
                 return grad.shape
 

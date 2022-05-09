@@ -1,3 +1,5 @@
+import logging
+
 from ..collection.tensor import Tensor
 from ..scalar.ref import Op
 from ..util import deref, hex_id, same_as
@@ -19,6 +21,9 @@ class Function(object):
         assert not self.edges
 
         unvisited = self._unvisited()
+        if not unvisited:
+            logging.info(f"cannot traverse {self.result} since it is disconnected from any operator graph")
+
         while unvisited:
             node = unvisited.pop(0)
             op = operator(node)
@@ -43,7 +48,7 @@ class Function(object):
         elif isinstance(deref(self.result), Op):
             unvisited = [self.result]
 
-        return [state for state in unvisited if isinstance(deref(state), Op)]
+        return [state for state in unvisited if operator(state)]
 
     def dedupe(self):
         canon = {}
