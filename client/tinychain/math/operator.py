@@ -580,25 +580,27 @@ def gradients(differentiable, loss, variables=None):
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
+    from .equation import Function
+
     if not operator(differentiable):
         raise ValueError(f"not a differentiable state: {differentiable}")
 
     grads = operator(differentiable).gradients(loss)
 
     if variables is None:
-        return grads
+        return Function(grads).optimize()
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
             raise KeyError(f"{variables} is not reachable from operator {differentiable}")
 
-        return grads[hex_id(variables)]
+        return Function(grads[hex_id(variables)]).optimize()
 
     missing = [var for var in variables if hex_id(var) not in grads]
     if missing:
         raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
-    else:
-        return [grads[hex_id(var)] for var in variables]
+
+    return Function([grads[hex_id(var)] for var in variables]).optimize()
 
 
 def operator(state_or_ref):

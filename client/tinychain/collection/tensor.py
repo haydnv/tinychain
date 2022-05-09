@@ -1,5 +1,4 @@
 """An n-dimensional array of numbers."""
-import logging
 
 from ..decorators import post
 from ..generic import Map
@@ -859,4 +858,16 @@ class Slice(Transform):
 
     def invert(self, loss):
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-        return Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad)))
+
+        # TODO: is there a better way to do this?
+        class SliceGradient(Unary):
+            def shape(self):
+                return grad.shape
+
+            def forward(self):
+                return self.subject
+
+            def backward(self, _variable=None):
+                return self.subject
+
+        return Dense(SliceGradient(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad))))

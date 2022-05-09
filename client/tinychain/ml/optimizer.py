@@ -7,9 +7,8 @@ from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, get, post
 from ..generic import Map, Tuple
-from ..math.equation import Function
 from ..math.interface import Numeric
-from ..math.operator import derivative_of, gradients, operator
+from ..math.operator import derivative_of, gradients
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import After, If
 from ..scalar.value import Id
@@ -57,27 +56,21 @@ class Parallel(Optimizer, Dynamic):
 
             loss = self._cost(inputs_batch, outputs)
             cxt.d_loss = derivative_of(loss).copy()
-            grads = Function(gradients(outputs, cxt.d_loss)).optimize()
+            grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
 
             if not grads:
                 raise ValueError(f"model output {outputs} has no gradients")
 
-            return {
-                var_id: (grad if isinstance(grad, Number) else grad.sum(0))
-                for var_id, grad in grads.items()
-            }
+            return [grad if isinstance(grad, Number) else grad.sum(0) for grad in grads]
 
         @post
         def sum_grads(grads: _Gradients, sum: _Gradients) -> _Gradients:
-            return {"sum": {
-                var_id: grads[var_id] + sum[var_id]
-                for var_id in trainable_vars.keys()
-            }}
+            return {"sum": [grads[i] + sum[i] for i in range(len(trainable_vars))]}
 
-        var_ids = set(trainable_vars.keys())
-        grads = {var_id: 0 for var_id in var_ids}
+        grads = [0] * len(trainable_vars)
         grads = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": grads}, sum_grads)
-        return Map(grads)["sum"]  # TODO: this type information shouldn't get lost
+        grads = Tuple(Map(grads)["sum"])  # TODO: this type information shouldn't get lost
+        return {var_id: grads[i] for i, var_id in enumerate(trainable_vars.keys())}
 
 
 class GradientDescent(Parallel):

@@ -43,7 +43,7 @@ class Function(object):
         elif isinstance(deref(self.result), Op):
             unvisited = [self.result]
 
-        return [state for state in unvisited if operator(state)]
+        return [state for state in unvisited if isinstance(deref(state), Op)]
 
     def dedupe(self):
         canon = {}
