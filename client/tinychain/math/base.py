@@ -3,6 +3,12 @@ from ..state import State
 from .interface import Numeric
 
 
+def is_numeric(state):
+    """Return `True` if the given `State` is :class:`Numeric` or a numeric constant, otherwise `False`."""
+
+    return isinstance(state, (bool, float, int, Numeric))
+
+
 # TODO: add a generic type to `Functional` and return an instance of that type
 def product(functional) -> Numeric:
     """Compute the product of a :class:`Functional` of :class:`Numeric` s."""

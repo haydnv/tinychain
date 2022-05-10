@@ -204,7 +204,7 @@ class Shape(Tuple):
 
             return reversed(self)
         elif is_literal(permutation):
-            return Shape(self[x] for x in permutation)
+            return Shape(tuple(self[x] for x in permutation))
         else:
             raise ValueError(f"Shape.transpose requires a constant permutation, not {permutation}")
 

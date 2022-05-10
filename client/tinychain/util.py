@@ -253,6 +253,9 @@ def same_as(a, b):
 
     from .scalar.ref import is_literal
 
+    if a is b:
+        return True
+
     a = deref(a)
     b = deref(b)
 
@@ -461,10 +464,11 @@ def uri(subject):
 def to_json(obj):
     """Return a JSON-encodable representation of the given state or reference."""
 
-    err_native = "Python callable {} is not JSON serializable; consider using a decorator like @get"
+    if inspect.isgenerator(obj):
+        raise ValueError(f"the Python generator {obj} is not JSON serializable")
 
     if callable(obj) and not hasattr(obj, "__json__"):
-        raise ValueError(err_native.format(obj))
+        raise ValueError(f"Python callable {obj} is not JSON serializable; consider using a decorator like @get")
 
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):

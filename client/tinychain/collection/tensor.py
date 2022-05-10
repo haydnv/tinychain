@@ -1,7 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from ..decorators import post
-from ..generic import Map
+from ..generic import Map, Tuple
 from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
@@ -371,9 +371,10 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         if not ref.is_literal(axis):
             raise ValueError(f"Tensor.split requires a constant axis, not {axis}")
 
-        dim = form_of(self.shape[axis])
-        if not int(dim) == dim:
-            raise RuntimeError(f"Tensor.split requires a constant dimension to split")
+        if ref.is_literal(self.shape[axis]):
+            dim = form_of(self.shape[axis])
+        else:
+            raise RuntimeError(f"Tensor.split requires a constant dimension to split, not {self.shape[axis]}")
 
         if isinstance(num_or_size_splits, (list, tuple)):
             if sum(num_or_size_splits) != dim:
@@ -667,12 +668,20 @@ class Concatenate(Dual):
         return Dense(form=ref.Post(uri(Dense) + "/concatenate", params))
 
     def backward(self, variable=None):
-        return Concatenate([derivative_of(t, variable) for t in self.subject], self.args)
+        # TODO: support concatenating Sparse tensors
+        return Dense(Concatenate([derivative_of(t, variable) for t in self.subject], self.args))
 
     def gradients(self, loss):
-        from ..ml import Variable  # TODO: remove this import
-
         grads = Gradients()
+
+        if isinstance(loss, Number):
+            for tensor in self.subject:
+                if operator(tensor):
+                    grads.update(operator(tensor).gradients(loss))
+                else:
+                    grads[hex_id(tensor)] = loss
+
+            return grads
 
         axis = self.args if self.args else 0
         if axis is None:
@@ -686,7 +695,7 @@ class Concatenate(Dual):
         for (tensor, loss) in zip(self.subject, losses):
             if operator(tensor):
                 grads.update(operator(tensor).gradients(loss))
-            elif isinstance(tensor, Variable):
+            else:
                 grads[hex_id(tensor)] = loss
 
         return grads
@@ -750,7 +759,8 @@ class Sum(Reduce):
     def gradients(self, loss):
         if self.args is None:
             loss = self.backward() * loss
-        else:
+        elif isinstance(loss, NDArray):
+            # TODO: is this correct?
             loss = Dense.ones_like(self.subject) * loss.expand_dims(self.args)
 
         grads = Gradients()
@@ -859,8 +869,11 @@ class Slice(Transform):
     def invert(self, loss):
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
 
-        # TODO: is there a better way to do this?
-        class SliceGradient(Unary):
+        # TODO: there must be a better way to do this
+        class SliceGradient(Operator):
+            def __init__(self, grad):
+                Operator.__init__(self, grad, None)
+
             @property
             def shape(self):
                 return grad.shape

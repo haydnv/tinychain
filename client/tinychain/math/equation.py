@@ -53,6 +53,7 @@ class Function(object):
     def dedupe(self):
         canon = {}
         for node_id, node in self.nodes.items():
+            assert same_as(node, node)
             dupes = [v for v in self.nodes.values() if same_as(node, v)]
             canon[node_id] = self.nodes[min(hex_id(n) for n in dupes)]
 

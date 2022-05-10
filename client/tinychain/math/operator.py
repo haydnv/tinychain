@@ -6,6 +6,7 @@ from ..scalar import ref
 from ..scalar.value import Id
 from ..util import deanonymize, deref, hex_id, same_as, to_json
 
+from .base import is_numeric
 from .interface import Numeric, Trigonometric
 
 
@@ -28,7 +29,7 @@ class Operator(ref.Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
     def __init__(self, subject, args):
-        if not isinstance(subject, Numeric):
+        if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
         ref.Op.__init__(self, subject, args)
@@ -81,6 +82,9 @@ class Operator(ref.Op):
 
 class Unary(Operator):
     def __init__(self, subject):
+        if not is_numeric(subject):
+            raise ValueError(f"Unary operator requires a Numeric subject, not {subject}")
+
         Operator.__init__(self, subject, None)
 
     def __ns__(self, context):
@@ -96,7 +100,7 @@ class Custom(Unary):
     """A custom operator"""
 
     def __init__(self, subject):
-        Unary.__init__(self, subject)
+        Operator.__init__(self, subject, None)
         self._op = self.forward()
 
     def __json__(self):
@@ -424,6 +428,15 @@ class Pow(Dual):
 
 
 class Broadcast(Operator):
+    def __init__(self, subject, args):
+        if not is_numeric(subject):
+            raise ValueError(f"{self.__class__.__name__} requires a Numeric subject, not {subject}")
+
+        if not is_numeric(args):
+            raise ValueError(f"{self.__class__.__name__} requires a Numeric subject, not {args}")
+
+        Operator.__init__(self, subject, args)
+
     @property
     def shape(self):
         if ref.is_literal(self.args):
@@ -517,7 +530,8 @@ class Div(Broadcast):
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
-        return ((subject * self.args) - (self.subject, arg)) / (self.args**2)
+
+        return ((subject * self.args) - (self.subject * arg)) / (self.args**2)
 
     def gradients(self, loss):
         grads = Gradients()
@@ -543,6 +557,9 @@ def derivative_of(state, variable=None):
     If the given `state` is not differentiable, this will raise a `TypeError`.
     """
 
+    if not is_numeric(state):
+        raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
+
     from ..scalar.number import F32, Number
     from ..collection.tensor import Dense, Sparse, Tensor
     from ..ml.optimizer import Variable
@@ -561,12 +578,12 @@ def derivative_of(state, variable=None):
 
     if operator(state):
         return operator(state).backward(variable)
-    elif isinstance(state, Number):
+    if isinstance(state, Number):
         return type(state)(form=0)
     elif isinstance(state, Tensor):
         return Sparse.create(state, F32)
     elif isinstance(state, (bool, int, float)):
-        return 0
+        return type(state)(0)
     else:
         raise TypeError(f"the derivative of {state} is not defined")
 
