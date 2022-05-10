@@ -146,6 +146,9 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
         return self._get("argmax", axis, self.__class__)
 
+    def broadcast(self, shape):
+        return self.__class__(form=Broadcast(self, shape))
+
     def cast(self, number_type):
         """Cast the data type of `Tensor` into the given `number_type`."""
 
@@ -595,6 +598,12 @@ class Sparse(Tensor):
 
         return cls.expect(shape, dtype)(ref.Get(cls, (shape, dtype)))
 
+    @classmethod
+    def zeros_like(cls, tensor):
+        """Return a `Sparse` tensor with the same shape and data type as the given `tensor`."""
+
+        return cls.zeros(tensor.shape)
+
     def as_dense(self):
         """Return a :class:`Dense` view of this `Sparse` tensor."""
 
@@ -651,7 +660,7 @@ def where(cond, x, y):
     return (cond.cast(Bool) * x) + (cond.logical_not() * y)
 
 
-class Concatenate(Dual):
+class Concatenate(Operator):
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
@@ -716,7 +725,7 @@ class Copy(Unary):
         return Gradients()
 
 
-class Norm(Dual):
+class Norm(Operator):
     @property
     def shape(self):
         if self.args is None:
@@ -743,7 +752,7 @@ class Norm(Dual):
         return grads
 
 
-class Reduce(Dual):
+class Reduce(Operator):
     @property
     def shape(self):
         return Shape.reduce(self.subject.shape, self.args)
@@ -794,6 +803,11 @@ class Transform(Operator):
             grads[hex_id(self.subject)] = loss
 
         return grads
+
+
+class Broadcast(Transform):
+    def forward(self):
+        return Numeric.broadcast(self.subject, self.args)
 
 
 class Expand(Transform):

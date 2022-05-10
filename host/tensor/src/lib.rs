@@ -1,5 +1,6 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::fmt;
+use std::iter;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -1508,10 +1509,41 @@ where
     }
 }
 
-/// Broadcast the given `left` and `right` tensors into the same shape.
+/// Compute the shape returned by broadcasting the given shapes together.
 ///
 /// For rules of broadcasting, see:
 /// [https://pytorch.org/docs/stable/notes/broadcasting.html](https://pytorch.org/docs/stable/notes/broadcasting.html)
+pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
+    let ndim = Ord::max(left.len(), right.len());
+
+    let left: Vec<u64> = iter::repeat(1)
+        .take(ndim - left.len())
+        .chain(left.iter().copied())
+        .collect();
+
+    let right: Vec<u64> = iter::repeat(1)
+        .take(ndim - right.len())
+        .chain(right.iter().copied())
+        .collect();
+
+    let mut shape = Vec::with_capacity(ndim);
+    for (l, r) in left.iter().zip(&right) {
+        if l == r || *l == 1 {
+            shape.push(*r);
+        } else if *r == 1 {
+            shape.push(*l)
+        } else {
+            return Err(TCError::unsupported(format!(
+                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?})",
+                l, r, left, right,
+            )));
+        }
+    }
+
+    Ok(shape.into())
+}
+
+/// Broadcast the given `left` and `right` tensors into their [`broadcast_shape`].
 pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
 where
     L: TensorAccess + TensorTransform,
@@ -1523,40 +1555,13 @@ where
         right.shape()
     );
 
-    let mut left_shape = left.shape().to_vec();
-    let mut right_shape = right.shape().to_vec();
+    let broadcast_shape = broadcast_shape(left.shape(), right.shape())?;
+    debug!("broadcast shape is {}", broadcast_shape);
 
-    match (left_shape.len(), right_shape.len()) {
-        (l, r) if l < r => {
-            for _ in 0..(r - l) {
-                left_shape.insert(0, 1);
-            }
-        }
-        (l, r) if r < l => {
-            for _ in 0..(l - r) {
-                right_shape.insert(0, 1);
-            }
-        }
-        _ => {}
-    }
-
-    let mut shape = Vec::with_capacity(left_shape.len());
-    for (l, r) in left_shape.iter().zip(right_shape.iter()) {
-        if l == r || *l == 1 {
-            shape.push(*r);
-        } else if *r == 1 {
-            shape.push(*l)
-        } else {
-            return Err(TCError::unsupported(format!(
-                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?})",
-                l, r, left_shape, right_shape,
-            )));
-        }
-    }
-
-    let shape = Shape::from(shape);
-    debug!("broadcast shape is {}", shape);
-    Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
+    Ok((
+        left.broadcast(broadcast_shape.clone())?,
+        right.broadcast(broadcast_shape)?,
+    ))
 }
 
 #[derive(Clone)]

@@ -38,6 +38,13 @@ class Numeric(Interface):
     def __rtruediv__(self, other):
         return other * (self.pow(-1))
 
+    @property
+    def shape(self):
+        """The shape of this :class:`Numeric` state"""
+
+        from ..shape import Shape
+        return self._get("shape", rtype=Shape)
+
     def abs(self):
         """Absolute value"""
 
