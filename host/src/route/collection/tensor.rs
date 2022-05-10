@@ -122,6 +122,41 @@ impl<B> From<DenseTensor<B>> for ArgsortHandler<B> {
     }
 }
 
+struct BroadcastHandler<T> {
+    tensor: T,
+}
+
+impl<'a, T> Handler<'a> for BroadcastHandler<T>
+where
+    T: TensorAccess + TensorTransform + Send + Sync + 'a,
+    Tensor: From<T::Broadcast>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let shape = Shape::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid Tensor shape for broadcast", v)
+                })?;
+
+                let shape = broadcast_shape(self.tensor.shape(), &shape)?;
+                self.tensor
+                    .broadcast(shape)
+                    .map(Tensor::from)
+                    .map(State::from)
+            })
+        }))
+    }
+}
+
+impl<T> From<T> for BroadcastHandler<T> {
+    fn from(tensor: T) -> Self {
+        Self { tensor }
+    }
+}
+
 struct CastHandler<T> {
     tensor: T,
 }
@@ -1195,7 +1230,7 @@ impl<'a> Handler<'a> for NormHandler {
                         .and_then(|pow| pow.sum(axis))
                         .and_then(|sum| sum.pow_const(0.5f32.into()))
                         .map(Collection::Tensor)
-                        .map(State::Collection)
+                        .map(State::Collection);
                 }
 
                 if self.tensor.ndim() <= 2 {
@@ -1478,6 +1513,7 @@ where
     Tensor: From<<T as TensorIndex<fs::Dir>>::Index>,
     Tensor: From<<T as TensorInstance>::Dense> + From<<T as TensorInstance>::Sparse>,
     Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+    Tensor: From<<T as TensorTransform>::Broadcast>,
     Tensor: From<<T as TensorTransform>::Cast>,
     Tensor: From<<T as TensorTransform>::Expand>,
     Tensor: From<<T as TensorTransform>::Flip>,
@@ -1758,6 +1794,7 @@ where
             ))),
 
             // transforms
+            "broadcast" => Some(Box::new(BroadcastHandler::from(tensor))),
             "cast" => Some(Box::new(CastHandler::from(tensor))),
             "flip" => Some(Box::new(FlipHandler::from(tensor))),
             "expand_dims" => Some(Box::new(ExpandHandler::from(tensor))),
