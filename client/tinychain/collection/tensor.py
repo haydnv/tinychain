@@ -1,7 +1,7 @@
 """An n-dimensional array of numbers."""
 
 from ..decorators import post
-from ..generic import Map, Tuple
+from ..generic import Map
 from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
@@ -746,7 +746,7 @@ class Norm(Dual):
 class Reduce(Dual):
     @property
     def shape(self):
-        return self.subject.shape.reduce(self.args)
+        return Shape.reduce(self.subject.shape, self.args)
 
 
 class Sum(Reduce):
@@ -799,13 +799,7 @@ class Transform(Operator):
 class Expand(Transform):
     @property
     def shape(self):
-        if not hasattr(self.subject, "__len__"):
-            raise RuntimeError(f"the expanded shape of {self.subject} requires a constant number of dimensions")
-
-        if not ref.is_literal(self.args):
-            raise ValueError(f"the shape of an expanded Tensor requires a constant axis, not {self.args}")
-
-        return Shape(self.subject.shape[:self.args] + [1] + self.subject.shape[self.args:])
+        return Shape.expand(self.subject.shape, self.args)
 
     def forward(self):
         return NDArray.expand_dims(self.subject, self.args)
@@ -832,7 +826,7 @@ class Transpose(Transform):
 
     @property
     def shape(self):
-        return self.subject.shape.transpose(self.args)
+        return Shape.transpose(self.subject.shape, self.args)
 
     def forward(self):
         return NDArray.transpose(self.subject, self.args)
@@ -849,7 +843,7 @@ class Transpose(Transform):
 class Reshape(Transform):
     @property
     def shape(self):
-        return Shape(self.args)
+        return Shape.reshape(self.subject.shape, self.args)
 
     def forward(self):
         return NDArray.reshape(self.subject, self.args)
@@ -861,7 +855,7 @@ class Reshape(Transform):
 class Slice(Transform):
     @property
     def shape(self):
-        return self.subject.shape.slice(self.args)
+        return Shape.slice(self.subject.shape, self.args)
 
     def forward(self):
         return NDArray.slice(self.subject, self.args)

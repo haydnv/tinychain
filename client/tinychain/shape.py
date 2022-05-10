@@ -1,3 +1,5 @@
+import functools
+import operator
 import typing
 
 from .generic import Tuple
@@ -40,7 +42,7 @@ class Shape(Tuple):
             if x.step is not None:
                 raise NotImplementedError(f"slice with step: {x}")
 
-            if len(spec) == 2 and spec[1] is not Ellipsis:
+            if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
                 # the contents are constants, so compute the slice now if possible
                 if hasattr(form_of(self), "__getitem__"):
                     if is_literal(start) and is_literal(stop):
@@ -81,6 +83,9 @@ class Shape(Tuple):
 
         dim = 0
         for shape in shapes:
+            if shape[axis] is None:
+                raise ValueError(f"dimension for concatenation at axis {axis} is not constant: {shape[axis]}")
+
             if is_literal(shape[axis]):
                 dim += form_of(shape[axis])
             else:
@@ -96,7 +101,9 @@ class Shape(Tuple):
                 elif concatenated[x] != shape[x]:
                     raise ValueError(f"cannot concatenate {shapes} due to inconsistent dimension at axis {x}")
 
-        assert not any(d is None for d in concatenated)
+            if concatenated[x] is None:
+                raise ValueError(f"shape of concatenated tensor is not constant at axis {x}")
+
         return concatenated
 
     def ndim(self, require_constant=False, op_name="this operation"):
@@ -150,6 +157,18 @@ class Shape(Tuple):
 
         return Shape(shape)
 
+    def expand(self, axis=None):
+        if not hasattr(self, "__len__"):
+            raise RuntimeError(f"Shape.expand requires a constant number of dimensions")
+
+        if not is_literal(axis):
+            raise ValueError(f"Shape.expand requires a constant axis, not {axis}")
+
+        if axis is None:
+            return Shape(self + [1])
+        else:
+            return Shape(self[:axis] + [1] + self[axis:])
+
     def reduce(self, axes):
         if not is_literal(axes):
             raise ValueError(f"Shape.reduce requires constant axes, not {axes}")
@@ -160,6 +179,36 @@ class Shape(Tuple):
         ndim = self.ndim(True, "reduce")
         axes = tuple(ndim + x if x < 0 else x for x in axes)
         return Shape(tuple(dim for x, dim in enumerate(self) if x not in axes))
+
+    def reshape(self, new_shape):
+        if is_literal(new_shape):
+            new_shape = form_of(new_shape)
+        else:
+            return new_shape
+
+        for (x, dim) in new_shape:
+            if dim < 0:
+                raise ValueError(f"invalid dimension for reshape at axis {x}: {dim}")
+
+        if len(dim for dim in new_shape if dim is None) > 1:
+            raise ValueError(f"Shape.reshape supports a maximum of one unknown dimension, not {new_shape}")
+
+        if is_literal(self):
+            this_size = functools.reduce(operator.mul, form_of(self))
+            for x in range(len(new_shape)):
+                if new_shape[x] is None:
+                    that_size = functools.reduce(operator.mul, new_shape[:x] + new_shape[x + 1:])
+                    new_shape[x] = this_size / that_size
+
+            that_size = functools.reduce(operator.mul, (dim for dim in new_shape if dim is not None))
+            if this_size != that_size:
+                raise ValueError(f"cannot reshape {self} into {new_shape}")
+
+            return Shape(new_shape)
+        elif any(dim is None for dim in new_shape):
+            raise ValueError(f"non-constant {self} does not support reshape with an unknown dimension: {new_shape}")
+        else:
+            return Shape(new_shape)
 
     def slice(self, bounds):
         if not hasattr(bounds, "__iter__"):

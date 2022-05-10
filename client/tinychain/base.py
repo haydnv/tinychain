@@ -5,14 +5,18 @@ import typing
 
 from .reflect import MethodStub
 
+BUILTINS = set(["shape"])
+
 
 class _Base(object):
     def __init__(self):
-        # TODO: is there a better place for this?
+        attr_names = set(dir(self)) - set(dir(object)) - BUILTINS
 
-        for name, attr in inspect.getmembers(self):
+        for name in attr_names:
             if name.startswith('_'):
                 continue
+
+            attr = getattr(self, name)
 
             if isinstance(attr, MethodStub):
                 method = attr.method(self, name)
