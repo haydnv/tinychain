@@ -70,6 +70,10 @@ class Docker(tc.host.Local.Process):
 
 
 def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1., **flags):
+    if not os.path.exists(DOCKERFILE):
+        raise RuntimeError(
+            f"Dockerfile at {DOCKERFILE} not found--use the TC_DOCKER environment variable to set a different path")
+
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
