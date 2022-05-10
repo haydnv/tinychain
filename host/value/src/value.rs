@@ -997,6 +997,7 @@ macro_rules! cast_real {
     };
 }
 
+cast_real!(Float);
 cast_real!(bool);
 cast_real!(f32);
 cast_real!(f64);
