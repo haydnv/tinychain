@@ -13,7 +13,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::{CastInto, Match, TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Digest;
 
@@ -675,22 +675,6 @@ impl TryFrom<Scalar> for Value {
     }
 }
 
-impl TryCastFrom<Scalar> for Bytes {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<Scalar> for Closure {
     fn can_cast_from(scalar: &Scalar) -> bool {
         OpDef::can_cast_from(scalar)
@@ -745,22 +729,6 @@ impl TryCastFrom<Scalar> for OpDef {
     }
 }
 
-impl TryCastFrom<Scalar> for Range {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => value.opt_cast_into(),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<Scalar> for TCRef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -794,64 +762,6 @@ impl TryCastFrom<Scalar> for IdRef {
                 TCRef::Id(id_ref) => Some(id_ref),
                 _ => None,
             },
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<Scalar> for Link {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<Scalar> for Float {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        Number::can_cast_from(scalar)
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        Number::opt_cast_from(scalar).map(|n| n.cast_into())
-    }
-}
-
-impl TryCastFrom<Scalar> for Number {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<Scalar> for TCString {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
             _ => None,
         }
     }
@@ -933,37 +843,36 @@ impl TryCastFrom<Scalar> for Tuple<Value> {
     }
 }
 
-impl TryCastFrom<Scalar> for bool {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
+macro_rules! from_value {
+    ($t:ty) => {
+        impl TryCastFrom<Scalar> for $t {
+            fn can_cast_from(scalar: &Scalar) -> bool {
+                match scalar {
+                    Scalar::Value(value) => Self::can_cast_from(value),
+                    _ => false,
+                }
+            }
 
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
-            _ => None,
+            fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+                match scalar {
+                    Scalar::Value(value) => Self::opt_cast_from(value),
+                    _ => None,
+                }
+            }
         }
-    }
+    };
 }
 
-impl TryCastFrom<Scalar> for u64 {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
-            _ => None,
-        }
-    }
-}
+from_value!(Bytes);
+from_value!(Float);
+from_value!(Link);
+from_value!(Number);
+from_value!(Range);
+from_value!(TCPathBuf);
+from_value!(TCString);
+from_value!(bool);
+from_value!(usize);
+from_value!(u64);
 
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
@@ -1031,22 +940,6 @@ impl TryCastFrom<Scalar> for OpRef {
             post_ref if PostRef::can_cast_from(&post_ref) => {
                 post_ref.opt_cast_into().map(Self::Post)
             }
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<Scalar> for TCPathBuf {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
             _ => None,
         }
     }

@@ -759,39 +759,14 @@ impl TryFrom<State> for Value {
     fn try_from(state: State) -> TCResult<Value> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
+
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(Value::try_from)
+                .collect::<TCResult<Tuple<Value>>>()
+                .map(Value::Tuple),
+
             other => Err(TCError::bad_request("expected Value but found", other)),
-        }
-    }
-}
-
-impl TryCastFrom<State> for bool {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for Bytes {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
         }
     }
 }
@@ -808,22 +783,6 @@ impl TryCastFrom<State> for Closure {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Closure(closure) => Some(closure),
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for TCString {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
@@ -949,54 +908,6 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
     }
 }
 
-impl TryCastFrom<State> for Id {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for IdRef {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for Link {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<State> for InstanceClass {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -1017,38 +928,6 @@ impl TryCastFrom<State> for InstanceClass {
                 Some(InstanceClass::anonymous(None, proto))
             }
             State::Object(Object::Class(class)) => Some(class),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for OpDef {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for OpRef {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
     }
@@ -1101,22 +980,6 @@ impl TryCastFrom<State> for Tensor {
     }
 }
 
-impl TryCastFrom<State> for TCPathBuf {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<State> for Value {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -1142,53 +1005,39 @@ impl TryCastFrom<State> for Value {
     }
 }
 
-impl TryCastFrom<State> for Float {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
+macro_rules! from_scalar {
+    ($t:ty) => {
+        impl TryCastFrom<State> for $t {
+            fn can_cast_from(state: &State) -> bool {
+                match state {
+                    State::Scalar(scalar) => Self::can_cast_from(scalar),
+                    _ => false,
+                }
+            }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
+            fn opt_cast_from(state: State) -> Option<Self> {
+                match state {
+                    State::Scalar(scalar) => Self::opt_cast_from(scalar),
+                    _ => None,
+                }
+            }
         }
-    }
+    };
 }
 
-impl TryCastFrom<State> for Number {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for u64 {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
+from_scalar!(Bytes);
+from_scalar!(Float);
+from_scalar!(Id);
+from_scalar!(IdRef);
+from_scalar!(Link);
+from_scalar!(Number);
+from_scalar!(OpDef);
+from_scalar!(OpRef);
+from_scalar!(TCPathBuf);
+from_scalar!(TCString);
+from_scalar!(bool);
+from_scalar!(usize);
+from_scalar!(u64);
 
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
