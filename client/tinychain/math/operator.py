@@ -32,7 +32,7 @@ class Operator(ref.Op):
         if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
-        ref.Op.__init__(self, subject, args)
+        ref.Op.__init__(self, simplify(subject), simplify(args))
 
     def __json__(self):
         return to_json(self.forward())
@@ -78,6 +78,15 @@ class Operator(ref.Op):
         """
 
         raise NotImplementedError(f"{self.__class__}.gradients")
+
+    def simplify(self):
+        """
+        Return a simplified form of this :class:`Operator` if possible, otherwise return `self`.
+
+        For example, calling `Add(x, 0).simplify()` will return `x`, and `Mul(1, y).simplify()` will return `y`.
+        """
+
+        return self
 
 
 class Unary(Operator):
@@ -330,9 +339,18 @@ class Atanh(Trig):
 class Dual(Operator):
     """A differentiable operator with two arguments"""
 
+    def __init__(self, subject, args):
+        if not is_numeric(subject):
+            raise ValueError(f"{self.__class__.__name__} requires a Numeric subject, not {subject}")
+
+        if not is_numeric(args):
+            raise ValueError(f"{self.__class__.__name__} requires Numeric args, not {args}")
+
+        Operator.__init__(self, subject, args)
+
 
 #TODO: Tensor.log(base!=None)
-class Log(Dual):
+class Log(Operator):
     @property
     def shape(self):
         return self.subject.shape
@@ -426,17 +444,19 @@ class Pow(Dual):
 
         return grads
 
+    def simplify(self):
+        from ..collection.tensor import Dense
 
-class Broadcast(Operator):
-    def __init__(self, subject, args):
-        if not is_numeric(subject):
-            raise ValueError(f"{self.__class__.__name__} requires a Numeric subject, not {subject}")
+        if ref.is_literal(self.args):
+            if same_as(self.args, 1):
+                return self.subject
+        elif same_as(self.args, Dense.ones_like(self.args)):
+            return self.subject
 
-        if not is_numeric(args):
-            raise ValueError(f"{self.__class__.__name__} requires a Numeric subject, not {args}")
+        return self
 
-        Operator.__init__(self, subject, args)
 
+class DualBroadcast(Operator):
     @property
     def shape(self):
         if ref.is_literal(self.args):
@@ -446,7 +466,7 @@ class Broadcast(Operator):
         return self.subject.shape.broadcast(self.args.shape)
 
 
-class Add(Broadcast):
+class Add(DualBroadcast):
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -470,8 +490,25 @@ class Add(Broadcast):
 
         return grads
 
+    def simplify(self):
+        from ..collection.tensor import NDArray, Sparse
 
-class Mul(Broadcast):
+        if ref.is_literal(self.args):
+            if same_as(self.args, 0):
+                return self.subject
+        elif isinstance(self.subject, NDArray) and same_as(self.args, Sparse.zeros_like(self.args)):
+            return self.subject.broadcast(self.args.shape)
+
+        if ref.is_literal(self.subject):
+            if same_as(self.subject, 0):
+                return self.args
+        elif isinstance(self.args, NDArray) and same_as(self.subject, Sparse.zeros_like(self.subject)):
+            return self.args.broadcast(self.subject.shape)
+
+        return self
+
+
+class Mul(DualBroadcast):
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -497,8 +534,33 @@ class Mul(Broadcast):
 
         return grads
 
+    def simplify(self):
+        from ..collection.tensor import Dense, Sparse, NDArray
 
-class Sub(Broadcast):
+        if ref.is_literal(self.args):
+            if same_as(self.args, 0):
+                return 0
+            elif same_as(self.args, 1):
+                return self.subject
+        elif same_as(self.args, Sparse.zeros_like(self.args)):
+            return self.args.broadcast(self.subject.shape)
+        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
+            return self.subject.broadcast(self.args.shape)
+
+        if ref.is_literal(self.subject):
+            if same_as(self.subject, 0):
+                return 0
+            elif same_as(self.subject, 1):
+                return self.args
+        elif same_as(self.subject, Sparse.zeros_like(self.subject)):
+            return self.subject.broadcast(self.args.shape)
+        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.ones_like(self.subject)):
+            return self.args.broadcast(self.subject.shape)
+
+        return self
+
+
+class Sub(DualBroadcast):
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -522,8 +584,25 @@ class Sub(Broadcast):
 
         return grads
 
+    def simplify(self):
+        from ..collection.tensor import Sparse
 
-class Div(Broadcast):
+        if ref.is_literal(self.args):
+            if same_as(self.args, 0):
+                return self.subject
+        elif same_as(self.args, Sparse.zeros_like(self.args)):
+            return self.subject
+
+        return self
+
+
+class Div(DualBroadcast):
+    def __init__(self, subject, args):
+        if same_as(args, 0):
+            raise ValueError(f"cannot divide {subject} by {args}")
+
+        DualBroadcast.__init__(self, subject, args)
+
     def forward(self):
         return Numeric.div(self.subject, self.args)
 
@@ -547,6 +626,39 @@ class Div(Broadcast):
             grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
         return grads
+
+    def simplify(self):
+        from ..collection.tensor import Dense, NDArray
+
+        if ref.is_literal(self.subject):
+            if same_as(self.subject, 0):
+                return 0
+        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.zeros_like(self.subject)):
+            return self.args.broadcast(self.subject.shape)
+
+        if ref.is_literal(self.args):
+            if same_as(self.args, 1):
+                return self.subject
+        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
+            return self.subject.broadcast(self.args.shape)
+
+        # TODO: simplify both numerator and denominator into a product of multiplicands
+
+        if operator(self.subject) and isinstance(operator(self.subject), Mul):
+            numerator = operator(self.subject)
+            if same_as(numerator.subject, self.args):
+                return numerator.args
+            elif same_as(numerator.args, self.args):
+                return numerator.subject
+
+        if operator(self.args) and isinstance(operator(self.args), Mul):
+            denominator = operator(self.args)
+            if same_as(denominator.subject, self.subject):
+                return 1 / denominator.args
+            elif same_as(denominator.args, self.subject):
+                return 1 / denominator.subject
+
+        return self
 
 
 def derivative_of(state, variable=None):
@@ -627,3 +739,30 @@ def operator(state_or_ref):
         return state_or_ref
     elif deref(state_or_ref) is not state_or_ref:
         return operator(deref(state_or_ref))
+
+
+def simplify(state):
+    """
+    Simplify the given operator graph, if possible.
+
+    For example, `simplify(Add(0, 2))` will return `2`.
+    """
+
+    if not operator(state):
+        return state
+
+    from ..state import State
+
+    if isinstance(state, State):
+        rtype = type(state)
+    else:
+        rtype = None
+
+    while operator(state):
+        simplified = operator(state).simplify()
+        if same_as(simplified, state):
+            break
+        else:
+            state = simplified
+
+    return rtype(state) if rtype else state
