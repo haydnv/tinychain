@@ -45,9 +45,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc + self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSub(self):
         y_torch = self.x_torch-self.w1_torch + self.b1_torch
@@ -59,18 +59,19 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc - self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testDiv(self):
         w1 = np.random.rand(2, 2) + 1
-        self.w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
+        w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
         w2 = np.random.rand(2, 2) + 1
-        self.w2_torch = torch.tensor(w2, dtype=torch.float, requires_grad=True)
-        y_torch = self.x_torch/self.w1_torch + self.b1_torch
-        y2_torch = y_torch/self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        w2_torch = torch.tensor(w2, dtype=torch.float, requires_grad=True)
+
+        y_torch = self.x_torch / w1_torch + self.b1_torch
+        y2_torch = y_torch / w2_torch + self.b2_torch
+        w1_torch_grad = grad_torch(y2_torch, w1_torch, grad_outputs=ones_like_torch(y2_torch))
 
         w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         w2_tc = tc.ml.optimizer.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
@@ -79,9 +80,10 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc / w1_tc + self.b1_tc
         cxt.y_2tc = cxt.y_tc / w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), w1_tc)
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
+
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testPow(self):
         y_torch = self.x_torch**self.w1_torch + self.b1_torch
@@ -93,13 +95,13 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc**self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testMul(self):
-        y_torch = self.x_torch*self.w1_torch + self.b1_torch
-        y2_torch = y_torch*self.w2_torch + self.b2_torch
+        y_torch = self.x_torch * self.w1_torch + self.b1_torch
+        y2_torch = y_torch * self.w2_torch + self.b2_torch
         w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
 
         cxt = tc.Context()
@@ -107,9 +109,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc * self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testMatMul(self):
         y_torch = self.x_torch@self.w1_torch + self.b1_torch
@@ -121,9 +123,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc@self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testExp(self):
         w_torch = self.w1_torch.exp()
@@ -135,10 +137,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc*cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
-
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testLog(self):
         w_torch = self.w1_torch.log()
@@ -150,9 +151,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSin(self):
         w_torch = self.w1_torch.sin()
@@ -164,9 +165,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testCos(self):
         w_torch = self.w1_torch.cos()
@@ -178,9 +179,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testAsin(self):
         w_torch = self.w1_torch.asin()
@@ -192,9 +193,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testAcos(self):
         w_torch = self.w1_torch.acos()
@@ -206,10 +207,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        response = HOST.post(ENDPOINT, cxt)
-        w1_tc_grad = load_np(response)
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSinh(self):
         w_torch = self.w1_torch.sinh()
@@ -221,9 +221,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())    
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testCosh(self):
         w_torch = self.w1_torch.cosh()
@@ -235,9 +235,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testAsinh(self):
         w_torch = self.w1_torch.asinh()
@@ -249,9 +249,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testAcosh(self):
         w1 = np.random.rand(2, 2)*10 + 1.1
@@ -268,9 +268,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = (cxt.x_tc * cxt.w1_tc).acosh()
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), cxt.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testTan(self):
         w_torch = self.w1_torch.tan()
@@ -282,9 +282,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testTanh(self):
         w_torch = self.w1_torch.tanh()
@@ -296,9 +296,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testArctan(self):
         w_torch = self.w1_torch.atan()
@@ -310,9 +310,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testArcTanh(self):
         w_torch = (self.w1_torch).atanh()
@@ -324,9 +324,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testMultipleFunctions(self):
         y_torch = self.x_torch @ self.w1_torch + self.w1_torch
@@ -338,9 +338,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc @ self.w2_tc + self.b2_tc + cxt.y_tc.exp()
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.detach().numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testDerivative(self):
         y_torch = self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
@@ -360,12 +360,12 @@ class OperatorTests(unittest.TestCase):
         cxt.result = {'the_first_derivative': cxt._dy_dw1_tc, 'the_second_derivative': cxt._d2y_dw2_tc}
 
         result = HOST.post(ENDPOINT, cxt)
-        dy_dw1_tc = load_np(result['the_first_derivative'])
-        d2y_dw2_tc = load_np(result['the_second_derivative'])
+        dy_dw1_tc = result['the_first_derivative']
+        d2y_dw2_tc = result['the_second_derivative']
 
-        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
-        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
-    
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
+
     def testSlice(self):
         y_torch = (self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)) * 12
         dy_dw1_torch = grad_torch(y_torch,
@@ -386,11 +386,11 @@ class OperatorTests(unittest.TestCase):
 
         result = HOST.post(ENDPOINT, cxt)
 
-        dy_dw1_tc = load_np(result['the_first_derivative'])
-        d2y_dw2_tc = load_np(result['the_second_derivative'])
+        dy_dw1_tc = result['the_first_derivative']
+        d2y_dw2_tc = result['the_second_derivative']
 
-        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
-        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def testConcat(self):
         y_torch = torch.cat([self.w1_torch, self.b1_torch])
@@ -406,8 +406,7 @@ class OperatorTests(unittest.TestCase):
 
         self.assertEqual(len(torch_grad), len(tc_grad))
         for (expected, actual) in zip(torch_grad, tc_grad.values()):
-            actual = load_np(actual)
-            self.assertTrue((abs(actual - expected.numpy()) < 0.0001).all())
+            self.assertAllClose(expected, actual)
 
     def testSum(self):
         y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
@@ -419,9 +418,9 @@ class OperatorTests(unittest.TestCase):
         cxt.y_2tc = cxt.y_tc.sum(0)**0.5
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     @unittest.skip # TODO: make it work
     def testSum2ndDerivative(self):
@@ -444,11 +443,14 @@ class OperatorTests(unittest.TestCase):
         cxt.map = {'the_first_derivative': cxt._dy_dw1_tc, 'the_second_derivative': cxt._d2y_dw2_tc}
 
         result = HOST.post(ENDPOINT, cxt)
-        dy_dw1_tc = load_np(result['the_first_derivative'])
-        d2y_dw2_tc = load_np(result['the_second_derivative'])
+        dy_dw1_tc = result['the_first_derivative']
+        d2y_dw2_tc = result['the_second_derivative']
 
-        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
-        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
+
+    def assertAllClose(self, tensor_torch, tensor_tc, threshold=0.0001):
+        self.assertTrue((abs(load_np(tensor_tc) - [t.detach().numpy() for t in tensor_torch]) < threshold).all())
 
 
 def load_np(as_json, dtype=float):
