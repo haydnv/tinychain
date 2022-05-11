@@ -1,7 +1,8 @@
 """An n-dimensional array of numbers."""
+import inspect
 
 from ..decorators import post
-from ..generic import Map
+from ..generic import Map, Tuple
 from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
@@ -15,6 +16,9 @@ from .base import Collection
 
 
 class NDArray(Interface):
+    def broadcast(self, shape):
+        return ref.Get(ref.MethodSubject(self, "broadcast"), shape)
+
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
@@ -43,6 +47,12 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     __uri__ = uri(Collection) + "/tensor"
     __spec__ = (Shape, Number)
 
+    def __init__(self, form):
+        if isinstance(deref(form), (bool, float, int)):
+            raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
+
+        Collection.__init__(self, form)
+
     @classmethod
     def trig_rtype(cls):
         shape, dtype = cls.__spec__
@@ -56,6 +66,13 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         It would be better to implement this function using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
         but this is not supported on Python <= 3.8.
         """
+
+        if inspect.isclass(shape):
+            if shape is not Tuple and shape is not Shape:
+                raise ValueError(f"invalid type for tensor shape: {shape}")
+
+        elif not isinstance(shape, (list, tuple, Tuple)):
+            raise ValueError(f"invalid tensor shape: {shape}")
 
         spec = (shape, dtype)
 
@@ -346,6 +363,9 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def slice(self, bounds):
         parent = self
         bounds = handle_bounds(bounds)
+
+        if ref.is_literal(self.shape):
+            self.shape.slice(bounds)  # test for valid bounds, if possible
 
         class WritableView(Tensor):
             def write(self, value):
@@ -718,9 +738,12 @@ class Copy(Unary):
     def forward(self):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
+    def backward(self, variable=None):
+        return derivative_of(self.subject, variable).copy()
+
     def gradients(self, loss):
         if operator(self.subject):
-            return form_of(self.subject).gradients(loss)
+            return operator(self.subject).gradients(loss)
 
         return Gradients()
 
@@ -810,7 +833,7 @@ class Transform(Operator):
 
 class Broadcast(Transform):
     def forward(self):
-        return Numeric.broadcast(self.subject, self.args)
+        return NDArray.broadcast(self.subject, self.args)
 
 
 class Expand(Transform):

@@ -55,7 +55,8 @@ class Parallel(Optimizer, Dynamic):
             outputs = self.ml_model.eval(inputs_batch)
 
             loss = self._cost(inputs_batch, outputs)
-            cxt.d_loss = derivative_of(loss).copy()
+            d_loss = derivative_of(loss)
+            cxt.d_loss = d_loss.copy() if isinstance(d_loss, Tensor) else d_loss
             grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
 
             if not grads:

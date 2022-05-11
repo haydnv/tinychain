@@ -104,7 +104,7 @@ class Shape(Tuple):
             if concatenated[x] is None:
                 raise ValueError(f"shape of concatenated tensor is not constant at axis {x}")
 
-        return concatenated
+        return Shape(concatenated)
 
     def ndim(self, require_constant=False, op_name="this operation"):
         if require_constant and not hasattr(self, "__len__"):
@@ -194,11 +194,11 @@ class Shape(Tuple):
         else:
             return new_shape
 
-        for (x, dim) in new_shape:
-            if dim < 0:
+        for (x, dim) in enumerate(new_shape):
+            if dim is not None and dim < 0:
                 raise ValueError(f"invalid dimension for reshape at axis {x}: {dim}")
 
-        if len(dim for dim in new_shape if dim is None) > 1:
+        if len([dim for dim in new_shape if dim is None]) > 1:
             raise ValueError(f"Shape.reshape supports a maximum of one unknown dimension, not {new_shape}")
 
         if is_literal(self):
@@ -231,7 +231,7 @@ class Shape(Tuple):
                 start = 0 if bound.start is None else form_of(bound.start)
                 stop = form_of(self[x]) if bound.stop is None else form_of(bound.stop)
                 if not is_literal((start, stop)):
-                    raise ValueError(f"the shape of a Tensor slice requires a constant bound, not {bound}")
+                    raise ValueError(f"the shape of a Tensor slice requires a constant bound, not {(start, stop)}")
 
                 if start < 0 or stop < 0:
                     if is_literal(self[x]):
