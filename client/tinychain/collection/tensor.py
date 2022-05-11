@@ -1,7 +1,8 @@
 """An n-dimensional array of numbers."""
+import inspect
 
 from ..decorators import post
-from ..generic import Map
+from ..generic import Map, Tuple
 from ..interface import Compare, Interface
 from ..math.operator import *
 from ..scalar.bound import handle_bounds
@@ -65,6 +66,13 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         It would be better to implement this function using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
         but this is not supported on Python <= 3.8.
         """
+
+        if inspect.isclass(shape):
+            if shape is not Tuple and shape is not Shape:
+                raise ValueError(f"invalid type for tensor shape: {shape}")
+
+        elif not isinstance(shape, (list, tuple, Tuple)):
+            raise ValueError(f"invalid tensor shape: {shape}")
 
         spec = (shape, dtype)
 
