@@ -383,7 +383,7 @@ class OperatorTests(unittest.TestCase):
 
     def testSum(self):
         y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        y2_torch = torch.sum(y_torch, 0)**0.5
         w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
@@ -398,8 +398,10 @@ class OperatorTests(unittest.TestCase):
 
     @unittest.skip # TODO: make it work
     def testSum2ndDerivative(self):
-        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0)**0.5
+        w1 = np.array([1, 2, 3, 4]).reshape(2, 2)
+        self.w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
+        # y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
+        y2_torch = torch.sum(self.w1_torch, 0)**2
         dy_dw1_torch = grad_torch(y2_torch,
                             self.w1_torch, 
                             grad_outputs=torch.ones_like(y2_torch),
@@ -408,19 +410,24 @@ class OperatorTests(unittest.TestCase):
         d2y_dw12_torch = grad_torch(dy_dw1_torch,
                               self.w1_torch,
                               grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+        print(f"ddy_dw1_torch: {dy_dw1_torch}")
+        print(f"d2y_dw12_torch: {d2y_dw12_torch}")
 
         cxt = tc.Context()
-        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
-        y_2tc = y_tc.sum(0)**0.5
+        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        # y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
+        y_2tc = self.w1_tc.sum(0)**2
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])
         d2y_dw2_tc = load_np(result['the_second_derivative'])
+        print(f"dy_dw1_tc: {dy_dw1_tc}")
+        print(f"d2y_dw2_tc: {d2y_dw2_tc}")
 
-        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.0001).all())
-        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.0001).all())
+        self.assertTrue((abs(dy_dw1_tc-[t.detach().numpy() for t in dy_dw1_torch]) < 0.001).all())
+        self.assertTrue((abs(d2y_dw2_tc-[t.detach().numpy() for t in d2y_dw12_torch]) < 0.001).all())
 
 
 def load_np(as_json, dtype=float):

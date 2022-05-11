@@ -768,13 +768,14 @@ class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, **self.args)
 
-    def gradients(self, loss):
-        if "axis" not in self.args:
-            loss = self.backward() * loss
-        elif isinstance(loss, NDArray):
-            # TODO: is this correct?
-            loss = Dense.ones_like(self.subject) * loss
+    def backward(self, variable=None):
+        return derivative_of(self.subject).sum(self.args['axis'], keepdims = True)
 
+    def gradients(self, loss):
+        # TODO: make it works for complex functions (it works for multiply but doesn't work for pow)
+        loss =  Dense.ones_like(self.subject) * loss
+
+        from ..ml.optimizer import Variable
         grads = Gradients()
 
         if operator(self.subject):
