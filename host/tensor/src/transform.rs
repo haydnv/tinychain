@@ -337,10 +337,11 @@ pub struct Reduce {
 }
 
 impl Reduce {
-    pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
+    pub fn new(source_shape: Shape, axis: usize, keepdims: bool) -> TCResult<Reduce> {
         if source_shape.size() == 0 {
             return Err(TCError::unsupported("cannot reduce a zero-size tensor"));
         }
+
         if axis >= source_shape.len() {
             return Err(TCError::unsupported(format!(
                 "cannot reduce axis {} of tensor with shape {}",
@@ -354,7 +355,12 @@ impl Reduce {
         }
 
         let mut shape = source_shape.clone();
-        shape.remove(axis);
+
+        if keepdims {
+            shape[axis] = 1;
+        } else {
+            shape.remove(axis);
+        }
 
         Ok(Reduce {
             source_shape,
@@ -368,9 +374,13 @@ impl Reduce {
     }
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.into_iter()
-            .map(|x| if x >= self.axis { x + 1 } else { x })
-            .collect()
+        if self.shape.len() == self.source_shape.len() {
+            axes
+        } else {
+            axes.into_iter()
+                .map(|x| if x >= self.axis { x + 1 } else { x })
+                .collect()
+        }
     }
 
     pub fn invert_axis(&self, bounds: &Bounds) -> usize {
@@ -384,21 +394,34 @@ impl Reduce {
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.axis {
-            bounds
+            // no-op
+        } else if self.shape.len() == self.source_shape.len() {
+            bounds[self.axis] = AxisBounds::all(self.source_shape[self.axis]);
         } else {
             bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
-            bounds
         }
+
+        bounds
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Bounds {
         let mut bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
-        bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
+
+        if self.shape.len() == self.source_shape.len() {
+            bounds[self.axis] = AxisBounds::all(self.source_shape[self.axis]);
+        } else {
+            bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
+        }
+
         bounds.into()
     }
 
     pub fn invert_coords(&self, coords: Coords) -> Coords {
-        coords.expand(&self.source_shape, self.axis)
+        if self.shape.len() == self.source_shape.len() {
+            coords.contract_dim(self.axis).expand(&self.source_shape, self.axis)
+        } else {
+            coords.expand(&self.source_shape, self.axis)
+        }
     }
 
     pub fn reduce_axis(&self) -> usize {

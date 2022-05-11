@@ -1811,9 +1811,10 @@ where
     pub fn new(
         source: SparseAccessor<FD, FS, D, T>,
         axis: usize,
+        keepdims: bool,
         reductor: Reductor<FD, FS, D, T>,
     ) -> TCResult<Self> {
-        transform::Reduce::new(source.shape().clone(), axis).map(|rebase| SparseReduce {
+        transform::Reduce::new(source.shape().clone(), axis, keepdims).map(|rebase| SparseReduce {
             source,
             rebase,
             reductor,
@@ -1942,6 +1943,7 @@ where
         self.shape().validate_bounds(&bounds)?;
 
         let reduce_axis = self.rebase.invert_axis(&bounds);
+        let keepdims = self.ndim() == self.source.ndim();
         let source_bounds = self.rebase.invert_bounds(bounds);
         debug!(
             "SparseReduce::slice source is {}, bounds are {}, source axis to reduce is {}",
@@ -1949,7 +1951,7 @@ where
         );
 
         let source = self.source.slice(source_bounds)?;
-        let reduced = SparseReduce::new(source.into(), reduce_axis, self.reductor)?;
+        let reduced = SparseReduce::new(source.into(), reduce_axis, keepdims, self.reductor)?;
         debug_assert!(reduced.ndim() > 0);
 
         if reduced.ndim() == 0 {

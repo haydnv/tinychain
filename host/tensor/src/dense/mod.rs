@@ -1080,8 +1080,8 @@ where
     type Txn = T;
     type Reduce = DenseTensor<FD, FS, D, T, BlockListReduce<FD, FS, D, T, B>>;
 
-    fn max(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::max(self.blocks, axis).map(DenseTensor::from)
+    fn max(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
+        BlockListReduce::max(self.blocks, axis, keepdims).map(DenseTensor::from)
     }
 
     fn max_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
@@ -1103,8 +1103,8 @@ where
         })
     }
 
-    fn min(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::min(self.blocks, axis).map(DenseTensor::from)
+    fn min(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
+        BlockListReduce::min(self.blocks, axis, keepdims).map(DenseTensor::from)
     }
 
     fn min_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number> {
@@ -1126,8 +1126,8 @@ where
         })
     }
 
-    fn product(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::product(self.blocks, axis).map(DenseTensor::from)
+    fn product(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
+        BlockListReduce::product(self.blocks, axis, keepdims).map(DenseTensor::from)
     }
 
     fn product_all(&self, txn: T) -> TCBoxTryFuture<Number> {
@@ -1150,8 +1150,8 @@ where
         })
     }
 
-    fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
-        BlockListReduce::sum(self.blocks, axis).map(DenseTensor::from)
+    fn sum(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
+        BlockListReduce::sum(self.blocks, axis, keepdims).map(DenseTensor::from)
     }
 
     fn sum_all(&self, txn: T) -> TCBoxTryFuture<Number> {

@@ -387,10 +387,12 @@ class OperatorTests(unittest.TestCase):
         w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
-        y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
-        y_2tc = y_tc.sum(0)**0.5
-        cxt.result = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
-        w1_tc_grad = load_np(HOST.post(ENDPOINT, cxt))
+        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
+        cxt.y_2tc = cxt.y_tc.sum(0)**0.5
+        cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
+
+        response = HOST.post(ENDPOINT, cxt)
+        w1_tc_grad = load_np(response)
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
 

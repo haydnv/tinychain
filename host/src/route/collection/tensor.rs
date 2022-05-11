@@ -31,6 +31,7 @@ use crate::txn::Txn;
 use super::{Handler, Route};
 
 const AXIS: Label = label("axis");
+const KEEPDIMS: Label = label("keepdims");
 const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
@@ -1215,6 +1216,50 @@ struct NormHandler {
     tensor: Tensor,
 }
 
+impl NormHandler {
+    async fn call(
+        tensor: Tensor,
+        txn: Txn,
+        axis: Option<usize>,
+        keepdims: bool,
+    ) -> TCResult<State> {
+        if let Some(axis) = axis {
+            debug!("norm of {} at axis {}", tensor, axis);
+
+            return tensor
+                .pow_const(2i32.into())
+                .and_then(|pow| pow.sum(axis, keepdims))
+                .and_then(|sum| sum.pow_const(0.5f32.into()))
+                .map(Collection::Tensor)
+                .map(State::Collection);
+        } else if tensor.ndim() <= 2 {
+            if keepdims {
+                Err(TCError::not_implemented("matrix norm with keepdims"))
+            } else {
+                let squared = tensor.pow_const(2i32.into())?;
+                let summed = squared.sum_all(txn).await?;
+                Ok(Value::from(summed.pow(0.5f32.into())).into())
+            }
+        } else {
+            debug!("norm of {}, keepdims is {}", tensor, keepdims);
+
+            tensor
+                .pow_const(2i32.into())
+                .and_then(|pow| {
+                    let axis = pow.ndim() - 1;
+                    pow.sum(axis, keepdims)
+                })
+                .and_then(|pow| {
+                    let axis = pow.ndim() - if keepdims { 2 } else { 1 };
+                    pow.sum(axis, keepdims)
+                })
+                .and_then(|sum| sum.pow_const(0.5f32.into()))
+                .map(Collection::Tensor)
+                .map(State::Collection)
+        }
+    }
+}
+
 impl<'a> Handler<'a> for NormHandler {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -1222,36 +1267,35 @@ impl<'a> Handler<'a> for NormHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    let axis = cast_axis(key, self.tensor.ndim())?;
-                    return self
-                        .tensor
-                        .pow_const(2i32.into())
-                        .and_then(|pow| pow.sum(axis))
-                        .and_then(|sum| sum.pow_const(0.5f32.into()))
-                        .map(Collection::Tensor)
-                        .map(State::Collection);
-                }
-
-                if self.tensor.ndim() <= 2 {
-                    let squared = self.tensor.pow_const(2i32.into())?;
-                    let summed = squared.sum_all(txn.clone()).await?;
-                    Ok(Value::from(summed.pow(0.5f32.into())).into())
+                let axis = if key.is_some() {
+                    cast_axis(key, self.tensor.ndim()).map(Some)?
                 } else {
-                    self.tensor
-                        .pow_const(2i32.into())
-                        .and_then(|pow| {
-                            let axis = pow.ndim() - 1;
-                            pow.sum(axis)
-                        })
-                        .and_then(|pow| {
-                            let axis = pow.ndim() - 1;
-                            pow.sum(axis)
-                        })
-                        .and_then(|sum| sum.pow_const(0.5f32.into()))
-                        .map(Collection::Tensor)
-                        .map(State::Collection)
-                }
+                    None
+                };
+
+                Self::call(self.tensor, txn.clone(), axis, false).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let axis = if params.contains_key(&AXIS.into()) {
+                    let axis = params.require(&AXIS.into())?;
+                    cast_axis(axis, self.tensor.ndim()).map(Some)?
+                } else {
+                    None
+                };
+
+                let keepdims = params.or_default(&KEEPDIMS.into())?;
+
+                params.expect_empty()?;
+
+                Self::call(self.tensor, txn.clone(), axis, keepdims).await
             })
         }))
     }
@@ -1265,20 +1309,44 @@ impl From<Tensor> for NormHandler {
 
 struct ReduceHandler<'a, T: TensorReduce<fs::Dir>> {
     tensor: &'a T,
-    reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
+    reduce: fn(T, usize, bool) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
     reduce_all: fn(&'a T, Txn) -> TCBoxTryFuture<'a, Number>,
 }
 
 impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T> {
     fn new(
         tensor: &'a T,
-        reduce: fn(T, usize) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
+        reduce: fn(T, usize, bool) -> TCResult<<T as TensorReduce<fs::Dir>>::Reduce>,
         reduce_all: fn(&'a T, Txn) -> TCBoxTryFuture<'a, Number>,
     ) -> Self {
         Self {
             tensor,
             reduce,
             reduce_all,
+        }
+    }
+}
+
+impl<'a, T: TensorReduce<fs::Dir>> ReduceHandler<'a, T>
+where
+    T: TensorAccess + TensorReduce<fs::Dir> + Clone + Sync,
+    Tensor: From<<T as TensorReduce<fs::Dir>>::Reduce>,
+{
+    async fn call(&self, txn: &Txn, axis: Option<usize>, keepdims: bool) -> TCResult<State> {
+        if axis.is_none() && keepdims {
+            Err(TCError::not_implemented(
+                "reduce all axes but keep dimensions",
+            ))
+        } else if axis.is_none() || (axis == Some(0) && self.tensor.ndim() == 1) {
+            (self.reduce_all)(self.tensor, txn.clone())
+                .map_ok(Value::from)
+                .map_ok(State::from)
+                .await
+        } else {
+            (self.reduce)(self.tensor.clone(), axis.expect("axis"), keepdims)
+                .map(Tensor::from)
+                .map(Collection::from)
+                .map(State::from)
         }
     }
 }
@@ -1297,25 +1365,31 @@ where
                 let axis = if key.is_none() {
                     None
                 } else {
-                    let axis = cast_axis(key, self.tensor.ndim())?;
-                    if axis == 0 && self.tensor.ndim() == 1 {
-                        None
-                    } else {
-                        Some(axis)
-                    }
+                    cast_axis(key, self.tensor.ndim()).map(Some)?
                 };
 
-                if let Some(axis) = axis {
-                    (self.reduce)(self.tensor.clone(), axis)
-                        .map(Tensor::from)
-                        .map(Collection::from)
-                        .map(State::from)
+                self.call(txn, axis, false).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let axis = if params.contains_key(&AXIS.into()) {
+                    let axis = params.require(&AXIS.into())?;
+                    cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
-                    (self.reduce_all)(self.tensor, txn.clone())
-                        .map_ok(Value::from)
-                        .map_ok(State::from)
-                        .await
-                }
+                    None
+                };
+
+                let keepdims = params.or_default(&KEEPDIMS.into())?;
+                params.expect_empty()?;
+
+                self.call(txn, axis, keepdims).await
             })
         }))
     }
