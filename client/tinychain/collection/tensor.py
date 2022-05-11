@@ -738,9 +738,12 @@ class Copy(Unary):
     def forward(self):
         return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
+    def backward(self, variable=None):
+        return derivative_of(self.subject, variable).copy()
+
     def gradients(self, loss):
         if operator(self.subject):
-            return form_of(self.subject).gradients(loss)
+            return operator(self.subject).gradients(loss)
 
         return Gradients()
 
