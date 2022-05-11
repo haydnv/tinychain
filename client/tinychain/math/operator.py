@@ -119,6 +119,10 @@ class Custom(Unary):
         Unary.__ns__(self, context)
         deanonymize(self._op, context)
 
+    @property
+    def shape(self):
+        return self._op.shape
+
 
 # TODO: Tensor.log(base!=None)
 class Abs(Unary):
@@ -672,13 +676,25 @@ def derivative_of(state, variable=None):
     if not is_numeric(state):
         raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
 
-    from ..scalar.number import F32, Number
-    from ..collection.tensor import Dense, Sparse, Tensor
+    from ..scalar.number import F32
+    from ..collection.tensor import Dense, Sparse
     from ..ml.optimizer import Variable
+
+    def ones_like(state):
+        if ref.is_literal(state) or same_as(state.shape.ndim(), 0):
+            return 1.
+        else:
+            return Dense.ones_like(state)
+
+    def zeros_like(state):
+        if ref.is_literal(state) or same_as(state.shape.ndim(), 0):
+            return 0.
+        else:
+            return Sparse.zeros_like(state)
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
-        return Dense.ones_like(state)
+        return ones_like(state)
 
     if isinstance(state, Variable):
         if variable is None:
@@ -690,14 +706,8 @@ def derivative_of(state, variable=None):
 
     if operator(state):
         return operator(state).backward(variable)
-    if isinstance(state, Number):
-        return type(state)(form=0)
-    elif isinstance(state, Tensor):
-        return Sparse.create(state, F32)
-    elif isinstance(state, (bool, int, float)):
-        return type(state)(0)
-    else:
-        raise TypeError(f"the derivative of {state} is not defined")
+
+    return zeros_like(state)
 
 
 def gradients(differentiable, loss, variables=None):
@@ -748,21 +758,11 @@ def simplify(state):
     For example, `simplify(Add(0, 2))` will return `2`.
     """
 
-    if not operator(state):
-        return state
-
-    from ..state import State
-
-    if isinstance(state, State):
-        rtype = type(state)
-    else:
-        rtype = None
-
     while operator(state):
         simplified = operator(state).simplify()
         if same_as(simplified, state):
             break
-        else:
-            state = simplified
 
-    return rtype(state) if rtype else state
+        state = simplified
+
+    return state

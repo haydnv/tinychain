@@ -15,6 +15,9 @@ from .base import Collection
 
 
 class NDArray(Interface):
+    def broadcast(self, shape):
+        return ref.Get(ref.MethodSubject(self, "broadcast"), shape)
+
     def expand_dims(self, axis=-1):
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
@@ -42,6 +45,12 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
     __uri__ = uri(Collection) + "/tensor"
     __spec__ = (Shape, Number)
+
+    def __init__(self, form):
+        if isinstance(deref(form), (bool, float, int)):
+            raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
+
+        Collection.__init__(self, form)
 
     @classmethod
     def trig_rtype(cls):
@@ -346,6 +355,9 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def slice(self, bounds):
         parent = self
         bounds = handle_bounds(bounds)
+
+        if ref.is_literal(self.shape):
+            self.shape.slice(bounds)  # test for valid bounds, if possible
 
         class WritableView(Tensor):
             def write(self, value):
@@ -807,7 +819,7 @@ class Transform(Operator):
 
 class Broadcast(Transform):
     def forward(self):
-        return Numeric.broadcast(self.subject, self.args)
+        return NDArray.broadcast(self.subject, self.args)
 
 
 class Expand(Transform):

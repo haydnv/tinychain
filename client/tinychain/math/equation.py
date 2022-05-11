@@ -4,12 +4,12 @@ from ..collection.tensor import Tensor
 from ..scalar.ref import Op
 from ..util import deref, hex_id, same_as
 
-from .operator import operator, simplify
+from .operator import operator
 
 
 class Function(object):
     def __init__(self, result):
-        self.result = simplify(result)
+        self.result = result
 
         self.nodes = {}
         self.edges = []
