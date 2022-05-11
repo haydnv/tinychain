@@ -720,7 +720,7 @@ class Copy(Unary):
 
     def gradients(self, loss):
         if operator(self.subject):
-            return form_of(self.subject).gradients(loss)
+            return deref(self.subject).gradients(loss)
 
         return Gradients()
 
