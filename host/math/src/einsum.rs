@@ -369,7 +369,7 @@ where
 
         if !f_output.contains(&f_input[axis]) {
             debug!("einsum will contract over axis {}", f_input[axis]);
-            op = op.sum(axis)?;
+            op = op.sum(axis, false)?;
             f_input.remove(axis);
         } else {
             assert!(f_input.contains(&f_output[axis]));

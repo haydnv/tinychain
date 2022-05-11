@@ -1017,10 +1017,11 @@ where
     type Txn = T;
     type Reduce = SparseTensor<FD, FS, D, T, SparseReduce<FD, FS, D, T>>;
 
-    fn max(self, axis: usize) -> TCResult<Self::Reduce> {
+    fn max(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(
             self.accessor.accessor(),
             axis,
+            keepdims,
             SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::max_all,
         )?;
 
@@ -1031,10 +1032,11 @@ where
         Box::pin(async move { self.clone().into_dense().max_all(txn).await })
     }
 
-    fn min(self, axis: usize) -> TCResult<Self::Reduce> {
+    fn min(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(
             self.accessor.accessor(),
             axis,
+            keepdims,
             SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::min_all,
         )?;
 
@@ -1045,10 +1047,11 @@ where
         Box::pin(async move { self.clone().into_dense().min_all(txn).await })
     }
 
-    fn product(self, axis: usize) -> TCResult<Self::Reduce> {
+    fn product(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(
             self.accessor.accessor(),
             axis,
+            keepdims,
             SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::product_all,
         )?;
 
@@ -1059,10 +1062,11 @@ where
         Box::pin(async move { self.clone().into_dense().product_all(txn).await })
     }
 
-    fn sum(self, axis: usize) -> TCResult<Self::Reduce> {
+    fn sum(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(
             self.accessor.accessor(),
             axis,
+            keepdims,
             SparseTensor::<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>::sum_all,
         )?;
 

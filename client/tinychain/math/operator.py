@@ -672,30 +672,38 @@ def derivative_of(state, variable=None):
     if not is_numeric(state):
         raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
 
-    from ..scalar.number import F32, Number
-    from ..collection.tensor import Dense, Sparse, Tensor
+    from ..collection.tensor import Dense, Sparse
     from ..ml.optimizer import Variable
+
+    def ones_like(state):
+        if same_as(state.shape.ndim(), 0):
+            return 1.
+        else:
+            return Dense.ones_like(state)
+
+    def zeros_like(state):
+        if same_as(state.shape.ndim(), 0):
+            return 0.
+        else:
+            return Sparse.zeros_like(state)
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
-        return Dense.ones_like(state)
+        return ones_like(state)
 
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
-            return Dense.ones_like(state)
+            return ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
-            return Sparse.create(state, F32)
+            return zeros_like(state)
 
     if operator(state):
         return operator(state).backward(variable)
-    if isinstance(state, Number):
-        return type(state)(form=0)
-    elif isinstance(state, Tensor):
-        return Sparse.create(state, F32)
-    elif isinstance(state, (bool, int, float)):
-        return type(state)(0)
+
+    if hasattr(state, "shape"):
+        return zeros_like(state)
     else:
         raise TypeError(f"the derivative of {state} is not defined")
 

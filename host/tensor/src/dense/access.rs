@@ -1346,8 +1346,8 @@ where
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
-    pub fn max(source: B, axis: usize) -> TCResult<Self> {
-        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+    pub fn max(source: B, axis: usize, keepdims: bool) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis, keepdims)?;
         let dtype = source.dtype();
         let stride = source.size() / (source.size() / source.shape()[axis]);
 
@@ -1359,8 +1359,8 @@ where
         })
     }
 
-    pub fn min(source: B, axis: usize) -> TCResult<Self> {
-        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+    pub fn min(source: B, axis: usize, keepdims: bool) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis, keepdims)?;
         let dtype = source.dtype();
         let stride = source.size() / (source.size() / source.shape()[axis]);
 
@@ -1372,8 +1372,8 @@ where
         })
     }
 
-    pub fn product(source: B, axis: usize) -> TCResult<Self> {
-        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+    pub fn product(source: B, axis: usize, keepdims: bool) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis, keepdims)?;
         let dtype = afarray::product_dtype(source.dtype());
         let stride = source.size() / (source.size() / source.shape()[axis]);
 
@@ -1385,8 +1385,8 @@ where
         })
     }
 
-    pub fn sum(source: B, axis: usize) -> TCResult<Self> {
-        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
+    pub fn sum(source: B, axis: usize, keepdims: bool) -> TCResult<Self> {
+        let rebase = transform::Reduce::new(source.shape().clone(), axis, keepdims)?;
         let dtype = afarray::sum_dtype(source.dtype());
         let stride = source.size() / (source.size() / source.shape()[axis]);
 
@@ -1487,14 +1487,15 @@ where
         self.shape().validate_bounds(&bounds)?;
         let reductor = self.reductor;
         let reduce_axis = self.rebase.invert_axis(&bounds);
+        let keepdims = self.ndim() == self.source.ndim();
         let source_bounds = self.rebase.invert_bounds(bounds);
         let slice = self.source.slice(source_bounds)?;
 
         match reductor {
-            Reductor::Max(_, _) => BlockListReduce::max(slice, reduce_axis),
-            Reductor::Min(_, _) => BlockListReduce::min(slice, reduce_axis),
-            Reductor::Product(_, _) => BlockListReduce::product(slice, reduce_axis),
-            Reductor::Sum(_, _) => BlockListReduce::sum(slice, reduce_axis),
+            Reductor::Max(_, _) => BlockListReduce::max(slice, reduce_axis, keepdims),
+            Reductor::Min(_, _) => BlockListReduce::min(slice, reduce_axis, keepdims),
+            Reductor::Product(_, _) => BlockListReduce::product(slice, reduce_axis, keepdims),
+            Reductor::Sum(_, _) => BlockListReduce::sum(slice, reduce_axis, keepdims),
         }
     }
 

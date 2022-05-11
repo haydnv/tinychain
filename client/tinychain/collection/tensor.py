@@ -21,8 +21,8 @@ class NDArray(Interface):
     def flip(self, axis):
         return ref.Get(ref.MethodSubject(self, "flip"), axis)
 
-    def norm(self, axis=None):
-        return ref.Get(ref.MethodSubject(self, "norm"), axis)
+    def norm(self, axis=None, keepdims=False):
+        return ref.Post(ref.MethodSubject(self, "norm"), _reduce_args(axis, keepdims))
 
     def reshape(self, shape):
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
@@ -30,8 +30,8 @@ class NDArray(Interface):
     def slice(self, bounds):
         return ref.Get(ref.MethodSubject(self), bounds)
 
-    def sum(self, axis=None):
-        return ref.Get(ref.MethodSubject(self, "sum"), axis)
+    def sum(self, axis=None, keepdims=False):
+        return ref.Post(ref.MethodSubject(self, "sum"), _reduce_args(axis, keepdims))
 
     def transpose(self, permutation=None):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
@@ -417,11 +417,11 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def sub(self, other):
         return Tensor(Sub(self, other))
 
-    def sum(self, axis=None):
+    def sum(self, axis=None, keepdims=False):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return rtype(form=Sum(self, axis))
+        return rtype(form=Sum(self, axis, keepdims))
 
     def transpose(self, permutation=None):
         """
@@ -753,24 +753,27 @@ class Norm(Operator):
 
 
 class Reduce(Operator):
+    def __init__(self, tensor, axis=None, keepdims=False):
+        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
+
     @property
     def shape(self):
-        return Shape.reduce(self.subject.shape, self.args)
+        return Shape.reduce(self.subject.shape, **self.args)
+
+    def backward(self, variable=None):
+        return derivative_of(self.subject).sum(**self.args)
 
 
 class Sum(Reduce):
     def forward(self):
-        return NDArray.sum(self.subject, axis=self.args)
-
-    def backward(self, variable=None):
-        return derivative_of(self.subject).sum(self.args)
+        return NDArray.sum(self.subject, **self.args)
 
     def gradients(self, loss):
-        if self.args is None:
+        if "axis" not in self.args:
             loss = self.backward() * loss
         elif isinstance(loss, NDArray):
             # TODO: is this correct?
-            loss = Dense.ones_like(self.subject) * loss.expand_dims(self.args)
+            loss = Dense.ones_like(self.subject) * loss
 
         grads = Gradients()
 
@@ -893,3 +896,15 @@ class Slice(Transform):
                 return self.subject
 
         return Dense(SliceGradient(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad))))
+
+
+def _reduce_args(axis=None, keepdims=False):
+    args = {}
+
+    if axis is not None:
+        args["axis"] = axis
+
+    if keepdims:
+        args["keepdims"] = keepdims
+
+    return args

@@ -119,7 +119,9 @@ class Shape(Tuple):
         ndim = max(self.ndim(True, "broadcast"), other.ndim(True, "broadcast"))
 
         assert int(ndim) == ndim
-        assert ndim > 0
+
+        if not ndim:
+            return Shape(tuple())
 
         shape = [1] * ndim
 
@@ -169,16 +171,22 @@ class Shape(Tuple):
         else:
             return Shape(self[:axis] + [1] + self[axis:])
 
-    def reduce(self, axes):
-        if not is_literal(axes):
-            raise ValueError(f"Shape.reduce requires constant axes, not {axes}")
+    def reduce(self, axis=None, keepdims=False):
+        if not is_literal(axis):
+            raise ValueError(f"Shape.reduce requires a constant axis, not {axis}")
 
-        if isinstance(axes, int):
-            axes = (axes,)
+        if not is_literal(keepdims):
+            return ValueError(f"the keepdims parameter of Shape.reduce must be a constant, not {keepdims}")
+
+        if not keepdims and axis is None:
+            return Shape(tuple())
 
         ndim = self.ndim(True, "reduce")
-        axes = tuple(ndim + x if x < 0 else x for x in axes)
-        return Shape(tuple(dim for x, dim in enumerate(self) if x not in axes))
+        axis = ndim + axis if axis < 0 else axis
+        if keepdims:
+            return Shape(tuple(1 if x == axis else dim for x, dim in enumerate(self)))
+        else:
+            return Shape(tuple(dim for x, dim in enumerate(self) if x != axis))
 
     def reshape(self, new_shape):
         if is_literal(new_shape):
