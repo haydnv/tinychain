@@ -426,10 +426,11 @@ class Pow(Dual):
         return Numeric.pow(self.subject, self.args)
 
     def backward(self, variable=None):
-        if self.args is variable:
+        if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        return self.args * (self.subject**(self.args - 1))
+        # here derivative_of(self.subject) is explicitly included according to the chain rule
+        return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
         grads = Gradients()

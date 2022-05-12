@@ -381,7 +381,7 @@ class OperatorTests(unittest.TestCase):
             actual = load_np(actual)
             self.assertTrue((abs(actual - expected.numpy()) < 0.0001).all())
 
-    def testSum(self):
+    def testSum_gradient(self):
         y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
         y2_torch = torch.sum(y_torch, 0) ** 0.5
         w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
@@ -395,6 +395,28 @@ class OperatorTests(unittest.TestCase):
         w1_tc_grad = load_np(response)
 
         self.assertTrue((abs(w1_tc_grad-[t.numpy() for t in w1_torch_grad]) < 0.0001).all())
+
+    def testSum_derivative(self):
+        # based on https://math.stackexchange.com/questions/289989/first-and-second-derivative-of-a-summation
+
+        from tinychain.math.operator import derivative_of
+
+        n = 10
+        mu = np.array([3])
+        x = np.arange(n).reshape([n])
+
+        cxt = tc.Context()
+        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3])
+        cxt.x = tc.tensor.Dense.arange([n], 0, n)
+        cxt.f_x = ((cxt.x - cxt.mu)**2).sum()
+        cxt.d_f_x = derivative_of(cxt.f_x)
+        cxt.d2_f_x = derivative_of(cxt.d_f_x)
+        cxt.result = cxt.d_f_x, cxt.d2_f_x
+
+        expected_d = -2 * np.sum(x - mu)
+        expected_d2 = 2 * n
+
+        self.assertEqual(HOST.post(ENDPOINT, cxt), [expected_d, expected_d2])
 
     @unittest.skip # TODO: make it work
     def testSum2ndDerivative(self):
