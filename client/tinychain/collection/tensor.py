@@ -1,6 +1,8 @@
 """An n-dimensional array of numbers."""
 
 import inspect
+import itertools
+import logging
 
 from ..decorators import post
 from ..generic import Map, Tuple
@@ -694,6 +696,17 @@ def where(cond, x, y):
 
 
 class Concatenate(Operator):
+    def __init__(self, tensors, axis=None):
+        if not hasattr(tensors, "__len__"):
+            logging.debug(f"Concatenate({tensors}) will not support automatic differentiation")
+
+        if axis:
+            for tensor in tensors:
+                if not is_literal(tensor.shape[axis]):
+                    logging.debug(f"tensor {tensor} to concatenate noes not have a constant shape at axis {axis}")
+
+        Operator.__init__(self, tensors, axis)
+
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
@@ -897,7 +910,31 @@ class Tile(Transform):
         return ref.Post(uri(Tensor) + "/tile", {"tensor": self.subject, "multiples": self.args})
 
     def invert(self, loss):
-        raise NotImplementedError(f"invert a tensor tiled {self.args} times")
+        if not isinstance(loss, NDArray):
+            return loss
+
+        if not is_literal(self.subject.shape):
+            raise RuntimeError(f"inversion with respect to a tiled tensor requires a constant shape, not {self.shape}")
+
+        dims = deref(self.subject.shape)
+        multiples = ([1] * (len(self.args) - 1)) + [self.args] if isinstance(self.args, int) else self.args
+        assert len(dims) == len(multiples)
+        assert not any(m <= 0 for m in multiples)
+
+        if all(m == 1 for m in multiples):
+            return loss
+
+        tiled_axes = [x for x, m in enumerate(multiples) if m != 1]
+        if len(tiled_axes) == 1:
+            [axis] = tiled_axes
+            return loss.sum(axis, keepdims=True)
+
+        sum_over = []
+        for offsets in itertools.product(range(0, m) for m in multiples):
+            bounds = [slice(offset, offset + dim) for offset, dim in zip(dims, offsets)]
+            sum_over.append(loss[bounds])
+
+        return sum(sum_over)
 
 
 class Transpose(Transform):
