@@ -5,7 +5,8 @@ from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
 from ..scalar.ref import form_of, If, Ref
 from ..state import State, Stream
-from ..util import to_json, uri, URI
+from ..uri import uri, URI
+from ..util import to_json
 
 from .base import Collection
 from .btree import BTree

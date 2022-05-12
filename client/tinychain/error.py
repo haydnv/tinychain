@@ -1,7 +1,8 @@
 """Generic error types."""
 
 from .scalar.value import String
-from .util import deanonymize, to_json, uri, URI
+from .uri import uri, URI
+from .util import deanonymize, to_json
 
 
 class TinyChainError(Exception):

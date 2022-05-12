@@ -1,7 +1,8 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
 from ..interface import Compare, Order
-from ..util import to_json, uri, URI
+from ..uri import uri, URI
+from ..util import to_json
 
 from .base import Scalar
 from .ref import form_of, Ref

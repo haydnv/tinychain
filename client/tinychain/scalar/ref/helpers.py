@@ -1,7 +1,8 @@
 import inspect
 import logging
 
-from ...util import uri, to_json, URI
+from ...uri import uri, URI
+from ...util import to_json
 
 from .base import Case, If, MethodSubject, Ref
 

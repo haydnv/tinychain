@@ -3,7 +3,7 @@
 from .scalar import ref
 from .scalar.value import Nil
 from .state import State
-from .util import uri, URI
+from .uri import uri, URI
 
 
 class Chain(State):

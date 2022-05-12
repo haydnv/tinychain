@@ -1,7 +1,8 @@
 import inspect
 import logging
 
-from ..util import to_json, uri, URI
+from ..uri import uri, URI
+from ..util import to_json
 
 
 class Meta(type):

@@ -2,7 +2,8 @@
 
 import logging
 
-from ...util import deanonymize, to_json, uri, URI
+from ...uri import uri, URI
+from ...util import deanonymize, to_json
 
 
 class Ref(object):

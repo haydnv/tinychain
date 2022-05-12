@@ -7,7 +7,7 @@ from .scalar.bound import Range
 from .scalar.number import Number, U64
 from .scalar.ref import form_of, is_literal, get_ref
 from .state import State
-from .util import uri
+from .uri import uri
 
 
 class Shape(Tuple):

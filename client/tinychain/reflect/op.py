@@ -4,7 +4,8 @@ import logging
 from ..scalar.value import Nil, Value
 from ..scalar import op, ref
 from ..state import State
-from ..util import to_json, uri, Context, URI
+from ..uri import uri, URI
+from ..util import to_json, Context
 
 from . import _get_rtype, parse_args, resolve_class
 

@@ -1,6 +1,7 @@
 from ..interface import Equality
 from ..state import State
-from ..util import to_json, uri
+from ..uri import uri
+from ..util import to_json
 
 
 class Scalar(State, Equality):

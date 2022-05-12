@@ -5,7 +5,8 @@ import inspect
 from .base import _Base
 from .interface import Functional
 from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
-from .util import deanonymize, to_json, uri, URI
+from .uri import uri, URI
+from .util import deanonymize, to_json
 
 
 class State(_Base):

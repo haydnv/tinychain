@@ -14,7 +14,8 @@ from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
 from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
-from .util import to_json, uri, URI
+from .uri import uri, URI
+from .util import to_json
 
 
 class Model(Object, metaclass=Meta):

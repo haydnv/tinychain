@@ -11,7 +11,7 @@ from ..scalar.number import Bool, F32, F64, Number, UInt
 from ..scalar import ref
 from ..shape import Shape
 from ..state import Class, Stream
-from ..util import uri
+from ..uri import uri
 
 from .base import Collection
 
