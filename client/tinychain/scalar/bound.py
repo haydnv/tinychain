@@ -1,7 +1,8 @@
 from ..state import State
-from ..util import form_of, to_json, URI
+from ..uri import URI
+from ..context import to_json
 
-from .ref import Ref
+from .ref import form_of, Ref
 from .value import Nil
 
 

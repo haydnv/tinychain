@@ -1,8 +1,8 @@
-from ..reflect import is_ref
 from ..generic import Tuple
-from ..scalar.ref import Post, Put
+from ..scalar.ref import form_of, is_ref, Post, Put
 from ..state import State
-from ..util import form_of, to_json, uri, URI
+from ..uri import uri, URI
+from ..context import to_json
 
 
 class Column(object):

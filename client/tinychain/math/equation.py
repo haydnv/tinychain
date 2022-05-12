@@ -1,8 +1,7 @@
 import logging
 
 from ..collection.tensor import Tensor
-from ..scalar.ref import Op
-from ..util import deref, hex_id, same_as
+from ..scalar.ref import deref, hex_id, same_as, Op
 
 from .operator import operator
 

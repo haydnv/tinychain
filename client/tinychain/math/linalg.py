@@ -9,7 +9,7 @@ from ..scalar.number import Number, Bool, F64, UInt, F32, Int
 from ..scalar.ref import After, Get, If, MethodSubject, While
 from ..scalar.value import Value
 from ..state import Stream
-from ..util import URI
+from ..uri import URI
 
 from .base import product
 

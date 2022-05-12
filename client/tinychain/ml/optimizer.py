@@ -10,10 +10,9 @@ from ..generic import Map, Tuple
 from ..math.interface import Numeric
 from ..math.operator import derivative_of, gradients
 from ..scalar.number import F32, F64, Number, UInt
-from ..scalar.ref import After, If
+from ..scalar.ref import form_of, hex_id, After, If
 from ..scalar.value import Id
 from ..state import State, Stream
-from ..util import form_of, hex_id
 
 from .variable import Variable
 from . import LIB_URI
@@ -38,7 +37,7 @@ class Optimizer(Model):
 class Parallel(Optimizer, Dynamic):
     @post
     def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> _Gradients:
-        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be an integer multiple {{parallel}}"
+        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be a multiple of {{parallel}}"
         batch_size = inputs.shape[0]
         txn.chunk_size = UInt(If(
             (parallel > 0).logical_and(batch_size % parallel == 0),

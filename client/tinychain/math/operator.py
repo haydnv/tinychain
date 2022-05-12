@@ -2,9 +2,9 @@ import logging
 import typing
 
 from ..error import BadRequest
-from ..scalar import ref
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
 from ..scalar.value import Id
-from ..util import deanonymize, deref, hex_id, same_as, to_json
+from ..context import deanonymize, to_json
 
 from .base import is_numeric
 from .interface import Numeric, Trigonometric
@@ -25,14 +25,14 @@ class Gradients(dict):
             self[var_id] = __m[var_id]
 
 
-class Operator(ref.Op):
+class Operator(Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
     def __init__(self, subject, args):
         if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
-        ref.Op.__init__(self, simplify(subject), simplify(args))
+        Op.__init__(self, simplify(subject), simplify(args))
 
     def __json__(self):
         return to_json(self.forward())
@@ -41,11 +41,11 @@ class Operator(ref.Op):
         deanonymize(self.subject, context)
         deanonymize(self.args, context)
 
-        if ref.is_op_ref(self.subject):
-            self.subject = ref.reference(context, self.subject)
+        if is_op_ref(self.subject):
+            self.subject = reference(context, self.subject)
 
-        if ref.is_op_ref(self.args):
-            self.args = ref.reference(context, self.args)
+        if is_op_ref(self.args):
+            self.args = reference(context, self.args)
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.subject}, {self.args})"
@@ -101,8 +101,8 @@ class Unary(Operator):
 
         deanonymize(self.subject, context)
 
-        if ref.is_op_ref(self.subject):
-            self.subject = ref.reference(context, self.subject)
+        if is_op_ref(self.subject):
+            self.subject = reference(context, self.subject)
 
 
 class Custom(Unary):
@@ -395,7 +395,7 @@ class MatMul(Dual):
 
     def gradients(self, loss):
         def transpose(matrix):
-            return type(matrix)(form=ref.If(
+            return type(matrix)(form=If(
                 matrix.ndim == 2,
                 matrix.transpose(),
                 BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
@@ -477,7 +477,7 @@ class Pow(Dual):
 class DualBroadcast(Operator):
     @property
     def shape(self):
-        if ref.is_literal(self.args):
+        if is_literal(self.args):
             # it's a constant number
             return self.subject.shape
 
@@ -511,13 +511,13 @@ class Add(DualBroadcast):
     def simplify(self):
         from ..collection.tensor import NDArray, Sparse
 
-        if ref.is_literal(self.args):
+        if is_literal(self.args):
             if same_as(self.args, 0):
                 return self.subject
         elif isinstance(self.subject, NDArray) and same_as(self.args, Sparse.zeros_like(self.args)):
             return self.subject.broadcast(self.args.shape)
 
-        if ref.is_literal(self.subject):
+        if is_literal(self.subject):
             if same_as(self.subject, 0):
                 return self.args
         elif isinstance(self.args, NDArray) and same_as(self.subject, Sparse.zeros_like(self.subject)):
@@ -555,7 +555,7 @@ class Mul(DualBroadcast):
     def simplify(self):
         from ..collection.tensor import Dense, Sparse, NDArray
 
-        if ref.is_literal(self.args):
+        if is_literal(self.args):
             if same_as(self.args, 0):
                 return 0
             elif same_as(self.args, 1):
@@ -565,7 +565,7 @@ class Mul(DualBroadcast):
         elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
             return self.subject.broadcast(self.args.shape)
 
-        if ref.is_literal(self.subject):
+        if is_literal(self.subject):
             if same_as(self.subject, 0):
                 return 0
             elif same_as(self.subject, 1):
@@ -605,7 +605,7 @@ class Sub(DualBroadcast):
     def simplify(self):
         from ..collection.tensor import Sparse
 
-        if ref.is_literal(self.args):
+        if is_literal(self.args):
             if same_as(self.args, 0):
                 return self.subject
         elif same_as(self.args, Sparse.zeros_like(self.args)):
@@ -648,13 +648,13 @@ class Div(DualBroadcast):
     def simplify(self):
         from ..collection.tensor import Dense, NDArray
 
-        if ref.is_literal(self.subject):
+        if is_literal(self.subject):
             if same_as(self.subject, 0):
                 return 0
         elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.zeros_like(self.subject)):
             return self.args.broadcast(self.subject.shape)
 
-        if ref.is_literal(self.args):
+        if is_literal(self.args):
             if same_as(self.args, 1):
                 return self.subject
         elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
@@ -693,13 +693,13 @@ def derivative_of(state, variable=None):
     from ..collection.tensor import Dense, Sparse
 
     def ones_like(state):
-        if ref.is_literal(state) or same_as(state.shape.ndim(), 0):
+        if is_literal(state) or same_as(state.shape.ndim(), 0):
             return 1.
         else:
             return Dense.ones_like(state)
 
     def zeros_like(state):
-        if ref.is_literal(state) or same_as(state.shape.ndim(), 0):
+        if is_literal(state) or same_as(state.shape.ndim(), 0):
             return 0.
         else:
             return Sparse.zeros_like(state)

@@ -4,9 +4,9 @@ import inspect
 
 from .base import _Base
 from .interface import Functional
-from .reflect import is_ref
-from .scalar.ref import Ref
-from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
+from .uri import uri, URI
+from .context import deanonymize, to_json
 
 
 class State(_Base):
