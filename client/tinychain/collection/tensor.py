@@ -17,6 +17,10 @@ from .base import Collection
 
 
 class NDArray(Interface):
+    @property
+    def shape(self):
+        return Shape(ref.Get(ref.MethodSubject(self, "shape")))
+
     def broadcast(self, shape):
         return ref.Get(ref.MethodSubject(self, "broadcast"), shape)
 
@@ -676,7 +680,7 @@ def tile(tensor, multiples):
     """
 
     rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
-    return rtype(form=ref.Post(uri(Tensor) + "/tile", {"tensor": tensor, "multiples": multiples}))
+    return rtype(form=Tile(tensor, multiples))
 
 
 def where(cond, x, y):
@@ -706,10 +710,16 @@ class Concatenate(Operator):
         return Dense(form=ref.Post(uri(Dense) + "/concatenate", params))
 
     def backward(self, variable=None):
+        if not isinstance(deref(self.subject), (list, tuple)):
+            raise ValueError(f"the derivative of a tensor concatenation requires a constant list, not {self.subject}")
+
         # TODO: support concatenating Sparse tensors
         return Dense(Concatenate([derivative_of(t, variable) for t in self.subject], self.args))
 
     def gradients(self, loss):
+        if not isinstance(deref(self.subject), (list, tuple)):
+            raise ValueError(f"the gradients of a tensor concatenation requires a constant list, not {self.subject}")
+
         grads = Gradients()
 
         if isinstance(loss, Number):
@@ -726,6 +736,9 @@ class Concatenate(Operator):
             num_or_size_slices = len(self.subject)
         else:
             num_or_size_slices = [t.shape[axis] for t in self.subject]
+
+        if not is_literal(num_or_size_slices):
+            raise TypeError(f"the gradients of a concatenation require constant-shaped inputs, not {self.subject}")
 
         losses = loss.split(num_or_size_slices, axis)
         assert len(losses) == len(self.subject)
@@ -792,13 +805,13 @@ class Reduce(Operator):
     def shape(self):
         return Shape.reduce(self.subject.shape, **self.args)
 
-    def backward(self, variable=None):
-        return derivative_of(self.subject).sum(**self.args)
-
 
 class Sum(Reduce):
     def forward(self):
         return NDArray.sum(self.subject, **self.args)
+
+    def backward(self, variable=None):
+        return derivative_of(self.subject).sum(**self.args)
 
     def gradients(self, loss):
         if "axis" not in self.args:
@@ -869,6 +882,24 @@ class Flip(Transform):
         return loss.flip(self.args)
 
 
+class Tile(Transform):
+    def __init__(self, tensor, multiples):
+        if not is_literal(multiples):
+            raise ValueError(f"Tensor.tile requires a constant value for multiples, not {multiples}")
+
+        Transform.__init__(self, tensor, multiples)
+
+    @property
+    def shape(self):
+        return self.subject.shape.tile(self.args)
+
+    def forward(self):
+        return ref.Post(uri(Tensor) + "/tile", {"tensor": self.subject, "multiples": self.args})
+
+    def invert(self, loss):
+        raise NotImplementedError(f"invert a tensor tiled {self.args} times")
+
+
 class Transpose(Transform):
     def __init__(self, subject, permutation=None):
         Transform.__init__(self, subject, permutation)
@@ -917,9 +948,12 @@ class Slice(Transform):
             def __init__(self, grad):
                 Operator.__init__(self, grad, None)
 
+            def __ns__(self, context):
+                return deanonymize(self.subject, context)
+
             @property
             def shape(self):
-                return grad.shape
+                return self.subject.shape
 
             def forward(self):
                 return self.subject
@@ -927,7 +961,7 @@ class Slice(Transform):
             def backward(self, _variable=None):
                 return self.subject
 
-        return Dense(SliceGradient(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad))))
+        return Dense(SliceGradient(Dense(ref.After(grad[self.args].write(loss), ref.MethodSubject(grad)))))
 
 
 def _reduce_args(axis=None, keepdims=False):

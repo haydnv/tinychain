@@ -23,23 +23,26 @@ def args(state_or_ref):
 def depends_on(state_or_ref):
     """Return the set of all compile-time dependencies of the given `state_or_ref`"""
 
+    if is_literal(state_or_ref):
+        return set()
+
     if form_of(state_or_ref) is not state_or_ref:
         return depends_on(form_of(state_or_ref))
 
     if independent(state_or_ref):
-        return [state_or_ref]
+        return set() if is_literal(state_or_ref) else set([state_or_ref])
 
-    deps = []
+    deps = set()
 
     if isinstance(state_or_ref, Ref):
         for dep in args(state_or_ref):
-            deps.extend(depends_on(dep))
+            deps.update(depends_on(dep))
     elif isinstance(state_or_ref, (list, tuple)):
         for dep in state_or_ref:
-            deps.extend(depends_on(dep))
+            deps.update(depends_on(dep))
     elif isinstance(state_or_ref, dict):
         for dep in state_or_ref.values():
-            deps.extend(depends_on(dep))
+            deps.update(depends_on(dep))
 
     return deps
 
@@ -48,6 +51,10 @@ def deref(state):
     """Return the :class:`Ref`, :class:`URI`, or constant which will be used to resolve the given :class:`State`."""
 
     from ...state import StateRef
+    from . import Op as OpRef
+
+    if isinstance(state, OpRef) or callable(state) or inspect.isclass(state):
+        return state
 
     if form_of(state) is not state:
         return deref(form_of(state))
@@ -144,10 +151,12 @@ def is_literal(state):
         return all(is_literal(value) for value in state.values())
     elif isinstance(state, slice):
         return is_literal(state.start) and is_literal(state.stop)
+    elif isinstance(state, (bool, float, int, str)):
+        return True
     elif state is None:
         return True
 
-    return isinstance(state, (bool, float, int, str))
+    return False
 
 
 def is_conditional(state):

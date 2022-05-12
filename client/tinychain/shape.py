@@ -5,7 +5,7 @@ import typing
 from .generic import Tuple
 from .scalar.bound import Range
 from .scalar.number import Number, U64
-from .scalar.ref import form_of, is_literal, get_ref
+from .scalar.ref import deref, is_literal, get_ref
 from .state import State
 from .uri import uri
 
@@ -22,7 +22,7 @@ class Shape(Tuple):
 
     def __add__(self, other):
         if hasattr(self, "__len__") and hasattr(other, "__len__"):
-            return Shape(tuple(form_of(self)) + tuple(form_of(other)))
+            return Shape(tuple(deref(self)) + tuple(deref(other)))
         else:
             raise ValueError(f"can only append Shapes with a constant number of dimensions, not {self} and {other}")
 
@@ -36,15 +36,15 @@ class Shape(Tuple):
             x = x.to_slice()
 
         if isinstance(x, slice):
-            start = form_of(x.start)
-            stop = form_of(x.stop)
+            start = deref(x.start)
+            stop = deref(x.stop)
 
             if x.step is not None:
                 raise NotImplementedError(f"slice with step: {x}")
 
             if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
                 # the contents are constants, so compute the slice now if possible
-                if hasattr(form_of(self), "__getitem__"):
+                if hasattr(deref(self), "__getitem__"):
                     if is_literal(start) and is_literal(stop):
                         start = _index_of(start, len(self), 0)
                         stop = _index_of(stop, len(self), len(self))
@@ -53,9 +53,13 @@ class Shape(Tuple):
             return self._get("", Range.from_slice(x), Shape)
 
         if is_literal(x):
-            x = form_of(x)
-            if hasattr(form_of(self), "__getitem__"):
-                item = form_of(self)[x]
+            x = deref(x)
+            if hasattr(deref(self), "__getitem__"):
+                try:
+                    item = deref(self)[x]
+                except KeyError as e:
+                    raise KeyError(f"{self} has no axis {x}")
+
                 if uri(self) == uri(self.__class__):
                     return item
                 else:
@@ -75,8 +79,8 @@ class Shape(Tuple):
             if shape.ndim(True, "concatenate") != ndim:
                 raise ValueError("shapes to concatenate must have the same number of dimensions")
 
-        if isinstance(form_of(axis), int):
-            axis = form_of(axis)
+        if isinstance(deref(axis), int):
+            axis = deref(axis)
             axis = ndim + axis if axis < 0 else axis
         else:
             raise ValueError(f"Shape.concatenate requires a constant axis, not {axis}")
@@ -87,7 +91,7 @@ class Shape(Tuple):
                 raise ValueError(f"dimension for concatenation at axis {axis} is not constant: {shape[axis]}")
 
             if is_literal(shape[axis]):
-                dim += form_of(shape[axis])
+                dim += deref(shape[axis])
             else:
                 raise ValueError(f"Shape.concatenate requires constant dimensions along the axis {axis}")
 
@@ -190,7 +194,7 @@ class Shape(Tuple):
 
     def reshape(self, new_shape):
         if is_literal(new_shape):
-            new_shape = form_of(new_shape)
+            new_shape = deref(new_shape)
         else:
             return new_shape
 
@@ -202,7 +206,7 @@ class Shape(Tuple):
             raise ValueError(f"Shape.reshape supports a maximum of one unknown dimension, not {new_shape}")
 
         if is_literal(self):
-            this_size = functools.reduce(operator.mul, form_of(self))
+            this_size = functools.reduce(operator.mul, deref(self))
             for x in range(len(new_shape)):
                 if new_shape[x] is None:
                     that_size = functools.reduce(operator.mul, new_shape[:x] + new_shape[x + 1:])
@@ -228,8 +232,8 @@ class Shape(Tuple):
                 bound = bound.to_slice()
 
             if isinstance(bound, slice):
-                start = 0 if bound.start is None else form_of(bound.start)
-                stop = form_of(self[x]) if bound.stop is None else form_of(bound.stop)
+                start = 0 if bound.start is None else deref(bound.start)
+                stop = deref(self[x]) if bound.stop is None else deref(bound.stop)
                 if not is_literal((start, stop)):
                     raise ValueError(f"the shape of a Tensor slice requires a constant bound, not {(start, stop)}")
 
@@ -253,6 +257,22 @@ class Shape(Tuple):
             shape.append(self[x])
 
         return Shape(shape)
+
+    def tile(self, multiples):
+        if not is_literal(multiples):
+            raise ValueError(f"Shape.tile requires a constant number or tuple for multiples, not {multiples}")
+
+        multiples = deref(multiples)
+        if isinstance(multiples, (list, tuple)):
+            if not is_literal(self):
+                raise ValueError(f"only a constant Shape supports tiling {multiples} times per-axis")
+
+            assert len(self) == len(multiples)
+            return Shape([dim * m for dim, m in zip(self, multiples)])
+        elif isinstance(multiples, int):
+            return Shape(self[:-1] + [self[-1] * multiples])
+        else:
+            raise ValueError(f"invalid number of multiples for Shape.tile: {multiples}")
 
     def transpose(self, permutation=None):
         if permutation is None:
