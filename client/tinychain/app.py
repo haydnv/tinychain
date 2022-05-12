@@ -10,11 +10,11 @@ from .reflect.meta import Meta, MethodStub
 from .chain import Chain
 from .generic import Map, Tuple
 from .interface import Interface
-from .scalar.ref import Ref
+from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
 from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
-from .util import depends_on, form_of, get_ref, independent, to_json, uri, URI
+from .util import to_json, uri, URI
 
 
 class Model(Object, metaclass=Meta):

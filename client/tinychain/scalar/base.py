@@ -1,6 +1,6 @@
 from ..interface import Equality
 from ..state import State
-from ..util import form_of, to_json, uri
+from ..util import to_json, uri
 
 
 class Scalar(State, Equality):
@@ -13,6 +13,7 @@ class Scalar(State, Equality):
     __uri__ = uri(State) + "/scalar"
 
     def __json__(self):
+        from .ref.helpers import form_of
         return to_json(form_of(self))
 
     def eq(self, other):

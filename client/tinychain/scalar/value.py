@@ -1,10 +1,10 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
 from ..interface import Compare, Order
-from ..util import form_of, to_json, uri, URI
+from ..util import to_json, uri, URI
 
 from .base import Scalar
-from .ref import Ref
+from .ref import form_of, Ref
 
 
 # Scalar value types
@@ -69,6 +69,8 @@ class Id(Value):
     __uri__ = uri(Value) + "/id"
 
     def __json__(self):
+        from .ref.helpers import form_of
+
         form = form_of(self)
         if isinstance(form, Ref):
             return to_json(form)
@@ -76,6 +78,7 @@ class Id(Value):
             return {str(self): []}
 
     def __str__(self):
+        from .ref.helpers import form_of
         return str(form_of(self))
 
 

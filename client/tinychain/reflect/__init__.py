@@ -3,60 +3,7 @@ import typing
 
 from pydoc import locate
 
-from ..util import form_of, URI
-
 from .meta import Meta, MethodStub
-
-
-def is_conditional(state):
-    from ..scalar.ref import Case, If
-    from ..state import State
-
-    if isinstance(state, State):
-        return is_conditional(form_of(state))
-    elif isinstance(state, dict):
-        return any(is_conditional(value) for value in state.values())
-    elif isinstance(state, (list, tuple)):
-        return any(is_conditional(item) for item in state)
-
-    return isinstance(state, (Case, If))
-
-
-def is_none(state):
-    from ..scalar.value import Nil
-
-    return state is None or state == Nil
-
-
-def is_op(fn):
-    from .method import Method
-    from .op import Op
-
-    if isinstance(fn, (Method, Op)):
-        return True
-    elif hasattr(fn, "__form__"):
-        return is_op(form_of(fn))
-    elif isinstance(fn, (list, tuple)):
-        return any(is_op(item) for item in fn)
-    elif isinstance(fn, dict):
-        return any(is_op(fn[k]) for k in fn)
-    else:
-        return False
-
-
-def is_ref(state):
-    from ..scalar.ref import MethodSubject, Ref
-
-    if isinstance(state, (Ref, URI, MethodSubject)):
-        return True
-    elif hasattr(state, "__form__"):
-        return is_ref(form_of(state))
-    elif isinstance(state, (list, tuple)):
-        return any(is_ref(item) for item in state)
-    elif isinstance(state, dict):
-        return any(is_ref(state[k]) for k in state)
-    else:
-        return False
 
 
 def parse_args(sig, *args, **kwargs):
@@ -126,6 +73,8 @@ def _resolve_interface(cls):
 
 
 def _get_rtype(fn, default_rtype):
+    from ..scalar.ref import is_op
+
     if is_op(fn):
         return fn.rtype
 

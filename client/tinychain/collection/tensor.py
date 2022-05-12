@@ -1,4 +1,5 @@
 """An n-dimensional array of numbers."""
+
 import inspect
 
 from ..decorators import post
@@ -10,7 +11,7 @@ from ..scalar.number import Bool, F32, F64, Number, UInt
 from ..scalar import ref
 from ..shape import Shape
 from ..state import Class, Stream
-from ..util import form_of, hex_id, uri
+from ..util import uri
 
 from .base import Collection
 
@@ -337,10 +338,18 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         rtype = Number if axis is None else Tensor
         return self._get("product", axis, rtype)
 
-    def reshape(self, shape):
+    def reshape(self, shape, copy=True):
         """Return a view of this `Tensor` with the given `shape`."""
 
-        return Tensor(form=Reshape(self, shape))
+        if not ref.is_literal(copy):
+            raise ValueError(f"reshape requires a constant boolean for copy, not {copy}")
+
+        reshaped = Tensor(form=Reshape(self, shape))
+
+        if copy:
+            return reshaped.copy()
+        else:
+            return reshaped
 
     @property
     def shape(self):
@@ -387,7 +396,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         `self.shape[axis]` then a `ValueError` error will be raised.
         """
 
-        num_or_size_splits = form_of(num_or_size_splits)
+        num_or_size_splits = ref.form_of(num_or_size_splits)
         if not ref.is_literal(num_or_size_splits):
             raise ValueError(f"Tensor.split requires a constant num_or_size_splits, not {num_or_size_splits}")
 
@@ -395,7 +404,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
             raise ValueError(f"Tensor.split requires a constant axis, not {axis}")
 
         if ref.is_literal(self.shape[axis]):
-            dim = form_of(self.shape[axis])
+            dim = ref.form_of(self.shape[axis])
         else:
             raise RuntimeError(f"Tensor.split requires a constant dimension to split, not {self.shape[axis]}")
 
@@ -708,7 +717,7 @@ class Concatenate(Operator):
                 if operator(tensor):
                     grads.update(operator(tensor).gradients(loss))
                 else:
-                    grads[hex_id(tensor)] = loss
+                    grads[ref.hex_id(tensor)] = loss
 
             return grads
 
@@ -725,7 +734,7 @@ class Concatenate(Operator):
             if operator(tensor):
                 grads.update(operator(tensor).gradients(loss))
             else:
-                grads[hex_id(tensor)] = loss
+                grads[ref.hex_id(tensor)] = loss
 
         return grads
 
@@ -770,7 +779,7 @@ class Norm(Operator):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
         else:
-            grads[hex_id(self.subject)] = loss
+            grads[ref.hex_id(self.subject)] = loss
 
         return grads
 
@@ -803,7 +812,7 @@ class Sum(Reduce):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
         else:
-            grads[hex_id(self.subject)] = loss
+            grads[ref.hex_id(self.subject)] = loss
 
         return grads
 
@@ -826,7 +835,7 @@ class Transform(Operator):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
         else:
-            grads[hex_id(self.subject)] = loss
+            grads[ref.hex_id(self.subject)] = loss
 
         return grads
 
