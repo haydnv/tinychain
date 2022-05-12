@@ -449,27 +449,13 @@ class Pow(Dual):
         return grads
 
     def simplify(self):
-        from ..collection.tensor import Dense, Sparse, NDArray
+        from ..collection.tensor import Dense, NDArray
 
-        if same_as(self.subject, 1):
-            return self.subject
-        elif isinstance(self.subject, NDArray) and same_as(self.subject, Dense.ones_like(self.subject)):
-            if isinstance(self.args, NDArray):
-                return self.subject.broadcast(self.args.shape)
-            else:
-                return self.subject
+        if is_one(self.subject) or is_one(self.args):
+            return broadcast_into(self.subject, self.args)
 
-        if same_as(self.args, 1):
-            return self.subject
-        elif same_as(self.args, 0):
-            return Dense.ones_like(self.subject) if isinstance(self.subject, NDArray) else 1
-        elif isinstance(self.args, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
-        elif isinstance(self.args, NDArray) and same_as(self.args, Sparse.zeros_like(self.args)):
-            if isinstance(self.subject, NDArray):
-                return Dense.ones_like(self.subject).broadcast(self.args.shape)
-            else:
-                return Dense.ones(self.args)
+        if is_zero(self.args):
+            return Dense.ones_like(self.subject).broadcast(self.args) if isinstance(self.subject, NDArray) else 1
 
         return self
 
@@ -509,19 +495,14 @@ class Add(DualBroadcast):
         return grads
 
     def simplify(self):
-        from ..collection.tensor import NDArray, Sparse
+        if is_zero(self.subject) and is_zero(self.args):
+            return 0
 
-        if is_literal(self.args):
-            if same_as(self.args, 0):
-                return self.subject
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
+        if is_zero(self.args):
+            return broadcast_into(self.subject, self.args)
 
-        if is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return self.args
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Sparse.zeros_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
+        if is_zero(self.subject):
+            return broadcast_into(self.args, self.subject)
 
         return self
 
@@ -553,27 +534,14 @@ class Mul(DualBroadcast):
         return grads
 
     def simplify(self):
-        from ..collection.tensor import Dense, Sparse, NDArray
+        if is_zero(self.subject) or is_zero(self.args):
+            return 0
 
-        if is_literal(self.args):
-            if same_as(self.args, 0):
-                return 0
-            elif same_as(self.args, 1):
-                return self.subject
-        elif same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.args.broadcast(self.subject.shape)
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
+        if is_one(self.args):
+            return broadcast_into(self.subject, self.args)
 
-        if is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return 0
-            elif same_as(self.subject, 1):
-                return self.args
-        elif same_as(self.subject, Sparse.zeros_like(self.subject)):
-            return self.subject.broadcast(self.args.shape)
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.ones_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
+        if is_one(self.subject):
+            return broadcast_into(self.args, self.subject)
 
         return self
 
@@ -603,13 +571,8 @@ class Sub(DualBroadcast):
         return grads
 
     def simplify(self):
-        from ..collection.tensor import Sparse
-
-        if is_literal(self.args):
-            if same_as(self.args, 0):
-                return self.subject
-        elif same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.subject
+        if is_zero(self.args):
+            return broadcast_into(self.subject, self.args)
 
         return self
 
@@ -646,19 +609,11 @@ class Div(DualBroadcast):
         return grads
 
     def simplify(self):
-        from ..collection.tensor import Dense, NDArray
+        if is_zero(self.subject):
+            return broadcast_into(self.args, self.subject)
 
-        if is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return 0
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.zeros_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
-
-        if is_literal(self.args):
-            if same_as(self.args, 1):
-                return self.subject
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
+        if is_one(self.args):
+            return broadcast_into(self.subject, self.args)
 
         # TODO: simplify both numerator and denominator into a product of multiplicands
 
@@ -679,6 +634,17 @@ class Div(DualBroadcast):
         return self
 
 
+def broadcast_into(source, dest):
+    """Broadcast the given `source` state into the shape of `dest`, only if both are :class:`NDArray` s"""
+
+    from ..collection.tensor import NDArray
+
+    if isinstance(source, NDArray) and isinstance(dest, NDArray):
+        return source.broadcast(dest.shape)
+
+    return source
+
+
 def derivative_of(state, variable=None):
     """
     Find the derivative of the given `state`.
@@ -689,20 +655,6 @@ def derivative_of(state, variable=None):
 
     if not is_numeric(state):
         raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
-
-    from ..collection.tensor import Dense, Sparse
-
-    def ones_like(state):
-        if is_literal(state) or same_as(state.shape.ndim(), 0):
-            return 1.
-        else:
-            return Dense.ones_like(state)
-
-    def zeros_like(state):
-        if is_literal(state) or same_as(state.shape.ndim(), 0):
-            return 0.
-        else:
-            return Sparse.zeros_like(state)
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
@@ -754,6 +706,58 @@ def gradients(differentiable, loss, variables=None):
         raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
 
     return Function([grads[hex_id(var)] for var in variables]).optimize()
+
+
+def is_one(numeric):
+    """Return `True` if the given `numeric` state is a constant with value one."""
+
+    from ..collection.tensor import NDArray, Dense, Transform
+
+    if same_as(numeric, 1):
+        return True
+
+    while isinstance(operator(numeric), Transform):
+        numeric = operator(numeric).subject
+
+    if isinstance(numeric, NDArray) and same_as(numeric, Dense.ones(numeric.shape)):
+        return True
+
+    return False
+
+
+def ones_like(state):
+    from ..collection.tensor import Dense
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        return 1.
+    else:
+        return Dense.ones_like(state)
+
+
+def is_zero(numeric):
+    """Return `True` if the given `numeric` state is a constant with value zero."""
+
+    from ..collection.tensor import NDArray, Sparse, Transform
+
+    if same_as(numeric, 0):
+        return True
+
+    while isinstance(operator(numeric), Transform):
+        numeric = operator(numeric).subject
+
+    if isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros(numeric.shape)):
+        return True
+
+    return False
+
+
+def zeros_like(state):
+    from ..collection.tensor import Sparse
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        return 0.
+    else:
+        return Sparse.zeros_like(state)
 
 
 def operator(state_or_ref):
