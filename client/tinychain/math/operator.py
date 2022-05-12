@@ -4,7 +4,7 @@ import typing
 from ..error import BadRequest
 from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
 from ..scalar.value import Id
-from ..util import deanonymize, to_json
+from ..context import deanonymize, to_json
 
 from .base import is_numeric
 from .interface import Numeric, Trigonometric

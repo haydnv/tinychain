@@ -6,7 +6,7 @@ from ..scalar.number import Bool, UInt
 from ..scalar.ref import form_of, If, Ref
 from ..state import State, Stream
 from ..uri import uri, URI
-from ..util import to_json
+from ..context import to_json
 
 from .base import Collection
 from .btree import BTree

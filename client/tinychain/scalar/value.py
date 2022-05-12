@@ -2,7 +2,7 @@
 
 from ..interface import Compare, Order
 from ..uri import uri, URI
-from ..util import to_json
+from ..context import to_json
 
 from .base import Scalar
 from .ref import form_of, Ref

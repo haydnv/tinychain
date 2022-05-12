@@ -2,7 +2,7 @@ import inspect
 import logging
 
 from ...uri import uri, URI
-from ...util import to_json
+from ...context import to_json
 
 from .base import Case, If, MethodSubject, Ref
 

@@ -15,7 +15,7 @@ from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
 from .uri import uri, URI
-from .util import to_json
+from .context import to_json
 
 
 class Model(Object, metaclass=Meta):

@@ -6,7 +6,7 @@ from .base import _Base
 from .interface import Functional
 from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
 from .uri import uri, URI
-from .util import deanonymize, to_json
+from .context import deanonymize, to_json
 
 
 class State(_Base):

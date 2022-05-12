@@ -6,7 +6,7 @@ from .scalar.ref import form_of, get_ref, is_literal, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
 from .uri import uri
-from .util import to_json
+from .context import to_json
 
 
 # TODO: implement `Functional` for `Map`

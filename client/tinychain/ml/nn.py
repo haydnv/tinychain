@@ -9,7 +9,7 @@ from ..error import BadRequest
 from ..generic import Tuple
 from ..math.operator import derivative_of, gradients, operator, Dual, Gradients
 from ..scalar.ref import hex_id, After, If, MethodSubject
-from ..util import deanonymize
+from ..context import deanonymize
 
 from .constants import LIB_URI
 from .interface import Differentiable

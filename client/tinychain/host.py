@@ -8,7 +8,7 @@ import urllib.parse
 from .error import *
 from .scalar.value import Nil
 from .uri import uri, URI
-from .util import to_json
+from .context import to_json
 
 
 DEFAULT_PORT = 8702

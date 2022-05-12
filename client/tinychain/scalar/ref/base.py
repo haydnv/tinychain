@@ -3,7 +3,7 @@
 import logging
 
 from ...uri import uri, URI
-from ...util import deanonymize, to_json
+from ...context import deanonymize, to_json
 
 
 class Ref(object):
