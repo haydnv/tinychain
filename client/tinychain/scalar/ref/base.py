@@ -16,7 +16,11 @@ class Ref(object):
         return same_as(self.__args__(), other.__args__())
 
 
-class After(Ref):
+class FlowControl(Ref):
+    """A flow control like :class:`If` or :class:`After`."""
+
+
+class After(FlowControl):
     """
     A flow control operator used to delay execution conditionally.
 
@@ -56,7 +60,7 @@ class After(Ref):
             self.when = reference(cxt, self.when)
 
 
-class Case(Ref):
+class Case(FlowControl):
     """
     A flow control used to branch execution conditionally.
 
@@ -93,7 +97,7 @@ class Case(Ref):
         deanonymize(self.case, cxt)
 
 
-class If(Ref):
+class If(FlowControl):
     """
     A flow control used to branch execution conditionally.
 
@@ -146,7 +150,7 @@ class If(Ref):
             self.cond = reference(cxt, self.cond)
 
 
-class While(Ref):
+class While(FlowControl):
     """
     A flow control operator to execute a closure repeatedly until a condition is met.
 
@@ -177,7 +181,7 @@ class While(Ref):
         deanonymize(self.state, cxt)
 
 
-class With(Ref):
+class With(FlowControl):
     """
     Capture state from an enclosing context. Prefer using the `closure` decorator to construct a `With` automatically.
 

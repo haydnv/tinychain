@@ -382,7 +382,7 @@ class MatMul(Dual):
     @property
     def shape(self):
         from ..shape import Shape
-        return self.subject.shape[:-2] + Shape((self.subject.shape[-1], self.args.shape[-2]))
+        return Shape(self.subject.shape[:-2]) + Shape((self.subject.shape[-1], self.args.shape[-2]))
 
     def forward(self):
         from ..collection.tensor import einsum
@@ -767,6 +767,30 @@ def operator(state_or_ref):
         return state_or_ref
     elif deref(state_or_ref) is not state_or_ref:
         return operator(deref(state_or_ref))
+
+
+def debug_shape(numeric):
+    if not hasattr(numeric, "shape"):
+        raise ValueError(f"{numeric} has no shape")
+
+    if is_literal(numeric.shape):
+        print(f"the shape of {numeric} is {numeric.shape}")
+        return
+
+    print(f"{numeric} does not have a constant shape")
+
+    op = operator(numeric)
+
+    if not op:
+        return
+
+    from ..collection.tensor import NDArray
+
+    if isinstance(op.subject, NDArray):
+        debug_shape(op.subject)
+
+    if isinstance(op.args, NDArray):
+        debug_shape(op.args)
 
 
 def simplify(state):

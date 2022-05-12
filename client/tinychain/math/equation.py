@@ -3,12 +3,12 @@ import logging
 from ..collection.tensor import Tensor
 from ..scalar.ref import deref, hex_id, same_as, Op
 
-from .operator import operator
+from .operator import operator, simplify
 
 
 class Function(object):
     def __init__(self, result):
-        self.result = result
+        self.result = simplify(result)
 
         self.nodes = {}
         self.edges = []

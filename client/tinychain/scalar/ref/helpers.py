@@ -51,9 +51,9 @@ def deref(state):
     """Return the :class:`Ref`, :class:`URI`, or constant which will be used to resolve the given :class:`State`."""
 
     from ...state import StateRef
-    from . import Op as OpRef
+    from .base import FlowControl, Op as OpRef
 
-    if isinstance(state, OpRef) or callable(state) or inspect.isclass(state):
+    if isinstance(state, (FlowControl, OpRef)) or callable(state) or inspect.isclass(state):
         return state
 
     if form_of(state) is not state:
@@ -145,6 +145,8 @@ def independent(state_or_ref):
 
 
 def is_literal(state):
+    from ...generic import Map, Tuple
+
     if isinstance(state, (list, tuple)):
         return all(is_literal(item) for item in state)
     elif isinstance(state, dict):
@@ -155,6 +157,8 @@ def is_literal(state):
         return True
     elif state is None:
         return True
+    elif isinstance(state, (Map, Tuple)):
+        return is_literal(form_of(state))
 
     return False
 
