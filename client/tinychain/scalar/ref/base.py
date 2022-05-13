@@ -325,7 +325,7 @@ class Get(Op):
             return {str(subject): to_json(self.args)}
 
     def __repr__(self):
-        return f"GET Op ref {self.subject} {self.args}"
+        return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference
@@ -359,7 +359,8 @@ class Put(Op):
         Op.__init__(self, subject, (key, value))
 
     def __repr__(self):
-        return f"PUT Op ref {self.subject} {self.args}"
+        key, value = self.args
+        return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference
@@ -406,7 +407,7 @@ class Post(Op):
         return args + ([self.args.values()] if is_op_ref(self.args) else [])
 
     def __repr__(self):
-        return f"POST Op ref {self.subject} {self.args}"
+        return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference
@@ -448,7 +449,7 @@ class Delete(Op):
         return {str(uri(self)): to_json([self.subject, self.args])}
 
     def __repr__(self):
-        return f"DELETE Op ref {self.subject} {self.args}"
+        return f"DELETE {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference
@@ -512,7 +513,7 @@ class MethodSubject(object):
             return str(uri(self))
 
     def __repr__(self):
-        return f"MethodSubject {repr(self.subject)}"
+        return f"{repr(self.subject)}/{self.method_name}"
 
 
 def _log_anonymous(arg):

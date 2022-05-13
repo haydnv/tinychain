@@ -3,7 +3,6 @@ from ..uri import URI
 from ..context import to_json
 
 from .ref import form_of, Ref
-from .value import Nil
 
 
 class Bound(object):
@@ -14,6 +13,7 @@ class Ex(Bound):
     """An exclusive `Bound`."""
 
     def __init__(self, value):
+        assert value is not None
         self.value = value
 
     def __repr__(self):
@@ -27,6 +27,7 @@ class In(Bound):
     """An inclusive `Bound`."""
 
     def __init__(self, value):
+        assert value is not None
         self.value = value
 
     def __repr__(self):
@@ -39,22 +40,46 @@ class In(Bound):
 class Un(Bound):
     """An unbounded side of a :class:`Range`"""
 
+    def __init__(self):
+        self.value = None
+
     def __repr__(self):
         return "..."
 
     def __json__(self):
-        return Nil
+        return to_json(self.value)
 
 
 class Range(object):
     """A selection range of one or two :class:`Bound`s."""
 
     def __repr__(self):
-        return f"Range {self.start} to {self.end}"
+        start, end = None, None
+
+        if isinstance(self.start, In):
+            start = f"[{repr(self.start.value)}"
+        if isinstance(self.start, Ex):
+            start = f"({repr(self.start.value)}"
+
+        if isinstance(self.end, In):
+            end = f"{repr(self.end.value)}]"
+        if isinstance(self.end, Ex):
+            end = f"{repr(self.end.value)})"
+
+        if start and end:
+            return f"{start}:{end}"
+        elif start:
+            return f"{start}:"
+        elif end:
+            return f":{end}"
+        else:
+            return ":"
 
     @staticmethod
     def from_slice(s):
-        return Range(In(s.start), Ex(s.stop))
+        start = Un() if s.start is None else In(s.start)
+        end = Un() if s.stop is None else Ex(s.stop)
+        return Range(start, end)
 
     def to_slice(self):
         return slice(form_of(self.start.value), form_of(self.end.value))
@@ -71,7 +96,7 @@ class Range(object):
             self.end = end
 
     def __json__(self):
-        if self.start is None and self.end is None:
+        if self.start.value is None and self.end.value is None:
             return None
         else:
             return to_json((self.start, self.end))

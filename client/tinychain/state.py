@@ -180,6 +180,9 @@ class StateRef(Ref):
         self.state = state
         self.__uri__ = URI(name)
 
+    def __repr__(self):
+        return str(uri(self))
+
     def __id__(self):
         return hex_id(self.state)
 
