@@ -13,7 +13,6 @@ class Ex(Bound):
     """An exclusive `Bound`."""
 
     def __init__(self, value):
-        assert value is not None
         self.value = value
 
     def __repr__(self):
@@ -27,7 +26,6 @@ class In(Bound):
     """An inclusive `Bound`."""
 
     def __init__(self, value):
-        assert value is not None
         self.value = value
 
     def __repr__(self):
@@ -35,19 +33,6 @@ class In(Bound):
 
     def __json__(self):
         return to_json(["in", self.value])
-
-
-class Un(Bound):
-    """An unbounded side of a :class:`Range`"""
-
-    def __init__(self):
-        self.value = None
-
-    def __repr__(self):
-        return "..."
-
-    def __json__(self):
-        return to_json(self.value)
 
 
 class Range(object):
@@ -77,12 +62,12 @@ class Range(object):
 
     @staticmethod
     def from_slice(s):
-        start = Un() if s.start is None else In(s.start)
-        end = Un() if s.stop is None else Ex(s.stop)
-        return Range(start, end)
+        return Range(In(s.start), Ex(s.stop))
 
     def to_slice(self):
-        return slice(form_of(self.start.value), form_of(self.end.value))
+        start = self.start.value if self.start else None
+        end = self.end.value if self.end else None
+        return slice(form_of(start), form_of(end))
 
     def __init__(self, start=None, end=None):
         if start is not None and not isinstance(start, Bound):
@@ -96,7 +81,7 @@ class Range(object):
             self.end = end
 
     def __json__(self):
-        if self.start.value is None and self.end.value is None:
+        if self.start is None and self.end is None:
             return None
         else:
             return to_json((self.start, self.end))
