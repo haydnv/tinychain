@@ -26,41 +26,6 @@ class Gradients(dict):
             self[var_id] = __m[var_id]
 
 
-class Constant(Ref):
-    def __init__(self, numeric, name):
-        self.state = numeric
-        self.name = name
-
-    def __json__(self):
-        return to_json(self.state)
-
-    def __ns__(self, context):
-        deanonymize(self.state, context)
-
-    def __same__(self, other):
-        if isinstance(other, Constant):
-            return same_as(self.state, other.state)
-
-        return same_as(self.state, other)
-
-    def __repr__(self):
-        if self.name:
-            return str(self.name)
-
-        if is_one(self.state):
-            return f"1x{self.shape}"
-        elif is_zero(self.state):
-            return f"0x{self.shape}"
-        elif not uri(self.state).startswith("/state"):
-            return str(uri(self.state))
-        else:
-            return f"constant {hex_id(self.state)}"
-
-    @property
-    def shape(self):
-        return self.state.shape
-
-
 class Operator(Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
@@ -828,12 +793,14 @@ def is_one(numeric):
     if same_as(numeric, 1):
         return True
 
-    from ..collection.tensor import Transform, Zeros
+    from ..collection.tensor import NDArray, Sparse, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, Zeros):
+    if same_as(numeric, 1):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros_like(numeric)):
         return True
 
     return False
@@ -854,12 +821,14 @@ def is_zero(numeric):
     if same_as(numeric, 0):
         return True
 
-    from ..collection.tensor import Ones, Transform
+    from ..collection.tensor import Dense, NDArray, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, Ones):
+    if same_as(numeric, 0):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Dense.ones_like(numeric)):
         return True
 
     return False

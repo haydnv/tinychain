@@ -52,14 +52,6 @@ class NDArray(Interface):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
 
 
-class Ones(Constant):
-    pass
-
-
-class Zeros(Constant):
-    pass
-
-
 class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
@@ -75,8 +67,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     def __repr__(self):
         if operator(self):
             return str(operator(self))
-        elif isinstance(ref.form_of(self), Constant):
-            return str(ref.form_of(self))
 
         return State.__repr__(self)
 
@@ -112,7 +102,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
             @classmethod
             def create(cls):
                 op_ref = ref.Get(cls, (shape, dtype))
-                return cls(Zeros(cls(op_ref), f"dense 0x{shape}"))
+                return cls(op_ref)
 
             @property
             def dtype(self):
@@ -162,7 +152,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
         cls = cls.expect(shape, dtype)
         op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data))
-        return cls(Constant(cls(op_ref), name))
+        return cls(op_ref)
 
     def __getitem__(self, bounds):
         return self.slice(bounds)
@@ -526,7 +516,7 @@ class Dense(Tensor):
         dtype = type(start) if isinstance(start, Number) else Number
         cls = cls.expect(shape, dtype)
         op_ref = ref.Get(uri(cls) + "/range", (shape, start, stop))
-        return cls(Constant(cls(op_ref), name))
+        return cls(op_ref)
 
     @classmethod
     def concatenate(cls, tensors, axis=0):
@@ -548,11 +538,11 @@ class Dense(Tensor):
         op_ref = ref.Get(uri(cls) + "/constant", (shape, value))
 
         if same_as(value, 1):
-            return cls(Ones(cls(op_ref), name))
+            return cls(op_ref)
         if same_as(value, 0):
-            return cls(Zeros(cls(op_ref), name))
+            return cls(op_ref)
         else:
-            return cls(Constant(cls(op_ref), name))
+            return cls(op_ref)
 
     @classmethod
     def ones(cls, shape):
@@ -590,7 +580,7 @@ class Dense(Tensor):
         cls = cls.expect(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
         op_ref = ref.Post(uri(cls) + "/random/normal", args)
-        return cls(Constant(cls(op_ref), name))
+        return cls(op_ref)
 
     @classmethod
     def random_uniform(cls, shape, minval=0, maxval=1):
@@ -644,7 +634,7 @@ class Dense(Tensor):
 
         name = name if name else f"truncated random {shape}"
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
-        return cls(Constant(cls(truncated), name))
+        return cls(truncated)
 
     def add(self, other):
         return Dense(Add(self, other))
@@ -695,7 +685,7 @@ class Sparse(Tensor):
 
         cls = cls.expect(shape, dtype)
         name = name if name else f"sparse 0x{shape}"
-        return cls(Zeros(cls(ref.Get(cls, (shape, dtype))), name))
+        return cls(ref.Get(cls, (shape, dtype)))
 
     @classmethod
     def zeros_like(cls, tensor):
