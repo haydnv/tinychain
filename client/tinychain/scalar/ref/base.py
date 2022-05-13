@@ -59,6 +59,9 @@ class After(FlowControl):
         if is_conditional(self.when):
             self.when = reference(cxt, self.when)
 
+    def __repr__(self):
+        return f"After({self.when}, {self.then})"
+
 
 class Case(FlowControl):
     """
@@ -95,6 +98,9 @@ class Case(FlowControl):
         deanonymize(self.cond, cxt)
         deanonymize(self.switch, cxt)
         deanonymize(self.case, cxt)
+
+    def __repr__(self):
+        return f"Cast({self.cond}, {self.switch}, {self.case})"
 
 
 class If(FlowControl):
@@ -149,6 +155,21 @@ class If(FlowControl):
         if is_conditional(self.cond) or is_op_ref(self.cond):
             self.cond = reference(cxt, self.cond)
 
+    def __repr__(self):
+        from .helpers import form_of
+
+        # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
+        if isinstance(form_of(self.cond), bool):
+            if self.cond:
+                return str(self.then)
+            else:
+                return str(self.or_else)
+
+        if self.or_else:
+            return f"If({self.cond}, {self.then}, {self.or_else})"
+        else:
+            return f"If({self.cond}, {self.then})"
+
 
 class While(FlowControl):
     """
@@ -179,6 +200,9 @@ class While(FlowControl):
         deanonymize(self.cond, cxt)
         deanonymize(self.op, cxt)
         deanonymize(self.state, cxt)
+
+    def __repr__(self):
+        return f"While({self.cond}, {self.op}, {self.state})"
 
 
 class With(FlowControl):
@@ -220,6 +244,9 @@ class With(FlowControl):
     def __ref__(self, name):
         from .helpers import get_ref
         return get_ref(self.op, name)
+
+    def __repr__(self):
+        return f"With({self.capture}, {self.op})"
 
 
 class Op(Ref):

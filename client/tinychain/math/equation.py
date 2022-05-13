@@ -46,6 +46,8 @@ class Function(object):
             unvisited = list(self.result.values())
         elif isinstance(deref(self.result), Op):
             unvisited = [self.result]
+        else:
+            raise TypeError(f"not an Operator: {self.result}")
 
         return [state for state in unvisited if operator(state)]
 

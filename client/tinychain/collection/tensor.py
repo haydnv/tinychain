@@ -12,13 +12,17 @@ from ..scalar.bound import handle_bounds
 from ..scalar.number import Bool, F32, F64, Number, UInt
 from ..scalar import ref
 from ..shape import Shape
-from ..state import Class, Stream
+from ..state import Class, State, StateRef, Stream
 from ..uri import uri
 
 from .base import Collection
 
 
 class NDArray(Interface):
+    @property
+    def dtype(self):
+        return Class(ref.Get(ref.MethodSubject(self, "dtype")))
+
     @property
     def shape(self):
         return Shape(ref.Get(ref.MethodSubject(self, "shape")))
@@ -48,6 +52,14 @@ class NDArray(Interface):
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
 
 
+class Ones(Constant):
+    pass
+
+
+class Zeros(Constant):
+    pass
+
+
 class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
     """An n-dimensional array of numbers."""
 
@@ -59,6 +71,14 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
             raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
 
         Collection.__init__(self, form)
+
+    def __repr__(self):
+        if operator(self):
+            return str(operator(self))
+        elif isinstance(ref.form_of(self), Constant):
+            return str(ref.form_of(self))
+
+        return State.__repr__(self)
 
     @classmethod
     def trig_rtype(cls):
@@ -91,7 +111,8 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
             @classmethod
             def create(cls):
-                return cls(ref.Get(cls, (shape, dtype)))
+                op_ref = ref.Get(cls, (shape, dtype))
+                return cls(Zeros(cls(op_ref), f"dense 0x{shape}"))
 
             @property
             def dtype(self):
@@ -121,9 +142,11 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         return cls.expect(shape, dtype).create()
 
     @classmethod
-    def load(cls, shape, data, dtype=F32):
+    def load(cls, shape, data, dtype=F32, name=None):
         """
         Load a `Tensor` from an existing data set.
+
+        The `name` parameter is useful in the string representation of an operator graph.
 
         Example:
             .. highlight:: python
@@ -135,7 +158,11 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
                 dense = tc.tensor.Dense.load([2, 3, 4], values, tc.I32)
         """
 
-        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/load", ((shape, dtype), data)))
+        name = name if name else f"load {shape}"
+
+        cls = cls.expect(shape, dtype)
+        op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data))
+        return cls(Constant(cls(op_ref), name))
 
     def __getitem__(self, bounds):
         return self.slice(bounds)
@@ -366,6 +393,8 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
                 return operator(self).shape
             except (RuntimeError, ValueError):
                 logging.debug(f"shape of {self} is not constant")
+        elif hasattr(deref(self), "shape"):
+            return deref(self).shape
 
         return self._get("shape", rtype=Shape)
 
@@ -412,7 +441,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         if ref.is_literal(self.shape[axis]):
             dim = ref.form_of(self.shape[axis])
         else:
-            raise RuntimeError(f"Tensor.split requires a constant dimension to split, not {self.shape[axis]}")
+            raise RuntimeError(f"to split {self} requires a constant dimension to split, not {self.shape[axis]}")
 
         if isinstance(num_or_size_splits, (list, tuple)):
             if sum(num_or_size_splits) != dim:
@@ -485,14 +514,19 @@ class Dense(Tensor):
     __uri__ = uri(Tensor) + "/dense"
 
     @classmethod
-    def arange(cls, shape, start, stop):
+    def arange(cls, shape, start, stop, name=None):
         """
-        Return a `Dense` tensor with the given shape containing a range of numbers
-        evenly distributed between `start` and `stop`.
+        Return a `Dense` tensor with the given shape containing a range of numbers evenly distributed
+        between `start` and `stop`.
+
+        The `name` parameter is used only in the string representation of an operator graph.
         """
 
+        name = name if name else f"arange({start}, {stop})x{shape}"
         dtype = type(start) if isinstance(start, Number) else Number
-        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/range", (shape, start, stop)))
+        cls = cls.expect(shape, dtype)
+        op_ref = ref.Get(uri(cls) + "/range", (shape, start, stop))
+        return cls(Constant(cls(op_ref), name))
 
     @classmethod
     def concatenate(cls, tensors, axis=0):
@@ -501,11 +535,24 @@ class Dense(Tensor):
         return Dense(form=Concatenate(tensors, axis))
 
     @classmethod
-    def constant(cls, shape, value):
-        """Return a `Dense` tensor filled with the given `value`."""
+    def constant(cls, shape, value, name=None):
+        """
+        Return a `Dense` tensor filled with the given `value`.
 
+        The `name` parameter is used only in the string representation of an operator graph.
+        """
+
+        name = name if name else f"{value}x{shape}"
         dtype = type(value) if isinstance(value, Number) else Number
-        return cls.expect(shape, dtype)(ref.Get(uri(cls) + "/constant", (shape, value)))
+        cls = cls.expect(shape, dtype)
+        op_ref = ref.Get(uri(cls) + "/constant", (shape, value))
+
+        if same_as(value, 1):
+            return cls(Ones(cls(op_ref), name))
+        if same_as(value, 0):
+            return cls(Zeros(cls(op_ref), name))
+        else:
+            return cls(Constant(cls(op_ref), name))
 
     @classmethod
     def ones(cls, shape):
@@ -532,15 +579,25 @@ class Dense(Tensor):
         return cls.zeros(tensor.shape)
 
     @classmethod
-    def random_normal(cls, shape, mean=0.0, std=1.0):
-        """Return a `Dense` tensor filled with a random normal distribution of `F64` s."""
+    def random_normal(cls, shape, mean=0.0, std=1.0, name=None):
+        """
+        Return a `Dense` tensor filled with a random normal distribution of `F64` s.
 
+        The `name` parameter is used only in the string representation of an operator graph.
+        """
+
+        name = name if name else f"random {shape}"
+        cls = cls.expect(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
-        return cls.expect(shape, F64)(ref.Post(uri(cls) + "/random/normal", args))
+        op_ref = ref.Post(uri(cls) + "/random/normal", args)
+        return cls(Constant(cls(op_ref), name))
 
     @classmethod
     def random_uniform(cls, shape, minval=0, maxval=1):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
+
+        if not is_literal(minval) or not is_literal(maxval):
+            raise ValueError(f"Dense.random_uniform requires a constant range, not [{minval}, {maxval})")
 
         if minval == maxval:
             return cls.constant(shape, minval)
@@ -555,7 +612,7 @@ class Dense(Tensor):
             return (random * range) + minval
 
     @classmethod
-    def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None):
+    def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None, name=None):
         """
         Return a `Dense` tensor filled with a random normal distribution of `F64` s.
 
@@ -563,6 +620,8 @@ class Dense(Tensor):
         random normal distribution.
 
         `minval` and `maxval` default to two standard deviations.
+
+        The `name` parameter is used only in the string representation of an operator graph.
         """
 
         if not std:
@@ -583,8 +642,9 @@ class Dense(Tensor):
             cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
             return Map(tensor=cxt.new_tensor.copy())
 
+        name = name if name else f"truncated random {shape}"
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
-        return cls(truncated)
+        return cls(Constant(cls(truncated), name))
 
     def add(self, other):
         return Dense(Add(self, other))
@@ -624,14 +684,18 @@ class Sparse(Tensor):
     __uri__ = uri(Tensor) + "/sparse"
 
     @classmethod
-    def zeros(cls, shape, dtype=F32):
+    def zeros(cls, shape, dtype=F32, name=None):
         """
         Return a `Sparse` tensor with the given shape and data type.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
+
+        The `name` parameter is used only in the string representation of an operator graph.
         """
 
-        return cls.expect(shape, dtype)(ref.Get(cls, (shape, dtype)))
+        cls = cls.expect(shape, dtype)
+        name = name if name else f"sparse 0x{shape}"
+        return cls(Zeros(cls(ref.Get(cls, (shape, dtype))), name))
 
     @classmethod
     def zeros_like(cls, tensor):
@@ -707,6 +771,9 @@ class Concatenate(Operator):
 
         Operator.__init__(self, tensors, axis)
 
+    def __repr__(self):
+        return f"concat({self.subject}, {self.args})"
+
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
@@ -766,6 +833,9 @@ class Concatenate(Operator):
 
 
 class Copy(Unary):
+    def __repr__(self):
+        return f"copy({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -784,6 +854,12 @@ class Copy(Unary):
 
 
 class Norm(Operator):
+    def __repr__(self):
+        if self.args:
+            return f"norm({self.subject}[{self.args}])"
+        else:
+            return f"norm({self.subject})"
+
     @property
     def shape(self):
         if self.args is None:
@@ -820,6 +896,12 @@ class Reduce(Operator):
 
 
 class Sum(Reduce):
+    def __repr__(self):
+        if "axis" in self.args:
+            return f"sum({self.subject}[{self.args['axis']}])"
+        else:
+            return f"sum({self.subject})"
+
     def forward(self):
         return NDArray.sum(self.subject, **self.args)
 
@@ -867,11 +949,17 @@ class Transform(Operator):
 
 
 class Broadcast(Transform):
+    def __repr__(self):
+        return str(self.subject)
+
     def forward(self):
         return NDArray.broadcast(self.subject, self.args)
 
 
 class Expand(Transform):
+    def __repr__(self):
+        return f"{self.subject}.expand({self.args})"
+
     @property
     def shape(self):
         return Shape.expand(self.subject.shape, self.args)
@@ -884,6 +972,9 @@ class Expand(Transform):
 
 
 class Flip(Transform):
+    def __repr__(self):
+        return f"{self.subject}.flip({self.args})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -901,6 +992,9 @@ class Tile(Transform):
             raise ValueError(f"Tensor.tile requires a constant value for multiples, not {multiples}")
 
         Transform.__init__(self, tensor, multiples)
+
+    def __repr__(self):
+        return f"{self.subject}.tile({self.args})"
 
     @property
     def shape(self):
@@ -941,6 +1035,12 @@ class Transpose(Transform):
     def __init__(self, subject, permutation=None):
         Transform.__init__(self, subject, permutation)
 
+    def __repr__(self):
+        if self.args:
+            return f"{self.subject}.transpose({self.args})"
+        else:
+            return f"{self.subject}.T"
+
     @property
     def shape(self):
         return Shape.transpose(self.subject.shape, self.args)
@@ -958,6 +1058,9 @@ class Transpose(Transform):
 
 
 class Reshape(Transform):
+    def __repr__(self):
+        return f"{self.subject}.reshape({self.args})"
+
     @property
     def shape(self):
         return Shape.reshape(self.subject.shape, self.args)
@@ -970,6 +1073,15 @@ class Reshape(Transform):
 
 
 class Slice(Transform):
+    def __init__(self, tensor, bounds):
+        if not is_literal(tensor.shape):
+            logging.debug(f"slice of {tensor} will not support automatic differentiation")
+
+        Transform.__init__(self, tensor, bounds)
+
+    def __repr__(self):
+        return f"{self.subject}.slice({self.args})"
+
     @property
     def shape(self):
         return Shape.slice(self.subject.shape, self.args)
@@ -984,6 +1096,9 @@ class Slice(Transform):
         class SliceGradient(Operator):
             def __init__(self, grad):
                 Operator.__init__(self, grad, None)
+
+            def __repr__(self):
+                return f"{self.subject}[{self.args}]"
 
             def __ns__(self, context):
                 return deanonymize(self.subject, context)

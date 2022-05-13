@@ -1,10 +1,11 @@
 import logging
 import typing
 
-from ..error import BadRequest
-from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
-from ..scalar.value import Id
 from ..context import deanonymize, to_json
+from ..error import BadRequest
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op, Ref
+from ..scalar.value import Id
+from ..uri import uri
 
 from .base import is_numeric
 from .interface import Numeric, Trigonometric
@@ -23,6 +24,41 @@ class Gradients(dict):
 
         for var_id in kwargs:
             self[var_id] = __m[var_id]
+
+
+class Constant(Ref):
+    def __init__(self, numeric, name):
+        self.state = numeric
+        self.name = name
+
+    def __json__(self):
+        return to_json(self.state)
+
+    def __ns__(self, context):
+        deanonymize(self.state, context)
+
+    def __same__(self, other):
+        if isinstance(other, Constant):
+            return same_as(self.state, other.state)
+
+        return same_as(self.state, other)
+
+    def __repr__(self):
+        if self.name:
+            return str(self.name)
+
+        if is_one(self.state):
+            return f"1x{self.shape}"
+        elif is_zero(self.state):
+            return f"0x{self.shape}"
+        elif not uri(self.state).startswith("/state"):
+            return str(uri(self.state))
+        else:
+            return f"constant {hex_id(self.state)}"
+
+    @property
+    def shape(self):
+        return self.state.shape
 
 
 class Operator(Op):
@@ -48,7 +84,15 @@ class Operator(Op):
             self.args = reference(context, self.args)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.subject}, {self.args})"
+        raise NotImplementedError(f"human-readable string representation of {self.__class__.__name__}")
+
+    def __same__(self, other):
+        other = operator(other)
+
+        if not other:
+            return False
+
+        return type(self) is type(other) and same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
     @property
     def shape(self):
@@ -68,7 +112,6 @@ class Operator(Op):
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
-    # TODO: support computing gradients w/r/t arbitrary states in the operator graph
     def gradients(self, loss):
         """
         Return the :class:`Gradients` this :class:`Operator` with respect to the given `variables`.
@@ -126,6 +169,9 @@ class Custom(Unary):
 
 # TODO: Tensor.log(base!=None)
 class Abs(Unary):
+    def __repr__(self):
+        return f"abs({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -150,6 +196,9 @@ class Abs(Unary):
 
 
 class Exp(Unary):
+    def __repr__(self):
+        return f"e**({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -185,6 +234,9 @@ class Trig(Unary):
 
 
 class Sin(Trig):
+    def __repr__(self):
+        return f"sin({self.subject})"
+
     def forward(self):
         return Trigonometric.sin(self.subject)
 
@@ -198,6 +250,9 @@ class Sin(Trig):
 
 
 class Cos(Trig):
+    def __repr__(self):
+        return f"cos({self.subject})"
+
     def forward(self):
         return Trigonometric.cos(self.subject)
 
@@ -211,6 +266,9 @@ class Cos(Trig):
 
 
 class Asin(Trig):
+    def __repr__(self):
+        return f"asin({self.subject})"
+
     def forward(self):
         return Trigonometric.asin(self.subject)
 
@@ -224,6 +282,9 @@ class Asin(Trig):
 
 
 class Acos(Trig):
+    def __repr__(self):
+        return f"acos({self.subject})"
+
     def forward(self):
         return Trigonometric.acos(self.subject)
 
@@ -237,6 +298,9 @@ class Acos(Trig):
 
 
 class Sinh(Trig):
+    def __repr__(self):
+        return f"sinh({self.subject})"
+
     def forward(self):
         return Trigonometric.sinh(self.subject)
 
@@ -250,6 +314,9 @@ class Sinh(Trig):
 
 
 class Cosh(Trig):
+    def __repr__(self):
+        return f"cosh({self.subject})"
+
     def forward(self):
         return Trigonometric.cosh(self.subject)
 
@@ -263,6 +330,9 @@ class Cosh(Trig):
 
 
 class Asinh(Trig):
+    def __repr__(self):
+        return f"asinh({self.subject})"
+
     def forward(self):
         return Trigonometric.asinh(self.subject)
 
@@ -276,6 +346,9 @@ class Asinh(Trig):
 
 
 class Acosh(Trig):
+    def __repr__(self):
+        return f"acosh({self.subject})"
+
     def forward(self):
         return Trigonometric.acosh(self.subject)
 
@@ -289,6 +362,9 @@ class Acosh(Trig):
 
 
 class Tan(Trig):
+    def __repr__(self):
+        return f"tan({self.subject})"
+
     def forward(self):
         return Trigonometric.tan(self.subject)
 
@@ -302,6 +378,9 @@ class Tan(Trig):
 
 
 class Tanh(Trig):
+    def __repr__(self):
+        return f"tanh({self.subject})"
+
     def forward(self):
         return Trigonometric.tanh(self.subject)
 
@@ -315,6 +394,9 @@ class Tanh(Trig):
 
 
 class Atan(Trig):
+    def __repr__(self):
+        return f"atan({self.subject})"
+
     def forward(self):
         return Trigonometric.atan(self.subject)
 
@@ -328,6 +410,9 @@ class Atan(Trig):
 
 
 class Atanh(Trig):
+    def __repr__(self):
+        return f"atanh({self.subject})"
+
     def forward(self):
         return Trigonometric.atanh(self.subject)
 
@@ -355,6 +440,9 @@ class Dual(Operator):
 
 #TODO: Tensor.log(base!=None)
 class Log(Operator):
+    def __repr__(self):
+        return f"log({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -379,6 +467,9 @@ class Log(Operator):
 
 
 class MatMul(Dual):
+    def __repr__(self):
+        return f"({self.subject}) @ ({self.args})"
+
     @property
     def shape(self):
         from ..shape import Shape
@@ -418,6 +509,9 @@ class MatMul(Dual):
 
 
 class Pow(Dual):
+    def __repr__(self):
+        return f"({self.subject})**({self.args})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -472,6 +566,9 @@ class DualBroadcast(Operator):
 
 
 class Add(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) + ({self.args})"
+
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -509,6 +606,9 @@ class Add(DualBroadcast):
 
 
 class Mul(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) * ({self.args})"
+
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -548,6 +648,9 @@ class Mul(DualBroadcast):
 
 
 class Sub(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) - ({self.args})"
+
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -579,6 +682,9 @@ class Sub(DualBroadcast):
 
 
 class Div(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) / ({self.args})"
+
     def __init__(self, subject, args):
         if same_as(args, 0):
             raise ValueError(f"cannot divide {subject} by {args}")
@@ -712,15 +818,15 @@ def gradients(differentiable, loss, variables=None):
 def is_one(numeric):
     """Return `True` if the given `numeric` state is a constant with value one."""
 
-    from ..collection.tensor import NDArray, Dense, Transform
-
     if same_as(numeric, 1):
         return True
+
+    from ..collection.tensor import Transform, Zeros
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, NDArray) and same_as(numeric, Dense.ones(numeric.shape)):
+    if isinstance(numeric, Zeros):
         return True
 
     return False
@@ -738,15 +844,15 @@ def ones_like(state):
 def is_zero(numeric):
     """Return `True` if the given `numeric` state is a constant with value zero."""
 
-    from ..collection.tensor import NDArray, Sparse, Transform
-
     if same_as(numeric, 0):
         return True
+
+    from ..collection.tensor import Ones, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros(numeric.shape)):
+    if isinstance(numeric, Ones):
         return True
 
     return False

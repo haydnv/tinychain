@@ -29,11 +29,11 @@ class OperatorTests(unittest.TestCase):
         self.w2_torch = torch.tensor(w2, dtype=torch.float, requires_grad=True)
         b2 = np.random.rand(2, 2)
         self.b2_torch = torch.tensor(b2, dtype=torch.float, requires_grad=True)
-        self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
-        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
-        self.w2_tc = tc.ml.optimizer.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
-        self.b1_tc = tc.ml.optimizer.Variable.load(b1.shape, b1.flatten().tolist(), tc.F32)
-        self.b2_tc = tc.ml.optimizer.Variable.load(b2.shape, b2.flatten().tolist(), tc.F32)
+        self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32, name="x")
+        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32, name="w1")
+        self.w2_tc = tc.ml.optimizer.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32, name="w2")
+        self.b1_tc = tc.ml.optimizer.Variable.load(b1.shape, b1.flatten().tolist(), tc.F32, name="b1")
+        self.b2_tc = tc.ml.optimizer.Variable.load(b2.shape, b2.flatten().tolist(), tc.F32, name="b2")
 
     def testAdd(self):
         y_torch = self.x_torch + self.w1_torch + self.b1_torch
@@ -436,6 +436,7 @@ class OperatorTests(unittest.TestCase):
         y_2tc = y_tc.sum(0)**0.5
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
+        print(_d2y_dw2_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
         result = HOST.post(ENDPOINT, cxt)
         dy_dw1_tc = load_np(result['the_first_derivative'])

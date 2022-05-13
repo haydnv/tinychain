@@ -188,6 +188,3 @@ class StateRef(Ref):
 
     def __ns__(self, cxt):
         deanonymize(self.state, cxt)
-
-    def __repr__(self):
-        return f"Ref({self.state}, {uri(self)})"

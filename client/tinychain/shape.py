@@ -58,7 +58,7 @@ class Shape(Tuple):
                 try:
                     item = deref(self)[x]
                 except KeyError as e:
-                    raise KeyError(f"{self} has no axis {x}")
+                    raise KeyError(f"{self} has no axis {x}: {e}")
 
                 if uri(self) == uri(self.__class__):
                     return item
@@ -66,6 +66,12 @@ class Shape(Tuple):
                     return get_ref(item, uri(self).append(x))
 
         return self._get("", x, U64)
+
+    def __repr__(self):
+        if hasattr(self, "__len__"):
+            return f"[{', '.join(str(dim) if is_literal(dim) else 'U64' for dim in self)}]"
+        else:
+            return "[...]"
 
     @classmethod
     def concatenate(cls, shapes, axis=0):

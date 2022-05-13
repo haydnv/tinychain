@@ -50,7 +50,6 @@ def depends_on(state_or_ref):
 def deref(state):
     """Return the :class:`Ref`, :class:`URI`, or constant which will be used to resolve the given :class:`State`."""
 
-    from ...state import StateRef
     from .base import FlowControl, Op as OpRef
 
     if isinstance(state, (FlowControl, OpRef)) or callable(state) or inspect.isclass(state):
@@ -58,7 +57,7 @@ def deref(state):
 
     if form_of(state) is not state:
         return deref(form_of(state))
-    elif isinstance(state, StateRef):
+    elif isinstance(state, Ref) and hasattr(state, "state"):
         return deref(state.state)
     elif isinstance(state, MethodSubject):
         return deref(state.subject)
