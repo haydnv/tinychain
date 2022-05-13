@@ -507,6 +507,13 @@ class MatMul(Dual):
 
         return grads
 
+    def simplify(self):
+        if is_zero(self.subject) or is_zero(self.args):
+            from ..collection.tensor import Sparse
+            return Sparse.zeros([self.subject.shape[-2], self.args.shape[-1]])
+
+        return self
+
 
 class Pow(Dual):
     def __repr__(self):
