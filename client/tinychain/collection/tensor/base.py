@@ -15,7 +15,7 @@ from ...uri import uri
 
 from ..base import Collection
 
-from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Reshape, Slice, Sum, Tile, Transpose
+from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Reshape, Slice, Sum, Transpose
 
 
 class NDArray(Interface):
@@ -25,31 +25,143 @@ class NDArray(Interface):
 
     @property
     def shape(self):
+        return Shape(ref.Get(ref.MethodSubject(self, "ndim")))
+
+    @property
+    def shape(self):
         return Shape(ref.Get(ref.MethodSubject(self, "shape")))
 
+    @property
+    def size(self):
+        return Shape(ref.Get(ref.MethodSubject(self, "size")))
+
+    def all(self):
+        """Return `True` if all elements in this :class:`NDArray` are nonzero."""
+
+        return self._get("all", rtype=Bool)
+
+    def any(self):
+        """Return `True` if any element in this :class:`NDArray` is nonzero."""
+
+        return self._get("any", rtype=Bool)
+
+    def argmax(self, axis=None):
+        """
+        Return the indices of the maximum values along the given `axis` of this :class:`NDArray`.
+
+        If no `axis` is given, the total offset will be returned.
+        """
+
+        return ref.Get(ref.MethodSubject(self, "argmax"), axis)
+
     def broadcast(self, shape):
+        """Broadcast this :class:`NDArray` into the given `shape`."""
+
         return ref.Get(ref.MethodSubject(self, "broadcast"), shape)
 
+    def cast(self, number_type):
+        """Cast the data type of this :class:`NDArray` into the given `number_type`."""
+
+        return self._get("cast", number_type)
+
+    def copy(self):
+        """Return a copy of this :class:`NDArray`"""
+
+        return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self})
+
     def expand_dims(self, axis=-1):
+        """Expand the given `axis` of this :class:`NDArray`, or append a new axis if no `axis` is given."""
+
         return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
 
     def flip(self, axis):
-        return ref.Get(ref.MethodSubject(self, "flip"), axis)
+        """Flip this :class:`NDArray` along the given `axis`"""
+
+        return self._get("flip", axis)
+
+    def max(self, axis=None):
+        """
+        Find the maxima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
+        """
+
+        return ref.Get(ref.MethodSubject(self, "max"), axis)
+
+    def min(self, axis=None):
+        """
+        Find the minima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
+        """
+
+        return ref.Get(ref.MethodSubject(self, "min"), axis)
+
+    def mean(self, axis=None):
+        """
+        Return the average of this :class:`NDArray` along the given `axis`, or the total average if no `axis` is given.
+        """
+
+        if axis is None:
+            return self.sum() / self.size
+        else:
+            return self.sum(axis) / self.shape[axis]
 
     def norm(self, axis=None, keepdims=False):
+        """
+        Compute the Frobenius (aka Euclidean) norm of this :class:`NDArray`.
+
+        By default this is the matrix norm of the last two dimensions; if an `axis` is given,
+        it will be the vector norm along that `axis`.
+        """
+
         return ref.Post(ref.MethodSubject(self, "norm"), _reduce_args(axis, keepdims))
 
+    def product(self, axis=None):
+        """
+        Calculate the product of this :class:`NDArray` along the given `axis`,
+        or the total product if no `axis` is given.
+        """
+
+        return ref.Get(ref.MethodSubject(self, "product"), axis)
+
     def reshape(self, shape):
+        """Reshape this :class:`NDArray` into the given `shape`."""
+
         return ref.Get(ref.MethodSubject(self, "reshape"), shape)
 
     def slice(self, bounds):
-        return ref.Get(ref.MethodSubject(self), bounds)
+        """Return the sub-array of this :class:`NDArray` within the given `bounds`."""
+
+        return ref.Get(ref.MethodSubject(self), handle_bounds(bounds))
+
+    def std(self, axis=None):
+        """
+        Return the standard deviation of this :class:`NDArray` along the given `axis`,
+        or the total standard deviation if no `axis` is given.
+        """
+
+        if axis is None:
+            average = self.mean()
+            size = self.size
+            return (((self - average)**2).sum() / size)**0.5
+        else:
+            raise NotImplementedError("std with axis")
 
     def sum(self, axis=None, keepdims=False):
+        """Compute the sum of this :class:`NDArray` along the given `axis`, or the total sum if no `axis` is given."""
+
         return ref.Post(ref.MethodSubject(self, "sum"), _reduce_args(axis, keepdims))
 
     def transpose(self, permutation=None):
+        """
+        Transpose this :class:`NDArray` according to the given `permutation`.
+
+        If no `permutation` is given, this will reverse the order of the axes of this :class:`NDArray`.
+        """
+
         return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
+
+    def write(self, value):
+        """Overwrite this :class:`NDArray` with the given :class:`NDArray` or `Number`, broadcasting if needed."""
+
+        return self._put("", None, value)
 
 
 class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
@@ -80,7 +192,7 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         """
         Define a new subclass of `cls` which captures the given shape and datatype.
 
-        It would be better to implement this function using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
+        It would be better to implement this feature using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
         but this is not supported on Python <= 3.8.
         """
 
@@ -161,100 +273,95 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         raise NotImplementedError("use Tensor.write instead")
 
     def __matmul__(self, other):
-        return Tensor(MatMul(self, other))
-    
-    def abs(self):
-        return Tensor(Abs(self))
-
-    def add(self, other):
-        return Tensor(Add(self, other))
-
-    def all(self):
-        """Return `True` if all elements in this `Tensor` are nonzero."""
-
-        return self._get("all", rtype=Bool)
-
-    def any(self):
-        """Return `True` if any element in this `Tensor` are nonzero."""
-
-        return self._get("any", rtype=Bool)
-
-    def argmax(self, axis=None):
-        """Return the indices of the maximum values along the given `axis` of this `Tensor`.
-
-        If no `axis` is given, the total offset will be returned.
-        """
-
-        return self._get("argmax", axis, self.__class__)
-
-    def broadcast(self, shape):
-        return self.__class__(form=Broadcast(self, shape))
-
-    def cast(self, number_type):
-        """Cast the data type of `Tensor` into the given `number_type`."""
-
-        return self._get("cast", number_type, self.__class__.expect(self.shape, number_type))
-
-    def copy(self):
-        """Return a copy of this `Tensor`"""
-
-        return self.__class__(form=Copy(self))
-
-    def div(self, other):
-        return Tensor(Div(self, other))
+        return Tensor(form=MatMul(self, other))
 
     @property
-    def dtype(self):
-        """Return the data type of this `Tensor`."""
+    def ndim(self):
+        """Return the number of dimensions of this `Tensor`."""
 
-        return self._get("dtype", rtype=Class)
+        if hasattr(self.shape, "__len__"):
+            return len(self.shape)
+        else:
+            return self._get("ndim", rtype=UInt)
+
+    @property
+    def shape(self):
+        """Return the shape of this `Tensor`."""
+
+        if operator(self):
+            try:
+                return operator(self).shape
+            except (RuntimeError, ValueError):
+                logging.debug(f"shape of {self} is not constant")
+        elif hasattr(deref(self), "shape"):
+            return deref(self).shape
+
+        return self._get("shape", rtype=Shape)
+
+    def abs(self):
+        return Tensor(form=Abs(self))
+
+    def add(self, other):
+        return Tensor(form=Add(self, other))
+
+    def broadcast(self, shape):
+        return Tensor(form=Broadcast(self, shape))
+
+    def cast(self, dtype):
+        return Tensor(form=NDArray.cast(self, dtype))
+
+    def copy(self):
+        return Tensor(form=Copy(self))
+
+    def div(self, other):
+        return Tensor(form=Div(self, other))
 
     def exp(self):
-        return Tensor(Exp(self))
+        return Tensor(form=Exp(self))
     
     def log(self, base=None):
-        return Tensor(Log(self, base))
+        return Tensor(form=Log(self, base))
 
     def sin(self):
-        return Tensor(Sin(self))
+        return Tensor(form=Sin(self))
 
     def cos(self):
-        return Tensor(Cos(self))
+        return Tensor(form=Cos(self))
 
     def asin(self):
-        return Tensor(Asin(self))
+        return Tensor(form=Asin(self))
 
     def acos(self):
-        return Tensor(Acos(self))
+        return Tensor(form=Acos(self))
 
     def sinh(self):
-        return Tensor(Sinh(self))
+        return Tensor(form=Sinh(self))
 
     def cosh(self):
-        return Tensor(Cosh(self))
+        return Tensor(form=Cosh(self))
 
     def asinh(self):
-        return Tensor(Asinh(self))
+        return Tensor(form=Asinh(self))
 
     def acosh(self):
-        return Tensor(Acosh(self))
+        return Tensor(form=Acosh(self))
 
     def tan(self):
-        return Tensor(Tan(self))
+        return Tensor(form=Tan(self))
 
     def tanh(self):
-        return Tensor(Tanh(self))
+        return Tensor(form=Tanh(self))
 
     def atan(self):
-        return Tensor(Atan(self))
+        return Tensor(form=Atan(self))
 
     def atanh(self):
-        return Tensor(Atanh(self))
+        return Tensor(form=Atanh(self))
 
     def flip(self, axis):
         """Flip the elements in this `Tensor` along the specified `axis`."""
 
-        return self.__class__(form=Flip(self, axis))
+        return Tensor(form=Flip(self, axis))
 
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
@@ -306,37 +413,8 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
         return self._post("xor", {"r": other}, Tensor)
 
-    def max(self, axis=None):
-        """Find the maxima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
-
-        rtype = Number if axis is None else Tensor
-        return self._get("max", axis, rtype)
-
-    def min(self, axis=None):
-        """Find the minima of this `Tensor` along the given `axis`, or the entire tensor if no axis is given."""
-
-        rtype = Number if axis is None else Tensor
-        return self._get("min", axis, rtype)
-
-    def mean(self, axis=None):
-        """
-        Return the average of this `Tensor` along the given `axis`,
-        or the average of the entire `Tensor` if no axis is given.
-        """
-
-        if axis is None:
-            return self.sum() / self.size
-        else:
-            return self.sum(axis) / self.shape[axis]
-
     def mul(self, other):
-        return Tensor(Mul(self, other))
-
-    @property
-    def ndim(self):
-        """Return the number of dimensions of this `Tensor`."""
-
-        return self._get("ndim", rtype=UInt)
+        return Tensor(form=Mul(self, other))
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
@@ -350,16 +428,10 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         For a vector norm, specify the `axis` of the vector.
         """
 
-        return Tensor(Norm(self, axis))
+        return Tensor(form=Norm(self, axis))
 
     def pow(self, other):
-        return Tensor(Pow(self, other))
-
-    def product(self, axis=None):
-        """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
-
-        rtype = Number if axis is None else Tensor
-        return self._get("product", axis, rtype)
+        return Tensor(form=Pow(self, other))
 
     def reshape(self, shape, copy=True):
         """Return a view of this `Tensor` with the given `shape`."""
@@ -374,26 +446,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         else:
             return reshaped
 
-    @property
-    def shape(self):
-        """Return the shape of this `Tensor`."""
-
-        if operator(self):
-            try:
-                return operator(self).shape
-            except (RuntimeError, ValueError):
-                logging.debug(f"shape of {self} is not constant")
-        elif hasattr(deref(self), "shape"):
-            return deref(self).shape
-
-        return self._get("shape", rtype=Shape)
-
-    @property
-    def size(self):
-        """Return the size of this `Tensor` (the product of its `shape`)."""
-
-        return self._get("size", rtype=UInt)
-
     def slice(self, bounds):
         parent = self
         bounds = handle_bounds(bounds)
@@ -407,75 +459,14 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
 
         return WritableView(Slice(self, bounds))
 
-    def split(self, num_or_size_splits, axis=0):
-        """
-        Split this `Tensor` into multiple slices along the given `axis`.
-
-        This method requires a constant `num_or_size_splits`, `axis`, and `self.shape[axis]`.
-
-        If `num_or_size_splits` is a `Number`, the `tensor` will be sliced along `axis` `num_or_size_splits` times;
-        if `self.shape[axis] % num_or_size_splits != 0` then a `ValueError` error will be raised.
-
-        If `num_or_size_splits` is a `Tuple` with length `n` then the `tensor` will be split into `n` new `Tensor` s
-        each with `shape[axis] == num_or_size_splits[axis]`; if the sum of `num_or_size_splits` is not equal to
-        `self.shape[axis]` then a `ValueError` error will be raised.
-        """
-
-        num_or_size_splits = ref.form_of(num_or_size_splits)
-        if not ref.is_literal(num_or_size_splits):
-            raise ValueError(f"Tensor.split requires a constant num_or_size_splits, not {num_or_size_splits}")
-
-        if not ref.is_literal(axis):
-            raise ValueError(f"Tensor.split requires a constant axis, not {axis}")
-
-        if ref.is_literal(self.shape[axis]):
-            dim = ref.form_of(self.shape[axis])
-        else:
-            raise RuntimeError(f"to split {self} requires a constant dimension to split, not {self.shape[axis]}")
-
-        if isinstance(num_or_size_splits, (list, tuple)):
-            if sum(num_or_size_splits) != dim:
-                raise ValueError(f"{num_or_size_splits} does not match the dimension {dim} of axis {axis}")
-
-        elif int(num_or_size_splits) == num_or_size_splits:
-            if dim % num_or_size_splits != 0:
-                raise ValueError(f"split dimension {dim} is not divisible by {num_or_size_splits}")
-
-            slice_dim = dim // num_or_size_splits
-            num_or_size_splits = [slice_dim] * num_or_size_splits
-
-        else:
-            raise ValueError(f"invalid num_or_size_splits: {num_or_size_splits}")
-
-        start = 0
-        slices = []
-        for slice_dim in num_or_size_splits:
-            bounds = ([slice(None)] * axis) + [slice(start, start + slice_dim)]
-            slices.append(self[bounds])
-
-        return slices
-
-    def std(self, axis=None):
-        """
-        Return the standard deviation of this `Tensor` along the given `axis`,
-        or the standard deviation of the entire `Tensor` if no axis is given.
-        """
-
-        if axis is None:
-            average = self.mean()
-            size = self.size
-            return (((self - average)**2).sum() / size)**0.5
-        else:
-            raise NotImplementedError("Tensor.std with axis")
-
     def sub(self, other):
-        return Tensor(Sub(self, other))
+        return Tensor(form=Sub(self, other))
 
     def sum(self, axis=None, keepdims=False):
         """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
 
         rtype = Number if axis is None else Tensor
-        return rtype(form=Sum(self, axis, keepdims))
+        return rtype(Sum(self, axis, keepdims))
 
     def transpose(self, permutation=None):
         """
@@ -485,11 +476,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         """
 
         return Tensor(form=Transpose(self, permutation))
-
-    def write(self, value):
-        """Overwrite this `Tensor` with the given `Tensor` or `Number`, broadcasting if needed."""
-
-        return self._put("", None, value)
 
 
 class Dense(Tensor):
@@ -628,6 +614,7 @@ class Dense(Tensor):
 
         @post
         def step(cxt, tensor: Dense) -> Map:
+            from .functions import where
             cxt.new_dist = Dense.random_normal(shape, mean, std)
             cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
             return Map(tensor=cxt.new_tensor.copy())
@@ -637,12 +624,12 @@ class Dense(Tensor):
         return cls(truncated)
 
     def add(self, other):
-        return Dense(Add(self, other))
+        return Dense(form=Add(self, other))
 
     def argsort(self):
         """Return the coordinates needed to sort this `Tensor`."""
 
-        return self._get("argsort", rtype=self.__class__)
+        return self._get("argsort", rtype=Tensor)
 
     def as_sparse(self):
         """Return a :class:`Sparse` view of this `Dense` tensor."""
@@ -656,7 +643,7 @@ class Dense(Tensor):
         return self._get("elements", bounds, Stream)
 
     def sub(self, other):
-        return Dense(Sub(self, other))
+        return Dense(form=Sub(self, other))
 
 
 class Sparse(Tensor):
@@ -699,7 +686,7 @@ class Sparse(Tensor):
         return self._get("dense", rtype=Dense)
 
     def div(self, other):
-        return Sparse(Div(self, other))
+        return Sparse(form=Div(self, other))
 
     def elements(self, bounds=None):
         """
@@ -712,41 +699,7 @@ class Sparse(Tensor):
         return self._get("elements", bounds, Stream)
 
     def mul(self, other):
-        return Sparse(Mul(self, other))
-
-
-def einsum(format, tensors):
-    """
-    Return the Einstein summation of the given `tensors` according the the given `format` string.
-
-    Example: `einsum("ij,jk->ik", [a, b]) # multiply two matrices`
-
-    The tensor product is computed from left to right, so when using any `Sparse` tensors,
-    it's important to put the sparsest first in the list to avoid redundant broadcasting.
-    """
-
-    return Tensor(ref.Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
-
-
-def tile(tensor, multiples):
-    """Construct a new `Tensor` by tiling the given `tensor` `multiples` times.
-
-    The values of `tensor` are repeated `multiples[x]` times along the `x`th axis of the output.
-    `multiples` must be a positive integer or a `Tuple` of length `tensor.ndim`.
-    """
-
-    rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
-    return rtype(form=Tile(tensor, multiples))
-
-
-def where(cond, x, y):
-    """
-    Return a view of `x` and `y` depending on whether the corresponding element of `cond` is `True`.
-
-    `cond`, `x`, and `y` must support broadcasting to the same shape.
-    """
-
-    return (cond.cast(Bool) * x) + (cond.logical_not() * y)
+        return Sparse(form=Mul(self, other))
 
 
 def _reduce_args(axis=None, keepdims=False):

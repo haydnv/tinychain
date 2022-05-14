@@ -73,7 +73,9 @@ class Concatenate(Operator):
         if not is_literal(num_or_size_slices):
             raise TypeError(f"the gradients of a concatenation require constant-shaped inputs, not {self.subject}")
 
-        losses = loss.split(num_or_size_slices, axis)
+        from .functions import split
+
+        losses = split(loss, num_or_size_slices, axis)
         assert len(losses) == len(self.subject)
 
         for (tensor, loss) in zip(self.subject, losses):
