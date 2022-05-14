@@ -3,12 +3,11 @@ import typing
 
 from ..context import deanonymize, to_json
 from ..error import BadRequest
-from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op, Ref
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
 from ..scalar.value import Id
-from ..uri import uri
 
 from .base import is_numeric
-from .interface import Numeric, Trigonometric
+from .interface import Boolean, Numeric, Trigonometric
 
 
 class Gradients(dict):
@@ -26,41 +25,6 @@ class Gradients(dict):
             self[var_id] = __m[var_id]
 
 
-class Constant(Ref):
-    def __init__(self, numeric, name):
-        self.state = numeric
-        self.name = name
-
-    def __json__(self):
-        return to_json(self.state)
-
-    def __ns__(self, context):
-        deanonymize(self.state, context)
-
-    def __same__(self, other):
-        if isinstance(other, Constant):
-            return same_as(self.state, other.state)
-
-        return same_as(self.state, other)
-
-    def __repr__(self):
-        if self.name:
-            return str(self.name)
-
-        if is_one(self.state):
-            return f"1x{self.shape}"
-        elif is_zero(self.state):
-            return f"0x{self.shape}"
-        elif not uri(self.state).startswith("/state"):
-            return str(uri(self.state))
-        else:
-            return f"constant {hex_id(self.state)}"
-
-    @property
-    def shape(self):
-        return self.state.shape
-
-
 class Operator(Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
@@ -68,7 +32,7 @@ class Operator(Op):
         if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
-        Op.__init__(self, simplify(subject), simplify(args))
+        Op.__init__(self, subject, args)
 
     def __json__(self):
         return to_json(self.forward())
@@ -121,15 +85,6 @@ class Operator(Op):
         """
 
         raise NotImplementedError(f"{self.__class__}.gradients")
-
-    def simplify(self):
-        """
-        Return a simplified form of this :class:`Operator` if possible, otherwise return `self`.
-
-        For example, calling `Add(x, 0).simplify()` will return `x`, and `Mul(1, y).simplify()` will return `y`.
-        """
-
-        return self
 
 
 class Unary(Operator):
@@ -219,6 +174,18 @@ class Exp(Unary):
             grads[hex_id(self.subject)] = loss
 
         return grads
+
+
+class LogicalNot(Unary):
+    def __repr__(self):
+        return f"NOT ({self.subject})"
+
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        return Boolean.logical_not(self.subject)
 
 
 class Trig(Unary):
@@ -476,8 +443,8 @@ class MatMul(Dual):
         return Shape(self.subject.shape[:-2]) + Shape((self.subject.shape[-1], self.args.shape[-2]))
 
     def forward(self):
-        from ..collection.tensor import einsum
-        return einsum("...ij,...jk->ik", [self.subject, self.args])
+        from ..collection.tensor import NDArray
+        return NDArray.__matmul__(self.subject, self.args)
 
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
@@ -506,13 +473,6 @@ class MatMul(Dual):
             grads[hex_id(self.args)] = grad
 
         return grads
-
-    def simplify(self):
-        if is_zero(self.subject) or is_zero(self.args):
-            from ..collection.tensor import Sparse
-            return Sparse.zeros([self.subject.shape[-2], self.args.shape[-1]])
-
-        return self
 
 
 class Pow(Dual):
@@ -550,26 +510,39 @@ class Pow(Dual):
 
         return grads
 
-    def simplify(self):
-        from ..collection.tensor import Dense, NDArray
-
-        if is_one(self.subject) or is_one(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_zero(self.args):
-            return Dense.ones_like(self.subject).broadcast(self.args) if isinstance(self.subject, NDArray) else 1
-
-        return self
-
 
 class DualBroadcast(Operator):
     @property
     def shape(self):
         if is_literal(self.args):
-            # it's a constant number
+            # it's a literal number
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
+
+
+class LogicalAnd(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) AND ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_and(self.subject, self.args)
+
+
+class LogicalOr(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) OR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_or(self.subject, self.args)
+
+
+class LogicalXor(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) XOR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_xor(self.subject, self.args)
 
 
 class Add(DualBroadcast):
@@ -598,18 +571,6 @@ class Add(DualBroadcast):
             grads[hex_id(self.args)] = loss
 
         return grads
-
-    def simplify(self):
-        if is_zero(self.subject) and is_zero(self.args):
-            return 0
-
-        if is_zero(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_zero(self.subject):
-            return broadcast_into(self.args, self.subject)
-
-        return self
 
 
 class Mul(DualBroadcast):
@@ -641,18 +602,6 @@ class Mul(DualBroadcast):
 
         return grads
 
-    def simplify(self):
-        if is_zero(self.subject) or is_zero(self.args):
-            return 0
-
-        if is_one(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_one(self.subject):
-            return broadcast_into(self.args, self.subject)
-
-        return self
-
 
 class Sub(DualBroadcast):
     def __repr__(self):
@@ -680,12 +629,6 @@ class Sub(DualBroadcast):
             grads[hex_id(self.args)] = -loss
 
         return grads
-
-    def simplify(self):
-        if is_zero(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        return self
 
 
 class Div(DualBroadcast):
@@ -722,41 +665,17 @@ class Div(DualBroadcast):
 
         return grads
 
-    def simplify(self):
-        if is_zero(self.subject):
-            return broadcast_into(self.args, self.subject)
 
-        if is_one(self.args):
-            return broadcast_into(self.subject, self.args)
+def constant(numeric):
+    """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
-        # TODO: simplify both numerator and denominator into a product of multiplicands
+    while operator(numeric):
+        numeric = type(numeric)(form=operator(numeric).forward())
 
-        if operator(self.subject) and isinstance(operator(self.subject), Mul):
-            numerator = operator(self.subject)
-            if same_as(numerator.subject, self.args):
-                return numerator.args
-            elif same_as(numerator.args, self.args):
-                return numerator.subject
-
-        if operator(self.args) and isinstance(operator(self.args), Mul):
-            denominator = operator(self.args)
-            if same_as(denominator.subject, self.subject):
-                return 1 / denominator.args
-            elif same_as(denominator.args, self.subject):
-                return 1 / denominator.subject
-
-        return self
-
-
-def broadcast_into(source, dest):
-    """Broadcast the given `source` state into the shape of `dest`, only if both are :class:`NDArray` s"""
-
-    from ..collection.tensor import NDArray
-
-    if isinstance(source, NDArray) and isinstance(dest, NDArray):
-        return source.broadcast(dest.shape)
-
-    return source
+    if is_numeric(numeric):
+        return numeric
+    else:
+        raise TypeError(f"not a numeric state: {numeric}")
 
 
 def derivative_of(state, variable=None):
@@ -799,27 +718,39 @@ def gradients(differentiable, loss, variables=None):
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
-    from .equation import Function
-
     if not operator(differentiable):
         raise ValueError(f"not a differentiable state: {differentiable}")
+
+    if not is_constant(loss):
+        raise TypeError(f"gradients requires a constant loss, not {loss}")
 
     grads = operator(differentiable).gradients(loss)
 
     if variables is None:
-        return Function(grads).optimize()
+        return grads
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
             raise KeyError(f"{variables} is not reachable from operator {differentiable}")
 
-        return Function(grads[hex_id(variables)]).optimize()
+        return grads[hex_id(variables)]
 
     missing = [var for var in variables if hex_id(var) not in grads]
     if missing:
         raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
 
-    return Function([grads[hex_id(var)] for var in variables]).optimize()
+    return [grads[hex_id(var)] for var in variables]
+
+
+def is_constant(numeric):
+    """
+    Return `False` if the given `numeric` state is the result of an :class:`Operator`, i.e. a differentiable function.
+    """
+
+    if not is_numeric(numeric):
+        raise TypeError(f"not a numeric state: {numeric}")
+
+    return operator(numeric) is None
 
 
 def is_one(numeric):
@@ -828,12 +759,14 @@ def is_one(numeric):
     if same_as(numeric, 1):
         return True
 
-    from ..collection.tensor import Transform, Zeros
+    from ..collection.tensor import NDArray, Sparse, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, Zeros):
+    if same_as(numeric, 1):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros_like(numeric)):
         return True
 
     return False
@@ -854,12 +787,14 @@ def is_zero(numeric):
     if same_as(numeric, 0):
         return True
 
-    from ..collection.tensor import Ones, Transform
+    from ..collection.tensor import Dense, NDArray, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
-    if isinstance(numeric, Ones):
+    if same_as(numeric, 0):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Dense.ones_like(numeric)):
         return True
 
     return False
@@ -891,7 +826,7 @@ def debug_shape(numeric):
         print(f"the shape of {numeric} is {numeric.shape}")
         return
 
-    print(f"{numeric} does not have a constant shape")
+    print(f"{numeric} does not have a literal shape")
 
     op = operator(numeric)
 
@@ -905,20 +840,3 @@ def debug_shape(numeric):
 
     if isinstance(op.args, NDArray):
         debug_shape(op.args)
-
-
-def simplify(state):
-    """
-    Simplify the given operator graph, if possible.
-
-    For example, `simplify(Add(0, 2))` will return `2`.
-    """
-
-    while operator(state):
-        simplified = operator(state).simplify()
-        if same_as(simplified, state):
-            break
-
-        state = simplified
-
-    return state

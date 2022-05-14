@@ -220,7 +220,7 @@ class Tuple(State, Functional):
             stop = form_of(i.stop)
 
             if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents are constants, so compute the slice now if possible
+                # the contents may be literal, so compute the slice now if possible
                 if hasattr(form_of(self), "__getitem__"):
                     if is_literal(start) and is_literal(stop):
                         start = _index_of(start, len(self), 0)

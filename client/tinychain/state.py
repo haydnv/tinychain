@@ -35,6 +35,8 @@ class State(_Base):
 
             self.__form__ = form
 
+        assert not isinstance(form_of(self), State)
+
         _Base.__init__(self)
 
     def __json__(self):
@@ -77,15 +79,6 @@ class State(_Base):
 
         from .scalar.ref import Get
         return dtype(form=Get(dtype, self))
-
-    def copy(self):
-        """Create a new `State` by copying this one."""
-
-        return self._get("copy", rtype=self.__class__)
-
-    def dtype(self):
-        """Return the native base :class:`Class` of this `State`."""
-        return self._get("class", rtype=Class)
 
     def hash(self):
         """Return the SHA256 hash of this `State` as an :class:`Id`."""
