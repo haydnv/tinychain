@@ -7,7 +7,7 @@ from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, referenc
 from ..scalar.value import Id
 
 from .base import is_numeric
-from .interface import Numeric, Trigonometric
+from .interface import Boolean, Numeric, Trigonometric
 
 
 class Gradients(dict):
@@ -183,6 +183,18 @@ class Exp(Unary):
             grads[hex_id(self.subject)] = loss
 
         return grads
+
+
+class LogicalNot(Unary):
+    def __repr__(self):
+        return f"NOT ({self.subject})"
+
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        return Boolean.logical_not(self.subject)
 
 
 class Trig(Unary):
@@ -534,6 +546,30 @@ class DualBroadcast(Operator):
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
+
+
+class LogicalAnd(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) AND ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_and(self.subject, self.args)
+
+
+class LogicalOr(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) OR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_or(self.subject, self.args)
+
+
+class LogicalXor(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) XOR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_xor(self.subject, self.args)
 
 
 class Add(DualBroadcast):

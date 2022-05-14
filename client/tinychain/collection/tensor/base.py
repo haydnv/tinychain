@@ -1,11 +1,17 @@
 """An n-dimensional array of numbers."""
 
 import inspect
+import logging
 
 from ...decorators import post
 from ...generic import Map, Tuple
 from ...interface import Compare, Interface
-from ...math.operator import *
+from ...math.interface import Boolean, Numeric, Trigonometric
+from ...math.operator import deref, operator
+from ...math.operator import Abs, Exp, Log, Pow
+from ...math.operator import Add, Mul, MatMul, Div, Sub
+from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
+from ...math.operator import LogicalAnd, LogicalNot, LogicalOr, LogicalXor
 from ...scalar.bound import handle_bounds
 from ...scalar.number import Bool, F32, F64, Number, UInt
 from ...scalar import ref
@@ -113,6 +119,18 @@ class NDArray(Interface):
         else:
             return self.sum(axis) / self.shape[axis]
 
+    def logical_and(self, other):
+        return Tensor(form=LogicalAnd(self, other))
+
+    def logical_not(self):
+        return Tensor(form=LogicalNot(self))
+
+    def logical_or(self, other):
+        return Tensor(form=LogicalOr(self, other))
+
+    def logical_xor(self, other):
+        return Tensor(form=LogicalXor(self, other))
+
     def norm(self, axis=None, keepdims=False):
         """
         Compute the Frobenius (aka Euclidean) norm of this :class:`NDArray`.
@@ -174,14 +192,14 @@ class NDArray(Interface):
         return self._put("", None, value)
 
 
-class _Base(Collection, Numeric, Compare, Trigonometric, NDArray):
-    """The base class of a `Constant` or `Tensor`"""
+class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
+    """An n-dimensional array of numbers."""
 
     __uri__ = uri(Collection) + "/tensor"
     __spec__ = (Shape, Number)
 
     def __init__(self, form):
-        if isinstance(deref(form), (bool, float, int)):
+        if isinstance(form, Number) or isinstance(deref(form), (bool, float, int)):
             raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
 
         Collection.__init__(self, form)
@@ -269,75 +287,6 @@ class _Base(Collection, Numeric, Compare, Trigonometric, NDArray):
         cls = cls.expect(shape, dtype)
         op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data))
         return cls(op_ref)
-
-
-class Constant(_Base):
-    """A constant n-dimensional array of numbers, i.e. one which is not the result of a differentiable operator"""
-
-    def argmax(self, axis=None):
-        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.argmax(self, axis))
-
-    def broadcast(self, shape):
-        rtype = Constant.expect(shape, self.dtype)
-        return rtype(form=NDArray.broadcast(self, shape))
-
-    def cast(self, number_type):
-        rtype = Constant.expect(self.shape, number_type)
-        return rtype(form=NDArray.cast(self, number_type))
-
-    def copy(self):
-        return Constant.expect(self.shape, self.dtype)(NDArray.copy(self))
-
-    def expand_dims(self, axis=-1):
-        rtype = Constant.expect(self.shape.expand(axis), self.dtype)
-        return rtype(form=NDArray.expand_dims(self, axis))
-
-    def flip(self, axis):
-        rtype = Constant.expect(self.shape, self.dtype)
-        return rtype(form=NDArray.flip(self, axis))
-
-    def max(self, axis=None):
-        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.max(self, axis))
-
-    def min(self, axis=None):
-        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.min(self, axis))
-
-    def norm(self, axis=None, keepdims=False):
-        rtype = self.dtype if axis is None and not keepdims else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.norm(self, axis, keepdims))
-
-    def product(self, axis=None):
-        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.product(self, axis))
-
-    def reshape(self, shape):
-        rtype = Constant.expect(shape, self.dtype)
-        return rtype(form=NDArray.reshape(self, shape))
-
-    def slice(self, bounds):
-        slice_shape = self.shape.slice(bounds)
-
-        if slice_shape:
-            rtype = Constant.expect(slice_shape, self.dtype)
-        else:
-            rtype = self.dtype
-
-        return rtype(form=NDArray.slice(self))
-
-    def sum(self, axis=None, keepdims=False):
-        rtype = self.dtype if axis is None and not keepdims else Constant.expect(self.shape.reduce(axis), self.dtype)
-        return rtype(form=NDArray.sum(self, axis, keepdims))
-
-    def transpose(self, permutation=None):
-        rtype = Constant.expect(self.shape.transpose(permutation), self.dtype)
-        return rtype(form=NDArray.transpose(permutation))
-
-
-class Tensor(_Base):
-    """An n-dimensional array of numbers."""
 
     def __repr__(self):
         if operator(self):
@@ -466,26 +415,6 @@ class Tensor(_Base):
 
         return self._post("lte", {"r": other}, Tensor)
 
-    def logical_and(self, other):
-        """Return a boolean `Tensor` with element-wise logical and values."""
-
-        return self._post("and", {"r": other}, Tensor)
-
-    def logical_not(self):
-        """Return a boolean `Tensor` with element-wise logical not values."""
-
-        return self._get("not", rtype=Tensor)
-
-    def logical_or(self, other):
-        """Return a boolean `Tensor` with element-wise logical or values."""
-
-        return self._post("or", {"r": other}, Tensor)
-
-    def logical_xor(self, other):
-        """Return a boolean `Tensor` with element-wise logical xor values."""
-
-        return self._post("xor", {"r": other}, Tensor)
-
     def mul(self, other):
         return Tensor(form=Mul(self, other))
 
@@ -596,9 +525,9 @@ class Dense(Tensor):
         cls = cls.expect(shape, dtype)
         op_ref = ref.Get(uri(cls) + "/constant", (shape, value))
 
-        if same_as(value, 1):
+        if ref.same_as(value, 1):
             return cls(op_ref)
-        if same_as(value, 0):
+        if ref.same_as(value, 0):
             return cls(op_ref)
         else:
             return cls(op_ref)
@@ -645,8 +574,8 @@ class Dense(Tensor):
     def random_uniform(cls, shape, minval=0, maxval=1):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
 
-        if not is_literal(minval) or not is_literal(maxval):
-            raise ValueError(f"Dense.random_uniform requires a constant range, not [{minval}, {maxval})")
+        if not ref.is_literal(minval) or not ref.is_literal(maxval):
+            raise ValueError(f"Dense.random_uniform requires a literal range, not [{minval}, {maxval})")
 
         if minval == maxval:
             return cls.constant(shape, minval)

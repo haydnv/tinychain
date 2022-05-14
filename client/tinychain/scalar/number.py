@@ -1,5 +1,6 @@
-from ..math.interface import Numeric, Trigonometric
-from ..math.operator import Add, Div, Exp, Mul, Pow, Sub, Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
+from ..math.interface import Boolean, Numeric, Trigonometric
+from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
+from ..math.operator import Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
 from ..uri import uri
 
 from .ref import form_of
@@ -116,7 +117,7 @@ class Number(Value, Numeric, Trigonometric):
         return self.__class__(form=Atanh(self))
 
 
-class Bool(Number):
+class Bool(Number, Boolean):
     """A boolean :class:`Value`."""
 
     __uri__ = uri(Number) + "/bool"
