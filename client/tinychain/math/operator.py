@@ -759,6 +759,18 @@ def broadcast_into(source, dest):
     return source
 
 
+def constant(numeric):
+    """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
+
+    while operator(numeric):
+        numeric = type(numeric)(form=operator(numeric).forward())
+
+    if is_numeric(numeric):
+        return numeric
+    else:
+        raise TypeError(f"not a numeric state: {numeric}")
+
+
 def derivative_of(state, variable=None):
     """
     Find the derivative of the given `state`.
@@ -799,27 +811,39 @@ def gradients(differentiable, loss, variables=None):
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
-    from .equation import Function
-
     if not operator(differentiable):
         raise ValueError(f"not a differentiable state: {differentiable}")
+
+    if not is_constant(loss):
+        raise TypeError(f"gradients requires a constant loss, not {loss}")
 
     grads = operator(differentiable).gradients(loss)
 
     if variables is None:
-        return Function(grads).optimize()
+        return grads
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
             raise KeyError(f"{variables} is not reachable from operator {differentiable}")
 
-        return Function(grads[hex_id(variables)]).optimize()
+        return grads[hex_id(variables)]
 
     missing = [var for var in variables if hex_id(var) not in grads]
     if missing:
         raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
 
-    return Function([grads[hex_id(var)] for var in variables]).optimize()
+    return [grads[hex_id(var)] for var in variables]
+
+
+def is_constant(numeric):
+    """
+    Return `False` if the given `numeric` state is the result of an :class:`Operator`, i.e. a differentiable function.
+    """
+
+    if not is_numeric(numeric):
+        raise TypeError(f"not a numeric state: {numeric}")
+
+    return operator(numeric) is None
 
 
 def is_one(numeric):

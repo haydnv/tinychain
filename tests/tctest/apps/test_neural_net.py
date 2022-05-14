@@ -38,7 +38,7 @@ class NeuralNetTester(tc.app.Library):
     @tc.post
     def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         def cost(i, o):
-            labels = i[:, 0].logical_or(i[:, 1]).expand_dims()
+            labels = tc.math.constant(i[:, 0].logical_or(i[:, 1]).expand_dims())
             return (o - labels)**2
 
         layer = tc.ml.nn.Linear.create(2, 1)
@@ -48,7 +48,7 @@ class NeuralNetTester(tc.app.Library):
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         def cost(i, o):
-            labels = i[:, 0].logical_xor(i[:, 1]).expand_dims()
+            labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
             return (o - labels)**2
 
         schema = [
@@ -83,8 +83,11 @@ class NeuralNetTests(unittest.TestCase):
         print(f"trained a deep neural net in {elapsed:.2}s")
 
     def testTrainer(self):
+        def cost(i, o):
+            return (o - tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
+
         dnn = tc.ml.nn.DNN.create([[2, 2, tc.ml.sigmoid], [2, 1]])
-        optimizer = tc.ml.optimizer.Adam(dnn, lambda i, o: (o - i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
+        optimizer = tc.ml.optimizer.Adam(dnn, cost)
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
 
         start = time.time()

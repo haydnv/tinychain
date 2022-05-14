@@ -7,8 +7,9 @@ from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
 from ..decorators import closure, get, post
 from ..generic import Map, Tuple
+from ..math.equation import Function
 from ..math.interface import Numeric
-from ..math.operator import derivative_of, gradients
+from ..math.operator import constant, derivative_of, is_constant, gradients
 from ..scalar.number import F32, F64, Number, UInt
 from ..scalar.ref import form_of, hex_id, After, If
 from ..scalar.value import Id
@@ -50,13 +51,15 @@ class Parallel(Optimizer, Dynamic):
         @get
         def calc_grads(cxt, batch: UInt) -> Map:
             cxt.start = batch * txn.chunk_size
-            inputs_batch = inputs[cxt.start:(cxt.start + txn.chunk_size)]
+            inputs_batch = constant(inputs[cxt.start:(cxt.start + txn.chunk_size)].copy())
             outputs = self.ml_model.eval(inputs_batch)
 
-            loss = self._cost(inputs_batch, outputs)
-            d_loss = derivative_of(loss)
-            cxt.d_loss = d_loss.copy() if isinstance(d_loss, Tensor) else d_loss
+            d_loss = derivative_of(self._cost(inputs_batch, outputs))
+            cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
+            assert is_constant(cxt.d_loss)
+
             grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
+            grads = Function(grads).optimize()
 
             if not grads:
                 raise ValueError(f"model output {outputs} has no gradients")
