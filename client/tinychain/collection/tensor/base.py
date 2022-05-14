@@ -344,7 +344,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
             try:
                 return operator(self).shape
             except (RuntimeError, ValueError):
-                logging.debug(f"shape of {self} is not constant")
+                logging.debug(f"{self} does not have a literal shape")
         elif hasattr(deref(self), "shape"):
             return deref(self).shape
 
@@ -355,7 +355,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
     def add(self, other):
         if is_zero(self) and is_zero(other):
-            return 0
+            return Sparse.zeros_like(self).broadcast(other.shape)
 
         from .functions import broadcast_into
 
@@ -486,10 +486,10 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return self._post("lte", {"r": other}, Tensor)
 
     def mul(self, other):
-        if is_zero(self) or is_zero(other):
-            return 0
-
         from .functions import broadcast_into
+
+        if is_zero(self) or is_zero(other):
+            return broadcast_into(Sparse.zeros_like(self), other)
 
         if is_one(other):
             return broadcast_into(self, other)
@@ -527,7 +527,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         """Return a view of this `Tensor` with the given `shape`."""
 
         if not ref.is_literal(copy):
-            raise ValueError(f"reshape requires a constant boolean for copy, not {copy}")
+            raise ValueError(f"reshape requires a literal boolean for copy, not {copy}")
 
         reshaped = Tensor(form=Reshape(self, shape))
 

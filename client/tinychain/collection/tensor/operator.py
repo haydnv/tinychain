@@ -17,7 +17,7 @@ class Concatenate(Operator):
         if axis:
             for tensor in tensors:
                 if not is_literal(tensor.shape[axis]):
-                    logging.debug(f"tensor {tensor} to concatenate noes not have a constant shape at axis {axis}")
+                    logging.debug(f"tensor {tensor} to concatenate noes not have a literal shape at axis {axis}")
 
         Operator.__init__(self, tensors, axis)
 
@@ -27,7 +27,7 @@ class Concatenate(Operator):
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
-            raise ValueError(f"the concatenation of {self.subject} does not have a constant shape")
+            raise ValueError(f"the concatenation of {self.subject} does not have a literal shape")
 
         return Shape.concatenate([t.shape for t in self.subject], self.args)
 
@@ -43,7 +43,7 @@ class Concatenate(Operator):
 
     def backward(self, variable=None):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the derivative of a tensor concatenation requires a constant list, not {self.subject}")
+            raise ValueError(f"the derivative of a tensor concatenation requires a literal list, not {self.subject}")
 
         # TODO: support concatenating Sparse tensors
         from .base import Dense
@@ -51,7 +51,7 @@ class Concatenate(Operator):
 
     def gradients(self, loss):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the gradients of a tensor concatenation requires a constant list, not {self.subject}")
+            raise ValueError(f"the gradients of a tensor concatenation requires a literal list, not {self.subject}")
 
         grads = Gradients()
 
@@ -71,7 +71,7 @@ class Concatenate(Operator):
             num_or_size_slices = [t.shape[axis] for t in self.subject]
 
         if not is_literal(num_or_size_slices):
-            raise TypeError(f"the gradients of a concatenation require constant-shaped inputs, not {self.subject}")
+            raise TypeError(f"the gradients of a concatenation require literal-shaped inputs, not {self.subject}")
 
         from .functions import split
 
@@ -256,7 +256,7 @@ class Flip(Transform):
 class Tile(Transform):
     def __init__(self, tensor, multiples):
         if not is_literal(multiples):
-            raise ValueError(f"Tensor.tile requires a constant value for multiples, not {multiples}")
+            raise ValueError(f"Tensor.tile requires a literal value for multiples, not {multiples}")
 
         Transform.__init__(self, tensor, multiples)
 
@@ -278,7 +278,7 @@ class Tile(Transform):
             return loss
 
         if not is_literal(self.subject.shape):
-            raise RuntimeError(f"inversion with respect to a tiled tensor requires a constant shape, not {self.shape}")
+            raise RuntimeError(f"inversion with respect to a tiled tensor requires a literal shape, not {self.shape}")
 
         dims = deref(self.subject.shape)
         multiples = ([1] * (len(self.args) - 1)) + [self.args] if isinstance(self.args, int) else self.args

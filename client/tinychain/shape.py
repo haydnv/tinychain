@@ -24,7 +24,7 @@ class Shape(Tuple):
         if hasattr(self, "__len__") and hasattr(other, "__len__"):
             return Shape(tuple(deref(self)) + tuple(deref(other)))
         else:
-            raise ValueError(f"can only append Shapes with a constant number of dimensions, not {self} and {other}")
+            raise ValueError(f"can only append Shapes with a literal number of dimensions, not {self} and {other}")
 
     def __getitem__(self, x):
         if x is None:
@@ -43,7 +43,7 @@ class Shape(Tuple):
                 raise NotImplementedError(f"slice with step: {x}")
 
             if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents are constants, so compute the slice now if possible
+                # the contents may be literal, so compute the slice now if possible
                 if hasattr(deref(self), "__getitem__"):
                     if is_literal(start) and is_literal(stop):
                         start = _index_of(start, len(self), 0)
@@ -78,7 +78,7 @@ class Shape(Tuple):
         if not shapes:
             raise ValueError("cannot concatenate an empty list of shapes")
         elif not hasattr(shapes, "__len__"):
-            raise ValueError(f"can only concatenate a constant list of shapes, not {shapes}")
+            raise ValueError(f"can only concatenate a literal list of shapes, not {shapes}")
 
         ndim = shapes[0].ndim(True, "concatenate")
         for shape in shapes:
@@ -89,17 +89,17 @@ class Shape(Tuple):
             axis = deref(axis)
             axis = ndim + axis if axis < 0 else axis
         else:
-            raise ValueError(f"Shape.concatenate requires a constant axis, not {axis}")
+            raise ValueError(f"Shape.concatenate requires a literal axis, not {axis}")
 
         dim = 0
         for shape in shapes:
             if shape[axis] is None:
-                raise ValueError(f"dimension for concatenation at axis {axis} is not constant: {shape[axis]}")
+                raise ValueError(f"dimension for concatenation at axis {axis} is unknown: {shape[axis]}")
 
             if is_literal(shape[axis]):
                 dim += deref(shape[axis])
             else:
-                raise ValueError(f"Shape.concatenate requires constant dimensions along the axis {axis}")
+                raise ValueError(f"Shape.concatenate requires literal dimensions along the axis {axis}")
 
         concatenated = [None] * ndim
         concatenated[axis] = dim
@@ -112,13 +112,13 @@ class Shape(Tuple):
                     raise ValueError(f"cannot concatenate {shapes} due to inconsistent dimension at axis {x}")
 
             if concatenated[x] is None:
-                raise ValueError(f"shape of concatenated tensor is not constant at axis {x}")
+                raise ValueError(f"shape of concatenated tensor is not kown at axis {x}")
 
         return Shape(concatenated)
 
-    def ndim(self, require_constant=False, op_name="this operation"):
-        if require_constant and not hasattr(self, "__len__"):
-            raise RuntimeError(f"to {op_name} {self} requires a constant number of dimensions")
+    def ndim(self, require_literal=False, op_name="this operation"):
+        if require_literal and not hasattr(self, "__len__"):
+            raise RuntimeError(f"to {op_name} {self} requires a literal number of dimensions")
 
         if hasattr(self, "__len__"):
             return len(self)
@@ -163,7 +163,7 @@ class Shape(Tuple):
                     dim = r  # assume l == r
 
             else:
-                raise ValueError(f"broadcast requires at least one of the dimensions {l} and {r} to be constant")
+                raise ValueError(f"broadcast requires at least one of the dimensions {l} and {r} to be literal")
 
             shape[x] = dim
 
@@ -171,10 +171,10 @@ class Shape(Tuple):
 
     def expand(self, axis=None):
         if not hasattr(self, "__len__"):
-            raise RuntimeError(f"Shape.expand requires a constant number of dimensions")
+            raise RuntimeError(f"Shape.expand requires a literal number of dimensions")
 
         if not is_literal(axis):
-            raise ValueError(f"Shape.expand requires a constant axis, not {axis}")
+            raise ValueError(f"Shape.expand requires a literal axis, not {axis}")
 
         if axis is None:
             return Shape(self + [1])
@@ -183,10 +183,10 @@ class Shape(Tuple):
 
     def reduce(self, axis=None, keepdims=False):
         if not is_literal(axis):
-            raise ValueError(f"Shape.reduce requires a constant axis, not {axis}")
+            raise ValueError(f"Shape.reduce requires a literal axis, not {axis}")
 
         if not is_literal(keepdims):
-            return ValueError(f"the keepdims parameter of Shape.reduce must be a constant, not {keepdims}")
+            return ValueError(f"the keepdims parameter of Shape.reduce must be a literal, not {keepdims}")
 
         if not keepdims and axis is None:
             return Shape(tuple())
@@ -224,13 +224,13 @@ class Shape(Tuple):
 
             return Shape(new_shape)
         elif any(dim is None for dim in new_shape):
-            raise ValueError(f"non-constant {self} does not support reshape with an unknown dimension: {new_shape}")
+            raise ValueError(f"{self} does not support reshape with an unknown dimension: {new_shape}")
         else:
             return Shape(new_shape)
 
     def slice(self, bounds):
         if not hasattr(bounds, "__iter__"):
-            raise ValueError(f"the shape of a Tensor slice requires constant-length bounds, not {bounds}")
+            raise ValueError(f"the shape of a Tensor slice requires literal-length bounds, not {bounds}")
 
         shape = []
         for x, bound in enumerate(bounds):
@@ -241,13 +241,13 @@ class Shape(Tuple):
                 start = 0 if bound.start is None else deref(bound.start)
                 stop = deref(self[x]) if bound.stop is None else deref(bound.stop)
                 if not is_literal((start, stop)):
-                    raise ValueError(f"the shape of a Tensor slice requires a constant bound, not {(start, stop)}")
+                    raise ValueError(f"the shape of a Tensor slice requires a literal bound, not {(start, stop)}")
 
                 if start < 0 or stop < 0:
                     if is_literal(self[x]):
                         dim = self[x]
                     else:
-                        raise RuntimeError(f"Shape.slice requires a constant dimension for axis {x}, not {self[x]}")
+                        raise RuntimeError(f"Shape.slice requires a literal dimension for axis {x}, not {self[x]}")
 
                     start = dim + start if start < 0 else start
                     stop = dim + stop if stop < 0 else stop
@@ -266,12 +266,12 @@ class Shape(Tuple):
 
     def tile(self, multiples):
         if not is_literal(multiples):
-            raise ValueError(f"Shape.tile requires a constant number or tuple for multiples, not {multiples}")
+            raise ValueError(f"Shape.tile requires a literal number or tuple for multiples, not {multiples}")
 
         multiples = deref(multiples)
         if isinstance(multiples, (list, tuple)):
             if not is_literal(self):
-                raise ValueError(f"only a constant Shape supports tiling {multiples} times per-axis")
+                raise ValueError(f"only a literal Shape supports tiling {multiples} times per-axis")
 
             assert len(self) == len(multiples)
             return Shape([dim * m for dim, m in zip(self, multiples)])
@@ -283,13 +283,13 @@ class Shape(Tuple):
     def transpose(self, permutation=None):
         if permutation is None:
             if not hasattr(self, "__reversed__"):
-                raise RuntimeError(f"Shape.transpose requires a constant-length shape, not {self}")
+                raise RuntimeError(f"Shape.transpose requires a literal-length shape, not {self}")
 
             return reversed(self)
         elif is_literal(permutation):
             return Shape(tuple(self[x] for x in permutation))
         else:
-            raise ValueError(f"Shape.transpose requires a constant permutation, not {permutation}")
+            raise ValueError(f"Shape.transpose requires a literal permutation, not {permutation}")
 
 
 def _index_of(i, length, default):

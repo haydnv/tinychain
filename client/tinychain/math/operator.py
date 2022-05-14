@@ -515,7 +515,7 @@ class DualBroadcast(Operator):
     @property
     def shape(self):
         if is_literal(self.args):
-            # it's a constant number
+            # it's a literal number
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
@@ -826,7 +826,7 @@ def debug_shape(numeric):
         print(f"the shape of {numeric} is {numeric.shape}")
         return
 
-    print(f"{numeric} does not have a constant shape")
+    print(f"{numeric} does not have a literal shape")
 
     op = operator(numeric)
 
