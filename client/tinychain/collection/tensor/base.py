@@ -548,7 +548,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         parent = self
         bounds = handle_bounds(bounds)
 
-        if hasattr(self.shape, "__len__"):
+        if ref.is_literal(self.shape):
             slice_shape = self.shape.slice(bounds)  # test for valid bounds, if possible
             if hasattr(slice_shape, "__len__") and len(slice_shape) == 0:
                 # in this case the result is a Number, not a Tensor
