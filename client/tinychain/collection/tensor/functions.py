@@ -16,6 +16,15 @@ def _gcs(*instances):
             return x
 
 
+def broadcast_into(source, dest):
+    """Broadcast the given `source` state into the shape of `dest`, only if both are :class:`NDArray` s"""
+
+    if isinstance(source, NDArray) and isinstance(dest, NDArray):
+        return source.broadcast(dest.shape)
+
+    return source
+
+
 def einsum(format, tensors):
     """
     Return the Einstein summation of the given `tensors` according the the given `format` string.

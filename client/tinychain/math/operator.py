@@ -32,7 +32,7 @@ class Operator(Op):
         if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
-        Op.__init__(self, simplify(subject), simplify(args))
+        Op.__init__(self, subject, args)
 
     def __json__(self):
         return to_json(self.forward())
@@ -85,15 +85,6 @@ class Operator(Op):
         """
 
         raise NotImplementedError(f"{self.__class__}.gradients")
-
-    def simplify(self):
-        """
-        Return a simplified form of this :class:`Operator` if possible, otherwise return `self`.
-
-        For example, calling `Add(x, 0).simplify()` will return `x`, and `Mul(1, y).simplify()` will return `y`.
-        """
-
-        return self
 
 
 class Unary(Operator):
@@ -483,13 +474,6 @@ class MatMul(Dual):
 
         return grads
 
-    def simplify(self):
-        if is_zero(self.subject) or is_zero(self.args):
-            from ..collection.tensor import Sparse
-            return Sparse.zeros([self.subject.shape[-2], self.args.shape[-1]])
-
-        return self
-
 
 class Pow(Dual):
     def __repr__(self):
@@ -525,17 +509,6 @@ class Pow(Dual):
             grads[hex_id(self.args)] = grad
 
         return grads
-
-    def simplify(self):
-        from ..collection.tensor import Dense, NDArray
-
-        if is_one(self.subject) or is_one(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_zero(self.args):
-            return Dense.ones_like(self.subject).broadcast(self.args) if isinstance(self.subject, NDArray) else 1
-
-        return self
 
 
 class DualBroadcast(Operator):
@@ -599,18 +572,6 @@ class Add(DualBroadcast):
 
         return grads
 
-    def simplify(self):
-        if is_zero(self.subject) and is_zero(self.args):
-            return 0
-
-        if is_zero(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_zero(self.subject):
-            return broadcast_into(self.args, self.subject)
-
-        return self
-
 
 class Mul(DualBroadcast):
     def __repr__(self):
@@ -641,18 +602,6 @@ class Mul(DualBroadcast):
 
         return grads
 
-    def simplify(self):
-        if is_zero(self.subject) or is_zero(self.args):
-            return 0
-
-        if is_one(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        if is_one(self.subject):
-            return broadcast_into(self.args, self.subject)
-
-        return self
-
 
 class Sub(DualBroadcast):
     def __repr__(self):
@@ -680,12 +629,6 @@ class Sub(DualBroadcast):
             grads[hex_id(self.args)] = -loss
 
         return grads
-
-    def simplify(self):
-        if is_zero(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        return self
 
 
 class Div(DualBroadcast):
@@ -721,42 +664,6 @@ class Div(DualBroadcast):
             grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
         return grads
-
-    def simplify(self):
-        if is_zero(self.subject):
-            return broadcast_into(self.args, self.subject)
-
-        if is_one(self.args):
-            return broadcast_into(self.subject, self.args)
-
-        # TODO: simplify both numerator and denominator into a product of multiplicands
-
-        if operator(self.subject) and isinstance(operator(self.subject), Mul):
-            numerator = operator(self.subject)
-            if same_as(numerator.subject, self.args):
-                return numerator.args
-            elif same_as(numerator.args, self.args):
-                return numerator.subject
-
-        if operator(self.args) and isinstance(operator(self.args), Mul):
-            denominator = operator(self.args)
-            if same_as(denominator.subject, self.subject):
-                return 1 / denominator.args
-            elif same_as(denominator.args, self.subject):
-                return 1 / denominator.subject
-
-        return self
-
-
-def broadcast_into(source, dest):
-    """Broadcast the given `source` state into the shape of `dest`, only if both are :class:`NDArray` s"""
-
-    from ..collection.tensor import NDArray
-
-    if isinstance(source, NDArray) and isinstance(dest, NDArray):
-        return source.broadcast(dest.shape)
-
-    return source
 
 
 def constant(numeric):
@@ -933,20 +840,3 @@ def debug_shape(numeric):
 
     if isinstance(op.args, NDArray):
         debug_shape(op.args)
-
-
-def simplify(state):
-    """
-    Simplify the given operator graph, if possible.
-
-    For example, `simplify(Add(0, 2))` will return `2`.
-    """
-
-    while operator(state):
-        simplified = operator(state).simplify()
-        if same_as(simplified, state):
-            break
-
-        state = simplified
-
-    return state

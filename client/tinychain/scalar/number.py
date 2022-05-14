@@ -1,4 +1,7 @@
+import math
+
 from ..math.interface import Boolean, Numeric, Trigonometric
+from ..math.operator import is_one, is_zero
 from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
 from ..math.operator import Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
 from ..uri import uri
@@ -24,6 +27,9 @@ class Number(Value, Numeric, Trigonometric):
     def add(self, other):
         """Return the sum of `self` and `other`."""
 
+        if is_zero(other):
+            return self
+
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other + self
@@ -33,6 +39,9 @@ class Number(Value, Numeric, Trigonometric):
     def div(self, other):
         """Return the quotient of `self` and `other`."""
 
+        if is_one(other):
+            return self
+
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other * (1 / self)
@@ -40,10 +49,20 @@ class Number(Value, Numeric, Trigonometric):
         return self.__class__(form=Div(self, other))
 
     def exp(self):
+        if is_zero(self):
+            return 1
+        elif is_one(self):
+            return math.e
+
         return self.__class__(form=Exp(self))
 
     def modulo(self, other):
         """Return the remainder of `self` divided by `other`."""
+
+        if is_one(other):
+            return 0
+        elif is_zero(other):
+            raise ValueError(f"divide by zero: {self} / {other}")
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
@@ -55,6 +74,11 @@ class Number(Value, Numeric, Trigonometric):
     def mul(self, other):
         """Return the product of `self` and `other`."""
 
+        if is_one(other):
+            return self
+        elif is_zero(other):
+            return 0
+
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other * self
@@ -63,6 +87,11 @@ class Number(Value, Numeric, Trigonometric):
 
     def pow(self, other):
         """Raise `self` to the power of `other`."""
+
+        if is_one(self) or is_zero(self) or is_one(other):
+            return self
+        elif is_zero(other):
+            return 1
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
@@ -73,6 +102,9 @@ class Number(Value, Numeric, Trigonometric):
 
     def sub(self, other):
         """Return the difference between `self` and `other`."""
+
+        if is_zero(other):
+            return self
 
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
@@ -133,10 +165,20 @@ class Bool(Number, Boolean):
         if isinstance(other, Tensor):
             return other.logical_and(self)
 
+        if is_zero(other):
+            return False
+        elif is_one(other):
+            return self
+
         return self._get("and", other, Bool)
 
     def logical_not(self):
         """Boolean NOT"""
+
+        if is_one(self):
+            return False
+        elif is_zero(self):
+            return True
 
         return self._get("not", rtype=Bool)
 
@@ -147,6 +189,11 @@ class Bool(Number, Boolean):
         if isinstance(other, Tensor):
             return other.logical_or(self)
 
+        if is_one(other):
+            return True
+        elif is_zero(other):
+            return self
+
         return self._get("or", other, Bool)
 
     def logical_xor(self, other):
@@ -155,6 +202,11 @@ class Bool(Number, Boolean):
         from ..collection.tensor import Tensor
         if isinstance(other, Tensor):
             return other.logical_xor(self)
+
+        if is_one(other):
+            return self.logical_not()
+        elif is_zero(other):
+            return self
 
         return self._get("xor", other, Bool)
 
