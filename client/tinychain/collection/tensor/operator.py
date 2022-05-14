@@ -109,6 +109,34 @@ class Copy(Unary):
         return Gradients()
 
 
+class Read(Operator):
+    def __init__(self, tensor, bounds):
+        Operator.__init__(self, tensor, bounds)
+
+    def __repr__(self):
+        return f"{self.subject}[{self.args}]"
+
+    @property
+    def shape(self):
+        return Shape(tuple())
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.slice(self.subject, self.args)
+
+    def backward(self, variable=None):
+        return derivative_of(self.subject).slice(self.args)
+
+
+class Reduce(Operator):
+    def __init__(self, tensor, axis=None, keepdims=False):
+        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
+
+    @property
+    def shape(self):
+        return Shape.reduce(self.subject.shape, **self.args)
+
+
 class Norm(Operator):
     def __repr__(self):
         if self.args:
@@ -141,15 +169,6 @@ class Norm(Operator):
             grads[hex_id(self.subject)] = loss
 
         return grads
-
-
-class Reduce(Operator):
-    def __init__(self, tensor, axis=None, keepdims=False):
-        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
-
-    @property
-    def shape(self):
-        return Shape.reduce(self.subject.shape, **self.args)
 
 
 class Sum(Reduce):
@@ -380,7 +399,7 @@ class Slice(Transform):
 
             @property
             def shape(self):
-                return self.subject.shape
+                return grad.shape
 
             def forward(self):
                 return self.subject

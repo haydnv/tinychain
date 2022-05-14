@@ -452,25 +452,21 @@ class MatMul(Dual):
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
-        def transpose(matrix):
-            return type(matrix)(form=If(
-                matrix.ndim == 2,
-                matrix.transpose(),
-                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
+        # TODO: don't assume that self.subject.ndim == 2 and self.args.ndim == 2
 
         grads = Gradients()
 
-        grad = loss @ transpose(self.args)
+        subject_grad = loss @ self.args.transpose([1, 0])
         if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
+            grads.update(operator(self.subject).gradients(subject_grad))
         else:
-            grads[hex_id(self.subject)] = grad
+            grads[hex_id(self.subject)] = subject_grad
 
-        grad = transpose(self.subject) @ loss
+        args_grad = self.subject.transpose([1, 0]) @ loss
         if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
+            grads.update(operator(self.args).gradients(args_grad))
         else:
-            grads[hex_id(self.args)] = grad
+            grads[hex_id(self.args)] = args_grad
 
         return grads
 

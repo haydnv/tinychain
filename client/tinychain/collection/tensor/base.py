@@ -22,7 +22,7 @@ from ...uri import uri
 
 from ..base import Collection
 
-from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Reshape, Slice, Sum, Transpose
+from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Read, Reshape, Slice, Sum, Transpose
 
 
 class NDArray(Interface):
@@ -416,6 +416,12 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
     def log(self, base=None):
         return Tensor(form=Log(self, base))
 
+    def max(self, axis=None):
+        return Tensor(form=NDArray.max(self, axis))
+
+    def min(self, axis=None):
+        return Tensor(form=NDArray.min(self, axis))
+
     def sin(self):
         return Tensor(form=Sin(self))
 
@@ -542,8 +548,17 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         parent = self
         bounds = handle_bounds(bounds)
 
-        if ref.is_literal(self.shape):
-            self.shape.slice(bounds)  # test for valid bounds, if possible
+        if hasattr(self.shape, "__len__"):
+            slice_shape = self.shape.slice(bounds)  # test for valid bounds, if possible
+            if hasattr(slice_shape, "__len__") and len(slice_shape) == 0:
+                # in this case the result is a Number, not a Tensor
+                rtype = self.dtype if inspect.isclass(self.dtype) and issubclass(self.dtype, Number) else Number
+
+                class WritableView(rtype):
+                    def write(self, value):
+                        return parent._put("", bounds, value)
+
+                return WritableView(Read(self, bounds))
 
         class WritableView(Tensor):
             def write(self, value):

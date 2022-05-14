@@ -1,6 +1,6 @@
 import logging
 
-from ..collection.tensor import Tensor
+from ..collection.tensor import Copy, NDArray
 from ..scalar.ref import deref, hex_id, same_as, Op
 
 from .operator import operator
@@ -85,10 +85,16 @@ class Function(object):
         for f, _t in self.edges:
             counts[hex_id(f)] += 1
 
-        copies = {
-            node_id: self.nodes[node_id].copy() for node_id, count in counts.items()
-            if count > 1 and isinstance(self.nodes[node_id], Tensor)
-        }
+        copies = {}
+        for node_id, count in counts.items():
+            if count <= 1:
+                continue
+
+            node = self.nodes[node_id]
+            if not isinstance(node, NDArray) or isinstance(operator(node), Copy):
+                copies[node_id] = node
+            else:
+                copies[node_id] = node.copy()
 
         visited = {}
         unvisited = self._unvisited()
