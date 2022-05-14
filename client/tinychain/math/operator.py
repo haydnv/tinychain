@@ -2,7 +2,6 @@ import logging
 import typing
 
 from ..context import deanonymize, to_json
-from ..error import BadRequest
 from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
 from ..scalar.value import Id
 
@@ -11,6 +10,12 @@ from .interface import Boolean, Numeric, Trigonometric
 
 
 class Gradients(dict):
+    def __add__(self, other):
+        grads = Gradients()
+        grads.update(self)
+        grads.update(other)
+        return grads
+
     def __setitem__(self, key: Id, value: Numeric):
         if key in self:
             dict.__setitem__(self, key, self[key] + value)
@@ -138,16 +143,7 @@ class Abs(Unary):
         return self.subject / self.subject.abs()
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients())
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class Exp(Unary):
@@ -165,15 +161,7 @@ class Exp(Unary):
         return self.subject.exp()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class LogicalNot(Unary):
@@ -193,12 +181,6 @@ class Trig(Unary):
     def shape(self):
         return self.subject.shape
 
-    def gradients(self, loss):
-        if operator(self.subject):
-            return operator(self.subject).gradients(loss)
-        else:
-            return Gradients({hex_id(self.subject): loss})
-
 
 class Sin(Trig):
     def __repr__(self):
@@ -212,8 +194,7 @@ class Sin(Trig):
         return subject.cos()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Cos(Trig):
@@ -228,8 +209,7 @@ class Cos(Trig):
         return subject - self.subject.sin()
 
     def gradients(self, loss):
-        loss *= -self.subject.sin()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * -self.subject.sin())
 
 
 class Asin(Trig):
@@ -244,8 +224,7 @@ class Asin(Trig):
         return (1 - (subject**2))**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Acos(Trig):
@@ -260,8 +239,7 @@ class Acos(Trig):
         return -((1 - subject**2)**-0.5)
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Sinh(Trig):
@@ -276,8 +254,7 @@ class Sinh(Trig):
         return subject.cosh()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Cosh(Trig):
@@ -292,8 +269,7 @@ class Cosh(Trig):
         return subject.sinh()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Asinh(Trig):
@@ -308,8 +284,7 @@ class Asinh(Trig):
         return (subject**2 + 1)**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Acosh(Trig):
@@ -324,8 +299,7 @@ class Acosh(Trig):
         return ((subject**2) - 1)**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Tan(Trig):
@@ -340,8 +314,7 @@ class Tan(Trig):
         return 1 / (subject.cos()**2)
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Tanh(Trig):
@@ -356,8 +329,7 @@ class Tanh(Trig):
         return 1 - subject.tanh()**2
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Atan(Trig):
@@ -372,8 +344,7 @@ class Atan(Trig):
         return 1 / (subject**2 + 1)
 
     def gradients(self, loss):
-        loss *= (self.subject**2 + 1)**(-1)
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * (self.subject**2 + 1)**(-1))
 
 
 class Atanh(Trig):
@@ -388,8 +359,7 @@ class Atanh(Trig):
         return 1 / (1 - (subject**2))
 
     def gradients(self, loss):
-        loss *= (1 - self.subject**2)**(-1)
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss / (1 - self.subject**2))
 
 
 class Dual(Operator):
@@ -421,16 +391,7 @@ class Log(Operator):
         return 1 / self.subject
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class MatMul(Dual):
@@ -453,22 +414,8 @@ class MatMul(Dual):
 
     def gradients(self, loss):
         # TODO: don't assume that self.subject.ndim == 2 and self.args.ndim == 2
-
-        grads = Gradients()
-
-        subject_grad = loss @ self.args.transpose([1, 0])
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(subject_grad))
-        else:
-            grads[hex_id(self.subject)] = subject_grad
-
-        args_grad = self.subject.transpose([1, 0]) @ loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(args_grad))
-        else:
-            grads[hex_id(self.args)] = args_grad
-
-        return grads
+        return (gradients(self.subject, loss @ self.args.transpose([1, 0])) +
+                gradients(self.args, self.subject.transpose([1, 0]) @ loss))
 
 
 class Pow(Dual):
@@ -490,21 +437,9 @@ class Pow(Dual):
         return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        grad = loss * self.args * self.subject**(self.args - 1)
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = loss * self.subject.log() * self.subject**self.args
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
+        subject_grad = loss * self.args * self.subject**(self.args - 1)
+        args_grad = loss * self.subject.log() * self.subject**self.args
+        return gradients(self.subject, subject_grad) + gradients(self.args, args_grad)
 
 
 class DualBroadcast(Operator):
@@ -554,19 +489,7 @@ class Add(DualBroadcast):
         return subject + arg
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss))
-        else:
-            grads[hex_id(self.args)] = loss
-
-        return grads
+        return gradients(self.subject, loss) + gradients(self.args, loss)
 
 
 class Mul(DualBroadcast):
@@ -582,21 +505,7 @@ class Mul(DualBroadcast):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        grad = self.args * loss
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = self.subject * loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
+        return gradients(self.subject, self.args * loss) + gradients(self.args, self.subject * loss)
 
 
 class Sub(DualBroadcast):
@@ -617,12 +526,12 @@ class Sub(DualBroadcast):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
         else:
-            grads[hex_id(self.subject)] = -loss
+            grads[hex_id(self.subject)] = constant(-loss)
 
         if operator(self.args):
             grads.update(operator(self.args).gradients(loss))
         else:
-            grads[hex_id(self.args)] = -loss
+            grads[hex_id(self.args)] = constant(-loss)
 
         return grads
 
@@ -652,12 +561,12 @@ class Div(DualBroadcast):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss / self.args))
         else:
-            grads[hex_id(self.subject)] = self.subject * loss / self.args
+            grads[hex_id(self.subject)] = constant(self.subject * loss / self.args)
 
         if operator(self.args):
             grads.update(operator(self.args).gradients(loss / self.args))
         else:
-            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
+            grads[hex_id(self.args)] = constant((-self.subject * loss) / self.args**2)
 
         return grads
 
@@ -705,35 +614,36 @@ def derivative_of(state, variable=None):
     return zeros_like(state)
 
 
-def gradients(differentiable, loss, variables=None):
+def gradients(numeric, loss, variables=None):
     """
-    Return the gradient of a `differentiable` operator graph with respect the `loss`.
+    Return the gradient of a `numeric` state with respect to the given `loss`.
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
     If a list of variables is given, a corresponding list of gradients will be returned.
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
-    if not operator(differentiable):
-        raise ValueError(f"not a differentiable state: {differentiable}")
-
-    if not is_constant(loss):
-        raise TypeError(f"gradients requires a constant loss, not {loss}")
-
-    grads = operator(differentiable).gradients(loss)
+    if operator(numeric):
+        grads = operator(numeric).gradients(loss)
+    elif is_constant(numeric):
+        grads = Gradients({hex_id(numeric): loss})
+    elif is_numeric(numeric):
+        raise ValueError(f"cannot compute gradients of {numeric} w/r/t {loss}")
+    else:
+        raise ValueError(f"not a numeric state: {numeric}")
 
     if variables is None:
         return grads
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
-            raise KeyError(f"{variables} is not reachable from operator {differentiable}")
+            raise KeyError(f"{variables} is not reachable from operator {numeric}")
 
         return grads[hex_id(variables)]
 
     missing = [var for var in variables if hex_id(var) not in grads]
     if missing:
-        raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
+        raise KeyError(f"not reachable by traversing the operator graph {numeric}: {missing}")
 
     return [grads[hex_id(var)] for var in variables]
 
