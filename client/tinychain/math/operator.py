@@ -440,8 +440,8 @@ class MatMul(Dual):
         return Shape(self.subject.shape[:-2]) + Shape((self.subject.shape[-1], self.args.shape[-2]))
 
     def forward(self):
-        from ..collection.tensor import einsum
-        return einsum("...ij,...jk->ik", [self.subject, self.args])
+        from ..collection.tensor import NDArray
+        return NDArray.__matmul__(self.subject, self.args)
 
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)

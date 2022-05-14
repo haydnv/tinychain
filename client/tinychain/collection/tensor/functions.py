@@ -1,9 +1,19 @@
 from ...scalar.number import Bool
 from ...scalar.ref import deref, is_literal, Post
+from ...state import State
 from ...uri import uri
 
-from .base import Tensor
+from .base import NDArray, Tensor
 from .operator import Tile
+
+
+def _gcs(*instances):
+    """Get the greatest common superclass of a list of instances"""
+
+    classes = [type(x).mro() for x in instances]
+    for x in classes[0]:
+        if all(x in mro for mro in classes):
+            return x
 
 
 def einsum(format, tensors):
@@ -16,7 +26,16 @@ def einsum(format, tensors):
     it's important to put the sparsest first in the list to avoid redundant broadcasting.
     """
 
-    return Tensor(Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
+    if not is_literal(format):
+        raise ValueError(f"einsum requires a literal format, not {format}")
+
+    for tensor in tensors:
+        if not isinstance(tensor, NDArray):
+            raise TypeError(f"einsum requires a tensor, not: {tensor}")
+
+    rtype = _gcs(tensors)
+    rtype = rtype if issubclass(rtype, State) else type("NDArrayState", (State, NDArray), {})
+    return rtype(form=Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
 
 
 def split(tensor, num_or_size_splits, axis=0):

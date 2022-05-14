@@ -19,6 +19,16 @@ from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Reshape,
 
 
 class NDArray(Interface):
+    def __getitem__(self, bounds):
+        return self.slice(bounds)
+
+    def __matmul__(self, other):
+        from .functions import einsum
+        return einsum("...ij,...jk->ik", [self, other])
+
+    def __setitem__(self, bounds, value):
+        raise NotImplementedError("use Tensor.write instead")
+
     @property
     def dtype(self):
         return Class(ref.Get(ref.MethodSubject(self, "dtype")))
@@ -164,8 +174,8 @@ class NDArray(Interface):
         return self._put("", None, value)
 
 
-class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
-    """An n-dimensional array of numbers."""
+class _Base(Collection, Numeric, Compare, Trigonometric, NDArray):
+    """The base class of a `Constant` or `Tensor`"""
 
     __uri__ = uri(Collection) + "/tensor"
     __spec__ = (Shape, Number)
@@ -175,12 +185,6 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
             raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
 
         Collection.__init__(self, form)
-
-    def __repr__(self):
-        if operator(self):
-            return str(operator(self))
-
-        return State.__repr__(self)
 
     @classmethod
     def trig_rtype(cls):
@@ -266,11 +270,80 @@ class Tensor(Collection, Numeric, Compare, Trigonometric, NDArray):
         op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data))
         return cls(op_ref)
 
-    def __getitem__(self, bounds):
-        return self.slice(bounds)
 
-    def __setitem__(self, bounds, value):
-        raise NotImplementedError("use Tensor.write instead")
+class Constant(_Base):
+    """A constant n-dimensional array of numbers, i.e. one which is not the result of a differentiable operator"""
+
+    def argmax(self, axis=None):
+        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.argmax(self, axis))
+
+    def broadcast(self, shape):
+        rtype = Constant.expect(shape, self.dtype)
+        return rtype(form=NDArray.broadcast(self, shape))
+
+    def cast(self, number_type):
+        rtype = Constant.expect(self.shape, number_type)
+        return rtype(form=NDArray.cast(self, number_type))
+
+    def copy(self):
+        return Constant.expect(self.shape, self.dtype)(NDArray.copy(self))
+
+    def expand_dims(self, axis=-1):
+        rtype = Constant.expect(self.shape.expand(axis), self.dtype)
+        return rtype(form=NDArray.expand_dims(self, axis))
+
+    def flip(self, axis):
+        rtype = Constant.expect(self.shape, self.dtype)
+        return rtype(form=NDArray.flip(self, axis))
+
+    def max(self, axis=None):
+        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.max(self, axis))
+
+    def min(self, axis=None):
+        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.min(self, axis))
+
+    def norm(self, axis=None, keepdims=False):
+        rtype = self.dtype if axis is None and not keepdims else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.norm(self, axis, keepdims))
+
+    def product(self, axis=None):
+        rtype = self.dtype if axis is None else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.product(self, axis))
+
+    def reshape(self, shape):
+        rtype = Constant.expect(shape, self.dtype)
+        return rtype(form=NDArray.reshape(self, shape))
+
+    def slice(self, bounds):
+        slice_shape = self.shape.slice(bounds)
+
+        if slice_shape:
+            rtype = Constant.expect(slice_shape, self.dtype)
+        else:
+            rtype = self.dtype
+
+        return rtype(form=NDArray.slice(self))
+
+    def sum(self, axis=None, keepdims=False):
+        rtype = self.dtype if axis is None and not keepdims else Constant.expect(self.shape.reduce(axis), self.dtype)
+        return rtype(form=NDArray.sum(self, axis, keepdims))
+
+    def transpose(self, permutation=None):
+        rtype = Constant.expect(self.shape.transpose(permutation), self.dtype)
+        return rtype(form=NDArray.transpose(permutation))
+
+
+class Tensor(_Base):
+    """An n-dimensional array of numbers."""
+
+    def __repr__(self):
+        if operator(self):
+            return str(operator(self))
+
+        return State.__repr__(self)
 
     def __matmul__(self, other):
         return Tensor(form=MatMul(self, other))
