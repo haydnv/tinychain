@@ -526,12 +526,12 @@ class Sub(DualBroadcast):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss))
         else:
-            grads[hex_id(self.subject)] = constant(-loss)
+            grads[hex_id(self.subject)] = -loss
 
         if operator(self.args):
             grads.update(operator(self.args).gradients(loss))
         else:
-            grads[hex_id(self.args)] = constant(-loss)
+            grads[hex_id(self.args)] = -loss
 
         return grads
 
@@ -561,12 +561,12 @@ class Div(DualBroadcast):
         if operator(self.subject):
             grads.update(operator(self.subject).gradients(loss / self.args))
         else:
-            grads[hex_id(self.subject)] = constant(self.subject * loss / self.args)
+            grads[hex_id(self.subject)] = self.subject * loss / self.args
 
         if operator(self.args):
             grads.update(operator(self.args).gradients(loss / self.args))
         else:
-            grads[hex_id(self.args)] = constant((-self.subject * loss) / self.args**2)
+            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
         return grads
 
