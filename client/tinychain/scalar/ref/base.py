@@ -254,9 +254,13 @@ class Op(Ref):
 
     __uri__ = uri(Ref) + "/op"
 
-    def __init__(self, subject, args):
+    def __init__(self, subject, args, debug_name=None):
+        self._debug_name = debug_name
         self.subject = subject
         self.args = args
+
+    def __repr__(self):
+        return self._debug_name if self._debug_name else f"{self.__class__.__name__} {self.subject}, {self.args}"
 
     def __args__(self):
         from .helpers import is_op_ref
@@ -297,11 +301,11 @@ class Get(Op):
 
     __uri__ = uri(Op) + "/get"
 
-    def __init__(self, subject, key=None):
+    def __init__(self, subject, key=None, debug_name=None):
         if subject is None:
             raise ValueError("Get op ref subject cannot be None")
 
-        Op.__init__(self, subject, (key,))
+        Op.__init__(self, subject, (key,), debug_name)
 
     def __json__(self):
         from .helpers import is_ref
@@ -325,7 +329,10 @@ class Get(Op):
             return {str(subject): to_json(self.args)}
 
     def __repr__(self):
-        return f"GET {repr(self.subject)}: {repr(self.args)}"
+        if self._debug_name:
+            return str(self._debug_name)
+        else:
+            return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference
@@ -394,11 +401,11 @@ class Post(Op):
 
     __uri__ = uri(Op) + "/post"
 
-    def __init__(self, subject, args):
+    def __init__(self, subject, args, debug_name=None):
         if not hasattr(args, "__iter__"):
             raise ValueError("POST Op ref requires named parameters (try using a Python dict)")
 
-        Op.__init__(self, subject, args)
+        Op.__init__(self, subject, args, debug_name)
 
     def __args__(self):
         from .helpers import is_op_ref
@@ -407,7 +414,10 @@ class Post(Op):
         return args + ([self.args.values()] if is_op_ref(self.args) else [])
 
     def __repr__(self):
-        return f"POST {repr(self.subject)}: {self.args}"
+        if self._debug_name:
+            return str(self._debug_name)
+        else:
+            return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt):
         from .helpers import is_op_ref, reference

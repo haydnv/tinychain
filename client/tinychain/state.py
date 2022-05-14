@@ -35,6 +35,8 @@ class State(_Base):
 
             self.__form__ = form
 
+        assert not isinstance(form_of(self), State)
+
         _Base.__init__(self)
 
     def __json__(self):

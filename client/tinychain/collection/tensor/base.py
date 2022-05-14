@@ -312,12 +312,14 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         name = name if name else f"load {shape}"
 
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data))
+        op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data), name)
         return cls(op_ref)
 
     def __repr__(self):
         if operator(self):
-            return str(operator(self))
+            return repr(operator(self))
+        elif isinstance(deref(self), ref.Op):
+            return repr(deref(self))
 
         return State.__repr__(self)
 
@@ -596,7 +598,7 @@ class Dense(Tensor):
         name = name if name else f"arange({start}, {stop})x{shape}"
         dtype = type(start) if isinstance(start, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/range", (shape, start, stop))
+        op_ref = ref.Get(uri(cls) + "/range", (shape, start, stop), name)
         return cls(op_ref)
 
     @classmethod
@@ -616,7 +618,7 @@ class Dense(Tensor):
         name = name if name else f"{value}x{shape}"
         dtype = type(value) if isinstance(value, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/constant", (shape, value))
+        op_ref = ref.Get(uri(cls) + "/constant", (shape, value), name)
 
         if ref.same_as(value, 1):
             return cls(op_ref)
@@ -660,7 +662,7 @@ class Dense(Tensor):
         name = name if name else f"random {shape}"
         cls = cls.expect(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
-        op_ref = ref.Post(uri(cls) + "/random/normal", args)
+        op_ref = ref.Post(uri(cls) + "/random/normal", args, name)
         return cls(op_ref)
 
     @classmethod
@@ -683,7 +685,7 @@ class Dense(Tensor):
             return (random * range) + minval
 
     @classmethod
-    def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None, name=None):
+    def truncated_normal(cls, shape, mean=0.0, std=1.0, minval=None, maxval=None):
         """
         Return a `Dense` tensor filled with a random normal distribution of `F64` s.
 
@@ -691,8 +693,6 @@ class Dense(Tensor):
         random normal distribution.
 
         `minval` and `maxval` default to two standard deviations.
-
-        The `name` parameter is used only in the string representation of an operator graph.
         """
 
         if not std:
@@ -714,7 +714,6 @@ class Dense(Tensor):
             cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
             return Map(tensor=cxt.new_tensor.copy())
 
-        name = name if name else f"truncated random {shape}"
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
         return cls(truncated)
 
@@ -767,7 +766,7 @@ class Sparse(Tensor):
 
         cls = cls.expect(shape, dtype)
         name = name if name else f"sparse 0x{shape}"
-        return cls(ref.Get(cls, (shape, dtype)))
+        return cls(ref.Get(cls, (shape, dtype), name))
 
     @classmethod
     def zeros_like(cls, tensor):
