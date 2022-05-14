@@ -26,6 +26,9 @@ class Shape(Tuple):
         else:
             raise ValueError(f"can only append Shapes with a literal number of dimensions, not {self} and {other}")
 
+    def __radd__(self, other):
+        return Shape(other) + self
+
     def __getitem__(self, x):
         if x is None:
             raise ValueError(f"invalid axis: {x}")
@@ -231,6 +234,9 @@ class Shape(Tuple):
     def slice(self, bounds):
         if not hasattr(bounds, "__iter__"):
             raise ValueError(f"the shape of a Tensor slice requires literal-length bounds, not {bounds}")
+
+        if hasattr(self, "__len__") and len(bounds) > len(self):
+            raise ValueError(f"{bounds} are out of bounds for shape {self}")
 
         shape = []
         for x, bound in enumerate(bounds):

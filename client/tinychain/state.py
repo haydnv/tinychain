@@ -174,7 +174,18 @@ class StateRef(Ref):
         self.__uri__ = URI(name)
 
     def __repr__(self):
-        return str(uri(self))
+        is_auto_assigned = False
+
+        address = str(uri(self)).split('_')[-1]
+        try:
+            is_auto_assigned = int(address, 16)
+        except ValueError:
+            pass
+
+        if is_auto_assigned:
+            return repr(self.state)
+        else:
+            return str(uri(self))
 
     def __id__(self):
         return hex_id(self.state)
