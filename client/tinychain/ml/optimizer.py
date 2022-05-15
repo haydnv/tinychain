@@ -4,16 +4,16 @@ import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
-from ..collection.tensor import Dense, Tensor
-from ..decorators import closure, get, post
+from ..collection.tensor import Dense, NDArray, Tensor
+from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.equation import Function
 from ..math.interface import Numeric
 from ..math.operator import constant, derivative_of, is_constant, gradients
-from ..scalar.number import F32, F64, Number, UInt
-from ..scalar.ref import form_of, hex_id, After, If
+from ..scalar.number import F32, F64, UInt
+from ..scalar.ref import form_of, hex_id, After
 from ..scalar.value import Id
-from ..state import State, Stream
+from ..state import State
 
 from .variable import Variable
 from . import LIB_URI
@@ -31,52 +31,40 @@ class Optimizer(Model):
     __uri__ = LIB_URI.append("Optimizer")
 
     @post
-    def train(self, i, inputs, parallel=1):
+    def train(self, i, inputs):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 
-class Parallel(Optimizer, Dynamic):
+class _Optimizer(Optimizer, Dynamic):
     @post
-    def gradients(self, txn, inputs: Tensor, parallel=UInt(1)) -> _Gradients:
-        err_parallel = "Optimizer.train requires the batch size {{batch_size}} to be a multiple of {{parallel}}"
-        batch_size = inputs.shape[0]
-        txn.chunk_size = UInt(If(
-            (parallel > 0).logical_and(batch_size % parallel == 0),
-            batch_size / parallel,
-            error.BadRequest(err_parallel, batch_size=batch_size, parallel=parallel)))
+    def gradients(self, cxt, inputs: Tensor) -> _Gradients:
+        logging.debug("Optimizer constructing gradient calculations...")
 
         trainable_vars = trainable(self.ml_model)
+        logging.debug("discovered trainable variables...")
 
-        @closure(self, inputs, txn.chunk_size)
-        @get
-        def calc_grads(cxt, batch: UInt) -> Map:
-            cxt.start = batch * txn.chunk_size
-            inputs_batch = constant(inputs[cxt.start:(cxt.start + txn.chunk_size)].copy())
-            outputs = self.ml_model.eval(inputs_batch)
+        outputs = self.ml_model.eval(inputs)
+        logging.debug("constructed model evaluation")
 
-            d_loss = derivative_of(self._cost(inputs_batch, outputs))
-            cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
-            assert is_constant(cxt.d_loss)
+        d_loss = derivative_of(self._cost(inputs, outputs))
+        logging.debug("constructed derivative of loss")
+        cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
+        assert is_constant(cxt.d_loss)
 
-            grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
-            grads = Function(grads).optimize()
+        grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
+        logging.debug("constructed gradients")
+        grads = Function(grads).optimize()
+        logging.debug("optimized gradients")
 
-            if not grads:
-                raise ValueError(f"model output {outputs} has no gradients")
+        if not grads:
+            raise ValueError(f"model output {outputs} has no gradients")
 
-            return [grad if isinstance(grad, Number) else grad.sum(0) for grad in grads]
-
-        @post
-        def sum_grads(grads: _Gradients, sum: _Gradients) -> _Gradients:
-            return {"sum": [grads[i] + sum[i] for i in range(len(trainable_vars))]}
-
-        grads = [0] * len(trainable_vars)
-        grads = Stream.range((0, parallel)).map(calc_grads).fold("grads", {"sum": grads}, sum_grads)
-        grads = Tuple(Map(grads)["sum"])  # TODO: this type information shouldn't get lost
-        return {var_id: grads[i] for i, var_id in enumerate(trainable_vars.keys())}
+        return {
+            var_id: grads[i].sum(0) if isinstance(grads[i], NDArray) else grads[i]
+            for i, var_id in enumerate(trainable_vars.keys())}
 
 
-class GradientDescent(Parallel):
+class GradientDescent(_Optimizer):
     """A simple gradient descent optimizer with a configurable learning rate."""
 
     def __init__(self, ml_model, cost, learning_rate=0.001):
@@ -91,8 +79,8 @@ class GradientDescent(Parallel):
         Dynamic.__init__(self)
 
     @post
-    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        grads = self.gradients(inputs, parallel)
+    def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
+        grads = self.gradients(inputs)
 
         writes = []
         for var_id, var in trainable(self.ml_model).items():
@@ -102,7 +90,7 @@ class GradientDescent(Parallel):
         return writes
 
 
-class Adam(Parallel):
+class Adam(_Optimizer):
     """
     Adam optimizer, an adaptive learning rate optimization algorithm designed to handle sparse gradients and noisy data.
 
@@ -135,8 +123,8 @@ class Adam(Parallel):
         Dynamic.__init__(self)
 
     @post
-    def train(self, txn, i: UInt, inputs: Tensor, parallel=UInt(1)) -> Tensor:
-        grads = self.gradients(inputs, parallel)
+    def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
+        grads = self.gradients(inputs)
 
         trainable_vars = trainable(self.ml_model)
         var_names = namespace(self.ml_model, self._model_name)
