@@ -103,7 +103,7 @@ class Dynamic(Instance):
 
             if isinstance(attr, MethodStub):
                 setattr(self, name, attr.method(self, name))
-            elif isinstance(attr, State):
+            elif isinstance(attr, (dict, list, tuple, State)):
                 if not independent(attr):
                     classname = self.__class__.__name__
                     raise ValueError(f"{attr} in {classname} depends on anonymous state {depends_on(attr)}")

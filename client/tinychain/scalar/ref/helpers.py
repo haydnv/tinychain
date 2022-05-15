@@ -1,5 +1,6 @@
 import inspect
 import logging
+import re
 
 from ...uri import uri, URI
 from ...context import to_json
@@ -248,10 +249,40 @@ def is_ref(state):
         return False
 
 
-def reference(context, state):
-    """Create a reference to `state` in `context` using its `hex_id`"""
+def _name_hint(context, state):
+    provider = deref(state)
 
-    name = f"{state.__class__.__name__}_{hex_id(state)}"
+    if not hasattr(provider, "name_hint") or not is_literal(provider.name_hint):
+        return
+    elif not re.match(r'^\w+$', repr(provider.name_hint)):
+        logging.info(f"invalid name hint {provider.name_hint} (only alphanumeric characters and underscore are allowed)")
+        return
+
+    def valid(candidate):
+        if candidate in context and not same_as(getattr(context, candidate), state):
+            return False
+        else:
+            return True
+
+    if valid(provider.name_hint):
+        return provider.name_hint
+
+    i = 0
+    while True:
+        candidate = f"{provider.name_hint}_{i}"
+        if valid(candidate):
+            return candidate
+
+        i += 1
+
+
+def reference(context, state):
+    """Create a reference to `state` in `context` using its name hint if present, otherwise its `hex_id`."""
+
+    name = _name_hint(context, state)
+    if not name:
+        name = f"{state.__class__.__name__}_{hex_id(state)}"
+
     if name not in context:
         logging.debug(f"assigned name {name} to {state} in {context}")
         setattr(context, name, state)
