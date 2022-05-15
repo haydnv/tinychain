@@ -2,7 +2,7 @@ import itertools
 import logging
 
 from ...context import deanonymize
-from ...math.operator import derivative_of, operator, Gradients, Operator, Unary
+from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, hex_id, is_literal, After, MethodSubject, Post
 from ...shape import Shape
@@ -57,10 +57,7 @@ class Concatenate(Operator):
 
         if isinstance(loss, Number):
             for tensor in self.subject:
-                if operator(tensor):
-                    grads.update(operator(tensor).gradients(loss))
-                else:
-                    grads[hex_id(tensor)] = loss
+                grads += gradients(tensor, loss)
 
             return grads
 
@@ -79,10 +76,7 @@ class Concatenate(Operator):
         assert len(losses) == len(self.subject)
 
         for (tensor, loss) in zip(self.subject, losses):
-            if operator(tensor):
-                grads.update(operator(tensor).gradients(loss))
-            else:
-                grads[hex_id(tensor)] = loss
+            grads += gradients(tensor, loss)
 
         return grads
 
@@ -103,10 +97,7 @@ class Copy(Unary):
         return derivative_of(self.subject, variable).copy()
 
     def gradients(self, loss):
-        if operator(self.subject):
-            return operator(self.subject).gradients(loss)
-
-        return Gradients()
+        return gradients(self.subject, loss)
 
 
 class Read(Operator):
@@ -159,16 +150,7 @@ class Norm(Operator):
         return self.subject / self.subject.norm(self.args)
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class Sum(Reduce):
@@ -186,30 +168,28 @@ class Sum(Reduce):
         return derivative_of(self.subject).sum(**self.args)
 
     def gradients(self, loss):
-        from .base import Dense, NDArray
+        assert is_literal(self.subject.ndim)
 
-        if "axis" not in self.args:
-            loss = self.backward() * loss
-        elif isinstance(loss, NDArray):
-            # TODO: is this correct?
-            loss = Dense.ones_like(self.subject) * loss
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
+        if self.args.get("axis") is None:
+            from .base import Dense
+            loss = loss * Dense.ones([1] * deref(self.subject.ndim))
+            return gradients(self.subject, self.backward() * loss)
+        elif not self.args.get("keepdims"):
+            axis = deref(self.args["axis"])
+            return gradients(self.subject, (self.backward() * loss).expand_dims(axis))
         else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+            return gradients(self.subject, self.backward() * loss)
 
 
 class Transform(Operator):
     def backward(self, variable=None):
         from .base import Tensor
 
-        rtype = type(self.subject) if isinstance(self.subject, Tensor) else Tensor
-        d = type(self)(derivative_of(self.subject, variable), self.args)
+        subject = derivative_of(self.subject, variable)
+
+        rtype = Tensor if isinstance(self.subject, Tensor) else Tensor
+        d = type(self)(subject, self.args)
+
         return rtype(form=d)
 
     def invert(self, loss):
@@ -235,6 +215,10 @@ class Broadcast(Transform):
     def __repr__(self):
         return str(self.subject)
 
+    @property
+    def shape(self):
+        return Shape.broadcast(self.subject.shape, self.args)
+
     def forward(self):
         from .base import NDArray
         return NDArray.broadcast(self.subject, self.args)
@@ -253,7 +237,7 @@ class Expand(Transform):
         return NDArray.expand_dims(self.subject, self.args)
 
     def invert(self, loss):
-        return loss.reshape(self.subject.shape)
+        return loss.sum(self.args)
 
 
 class Flip(Transform):

@@ -1,5 +1,6 @@
 """An n-dimensional array of numbers."""
 
+import functools
 import inspect
 import logging
 import math
@@ -14,7 +15,7 @@ from ...math.operator import Add, Mul, MatMul, Div, Sub
 from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
 from ...math.operator import LogicalAnd, LogicalNot, LogicalOr, LogicalXor
 from ...scalar.bound import handle_bounds
-from ...scalar.number import Bool, F32, F64, Number, UInt
+from ...scalar.number import Bool, F32, F64, Number, U64
 from ...scalar import ref
 from ...shape import Shape
 from ...state import Class, State, Stream
@@ -41,7 +42,7 @@ class NDArray(Interface):
         return Class(ref.Get(ref.MethodSubject(self, "dtype")))
 
     @property
-    def shape(self):
+    def ndim(self):
         return Shape(ref.Get(ref.MethodSubject(self, "ndim")))
 
     @property
@@ -50,7 +51,7 @@ class NDArray(Interface):
 
     @property
     def size(self):
-        return Shape(ref.Get(ref.MethodSubject(self, "size")))
+        return U64(ref.Get(ref.MethodSubject(self, "size")))
 
     def all(self):
         """Return `True` if all elements in this :class:`NDArray` are nonzero."""
@@ -260,6 +261,17 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         class _Tensor(cls):
             __spec__ = spec
 
+            def __init__(self, form):
+                if ref.is_literal(shape) and operator(form):
+                    try:
+                        actual_shape = operator(form).shape
+                        if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
+                            raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
+                    except (RuntimeError, ValueError) as e:
+                        logging.debug(f"{form} does not have a literal shape: {e}")
+
+                Tensor.__init__(self, form)
+
             @classmethod
             def create(cls):
                 op_ref = ref.Get(cls, (shape, dtype))
@@ -336,7 +348,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if hasattr(self.shape, "__len__"):
             return len(self.shape)
         else:
-            return self._get("ndim", rtype=UInt)
+            return self._get("ndim", rtype=U64)
 
     @property
     def shape(self):
@@ -345,10 +357,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if operator(self):
             try:
                 return operator(self).shape
-            except (RuntimeError, ValueError):
-                logging.debug(f"{self} does not have a literal shape")
-        elif hasattr(deref(self), "shape"):
-            return deref(self).shape
+            except (RuntimeError, ValueError) as e:
+                logging.debug(f"{self} does not have a literal shape: {e}")
 
         return self._get("shape", rtype=Shape)
 
@@ -466,6 +476,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
 
+        _check_broadcast(self, other)
         return self._post("eq", {"r": other}, Tensor)
 
     def expand_dims(self, axis=None):
@@ -476,21 +487,25 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
 
+        _check_broadcast(self, other)
         return self._post("gt", {"r": other}, Tensor)
 
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
+        _check_broadcast(self, other)
         return self._post("gte", {"r": other}, Tensor)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
 
+        _check_broadcast(self, other)
         return self._post("lt", {"r": other}, Tensor)
 
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
 
+        _check_broadcast(self, other)
         return self._post("lte", {"r": other}, Tensor)
 
     def mul(self, other):
@@ -505,11 +520,13 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if is_one(self):
             return broadcast_into(other, self)
 
+        _check_broadcast(self, other)
         return Tensor(form=Mul(self, other))
 
     def ne(self, other):
         """Return a boolean `Tensor` with element-wise not-equal values."""
 
+        _check_broadcast(self, other)
         return self._post("ne", {"r": other}, Tensor)
 
     def norm(self, axis=None):
@@ -529,6 +546,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         elif is_zero(other):
             return Dense.ones_like(self).broadcast(other)
 
+        _check_broadcast(self, other)
         return Tensor(form=Pow(self, other))
 
     def reshape(self, shape, copy=True):
@@ -536,6 +554,10 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
         if not ref.is_literal(copy):
             raise ValueError(f"reshape requires a literal boolean for copy, not {copy}")
+
+        if ref.is_literal(self.shape) and ref.is_literal(shape) and not any(dim is None for dim in shape):
+            if not self.size == functools.reduce(lambda size, dim: size * dim, deref(shape)):
+                raise ValueError(f"cannot reshape {self} into {shape}")
 
         reshaped = Tensor(form=Reshape(self, shape))
 
@@ -572,6 +594,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if is_zero(other):
             return broadcast_into(self, other)
 
+        _check_broadcast(self, other)
         return Tensor(form=Sub(self, other))
 
     def sum(self, axis=None, keepdims=False):
@@ -586,6 +609,10 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
         If no permutation is given, the axes will be inverted (e.g. `(0, 1, 2)` inverts to `(2, 1, 0)`).
         """
+
+        if ref.is_literal(self.ndim) and ref.is_literal(permutation) and permutation is not None:
+            if len(permutation) != self.ndim:
+                raise ValueError(f"invalid permutation {permutation} for {self}")
 
         return Tensor(form=Transpose(self, permutation))
 
@@ -809,6 +836,20 @@ class Sparse(Tensor):
 
     def mul(self, other):
         return Sparse(form=Tensor.mul(self, other))
+
+
+def _shape_of(numeric):
+    if isinstance(numeric, (bool, float, int)):
+        return Shape(tuple())
+    elif isinstance(numeric, Numeric):
+        return numeric.shape
+    else:
+        raise ValueError(f"{numeric} has no shape")
+
+
+def _check_broadcast(this, that):
+    if ref.is_literal(_shape_of(this)) and ref.is_literal(_shape_of(that)):
+        this.shape.broadcast(_shape_of(that))  # raise an error in case the shapes are incompatible
 
 
 def _reduce_args(axis=None, keepdims=False):

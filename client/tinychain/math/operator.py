@@ -2,7 +2,7 @@ import logging
 import typing
 
 from ..context import deanonymize, to_json
-from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, Op
 from ..scalar.value import Id
 
 from .base import is_numeric
@@ -552,7 +552,6 @@ class Div(DualBroadcast):
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
-
         return ((subject * self.args) - (self.subject * arg)) / (self.args**2)
 
     def gradients(self, loss):
@@ -608,10 +607,12 @@ def derivative_of(state, variable=None):
             # it's a partial derivative and this variable is held constant
             return zeros_like(state)
 
-    if operator(state):
+    if is_constant(state):
+        return zeros_like(state)
+    elif operator(state):
         return operator(state).backward(variable)
-
-    return zeros_like(state)
+    else:
+        raise ValueError(f"the derivative of {state} is not defined")
 
 
 def gradients(numeric, loss, variables=None):
@@ -729,10 +730,10 @@ def debug_shape(numeric):
         raise ValueError(f"{numeric} has no shape")
 
     if is_literal(numeric.shape):
-        print(f"the shape of {numeric} is {numeric.shape}")
+        logging.debug(f"the shape of {numeric} is {numeric.shape}")
         return
 
-    print(f"{numeric} does not have a literal shape")
+    logging.debug(f"{numeric} does not have a literal shape")
 
     op = operator(numeric)
 
