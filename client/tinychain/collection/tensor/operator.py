@@ -196,15 +196,6 @@ class Sum(Reduce):
         
         return gradients(self.subject, loss)
 
-        # grads = Gradients()
-
-        # if operator(self.subject):
-        #     grads.update(operator(self.subject).gradients(loss))
-        # else:
-        #     grads[hex_id(self.subject)] = loss
-
-        # return grads
-
 
 class Transform(Operator):
     def backward(self, variable=None):
