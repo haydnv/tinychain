@@ -512,14 +512,14 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
         return self._post("ne", {"r": other}, Tensor)
 
-    def norm(self, axis=None):
+    def norm(self, axis=None, keepdims=False):
         """
         With no `axis`, computes the Frobenius norm (aka Euclidean norm) of a matrix or batch of matrices.
 
         For a vector norm, specify the `axis` of the vector.
         """
 
-        return Tensor(form=Norm(self, axis))
+        return Tensor(form=Norm(self, axis, keepdims))
 
     def pow(self, other):
         from .functions import broadcast_into

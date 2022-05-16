@@ -2,7 +2,7 @@ import itertools
 import logging
 
 from ...context import deanonymize
-from ...math.operator import derivative_of, operator, Gradients, Operator, Unary
+from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, hex_id, is_literal, After, MethodSubject, Post
 from ...shape import Shape
@@ -193,15 +193,8 @@ class Sum(Reduce):
         elif isinstance(loss, NDArray):
             # TODO: is this correct?
             loss = Dense.ones_like(self.subject) * loss
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        
+        return gradients(self.subject, loss)
 
 
 class Transform(Operator):

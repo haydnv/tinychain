@@ -521,19 +521,7 @@ class Sub(DualBroadcast):
         return subject - arg
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = -loss
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss))
-        else:
-            grads[hex_id(self.args)] = -loss
-
-        return grads
+        return gradients(self.subject, loss) + gradients(self.args, -loss)
 
 
 class Div(DualBroadcast):
@@ -556,19 +544,8 @@ class Div(DualBroadcast):
         return ((subject * self.args) - (self.subject * arg)) / (self.args**2)
 
     def gradients(self, loss):
-        grads = Gradients()
 
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss / self.args))
-        else:
-            grads[hex_id(self.subject)] = self.subject * loss / self.args
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients((-self.subject * loss) / self.args**2))
-        else:
-            grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
-
-        return grads
+        return gradients(self.subject, loss / self.args) + gradients(self.args, -self.subject * loss / self.args**2)
 
 
 def constant(numeric):
