@@ -2,6 +2,7 @@
 
 import functools
 import inspect
+import logging
 
 from ...constants import debug, e
 from ...decorators import post
@@ -841,8 +842,9 @@ class Sparse(Tensor):
 
 
 def _check_broadcast(this, that):
-    if ref.is_literal(shape_of(this)) and ref.is_literal(shape_of(that)):
-        this.shape.broadcast(shape_of(that))  # raise an error in case the shapes are incompatible
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        if ref.is_literal(shape_of(this)) and ref.is_literal(shape_of(that)):
+            this.shape.broadcast(shape_of(that))  # raise an error in case the shapes are incompatible
 
 
 def _reduce_args(axis=None, keepdims=False):

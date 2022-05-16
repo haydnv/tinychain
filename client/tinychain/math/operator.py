@@ -1,3 +1,4 @@
+import functools
 import logging
 import typing
 
@@ -587,6 +588,7 @@ def constant(numeric):
     return numeric
 
 
+@functools.cache
 def derivative_of(state, variable=None):
     """
     Find the derivative of the given `state`.

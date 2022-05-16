@@ -39,6 +39,9 @@ class State(_Base):
 
         _Base.__init__(self)
 
+    def __hash__(self):
+        return hash(form_of(self))
+
     def __json__(self):
         form = form_of(self)
 
@@ -172,6 +175,9 @@ class StateRef(Ref):
     def __init__(self, state, name):
         self.state = state
         self.__uri__ = URI(name)
+
+    def __hash__(self):
+        return hash(self.state)
 
     def __repr__(self):
         is_auto_assigned = False
