@@ -217,7 +217,7 @@ class Broadcast(Transform):
 
     @property
     def shape(self):
-        return Shape.broadcast(self.subject.shape, self.args)
+        return self.subject.shape.broadcast(self.args)
 
     def forward(self):
         from .base import NDArray
@@ -254,6 +254,69 @@ class Flip(Transform):
 
     def invert(self, loss):
         return loss.flip(self.args)
+
+
+class Reshape(Transform):
+    def __repr__(self):
+        return f"{self.subject}.reshape({self.args})"
+
+    @property
+    def shape(self):
+        return Shape.reshape(self.subject.shape, self.args)
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.reshape(self.subject, self.args)
+
+    def invert(self, loss):
+        return loss.reshape(self.subject.shape)
+
+
+class Slice(Transform):
+    def __init__(self, tensor, bounds):
+        if not is_literal(tensor.shape):
+            debug(lambda: f"slice of {tensor} will not support automatic differentiation")
+
+        Transform.__init__(self, tensor, bounds)
+
+    def __repr__(self):
+        return f"{self.subject}.slice({self.args})"
+
+    @property
+    def shape(self):
+        return Shape.slice(self.subject.shape, self.args)
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.slice(self.subject, self.args)
+
+    def invert(self, loss):
+        from .base import Dense
+
+        grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
+
+        # TODO: there must be a better way to do this
+        class SliceGradient(Operator):
+            def __init__(self, grad):
+                Operator.__init__(self, grad, None)
+
+            def __repr__(self):
+                return f"{self.subject}[{self.args}]"
+
+            def __ns__(self, context):
+                return deanonymize(self.subject, context)
+
+            @property
+            def shape(self):
+                return grad.shape
+
+            def forward(self):
+                return self.subject
+
+            def backward(self, _variable=None):
+                return self.subject
+
+        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
 
 
 class Tile(Transform):
@@ -329,69 +392,6 @@ class Transpose(Transform):
             inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
 
         return loss.transpose(inverse_permutation)
-
-
-class Reshape(Transform):
-    def __repr__(self):
-        return f"{self.subject}.reshape({self.args})"
-
-    @property
-    def shape(self):
-        return Shape.reshape(self.subject.shape, self.args)
-
-    def forward(self):
-        from .base import NDArray
-        return NDArray.reshape(self.subject, self.args)
-
-    def invert(self, loss):
-        return loss.reshape(self.subject.shape)
-
-
-class Slice(Transform):
-    def __init__(self, tensor, bounds):
-        if not is_literal(tensor.shape):
-            debug(lambda: f"slice of {tensor} will not support automatic differentiation")
-
-        Transform.__init__(self, tensor, bounds)
-
-    def __repr__(self):
-        return f"{self.subject}.slice({self.args})"
-
-    @property
-    def shape(self):
-        return Shape.slice(self.subject.shape, self.args)
-
-    def forward(self):
-        from .base import NDArray
-        return NDArray.slice(self.subject, self.args)
-
-    def invert(self, loss):
-        from .base import Dense
-
-        grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-
-        # TODO: there must be a better way to do this
-        class SliceGradient(Operator):
-            def __init__(self, grad):
-                Operator.__init__(self, grad, None)
-
-            def __repr__(self):
-                return f"{self.subject}[{self.args}]"
-
-            def __ns__(self, context):
-                return deanonymize(self.subject, context)
-
-            @property
-            def shape(self):
-                return grad.shape
-
-            def forward(self):
-                return self.subject
-
-            def backward(self, _variable=None):
-                return self.subject
-
-        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
 
 
 def _reduce_args(axis=None, keepdims=False):

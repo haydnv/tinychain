@@ -8,7 +8,7 @@ from ...decorators import post
 from ...generic import Map, Tuple
 from ...interface import Compare, Interface
 from ...math.interface import Boolean, Numeric, Trigonometric
-from ...math.operator import deref, is_one, is_zero, operator
+from ...math.operator import deref, is_one, is_zero, operator, shape_of
 from ...math.operator import Abs, Exp, Log, Pow
 from ...math.operator import Add, Mul, MatMul, Div, Sub
 from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
@@ -379,6 +379,9 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Add(self, other))
 
     def broadcast(self, shape):
+        if ref.same_as(shape, self.shape):
+            return self
+
         return Tensor(form=Broadcast(self, shape))
 
     def cast(self, dtype):
@@ -837,18 +840,9 @@ class Sparse(Tensor):
         return Sparse(form=Tensor.mul(self, other))
 
 
-def _shape_of(numeric):
-    if isinstance(numeric, (bool, float, int)):
-        return Shape(tuple())
-    elif isinstance(numeric, Numeric):
-        return numeric.shape
-    else:
-        raise ValueError(f"{numeric} has no shape")
-
-
 def _check_broadcast(this, that):
-    if ref.is_literal(_shape_of(this)) and ref.is_literal(_shape_of(that)):
-        this.shape.broadcast(_shape_of(that))  # raise an error in case the shapes are incompatible
+    if ref.is_literal(shape_of(this)) and ref.is_literal(shape_of(that)):
+        this.shape.broadcast(shape_of(that))  # raise an error in case the shapes are incompatible
 
 
 def _reduce_args(axis=None, keepdims=False):

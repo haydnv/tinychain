@@ -1,7 +1,6 @@
 import logging
 import typing
 
-from ..constants import debug
 from ..context import deanonymize, to_json
 from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, Op
 from ..scalar.value import Id
@@ -415,38 +414,19 @@ class MatMul(Dual):
 
     def gradients(self, loss):
         # TODO: don't assume that self.subject.ndim == 2 and self.args.ndim == 2
+        assert len(self.subject.shape) == 2
+        assert len(self.args.shape) == 2
+
         return (gradients(self.subject, loss @ self.args.transpose([1, 0])) +
                 gradients(self.args, self.subject.transpose([1, 0]) @ loss))
-
-
-class Pow(Dual):
-    def __repr__(self):
-        return f"({self.subject})**({self.args})"
-
-    @property
-    def shape(self):
-        return self.subject.shape
-
-    def forward(self):
-        return Numeric.pow(self.subject, self.args)
-
-    def backward(self, variable=None):
-        if same_as(self.args, variable):
-            return (self.subject**self.args) * self.subject.log()
-
-        return self.args * (self.subject**(self.args - 1))
-
-    def gradients(self, loss):
-        subject_grad = loss * self.args * self.subject**(self.args - 1)
-        args_grad = loss * self.subject.log() * self.subject**self.args
-        return gradients(self.subject, subject_grad) + gradients(self.args, args_grad)
 
 
 class DualBroadcast(Operator):
     @property
     def shape(self):
-        if is_literal(self.args):
-            # it's a literal number
+        if is_literal(self.subject):
+            return self.args.shape
+        elif is_literal(self.args):
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
@@ -489,7 +469,7 @@ class Add(DualBroadcast):
         return subject + arg
 
     def gradients(self, loss):
-        return gradients(self.subject, loss) + gradients(self.args, loss)
+        return (gradients(self.subject, loss) + gradients(self.args, loss))
 
 
 class Mul(DualBroadcast):
@@ -505,7 +485,8 @@ class Mul(DualBroadcast):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        return gradients(self.subject, self.args * loss) + gradients(self.args, self.subject * loss)
+        return (gradients(self.subject, self.args * loss) +
+                gradients(self.args, self.subject * loss))
 
 
 class Sub(DualBroadcast):
@@ -570,6 +551,25 @@ class Div(DualBroadcast):
         return grads
 
 
+class Pow(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject})**({self.args})"
+
+    def forward(self):
+        return Numeric.pow(self.subject, self.args)
+
+    def backward(self, variable=None):
+        if same_as(self.args, variable):
+            return (self.subject**self.args) * self.subject.log()
+
+        return self.args * (self.subject**(self.args - 1))
+
+    def gradients(self, loss):
+        subject_grad = loss * self.args * self.subject**(self.args - 1)
+        args_grad = loss * self.subject.log() * self.subject**self.args
+        return gradients(self.subject, subject_grad) + gradients(self.args, args_grad)
+
+
 def constant(numeric):
     """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
@@ -628,6 +628,9 @@ def gradients(numeric, loss, variables=None):
     If a list of variables is given, a corresponding list of gradients will be returned.
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
+
+    if not is_numeric(loss):
+        raise ValueError(f"gradients require a numeric state for loss, not {loss} (type {type(loss)})")
 
     if operator(numeric):
         grads = operator(numeric).gradients(loss)
@@ -733,15 +736,25 @@ def operator(state_or_ref):
         return operator(deref(state_or_ref))
 
 
+def shape_of(numeric):
+    if isinstance(numeric, (bool, float, int)):
+        from ..shape import Shape
+        return Shape(tuple())
+    elif isinstance(numeric, Numeric):
+        return numeric.shape
+    else:
+        raise ValueError(f"{numeric} has no shape")
+
+
 def debug_shape(numeric):
     if not hasattr(numeric, "shape"):
         raise ValueError(f"{numeric} has no shape")
 
     if is_literal(numeric.shape):
-        debug(lambda: f"the shape of {numeric} is {numeric.shape}")
+        print(f"the shape of {numeric} is {numeric.shape}")
         return
 
-    debug(lambda: f"{numeric} does not have a literal shape")
+    print(f"{numeric} does not have a literal shape")
 
     op = operator(numeric)
 
