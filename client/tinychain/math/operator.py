@@ -564,7 +564,7 @@ class Div(DualBroadcast):
             grads[hex_id(self.subject)] = self.subject * loss / self.args
 
         if operator(self.args):
-            grads.update(operator(self.args).gradients(loss / self.args))
+            grads.update(operator(self.args).gradients((-self.subject * loss) / self.args**2))
         else:
             grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
