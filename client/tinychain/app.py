@@ -10,11 +10,12 @@ from .reflect.meta import Meta, MethodStub
 from .chain import Chain
 from .generic import Map, Tuple
 from .interface import Interface
-from .scalar.ref import Ref
+from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
 from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
-from .util import depends_on, form_of, get_ref, independent, to_json, uri, URI
+from .uri import uri, URI
+from .context import to_json
 
 
 class Model(Object, metaclass=Meta):
@@ -104,8 +105,8 @@ class Dynamic(Instance):
                 setattr(self, name, attr.method(self, name))
             elif isinstance(attr, State):
                 if not independent(attr):
-                    cls = self.__class__.__name__
-                    raise ValueError(f"{attr} in {cls} depends on anonymous state {depends_on(attr)}")
+                    classname = self.__class__.__name__
+                    raise ValueError(f"{attr} in {classname} depends on anonymous state {depends_on(attr)}")
 
     # TODO: deduplicate with Meta.__form__
     def __form__(self):

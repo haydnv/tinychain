@@ -3,9 +3,10 @@
 from ..generic import Map, Tuple
 from ..scalar.bound import Range
 from ..scalar.number import UInt
-from ..scalar.ref import Ref
+from ..scalar.ref import form_of, Ref
 from ..state import State, Stream
-from ..util import form_of, to_json, uri, URI
+from ..uri import uri, URI
+from ..context import to_json
 
 from .base import Collection
 

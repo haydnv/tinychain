@@ -3,9 +3,10 @@ import inspect
 from ..scalar import Value
 from ..scalar import op, ref
 from ..state import State
-from ..util import form_of, to_json, uri, Context, URI
+from ..uri import uri, URI
+from ..context import to_json, Context
 
-from . import _get_rtype, is_none, parse_args, resolve_class
+from . import _get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -29,7 +30,7 @@ class Method(object):
         return False
 
     def __json__(self):
-        return {str(uri(self)): to_json(form_of(self))}
+        return {str(uri(self)): to_json(ref.form_of(self))}
 
     def dtype(self):
         return self.__class__.__name__
@@ -52,7 +53,7 @@ class Get(Method):
         return self.rtype(form=ref.Get(self.subject(), key))
 
     def __args__(self):
-        _, cxt = form_of(self)
+        _, cxt = ref.form_of(self)
         return [self.subject(), cxt]
 
     def __form__(self):
@@ -84,7 +85,7 @@ class Put(Method):
     def __init__(self, header, form, name):
         rtype = _get_rtype(form, None)
 
-        if not is_none(rtype):
+        if not ref.is_none(rtype):
             raise ValueError(f"PUT method must return None, not f{rtype}")
 
         Method.__init__(self, header, form, name)
@@ -93,7 +94,7 @@ class Put(Method):
         return ref.Put(self.subject(), key, value)
 
     def __args__(self):
-        _, _, cxt = form_of(self)
+        _, _, cxt = ref.form_of(self)
         return [self.subject(), cxt]
 
     def __form__(self):
@@ -164,7 +165,7 @@ class Post(Method):
         return rtype(form=ref.Post(self.subject(), params))
 
     def __args__(self):
-        _, cxt = form_of(self)
+        _, cxt = ref.form_of(self)
         return [self.subject(), cxt]
 
     def __form__(self):
@@ -200,7 +201,7 @@ class Delete(Method):
     def __init__(self, header, form, name):
         rtype = _get_rtype(form, None)
 
-        if not is_none(rtype):
+        if not ref.is_none(rtype):
             raise ValueError(f"DELETE method must return None, not f{rtype}")
 
         Method.__init__(self, header, form, name)
@@ -209,7 +210,7 @@ class Delete(Method):
         return ref.Delete(self.subject(), key)
 
     def __args__(self):
-        _, cxt = form_of(self)
+        _, cxt = ref.form_of(self)
         return [self.subject(), cxt]
 
     def __form__(self):

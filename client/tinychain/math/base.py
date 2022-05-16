@@ -4,7 +4,7 @@ from .interface import Numeric
 
 
 def is_numeric(state):
-    """Return `True` if the given `State` is :class:`Numeric` or a numeric constant, otherwise `False`."""
+    """Return `True` if the given `State` is :class:`Numeric` or a numeric literal, otherwise `False`."""
 
     return isinstance(state, (bool, float, int, Numeric))
 

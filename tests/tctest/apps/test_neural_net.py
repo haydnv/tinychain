@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+import time
 import tinychain as tc
 
 from ..process import start_host
@@ -37,7 +38,7 @@ class NeuralNetTester(tc.app.Library):
     @tc.post
     def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         def cost(i, o):
-            labels = i[:, 0].logical_or(i[:, 1]).expand_dims()
+            labels = tc.math.constant(i[:, 0].logical_or(i[:, 1]).expand_dims())
             return (o - labels)**2
 
         layer = tc.ml.nn.Linear.create(2, 1)
@@ -47,7 +48,7 @@ class NeuralNetTester(tc.app.Library):
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         def cost(i, o):
-            labels = i[:, 0].logical_xor(i[:, 1]).expand_dims()
+            labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
             return (o - labels)**2
 
         schema = [
@@ -65,22 +66,34 @@ class NeuralNetTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_neural_net", NeuralNetTester(), wait_time=2, request_ttl=60)
 
-    @unittest.skip  # TODO: re-enable this test after implementing an Operator for Tensor.concatenate
-    def testCNN(self):
-        inputs = np.ones([BATCH_SIZE, 3, 5, 5])
-        self.host.post(tc.uri(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
-        self.host.post(tc.uri(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
+    # @unittest.skip  # TODO: re-enable this test after implementing an Operator for Tensor.concatenate
+    # def testCNN(self):
+    #     inputs = np.ones([BATCH_SIZE, 3, 5, 5])
+    #     self.host.post(tc.uri(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
+    #     self.host.post(tc.uri(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
 
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+
         self.host.post(tc.uri(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
+
+        start = time.time()
         self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
+        elapsed = time.time() - start
+        print(f"trained a deep neural net in {elapsed:.2}s")
 
     def testTrainer(self):
+        def cost(i, o):
+            return (o - tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
+
         dnn = tc.ml.nn.DNN.create([[2, 2, tc.ml.sigmoid], [2, 1]])
-        optimizer = tc.ml.optimizer.Adam(dnn, lambda i, o: (o - i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
+        optimizer = tc.ml.optimizer.Adam(dnn, cost)
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+
+        start = time.time()
         self.host.post(tc.uri(tc.ml.service.ML).append("train"), {"optimizer": optimizer, "inputs": load_dense(inputs)})
+        elapsed = time.time() - start
+        print(f"trained a deep neural net in {elapsed:.2}s")
 
     @classmethod
     def tearDownClass(cls) -> None:

@@ -16,7 +16,7 @@ class TensorTests(ClientTest):
 
         cxt = tc.Context()
         cxt.x1 = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I64)
-        cxt.x2 = cxt.x1.split(3, axis=0)
+        cxt.x2 = tc.tensor.split(cxt.x1, 3, axis=0)
         cxt.result = [tc.tensor.Tensor(cxt.x2[i]).shape for i in range(3)]
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [[shape[0] // splits, 30]] * splits)
@@ -30,7 +30,7 @@ class TensorTests(ClientTest):
 
         cxt = tc.Context()
         cxt.input = tc.tensor.Dense.load(x.shape, x.flatten().tolist())
-        cxt.splits = cxt.input.split(split, axis=axis)
+        cxt.splits = tc.tensor.split(cxt.input, split, axis=axis)
         cxt.result = [cxt.splits[i].shape for i in range(len(split))]
 
         actual = self.host.post(ENDPOINT, cxt)

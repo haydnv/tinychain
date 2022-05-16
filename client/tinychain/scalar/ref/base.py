@@ -1,12 +1,9 @@
-"""
-Reference types.
-:class:`After`, :class:`Case`, :class:`If`, and :class:`While` are available in the top-level namespace.
-"""
+"""Reference types"""
 
 import logging
 
-from ..reflect import is_conditional, is_ref
-from ..util import deanonymize, form_of, get_ref, hex_id, same_as, to_json, uri, URI
+from ...uri import uri, URI
+from ...context import deanonymize, to_json
 
 
 class Ref(object):
@@ -15,10 +12,15 @@ class Ref(object):
     __uri__ = URI("/state/scalar/ref")
 
     def __same__(self, other):
+        from .helpers import same_as
         return same_as(self.__args__(), other.__args__())
 
 
-class After(Ref):
+class FlowControl(Ref):
+    """A flow control like :class:`If` or :class:`After`."""
+
+
+class After(FlowControl):
     """
     A flow control operator used to delay execution conditionally.
 
@@ -34,6 +36,8 @@ class After(Ref):
     __uri__ = uri(Ref) + "/after"
 
     def __init__(self, when, then):
+        from .helpers import is_conditional
+
         if is_conditional(then):
             raise ValueError(f"After does not support a conditional clause: {then}")
 
@@ -47,14 +51,19 @@ class After(Ref):
         return {str(uri(self)): to_json([self.when, self.then])}
 
     def __ns__(self, cxt):
+        from .helpers import is_conditional, reference
+
         deanonymize(self.when, cxt)
         deanonymize(self.then, cxt)
 
         if is_conditional(self.when):
             self.when = reference(cxt, self.when)
 
+    def __repr__(self):
+        return f"After({self.when}, {self.then})"
 
-class Case(Ref):
+
+class Case(FlowControl):
     """
     A flow control used to branch execution conditionally.
 
@@ -90,8 +99,11 @@ class Case(Ref):
         deanonymize(self.switch, cxt)
         deanonymize(self.case, cxt)
 
+    def __repr__(self):
+        return f"Cast({self.cond}, {self.switch}, {self.case})"
 
-class If(Ref):
+
+class If(FlowControl):
     """
     A flow control used to branch execution conditionally.
 
@@ -109,6 +121,8 @@ class If(Ref):
     __uri__ = uri(Ref) + "/if"
 
     def __init__(self, cond, then, or_else=None):
+        from .helpers import is_conditional
+
         if is_conditional(cond):
             raise ValueError(f"If does not support nested conditionals: {cond}")
 
@@ -120,6 +134,8 @@ class If(Ref):
         return [self.cond, self.then, self.or_else]
 
     def __json__(self):
+        from .helpers import form_of
+
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
         if isinstance(form_of(self.cond), bool):
             if form_of(self.cond):
@@ -130,6 +146,8 @@ class If(Ref):
         return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt):
+        from .helpers import is_conditional, is_op_ref, reference
+
         deanonymize(self.cond, cxt)
         deanonymize(self.then, cxt)
         deanonymize(self.or_else, cxt)
@@ -137,8 +155,23 @@ class If(Ref):
         if is_conditional(self.cond) or is_op_ref(self.cond):
             self.cond = reference(cxt, self.cond)
 
+    def __repr__(self):
+        from .helpers import form_of
 
-class While(Ref):
+        # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
+        if isinstance(form_of(self.cond), bool):
+            if self.cond:
+                return str(self.then)
+            else:
+                return str(self.or_else)
+
+        if self.or_else:
+            return f"If({self.cond}, {self.then}, {self.or_else})"
+        else:
+            return f"If({self.cond}, {self.then})"
+
+
+class While(FlowControl):
     """
     A flow control operator to execute a closure repeatedly until a condition is met.
 
@@ -168,8 +201,11 @@ class While(Ref):
         deanonymize(self.op, cxt)
         deanonymize(self.state, cxt)
 
+    def __repr__(self):
+        return f"While({self.cond}, {self.op}, {self.state})"
 
-class With(Ref):
+
+class With(FlowControl):
     """
     Capture state from an enclosing context. Prefer using the `closure` decorator to construct a `With` automatically.
 
@@ -206,7 +242,11 @@ class With(Ref):
         pass
 
     def __ref__(self, name):
+        from .helpers import get_ref
         return get_ref(self.op, name)
+
+    def __repr__(self):
+        return f"With({self.capture}, {self.op})"
 
 
 class Op(Ref):
@@ -214,15 +254,23 @@ class Op(Ref):
 
     __uri__ = uri(Ref) + "/op"
 
-    def __init__(self, subject, args):
+    def __init__(self, subject, args, debug_name=None):
+        self._debug_name = debug_name
         self.subject = subject
         self.args = args
 
+    def __repr__(self):
+        return self._debug_name if self._debug_name else f"{self.__class__.__name__} {self.subject}, {self.args}"
+
     def __args__(self):
+        from .helpers import is_op_ref
+
         subject = [self.subject] if is_op_ref(self.subject, allow_literals=False) else []
         return subject + [arg for arg in list(self.args) if is_op_ref(arg)]
 
     def __json__(self):
+        from .helpers import form_of
+
         if hasattr(self.subject, "__form__"):
             subject = form_of(self.subject)
         else:
@@ -237,6 +285,7 @@ class Op(Ref):
         deanonymize(self.subject, cxt)
 
     def __same__(self, other):
+        from .helpers import same_as
         return same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
 
@@ -252,13 +301,15 @@ class Get(Op):
 
     __uri__ = uri(Op) + "/get"
 
-    def __init__(self, subject, key=None):
+    def __init__(self, subject, key=None, debug_name=None):
         if subject is None:
             raise ValueError("Get op ref subject cannot be None")
 
-        Op.__init__(self, subject, (key,))
+        Op.__init__(self, subject, (key,), debug_name)
 
     def __json__(self):
+        from .helpers import is_ref
+
         if isinstance(self.subject, Ref):
             subject = uri(self.subject)
             is_scalar = False
@@ -278,9 +329,14 @@ class Get(Op):
             return {str(subject): to_json(self.args)}
 
     def __repr__(self):
-        return f"GET Op ref {self.subject} {self.args}"
+        if self._debug_name:
+            return str(self._debug_name)
+        else:
+            return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt):
+        from .helpers import is_op_ref, reference
+
         super().__ns__(cxt)
 
         deanonymize(self.args, cxt)
@@ -310,9 +366,12 @@ class Put(Op):
         Op.__init__(self, subject, (key, value))
 
     def __repr__(self):
-        return f"PUT Op ref {self.subject} {self.args}"
+        key, value = self.args
+        return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
 
     def __ns__(self, cxt):
+        from .helpers import is_op_ref, reference
+
         super().__ns__(cxt)
 
         key, value = self.args
@@ -342,20 +401,27 @@ class Post(Op):
 
     __uri__ = uri(Op) + "/post"
 
-    def __init__(self, subject, args):
+    def __init__(self, subject, args, debug_name=None):
         if not hasattr(args, "__iter__"):
             raise ValueError("POST Op ref requires named parameters (try using a Python dict)")
 
-        Op.__init__(self, subject, args)
+        Op.__init__(self, subject, args, debug_name)
 
     def __args__(self):
+        from .helpers import is_op_ref
+
         args = [self.subject] if is_op_ref(self.subject) else []
         return args + ([self.args.values()] if is_op_ref(self.args) else [])
 
     def __repr__(self):
-        return f"POST Op ref {self.subject} {self.args}"
+        if self._debug_name:
+            return str(self._debug_name)
+        else:
+            return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt):
+        from .helpers import is_op_ref, reference
+
         super().__ns__(cxt)
 
         if not isinstance(self.args, dict):
@@ -393,9 +459,11 @@ class Delete(Op):
         return {str(uri(self)): to_json([self.subject, self.args])}
 
     def __repr__(self):
-        return f"DELETE Op ref {self.subject} {self.args}"
+        return f"DELETE {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt):
+        from .helpers import is_op_ref, reference
+
         super().__ns__(cxt)
         deanonymize(self.args, cxt)
 
@@ -413,9 +481,12 @@ class MethodSubject(object):
         self.method_name = method_name
 
     def __args__(self):
+        from .helpers import is_op_ref
         return [self.subject] if is_op_ref(self.subject) else []
 
     def __ns__(self, cxt):
+        from .helpers import hex_id
+
         name = f"{self.subject.__class__.__name__}_{hex_id(self.subject)}"
         auto_uri = URI(name).append(self.method_name)
 
@@ -452,69 +523,13 @@ class MethodSubject(object):
             return str(uri(self))
 
     def __repr__(self):
-        return f"MethodSubject {repr(self.subject)}"
-
-
-def is_literal(state):
-    if isinstance(state, (list, tuple)):
-        return all(is_literal(item) for item in state)
-    elif isinstance(state, dict):
-        return all(is_literal(value) for value in state.values())
-    elif isinstance(state, slice):
-        return is_literal(state.start) and is_literal(state.stop)
-    elif state is None:
-        return True
-
-    return isinstance(state, (bool, float, int, str))
-
-
-def is_op_ref(state_or_ref, allow_literals=True):
-    """Return `True` if `state_or_ref` is a reference to an `Op`, otherwise `False`."""
-
-    if allow_literals and is_literal(state_or_ref):
-        return False
-    elif isinstance(state_or_ref, (Op, After, If, Case)):
-        return True
-    elif uri(state_or_ref) and uri(type(state_or_ref)) and uri(state_or_ref) >= uri(type(state_or_ref)):
-        return True
-    elif form_of(state_or_ref) is not state_or_ref:
-        return is_op_ref(form_of(state_or_ref), allow_literals)
-    elif isinstance(state_or_ref, (list, tuple)):
-        return any(is_op_ref(item) for item in state_or_ref)
-    elif isinstance(state_or_ref, dict):
-        return any(is_op_ref(state_or_ref[k]) for k in state_or_ref)
-    else:
-        return False
-
-
-def is_write_op_ref(fn):
-    """Return `True` if `state_or_ref` is a reference to a `Put` or `Delete` op, otherwise `False`."""
-
-    if isinstance(fn, (Delete, Put)):
-        return True
-    elif hasattr(fn, "__form__"):
-        return is_write_op_ref(form_of(fn))
-    elif isinstance(fn, (list, tuple)):
-        return any(is_write_op_ref(item) for item in fn)
-    elif isinstance(fn, dict):
-        return any(is_write_op_ref(fn[k]) for k in fn)
-    else:
-        return False
+        return f"{repr(self.subject)}/{self.method_name}"
 
 
 def _log_anonymous(arg):
+    from .helpers import is_op_ref, is_write_op_ref
+
     if is_write_op_ref(arg):
         logging.warning(f"assigning auto-generated name to the result of {arg}")
     elif is_op_ref(arg):
         logging.info(f"assigning auto-generated name to the result of {arg}")
-
-
-def reference(context, state):
-    """Create a reference to `state` in `context` using its `hex_id`"""
-
-    name = f"{state.__class__.__name__}_{hex_id(state)}"
-    if name not in context:
-        logging.debug(f"assigned name {name} to {state} in {context}")
-        setattr(context, name, state)
-
-    return getattr(context, name)

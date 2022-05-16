@@ -1,16 +1,21 @@
 import logging
 import typing
 
-from ..error import BadRequest
-from ..scalar import ref
+from ..context import deanonymize, to_json
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
 from ..scalar.value import Id
-from ..util import deanonymize, deref, hex_id, same_as, to_json
 
 from .base import is_numeric
-from .interface import Numeric, Trigonometric
+from .interface import Boolean, Numeric, Trigonometric
 
 
 class Gradients(dict):
+    def __add__(self, other):
+        grads = Gradients()
+        grads.update(self)
+        grads.update(other)
+        return grads
+
     def __setitem__(self, key: Id, value: Numeric):
         if key in self:
             dict.__setitem__(self, key, self[key] + value)
@@ -25,14 +30,14 @@ class Gradients(dict):
             self[var_id] = __m[var_id]
 
 
-class Operator(ref.Op):
+class Operator(Op):
     """A differentiable operator like addition, multiplication, exponentiation, etc."""
 
     def __init__(self, subject, args):
         if not is_numeric(subject):
             logging.info(f"{subject} is the the subject of a differentiable Operator but does not implement Numeric")
 
-        ref.Op.__init__(self, simplify(subject), simplify(args))
+        Op.__init__(self, subject, args)
 
     def __json__(self):
         return to_json(self.forward())
@@ -41,14 +46,22 @@ class Operator(ref.Op):
         deanonymize(self.subject, context)
         deanonymize(self.args, context)
 
-        if ref.is_op_ref(self.subject):
-            self.subject = ref.reference(context, self.subject)
+        if is_op_ref(self.subject):
+            self.subject = reference(context, self.subject)
 
-        if ref.is_op_ref(self.args):
-            self.args = ref.reference(context, self.args)
+        if is_op_ref(self.args):
+            self.args = reference(context, self.args)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.subject}, {self.args})"
+        raise NotImplementedError(f"human-readable string representation of {self.__class__.__name__}")
+
+    def __same__(self, other):
+        other = operator(other)
+
+        if not other:
+            return False
+
+        return type(self) is type(other) and same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
     @property
     def shape(self):
@@ -68,7 +81,6 @@ class Operator(ref.Op):
 
         raise NotImplementedError(f"{self.__class__}.backward")
 
-    # TODO: support computing gradients w/r/t arbitrary states in the operator graph
     def gradients(self, loss):
         """
         Return the :class:`Gradients` this :class:`Operator` with respect to the given `variables`.
@@ -78,15 +90,6 @@ class Operator(ref.Op):
         """
 
         raise NotImplementedError(f"{self.__class__}.gradients")
-
-    def simplify(self):
-        """
-        Return a simplified form of this :class:`Operator` if possible, otherwise return `self`.
-
-        For example, calling `Add(x, 0).simplify()` will return `x`, and `Mul(1, y).simplify()` will return `y`.
-        """
-
-        return self
 
 
 class Unary(Operator):
@@ -101,8 +104,8 @@ class Unary(Operator):
 
         deanonymize(self.subject, context)
 
-        if ref.is_op_ref(self.subject):
-            self.subject = ref.reference(context, self.subject)
+        if is_op_ref(self.subject):
+            self.subject = reference(context, self.subject)
 
 
 class Custom(Unary):
@@ -119,9 +122,16 @@ class Custom(Unary):
         Unary.__ns__(self, context)
         deanonymize(self._op, context)
 
+    @property
+    def shape(self):
+        return self._op.shape
+
 
 # TODO: Tensor.log(base!=None)
 class Abs(Unary):
+    def __repr__(self):
+        return f"abs({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -133,19 +143,13 @@ class Abs(Unary):
         return self.subject / self.subject.abs()
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients())
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class Exp(Unary):
+    def __repr__(self):
+        return f"e**({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -157,15 +161,19 @@ class Exp(Unary):
         return self.subject.exp()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        grads = Gradients()
+        return gradients(self.subject, loss * self.backward())
 
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
 
-        return grads
+class LogicalNot(Unary):
+    def __repr__(self):
+        return f"NOT ({self.subject})"
+
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        return Boolean.logical_not(self.subject)
 
 
 class Trig(Unary):
@@ -173,14 +181,11 @@ class Trig(Unary):
     def shape(self):
         return self.subject.shape
 
-    def gradients(self, loss):
-        if operator(self.subject):
-            return operator(self.subject).gradients(loss)
-        else:
-            return Gradients({hex_id(self.subject): loss})
-
 
 class Sin(Trig):
+    def __repr__(self):
+        return f"sin({self.subject})"
+
     def forward(self):
         return Trigonometric.sin(self.subject)
 
@@ -189,11 +194,13 @@ class Sin(Trig):
         return subject.cos()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Cos(Trig):
+    def __repr__(self):
+        return f"cos({self.subject})"
+
     def forward(self):
         return Trigonometric.cos(self.subject)
 
@@ -202,11 +209,13 @@ class Cos(Trig):
         return subject - self.subject.sin()
 
     def gradients(self, loss):
-        loss *= -self.subject.sin()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * -self.subject.sin())
 
 
 class Asin(Trig):
+    def __repr__(self):
+        return f"asin({self.subject})"
+
     def forward(self):
         return Trigonometric.asin(self.subject)
 
@@ -215,11 +224,13 @@ class Asin(Trig):
         return (1 - (subject**2))**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Acos(Trig):
+    def __repr__(self):
+        return f"acos({self.subject})"
+
     def forward(self):
         return Trigonometric.acos(self.subject)
 
@@ -228,11 +239,13 @@ class Acos(Trig):
         return -((1 - subject**2)**-0.5)
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Sinh(Trig):
+    def __repr__(self):
+        return f"sinh({self.subject})"
+
     def forward(self):
         return Trigonometric.sinh(self.subject)
 
@@ -241,11 +254,13 @@ class Sinh(Trig):
         return subject.cosh()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Cosh(Trig):
+    def __repr__(self):
+        return f"cosh({self.subject})"
+
     def forward(self):
         return Trigonometric.cosh(self.subject)
 
@@ -254,11 +269,13 @@ class Cosh(Trig):
         return subject.sinh()
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Asinh(Trig):
+    def __repr__(self):
+        return f"asinh({self.subject})"
+
     def forward(self):
         return Trigonometric.asinh(self.subject)
 
@@ -267,11 +284,13 @@ class Asinh(Trig):
         return (subject**2 + 1)**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Acosh(Trig):
+    def __repr__(self):
+        return f"acosh({self.subject})"
+
     def forward(self):
         return Trigonometric.acosh(self.subject)
 
@@ -280,11 +299,13 @@ class Acosh(Trig):
         return ((subject**2) - 1)**-0.5
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Tan(Trig):
+    def __repr__(self):
+        return f"tan({self.subject})"
+
     def forward(self):
         return Trigonometric.tan(self.subject)
 
@@ -293,11 +314,13 @@ class Tan(Trig):
         return 1 / (subject.cos()**2)
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Tanh(Trig):
+    def __repr__(self):
+        return f"tanh({self.subject})"
+
     def forward(self):
         return Trigonometric.tanh(self.subject)
 
@@ -306,11 +329,13 @@ class Tanh(Trig):
         return 1 - subject.tanh()**2
 
     def gradients(self, loss):
-        loss *= self.backward()
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * self.backward())
 
 
 class Atan(Trig):
+    def __repr__(self):
+        return f"atan({self.subject})"
+
     def forward(self):
         return Trigonometric.atan(self.subject)
 
@@ -319,11 +344,13 @@ class Atan(Trig):
         return 1 / (subject**2 + 1)
 
     def gradients(self, loss):
-        loss *= (self.subject**2 + 1)**(-1)
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss * (self.subject**2 + 1)**(-1))
 
 
 class Atanh(Trig):
+    def __repr__(self):
+        return f"atanh({self.subject})"
+
     def forward(self):
         return Trigonometric.atanh(self.subject)
 
@@ -332,8 +359,7 @@ class Atanh(Trig):
         return 1 / (1 - (subject**2))
 
     def gradients(self, loss):
-        loss *= (1 - self.subject**2)**(-1)
-        return Trig.gradients(self, loss)
+        return gradients(self.subject, loss / (1 - self.subject**2))
 
 
 class Dual(Operator):
@@ -351,6 +377,9 @@ class Dual(Operator):
 
 #TODO: Tensor.log(base!=None)
 class Log(Operator):
+    def __repr__(self):
+        return f"log({self.subject})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -362,27 +391,21 @@ class Log(Operator):
         return 1 / self.subject
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class MatMul(Dual):
+    def __repr__(self):
+        return f"({self.subject}) @ ({self.args})"
+
     @property
     def shape(self):
         from ..shape import Shape
-        return self.subject.shape[:-2] + Shape((self.subject.shape[-1], self.args.shape[-2]))
+        return Shape(self.subject.shape[:-2]) + Shape((self.subject.shape[-1], self.args.shape[-2]))
 
     def forward(self):
-        from ..collection.tensor import einsum
-        return einsum("...ij,...jk->ik", [self.subject, self.args])
+        from ..collection.tensor import NDArray
+        return NDArray.__matmul__(self.subject, self.args)
 
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
@@ -390,30 +413,15 @@ class MatMul(Dual):
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
-        def transpose(matrix):
-            return type(matrix)(form=ref.If(
-                matrix.ndim == 2,
-                matrix.transpose(),
-                BadRequest("not a matrix: {{tensor}}", tensor=matrix)))
-
-        grads = Gradients()
-
-        grad = loss @ transpose(self.args)
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = transpose(self.subject) @ loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
+        # TODO: don't assume that self.subject.ndim == 2 and self.args.ndim == 2
+        return (gradients(self.subject, loss @ self.args.transpose([1, 0])) +
+                gradients(self.args, self.subject.transpose([1, 0]) @ loss))
 
 
 class Pow(Dual):
+    def __repr__(self):
+        return f"({self.subject})**({self.args})"
+
     @property
     def shape(self):
         return self.subject.shape
@@ -422,51 +430,56 @@ class Pow(Dual):
         return Numeric.pow(self.subject, self.args)
 
     def backward(self, variable=None):
-        if self.args is variable:
+        if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        return self.args * (self.subject**(self.args - 1))
+        # here derivative_of(self.subject) is explicitly included according to the chain rule
+        return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        grad = loss * self.args * self.subject**(self.args - 1)
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = loss * self.subject.log() * self.subject**self.args
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
-
-    def simplify(self):
-        from ..collection.tensor import Dense
-
-        if ref.is_literal(self.args):
-            if same_as(self.args, 1):
-                return self.subject
-        elif same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject
-
-        return self
+        subject_grad = loss * self.args * self.subject**(self.args - 1)
+        args_grad = loss * self.subject.log() * self.subject**self.args
+        return gradients(self.subject, subject_grad) + gradients(self.args, args_grad)
 
 
 class DualBroadcast(Operator):
     @property
     def shape(self):
-        if ref.is_literal(self.args):
-            # it's a constant number
+        if is_literal(self.args):
+            # it's a literal number
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
 
 
+class LogicalAnd(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) AND ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_and(self.subject, self.args)
+
+
+class LogicalOr(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) OR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_or(self.subject, self.args)
+
+
+class LogicalXor(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) XOR ({self.args})"
+
+    def forward(self):
+        return Boolean.logical_xor(self.subject, self.args)
+
+
 class Add(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) + ({self.args})"
+
     def forward(self):
         return Numeric.add(self.subject, self.args)
 
@@ -476,39 +489,13 @@ class Add(DualBroadcast):
         return subject + arg
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(loss))
-        else:
-            grads[hex_id(self.args)] = loss
-
-        return grads
-
-    def simplify(self):
-        from ..collection.tensor import NDArray, Sparse
-
-        if ref.is_literal(self.args):
-            if same_as(self.args, 0):
-                return self.subject
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
-
-        if ref.is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return self.args
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Sparse.zeros_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
-
-        return self
+        return gradients(self.subject, loss) + gradients(self.args, loss)
 
 
 class Mul(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) * ({self.args})"
+
     def forward(self):
         return Numeric.mul(self.subject, self.args)
 
@@ -518,49 +505,13 @@ class Mul(DualBroadcast):
         return (subject * self.args) + (self.subject * arg)
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        grad = self.args * loss
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(grad))
-        else:
-            grads[hex_id(self.subject)] = grad
-
-        grad = self.subject * loss
-        if operator(self.args):
-            grads.update(operator(self.args).gradients(grad))
-        else:
-            grads[hex_id(self.args)] = grad
-
-        return grads
-
-    def simplify(self):
-        from ..collection.tensor import Dense, Sparse, NDArray
-
-        if ref.is_literal(self.args):
-            if same_as(self.args, 0):
-                return 0
-            elif same_as(self.args, 1):
-                return self.subject
-        elif same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.args.broadcast(self.subject.shape)
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
-
-        if ref.is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return 0
-            elif same_as(self.subject, 1):
-                return self.args
-        elif same_as(self.subject, Sparse.zeros_like(self.subject)):
-            return self.subject.broadcast(self.args.shape)
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.ones_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
-
-        return self
+        return gradients(self.subject, self.args * loss) + gradients(self.args, self.subject * loss)
 
 
 class Sub(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) - ({self.args})"
+
     def forward(self):
         return Numeric.sub(self.subject, self.args)
 
@@ -584,19 +535,11 @@ class Sub(DualBroadcast):
 
         return grads
 
-    def simplify(self):
-        from ..collection.tensor import Sparse
-
-        if ref.is_literal(self.args):
-            if same_as(self.args, 0):
-                return self.subject
-        elif same_as(self.args, Sparse.zeros_like(self.args)):
-            return self.subject
-
-        return self
-
 
 class Div(DualBroadcast):
+    def __repr__(self):
+        return f"({self.subject}) / ({self.args})"
+
     def __init__(self, subject, args):
         if same_as(args, 0):
             raise ValueError(f"cannot divide {subject} by {args}")
@@ -621,44 +564,23 @@ class Div(DualBroadcast):
             grads[hex_id(self.subject)] = self.subject * loss / self.args
 
         if operator(self.args):
-            grads.update(operator(self.args).gradients(loss / self.args))
+            grads.update(operator(self.args).gradients((-self.subject * loss) / self.args**2))
         else:
             grads[hex_id(self.args)] = (-self.subject * loss) / self.args**2
 
         return grads
 
-    def simplify(self):
-        from ..collection.tensor import Dense, NDArray
 
-        if ref.is_literal(self.subject):
-            if same_as(self.subject, 0):
-                return 0
-        elif isinstance(self.args, NDArray) and same_as(self.subject, Dense.zeros_like(self.subject)):
-            return self.args.broadcast(self.subject.shape)
+def constant(numeric):
+    """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
-        if ref.is_literal(self.args):
-            if same_as(self.args, 1):
-                return self.subject
-        elif isinstance(self.subject, NDArray) and same_as(self.args, Dense.ones_like(self.args)):
-            return self.subject.broadcast(self.args.shape)
+    while operator(numeric):
+        numeric = type(numeric)(form=operator(numeric).forward())
 
-        # TODO: simplify both numerator and denominator into a product of multiplicands
-
-        if operator(self.subject) and isinstance(operator(self.subject), Mul):
-            numerator = operator(self.subject)
-            if same_as(numerator.subject, self.args):
-                return numerator.args
-            elif same_as(numerator.args, self.args):
-                return numerator.subject
-
-        if operator(self.args) and isinstance(operator(self.args), Mul):
-            denominator = operator(self.args)
-            if same_as(denominator.subject, self.subject):
-                return 1 / denominator.args
-            elif same_as(denominator.args, self.subject):
-                return 1 / denominator.subject
-
-        return self
+    if is_numeric(numeric):
+        return numeric
+    else:
+        raise TypeError(f"not a numeric state: {numeric}")
 
 
 def derivative_of(state, variable=None):
@@ -672,64 +594,125 @@ def derivative_of(state, variable=None):
     if not is_numeric(state):
         raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
 
-    from ..scalar.number import F32, Number
-    from ..collection.tensor import Dense, Sparse, Tensor
-    from ..ml.optimizer import Variable
-
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
-        return Dense.ones_like(state)
+        return ones_like(state)
+
+    from ..ml.optimizer import Variable
 
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
-            return Dense.ones_like(state)
+            return ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
-            return Sparse.create(state, F32)
+            return zeros_like(state)
 
     if operator(state):
         return operator(state).backward(variable)
-    if isinstance(state, Number):
-        return type(state)(form=0)
-    elif isinstance(state, Tensor):
-        return Sparse.create(state, F32)
-    elif isinstance(state, (bool, int, float)):
-        return type(state)(0)
-    else:
-        raise TypeError(f"the derivative of {state} is not defined")
+
+    return zeros_like(state)
 
 
-def gradients(differentiable, loss, variables=None):
+def gradients(numeric, loss, variables=None):
     """
-    Return the gradient of a `differentiable` operator graph with respect the `loss`.
+    Return the gradient of a `numeric` state with respect to the given `loss`.
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
     If a list of variables is given, a corresponding list of gradients will be returned.
     If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
     """
 
-    from .equation import Function
-
-    if not operator(differentiable):
-        raise ValueError(f"not a differentiable state: {differentiable}")
-
-    grads = operator(differentiable).gradients(loss)
+    if operator(numeric):
+        grads = operator(numeric).gradients(loss)
+    elif is_constant(numeric):
+        grads = Gradients({hex_id(numeric): loss})
+    elif is_numeric(numeric):
+        raise ValueError(f"cannot compute gradients of {numeric} w/r/t {loss}")
+    else:
+        raise ValueError(f"not a numeric state: {numeric}")
 
     if variables is None:
-        return Function(grads).optimize()
+        return grads
 
     if not isinstance(variables, (list, tuple)):
         if hex_id(variables) not in grads:
-            raise KeyError(f"{variables} is not reachable from operator {differentiable}")
+            raise KeyError(f"{variables} is not reachable from operator {numeric}")
 
-        return Function(grads[hex_id(variables)]).optimize()
+        return grads[hex_id(variables)]
 
     missing = [var for var in variables if hex_id(var) not in grads]
     if missing:
-        raise KeyError(f"not reachable by traversing the operator graph {differentiable}: {missing}")
+        raise KeyError(f"not reachable by traversing the operator graph {numeric}: {missing}")
 
-    return Function([grads[hex_id(var)] for var in variables]).optimize()
+    return [grads[hex_id(var)] for var in variables]
+
+
+def is_constant(numeric):
+    """
+    Return `False` if the given `numeric` state is the result of an :class:`Operator`, i.e. a differentiable function.
+    """
+
+    if not is_numeric(numeric):
+        raise TypeError(f"not a numeric state: {numeric}")
+
+    return operator(numeric) is None
+
+
+def is_one(numeric):
+    """Return `True` if the given `numeric` state is a constant with value one."""
+
+    if same_as(numeric, 1):
+        return True
+
+    from ..collection.tensor import NDArray, Sparse, Transform
+
+    while isinstance(operator(numeric), Transform):
+        numeric = operator(numeric).subject
+
+    if same_as(numeric, 1):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros_like(numeric)):
+        return True
+
+    return False
+
+
+def ones_like(state):
+    from ..collection.tensor import Dense
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        return 1.
+    else:
+        return Dense.ones_like(state)
+
+
+def is_zero(numeric):
+    """Return `True` if the given `numeric` state is a constant with value zero."""
+
+    if same_as(numeric, 0):
+        return True
+
+    from ..collection.tensor import Dense, NDArray, Transform
+
+    while isinstance(operator(numeric), Transform):
+        numeric = operator(numeric).subject
+
+    if same_as(numeric, 0):
+        return True
+    elif isinstance(numeric, NDArray) and same_as(numeric, Dense.ones_like(numeric)):
+        return True
+
+    return False
+
+
+def zeros_like(state):
+    from ..collection.tensor import Sparse
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        return 0.
+    else:
+        return Sparse.zeros_like(state)
 
 
 def operator(state_or_ref):
@@ -741,28 +724,25 @@ def operator(state_or_ref):
         return operator(deref(state_or_ref))
 
 
-def simplify(state):
-    """
-    Simplify the given operator graph, if possible.
+def debug_shape(numeric):
+    if not hasattr(numeric, "shape"):
+        raise ValueError(f"{numeric} has no shape")
 
-    For example, `simplify(Add(0, 2))` will return `2`.
-    """
+    if is_literal(numeric.shape):
+        print(f"the shape of {numeric} is {numeric.shape}")
+        return
 
-    if not operator(state):
-        return state
+    print(f"{numeric} does not have a literal shape")
 
-    from ..state import State
+    op = operator(numeric)
 
-    if isinstance(state, State):
-        rtype = type(state)
-    else:
-        rtype = None
+    if not op:
+        return
 
-    while operator(state):
-        simplified = operator(state).simplify()
-        if same_as(simplified, state):
-            break
-        else:
-            state = simplified
+    from ..collection.tensor import NDArray
 
-    return rtype(state) if rtype else state
+    if isinstance(op.subject, NDArray):
+        debug_shape(op.subject)
+
+    if isinstance(op.args, NDArray):
+        debug_shape(op.args)

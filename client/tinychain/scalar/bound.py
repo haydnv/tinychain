@@ -1,8 +1,8 @@
 from ..state import State
-from ..util import form_of, to_json, URI
+from ..uri import URI
+from ..context import to_json
 
-from .ref import Ref
-from .value import Nil
+from .ref import form_of, Ref
 
 
 class Bound(object):
@@ -35,28 +35,39 @@ class In(Bound):
         return to_json(["in", self.value])
 
 
-class Un(Bound):
-    """An unbounded side of a :class:`Range`"""
-
-    def __repr__(self):
-        return "..."
-
-    def __json__(self):
-        return Nil
-
-
 class Range(object):
     """A selection range of one or two :class:`Bound`s."""
 
     def __repr__(self):
-        return f"Range {self.start} to {self.end}"
+        start, end = None, None
+
+        if isinstance(self.start, In):
+            start = f"[{repr(self.start.value)}"
+        if isinstance(self.start, Ex):
+            start = f"({repr(self.start.value)}"
+
+        if isinstance(self.end, In):
+            end = f"{repr(self.end.value)}]"
+        if isinstance(self.end, Ex):
+            end = f"{repr(self.end.value)})"
+
+        if start and end:
+            return f"{start}:{end}"
+        elif start:
+            return f"{start}:"
+        elif end:
+            return f":{end}"
+        else:
+            return ":"
 
     @staticmethod
     def from_slice(s):
         return Range(In(s.start), Ex(s.stop))
 
     def to_slice(self):
-        return slice(form_of(self.start.value), form_of(self.end.value))
+        start = self.start.value if self.start else None
+        end = self.end.value if self.end else None
+        return slice(form_of(start), form_of(end))
 
     def __init__(self, start=None, end=None):
         if start is not None and not isinstance(start, Bound):

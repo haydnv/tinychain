@@ -1,4 +1,27 @@
 from ..interface import Interface
+from ..scalar.ref import MethodSubject, Get, Post
+
+
+class Boolean(Interface):
+    def logical_and(self, other):
+        """Return `True` where both this :class:`Boolean` and the `other` are `True`."""
+
+        return Post(MethodSubject(self, "and"), {'r': other})
+
+    def logical_not(self):
+        """Return `True` where this :class:`Boolean` is False and vice-versa."""
+
+        return Get(MethodSubject(self, "and"))
+
+    def logical_or(self, other):
+        """Return `True` where this :class:`Boolean` or the `other` is `True`."""
+
+        return Post(MethodSubject(self, "or"), {'r': other})
+
+    def logical_xor(self, other):
+        """Return `True` where either this :class:`Boolean` or the `other` is `True`, but not both."""
+
+        return Post(MethodSubject(self, "xor"), {'r': other})
 
 
 class Numeric(Interface):

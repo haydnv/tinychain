@@ -2,10 +2,11 @@ import typing
 
 from .interface import Functional
 from .scalar.bound import Range
-from .scalar.ref import is_literal, Get, Post
+from .scalar.ref import form_of, get_ref, is_literal, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
-from .util import form_of, get_ref, to_json, uri
+from .uri import uri
+from .context import to_json
 
 
 # TODO: implement `Functional` for `Map`
@@ -219,7 +220,7 @@ class Tuple(State, Functional):
             stop = form_of(i.stop)
 
             if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents are constants, so compute the slice now if possible
+                # the contents may be literal, so compute the slice now if possible
                 if hasattr(form_of(self), "__getitem__"):
                     if is_literal(start) and is_literal(stop):
                         start = _index_of(start, len(self), 0)

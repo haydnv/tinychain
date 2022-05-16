@@ -12,6 +12,7 @@ from .process import start_local_host
 
 DEFAULT_CONCURRENCY = 5
 BACKOFF = 0.01
+TIMEOUT = aiohttp.ClientTimeout(total=86400)
 
 
 # TODO: move this class into a new async module in tc.host
@@ -25,7 +26,7 @@ class Host(object):
     async def get(self, path, key=None):
         endpoint = str(tc.uri(self) + path)
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.get(endpoint, params={"key": json.dumps(tc.to_json(key))})
 
             backoff = BACKOFF
@@ -39,7 +40,7 @@ class Host(object):
     async def put(self, path, key=None, value=None):
         endpoint = str(tc.uri(self) + path)
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.put(endpoint, params={"key": json.dumps(tc.to_json(key))}, json=tc.to_json(value))
 
             backoff = BACKOFF
@@ -53,7 +54,7 @@ class Host(object):
     async def post(self, path, params={}):
         endpoint = str(tc.uri(self) + path)
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.post(endpoint, json=tc.to_json(params))
 
             backoff = BACKOFF
@@ -67,7 +68,7 @@ class Host(object):
     async def delete(self, path, key=None):
         endpoint = str(tc.uri(self) + path)
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.delete(endpoint, params={"key": json.dumps(tc.to_json(key))})
 
             backoff = BACKOFF

@@ -1,6 +1,6 @@
 """User-defined ops"""
 
-from ..util import uri
+from ..uri import uri
 
 from . import ref
 from .base import Scalar

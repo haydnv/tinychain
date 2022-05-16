@@ -4,9 +4,9 @@ import inspect
 
 from .base import _Base
 from .interface import Functional
-from .reflect import is_ref
-from .scalar.ref import Ref
-from .util import deanonymize, form_of, get_ref, hex_id, to_json, uri, URI
+from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
+from .uri import uri, URI
+from .context import deanonymize, to_json
 
 
 class State(_Base):
@@ -34,6 +34,8 @@ class State(_Base):
                 self.__uri__ = uri(form)
 
             self.__form__ = form
+
+        assert not isinstance(form_of(self), State)
 
         _Base.__init__(self)
 
@@ -77,15 +79,6 @@ class State(_Base):
 
         from .scalar.ref import Get
         return dtype(form=Get(dtype, self))
-
-    def copy(self):
-        """Create a new `State` by copying this one."""
-
-        return self._get("copy", rtype=self.__class__)
-
-    def dtype(self):
-        """Return the native base :class:`Class` of this `State`."""
-        return self._get("class", rtype=Class)
 
     def hash(self):
         """Return the SHA256 hash of this `State` as an :class:`Id`."""
@@ -180,6 +173,20 @@ class StateRef(Ref):
         self.state = state
         self.__uri__ = URI(name)
 
+    def __repr__(self):
+        is_auto_assigned = False
+
+        address = str(uri(self)).split('_')[-1]
+        try:
+            is_auto_assigned = int(address, 16)
+        except ValueError:
+            pass
+
+        if is_auto_assigned:
+            return repr(self.state)
+        else:
+            return str(uri(self))
+
     def __id__(self):
         return hex_id(self.state)
 
@@ -188,6 +195,3 @@ class StateRef(Ref):
 
     def __ns__(self, cxt):
         deanonymize(self.state, cxt)
-
-    def __repr__(self):
-        return f"Ref({self.state}, {uri(self)})"

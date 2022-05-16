@@ -4,7 +4,8 @@ import logging
 from ..scalar.value import Nil, Value
 from ..scalar import op, ref
 from ..state import State
-from ..util import form_of, to_json, uri, Context, URI
+from ..uri import uri, URI
+from ..context import to_json, Context
 
 from . import _get_rtype, parse_args, resolve_class
 
@@ -22,7 +23,7 @@ class Op(object):
         self.form = form
 
     def __json__(self):
-        return {str(uri(self)): to_json(form_of(self))}
+        return {str(uri(self)): to_json(ref.form_of(self))}
 
     def __ref__(self):
         raise RuntimeError("cannot reference a reflected Op; use Get, Put, Post, or Delete instead")
@@ -39,7 +40,7 @@ class Get(Op):
         Op.__init__(self, form)
 
     def __args__(self):
-        _, cxt = form_of(self)
+        _, cxt = ref.form_of(self)
         return [cxt]
 
     def __form__(self):
@@ -79,7 +80,7 @@ class Put(Op):
         return ref.Put(self, key, value)
 
     def __args__(self):
-        _, _, cxt = form_of(self)
+        _, _, cxt = ref.form_of(self)
         return [cxt]
 
     def __form__(self):
@@ -140,7 +141,7 @@ class Post(Op):
         Op.__init__(self, form)
 
     def __args__(self):
-        return [form_of(self)]
+        return [ref.form_of(self)]
 
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
@@ -180,7 +181,7 @@ class Delete(Op):
     __uri__ = uri(op.Delete)
 
     def __args__(self):
-        _, cxt = form_of(self)
+        _, cxt = ref.form_of(self)
         return [cxt]
 
     def __form__(self):
@@ -235,7 +236,7 @@ def validate(cxt, provided):
 
         form = cxt.form[name]
         while hasattr(form, "__form__"):
-            form = form_of(form)
+            form = ref.form_of(form)
 
         if isinstance(form, URI):
             validate_ref(form)

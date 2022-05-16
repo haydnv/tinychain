@@ -1,10 +1,9 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`"""
 
-from .reflect import is_ref
 from .scalar import ref
 from .scalar.value import Nil
 from .state import State
-from .util import uri, URI
+from .uri import uri, URI
 
 
 class Chain(State):
@@ -13,7 +12,7 @@ class Chain(State):
     __uri__ = uri(State) + "/chain"
 
     def __new__(cls, form):
-        if is_ref(form):
+        if ref.is_ref(form):
             return State.__new__(cls)
 
         elif isinstance(form, State):
@@ -33,7 +32,7 @@ class Chain(State):
 
         if isinstance(form, URI):
             self.__uri__ = form
-        elif is_ref(form) and hasattr(form, "__uri__"):
+        elif ref.is_ref(form) and hasattr(form, "__uri__"):
             self.__uri__ = uri(form)
 
         self.__form__ = form

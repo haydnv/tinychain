@@ -3,13 +3,10 @@
 import logging
 
 from ..app import Dynamic, Model
-from ..collection.tensor import einsum, Dense, NDArray, Tensor
+from ..collection.tensor import Dense, NDArray, Tensor
 from ..decorators import differentiable
-from ..error import BadRequest
 from ..generic import Tuple
-from ..math.operator import derivative_of, gradients, operator, Dual, Gradients
-from ..scalar.ref import After, If, MethodSubject
-from ..util import deanonymize, hex_id
+from ..scalar.ref import After
 
 from .constants import LIB_URI
 from .interface import Differentiable

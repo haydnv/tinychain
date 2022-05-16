@@ -1,7 +1,8 @@
 import inspect
 import logging
 
-from ..util import form_of, get_ref, to_json, uri, URI
+from ..uri import uri, URI
+from ..context import to_json
 
 
 class Meta(type):
@@ -20,6 +21,7 @@ class Meta(type):
 
     def __form__(cls):
         from ..app import Model  # TODO: remove this dependency from Meta
+        from ..scalar.ref import form_of, get_ref
         from ..state import State
 
         parents = [c for c in cls.parents() if not issubclass(c, Model)]
@@ -65,6 +67,7 @@ class Meta(type):
 
     def __json__(cls):
         from ..state import Class, State
+        from ..scalar.ref import form_of
 
         parents = cls.parents()
 

@@ -3,9 +3,10 @@ from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
-from ..scalar.ref import If, Ref
+from ..scalar.ref import form_of, If, Ref
 from ..state import State, Stream
-from ..util import form_of, to_json, uri, URI
+from ..uri import uri, URI
+from ..context import to_json
 
 from .base import Collection
 from .btree import BTree

@@ -1,15 +1,14 @@
 import logging
 
-from ..collection.tensor import Tensor
-from ..scalar.ref import Op
-from ..util import deref, hex_id, same_as
+from ..collection.tensor import Copy, NDArray
+from ..scalar.ref import deref, hex_id, same_as, Op
 
-from .operator import operator, simplify
+from .operator import operator
 
 
 class Function(object):
     def __init__(self, result):
-        self.result = simplify(result)
+        self.result = result
 
         self.nodes = {}
         self.edges = []
@@ -47,6 +46,8 @@ class Function(object):
             unvisited = list(self.result.values())
         elif isinstance(deref(self.result), Op):
             unvisited = [self.result]
+        else:
+            raise TypeError(f"not an Operator: {self.result}")
 
         return [state for state in unvisited if operator(state)]
 
@@ -84,10 +85,16 @@ class Function(object):
         for f, _t in self.edges:
             counts[hex_id(f)] += 1
 
-        copies = {
-            node_id: self.nodes[node_id].copy() for node_id, count in counts.items()
-            if count > 1 and isinstance(self.nodes[node_id], Tensor)
-        }
+        copies = {}
+        for node_id, count in counts.items():
+            if count <= 1:
+                continue
+
+            node = self.nodes[node_id]
+            if not isinstance(node, NDArray) or isinstance(operator(node), Copy):
+                copies[node_id] = node
+            else:
+                copies[node_id] = node.copy()
 
         visited = {}
         unvisited = self._unvisited()

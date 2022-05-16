@@ -8,7 +8,7 @@ from ..decorators import closure, get, put
 from ..generic import Tuple
 from ..scalar.number import Bool, U32
 from ..scalar.ref import After, If, Put
-from ..util import uri
+from ..uri import uri
 
 from .edge import DIM, Edge, ForeignKey
 
