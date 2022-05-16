@@ -7,7 +7,6 @@ from ..collection.tensor import Dense, NDArray, Tensor
 from ..constants import debug
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..math.equation import Function
 from ..math.interface import Numeric
 from ..math.operator import constant, derivative_of, is_constant, gradients
 from ..scalar.number import F32, F64, UInt
@@ -38,25 +37,23 @@ class Optimizer(Model):
 class _Optimizer(Optimizer, Dynamic):
     @post
     def gradients(self, cxt, inputs: Tensor) -> _Gradients:
-        debug("Optimizer constructing gradient calculations...")
+        print("Optimizer constructing gradient calculations...")
 
         trainable_vars = trainable(self.ml_model)
-        debug("discovered trainable variables...")
+        print("discovered trainable variables...")
 
         outputs = self.ml_model.eval(inputs)
-        debug("constructed model evaluation")
+        print("constructed model evaluation")
 
         loss = self._cost(inputs, outputs)
-        debug(lambda: f"constructed loss: {loss}")
+        print(f"constructed loss")
         d_loss = derivative_of(loss)
-        debug(lambda: f"constructed derivative of loss: {d_loss}")
+        print(f"constructed derivative of loss")
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
         grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
-        debug("constructed gradients")
-        grads = Function(grads).optimize()
-        debug("optimized gradients")
+        print("constructed gradients")
 
         if not grads:
             raise ValueError(f"model output {outputs} has no gradients")
