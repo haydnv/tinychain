@@ -5,14 +5,11 @@ import json
 import requests
 import urllib.parse
 
+from .constants import ENCODING
 from .error import *
 from .scalar.value import Nil
 from .uri import uri, URI
 from .context import to_json
-
-
-DEFAULT_PORT = 8702
-ENCODING = "utf-8"
 
 
 class Host(object):

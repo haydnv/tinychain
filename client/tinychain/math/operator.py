@@ -1,6 +1,7 @@
 import logging
 import typing
 
+from ..constants import debug
 from ..context import deanonymize, to_json
 from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, Op
 from ..scalar.value import Id
@@ -158,10 +159,10 @@ class Exp(Unary):
         return Numeric.exp(self.subject)
 
     def backward(self, _variable=None):
-        return self.subject.exp()
+        return derivative_of(self.subject) * self.subject.exp()
 
     def gradients(self, loss):
-        return gradients(self.subject, loss * self.backward())
+        return gradients(self.subject, loss * self.subject.exp())
 
 
 class LogicalNot(Unary):
@@ -730,10 +731,10 @@ def debug_shape(numeric):
         raise ValueError(f"{numeric} has no shape")
 
     if is_literal(numeric.shape):
-        logging.debug(f"the shape of {numeric} is {numeric.shape}")
+        debug(lambda: f"the shape of {numeric} is {numeric.shape}")
         return
 
-    logging.debug(f"{numeric} does not have a literal shape")
+    debug(lambda: f"{numeric} does not have a literal shape")
 
     op = operator(numeric)
 

@@ -151,7 +151,7 @@ class Shape(Tuple):
                 elif r == 1:
                     dim = l
                 else:
-                    raise ValueError(f"cannot broadcast dimensions {l} and {r}")
+                    raise ValueError(f"cannot broadcast dimensions {l} and {r} (shapes are {left} and {right})")
 
             elif is_literal(l):
                 if l == 1:

@@ -2,8 +2,9 @@
 
 import logging
 
-from ...uri import uri, URI
+from ...constants import debug
 from ...context import deanonymize, to_json
+from ...uri import uri, URI
 
 
 class Ref(object):
@@ -492,7 +493,7 @@ class MethodSubject(object):
 
         if hasattr(self, "__uri__"):
             if uri(self) == auto_uri and name not in cxt:
-                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
+                debug(lambda: f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
             else:
                 return
@@ -501,7 +502,7 @@ class MethodSubject(object):
             self.__uri__ = auto_uri
 
             if name not in cxt:
-                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
+                debug(lambda: f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
 
             deanonymize(self.subject, cxt)

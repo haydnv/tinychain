@@ -1,5 +1,4 @@
-import math
-
+from ..constants import e
 from ..math.interface import Boolean, Numeric, Trigonometric
 from ..math.operator import is_one, is_zero
 from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
@@ -52,7 +51,7 @@ class Number(Value, Numeric, Trigonometric):
         if is_zero(self):
             return 1
         elif is_one(self):
-            return math.e
+            return e
 
         return self.__class__(form=Exp(self))
 

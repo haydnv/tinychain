@@ -1,8 +1,9 @@
 import inspect
 import logging
 
-from ..uri import uri, URI
+from ..constants import debug
 from ..context import to_json
+from ..uri import uri, URI
 
 
 class Meta(type):
@@ -38,11 +39,11 @@ class Meta(type):
                 continue
             elif name in parent_members:
                 if attr is parent_members[name] or attr == parent_members[name]:
-                    logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
+                    debug(lambda: f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
                     continue
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
-                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
+                        debug(lambda: f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
                         continue
 
                 logging.info(f"{attr} ({name}) overrides a parent method and will be explicitly defined in {cls}")

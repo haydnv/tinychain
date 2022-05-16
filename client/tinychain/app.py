@@ -5,6 +5,7 @@ import logging
 import typing
 
 from .collection import Collection
+from .constants import debug
 from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .chain import Chain
@@ -73,7 +74,7 @@ class Model(Object, metaclass=Meta):
             return {str(uri(self)): to_json(form)}
 
     def __ns__(self, _context):
-        logging.debug(f"will not deanonymize model {self}")
+        debug(lambda: f"will not deanonymize model {self}")
 
     def __ref__(self, name):
         return ModelRef(self, name)
@@ -103,8 +104,9 @@ class Dynamic(Instance):
 
             if isinstance(attr, MethodStub):
                 setattr(self, name, attr.method(self, name))
-            elif isinstance(attr, (dict, list, tuple, State)):
-                if not independent(attr):
+
+            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                if isinstance(attr, (dict, list, tuple, State)) and not independent(attr):
                     classname = self.__class__.__name__
                     raise ValueError(f"{attr} in {classname} depends on anonymous state {depends_on(attr)}")
 
@@ -131,7 +133,7 @@ class Dynamic(Instance):
                     continue
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
-                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
+                        debug(lambda: f"{attr} is identical to its parent, won't be defined explicitly in {self}")
                         continue
 
             if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
@@ -150,7 +152,7 @@ class Dynamic(Instance):
         return {str(uri(self)): to_json(form)}
 
     def __ns__(self, _context):
-        logging.debug(f"will not deanonymize dynamic model {self}")
+        debug(lambda: f"will not deanonymize dynamic model {self}")
 
     def __repr__(self):
         return f"a Dynamic model {self.__class__.__name__}"

@@ -2,9 +2,8 @@
 
 import functools
 import inspect
-import logging
-import math
 
+from ...constants import debug, e
 from ...decorators import post
 from ...generic import Map, Tuple
 from ...interface import Compare, Interface
@@ -268,7 +267,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                         if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
                             raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
                     except (RuntimeError, ValueError) as e:
-                        logging.debug(f"{form} does not have a literal shape: {e}")
+                        debug(lambda: f"{form} does not have a literal shape: {e}")
 
                 Tensor.__init__(self, form)
 
@@ -358,7 +357,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
             try:
                 return operator(self).shape
             except (RuntimeError, ValueError) as e:
-                logging.debug(f"{self} does not have a literal shape: {e}")
+                debug(lambda: f"{self} does not have a literal shape: {e}")
 
         return self._get("shape", rtype=Shape)
 
@@ -417,7 +416,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
     def exp(self):
         if is_one(self):
-            return Dense.constant(self.shape, math.e, self.dtype)
+            return Dense.constant(self.shape, e, self.dtype)
         elif is_zero(self):
             return Sparse.zeros_like(self)
 

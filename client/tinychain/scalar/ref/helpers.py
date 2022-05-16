@@ -2,6 +2,7 @@ import inspect
 import logging
 import re
 
+from ...constants import debug
 from ...uri import uri, URI
 from ...context import to_json
 
@@ -99,7 +100,7 @@ def get_ref(state, name):
     elif isinstance(state, (list, tuple)):
         return tuple(get_ref(item, name.append(i)) for i, item in enumerate(state))
     else:
-        logging.debug(f"{state} has no __ref__ method")
+        debug(lambda: f"{state} has no __ref__ method")
         return state
 
 
@@ -284,7 +285,7 @@ def reference(context, state):
         name = f"{state.__class__.__name__}_{hex_id(state)}"
 
     if name not in context:
-        logging.debug(f"assigned name {name} to {state} in {context}")
+        debug(lambda: f"assigned name {name} to {state} in {context}")
         setattr(context, name, state)
 
     return getattr(context, name)

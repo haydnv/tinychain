@@ -1,10 +1,10 @@
 import inspect
-import logging
 import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, NDArray, Tensor
+from ..constants import debug
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.equation import Function
@@ -38,23 +38,23 @@ class Optimizer(Model):
 class _Optimizer(Optimizer, Dynamic):
     @post
     def gradients(self, cxt, inputs: Tensor) -> _Gradients:
-        logging.debug("Optimizer constructing gradient calculations...")
+        debug("Optimizer constructing gradient calculations...")
 
         trainable_vars = trainable(self.ml_model)
-        logging.debug("discovered trainable variables...")
+        debug("discovered trainable variables...")
 
         outputs = self.ml_model.eval(inputs)
-        logging.debug("constructed model evaluation")
+        debug("constructed model evaluation")
 
         d_loss = derivative_of(self._cost(inputs, outputs))
-        logging.debug("constructed derivative of loss")
+        debug("constructed derivative of loss")
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
         grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
-        logging.debug("constructed gradients")
+        debug("constructed gradients")
         grads = Function(grads).optimize()
-        logging.debug("optimized gradients")
+        debug("optimized gradients")
 
         if not grads:
             raise ValueError(f"model output {outputs} has no gradients")
@@ -217,7 +217,7 @@ def namespace(model, prefix):
 
             ns.update(namespace(component, f"{prefix}.{name}"))
     else:
-        logging.debug(f"ignoring non-trainable model attribute {model}")
+        debug(lambda: f"ignoring non-trainable model attribute {model}")
 
     return ns
 
@@ -248,6 +248,6 @@ def trainable(model):
 
             vars.update(trainable(component))
     else:
-        logging.debug(f"ignoring non-trainable model attribute {model}")
+        debug(lambda: f"ignoring non-trainable model attribute {model}")
 
     return vars

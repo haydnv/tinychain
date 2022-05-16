@@ -1,6 +1,6 @@
 import itertools
-import logging
 
+from ...constants import debug
 from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
@@ -12,12 +12,12 @@ from ...uri import uri
 class Concatenate(Operator):
     def __init__(self, tensors, axis=None):
         if not hasattr(tensors, "__len__"):
-            logging.debug(f"Concatenate({tensors}) will not support automatic differentiation")
+            debug(lambda: f"Concatenate({tensors}) will not support automatic differentiation")
 
         if axis:
             for tensor in tensors:
                 if not is_literal(tensor.shape[axis]):
-                    logging.debug(f"tensor {tensor} to concatenate noes not have a literal shape at axis {axis}")
+                    debug(lambda: f"tensor {tensor} to concatenate noes not have a literal shape at axis {axis}")
 
         Operator.__init__(self, tensors, axis)
 
@@ -350,7 +350,7 @@ class Reshape(Transform):
 class Slice(Transform):
     def __init__(self, tensor, bounds):
         if not is_literal(tensor.shape):
-            logging.debug(f"slice of {tensor} will not support automatic differentiation")
+            debug(lambda: f"slice of {tensor} will not support automatic differentiation")
 
         Transform.__init__(self, tensor, bounds)
 
