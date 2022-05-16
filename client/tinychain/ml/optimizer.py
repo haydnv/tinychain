@@ -46,8 +46,10 @@ class _Optimizer(Optimizer, Dynamic):
         outputs = self.ml_model.eval(inputs)
         debug("constructed model evaluation")
 
-        d_loss = derivative_of(self._cost(inputs, outputs))
-        debug("constructed derivative of loss")
+        loss = self._cost(inputs, outputs)
+        debug(lambda: f"constructed loss: {loss}")
+        d_loss = derivative_of(loss)
+        debug(lambda: f"constructed derivative of loss: {d_loss}")
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 

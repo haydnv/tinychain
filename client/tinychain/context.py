@@ -143,10 +143,7 @@ def to_json(state_or_ref):
             return to_json({str(uri(state_or_ref)): {}})
 
     if hasattr(state_or_ref, "__json__"):
-        try:
-            return state_or_ref.__json__()
-        except TypeError as e:
-            raise TypeError(f"error encoding {state_or_ref} to JSON: {e}")
+        return state_or_ref.__json__()
     elif isinstance(state_or_ref, (list, tuple)):
         return [to_json(i) for i in state_or_ref]
     elif isinstance(state_or_ref, dict):

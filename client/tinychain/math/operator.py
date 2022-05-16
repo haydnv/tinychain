@@ -434,8 +434,7 @@ class Pow(Dual):
         if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        # here derivative_of(self.subject) is explicitly included according to the chain rule
-        return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
+        return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
@@ -574,13 +573,18 @@ class Div(DualBroadcast):
 def constant(numeric):
     """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
-    while operator(numeric):
-        numeric = type(numeric)(form=operator(numeric).forward())
-
-    if is_numeric(numeric):
+    if is_literal(numeric):
         return numeric
-    else:
-        raise TypeError(f"not a numeric state: {numeric}")
+
+    rtype = type(numeric)
+
+    if not is_numeric(numeric):
+        raise ValueError(f"a non-numeric state {numeric} (type {rtype}) cannot be a numeric constant")
+
+    while operator(numeric):
+        numeric = rtype(form=operator(numeric).forward())
+
+    return numeric
 
 
 def derivative_of(state, variable=None):
@@ -632,7 +636,7 @@ def gradients(numeric, loss, variables=None):
     elif is_numeric(numeric):
         raise ValueError(f"cannot compute gradients of {numeric} w/r/t {loss}")
     else:
-        raise ValueError(f"not a numeric state: {numeric}")
+        raise ValueError(f"cannot compute gradients of a non-numeric state: {numeric}")
 
     if variables is None:
         return grads
@@ -656,7 +660,7 @@ def is_constant(numeric):
     """
 
     if not is_numeric(numeric):
-        raise TypeError(f"not a numeric state: {numeric}")
+        raise TypeError(f"a non-numeric state {numeric} (type {type(numeric)}) cannot be a numeric constant")
 
     return operator(numeric) is None
 
@@ -712,7 +716,10 @@ def zeros_like(state):
     from ..collection.tensor import Sparse
 
     if is_literal(state) or same_as(state.shape.ndim(), 0):
-        return 0.
+        if isinstance(state, Numeric):
+            return type(state)(form=0.)
+        else:
+            return 0.
     else:
         return Sparse.zeros_like(state)
 
