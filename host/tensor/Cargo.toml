@@ -1,6 +1,6 @@
 [package]
 name = "tc-tensor"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's Tensor collection type"
@@ -25,8 +25,8 @@ pin-project = "1.0"
 safecast = "~0.1.2"
 strided = "~0.2.9"
 tc-btree = { path = "../btree" }
-tc-error = "0.5"
+tc-error = { path = "../error" }
 tc-transact = { path = "../transact", features = ["tensor"] }
 tc-value = { path = "../value" }
 tc-table = { path = "../table" }
-tcgeneric = "0.4"
+tcgeneric = { path = "../generic" }

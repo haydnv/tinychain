@@ -7,7 +7,7 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_value::{TCString, Value};
-use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment, TCPath};
+use tcgeneric::{label, path_label, Id, Map, PathLabel, PathSegment, TCPath, Tuple};
 
 use crate::scalar::OpRefType as ORT;
 use crate::state::State;
@@ -179,6 +179,25 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
 
                 if let Some(err_type) = error_type(self.code) {
                     Err(TCError::new(err_type, message.to_string()))
+                } else {
+                    Err(TCError::not_found(self.code))
+                }
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let message: TCString = params.require(&label("message").into())?;
+                let stack: Tuple<TCString> = params.require(&label("stack").into())?;
+                params.expect_empty()?;
+
+                if let Some(err_type) = error_type(self.code) {
+                    Err(TCError::with_stack(err_type, message, stack))
                 } else {
                     Err(TCError::not_found(self.code))
                 }

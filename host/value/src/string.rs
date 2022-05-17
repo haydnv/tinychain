@@ -105,6 +105,12 @@ impl TryCastFrom<TCString> for Id {
     }
 }
 
+impl From<TCString> for String {
+    fn from(string: TCString) -> String {
+        string.0
+    }
+}
+
 #[async_trait]
 impl de::FromStream for TCString {
     type Context = ();

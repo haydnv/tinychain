@@ -8,6 +8,49 @@ use destream::{en, EncodeMap, Encoder};
 
 pub type TCResult<T> = Result<T, TCError>;
 
+struct ErrorData {
+    message: String,
+    stack: Vec<String>,
+}
+
+impl<'en> en::ToStream<'en> for ErrorData {
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        if self.stack.is_empty() {
+            return en::ToStream::to_stream(&self.message, encoder);
+        }
+
+        let mut map = encoder.encode_map(Some(2))?;
+        map.encode_entry("message", &self.message)?;
+        map.encode_entry("stack", &self.stack)?;
+        map.end()
+    }
+}
+
+impl<'en> en::IntoStream<'en> for ErrorData {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        if self.stack.is_empty() {
+            return en::IntoStream::into_stream(self.message, encoder);
+        }
+
+        let mut map = encoder.encode_map(Some(2))?;
+        map.encode_entry("message", self.message)?;
+        map.encode_entry("stack", self.stack)?;
+        map.end()
+    }
+}
+
+impl<T> From<T> for ErrorData
+where
+    T: fmt::Display,
+{
+    fn from(message: T) -> Self {
+        Self {
+            message: message.to_string(),
+            stack: vec![],
+        }
+    }
+}
+
 /// The category of a `TCError`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ErrorType {
@@ -73,47 +116,54 @@ impl fmt::Display for ErrorType {
 /// A general error description.
 pub struct TCError {
     code: ErrorType,
-    message: String,
+    data: ErrorData,
 }
 
 impl TCError {
     /// Returns a new error with the given code and message.
-    pub fn new(code: ErrorType, message: String) -> Self {
-        Self { code, message }
+    pub fn new<I: fmt::Display>(code: ErrorType, message: I) -> Self {
+        Self {
+            code,
+            data: message.into(),
+        }
+    }
+
+    /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
+    pub fn with_stack<I, S, SI>(code: ErrorType, message: I, stack: S) -> Self
+    where
+        I: fmt::Display,
+        SI: fmt::Display,
+        S: IntoIterator<Item = SI>,
+    {
+        Self {
+            code,
+            data: ErrorData {
+                message: message.to_string(),
+                stack: stack.into_iter().map(|msg| msg.to_string()).collect(),
+            },
+        }
     }
 
     /// Error indicating that the an upstream server send an invalid response.
     pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
-        Self {
-            code: ErrorType::BadGateway,
-            message: cause.to_string(),
-        }
+        Self::new(ErrorType::BadGateway, cause)
     }
 
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
-        Self {
-            code: ErrorType::BadRequest,
-            message: format!("{}: {}", message, cause),
-        }
+        Self::new(ErrorType::BadRequest, format!("{}: {}", message, cause))
     }
 
     /// Error indicating that the request depends on a resource which is exclusively locked
     /// by another request.
     pub fn conflict<M: fmt::Display>(message: M) -> Self {
-        Self {
-            code: ErrorType::Conflict,
-            message: message.to_string(),
-        }
+        Self::new(ErrorType::Conflict, message)
     }
 
     /// Error indicating that the request actor's credentials do not authorize access to some
     /// request dependencies.
     pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
-        Self {
-            code: ErrorType::Forbidden,
-            message: format!("{}: {}", message, id),
-        }
+        Self::new(ErrorType::Forbidden, format!("{}: {}", message, id))
     }
 
     /// A truly unexpected error, for which the calling application cannot define any specific
@@ -123,10 +173,7 @@ impl TCError {
         panic!("{}", info);
 
         #[cfg(not(debug_assertions))]
-        Self {
-            code: ErrorType::Internal,
-            message: info.to_string(),
-        }
+        Self::new(ErrorType::Internal, info)
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
@@ -135,58 +182,43 @@ impl TCError {
         subject: S,
         path: P,
     ) -> Self {
-        Self {
-            code: ErrorType::MethodNotAllowed,
-            message: format!("{} endpoint {} does not support {}", subject, path, method),
-        }
+        Self::new(
+            ErrorType::MethodNotAllowed,
+            format!("{} endpoint {} does not support {}", subject, path, method),
+        )
     }
 
     /// Error indicating that the requested resource does not exist at the specified location.
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
-        Self {
-            code: ErrorType::NotFound,
-            message: locator.to_string(),
-        }
+        Self::new(ErrorType::NotFound, locator)
     }
 
     /// Error indicating that a required feature is not yet implemented.
     pub fn not_implemented<F: fmt::Display>(feature: F) -> Self {
-        Self {
-            code: ErrorType::NotImplemented,
-            message: feature.to_string(),
-        }
+        Self::new(ErrorType::NotImplemented, feature)
     }
 
     /// Error indicating that the request failed to complete in the allotted time.
     pub fn timeout<I: fmt::Display>(info: I) -> Self {
-        Self {
-            code: ErrorType::Timeout,
-            message: info.to_string(),
-        }
+        Self::new(ErrorType::Timeout, info)
     }
 
     /// Error indicating that the user's credentials are missing or nonsensical.
     pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
-        Self {
-            code: ErrorType::Unauthorized,
-            message: format!("invalid credentials: {}", info),
-        }
+        Self::new(
+            ErrorType::Unauthorized,
+            format!("invalid credentials: {}", info),
+        )
     }
 
     /// Error indicating that this host is currently overloaded
     pub fn unavailable<I: fmt::Display>(info: I) -> Self {
-        Self {
-            code: ErrorType::Unavailable,
-            message: info.to_string(),
-        }
+        Self::new(ErrorType::Unavailable, info)
     }
 
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn unsupported<I: fmt::Display>(info: I) -> Self {
-        Self {
-            code: ErrorType::BadRequest,
-            message: info.to_string(),
-        }
+        Self::new(ErrorType::BadRequest, info)
     }
 
     pub fn code(&self) -> ErrorType {
@@ -194,14 +226,12 @@ impl TCError {
     }
 
     pub fn message(&'_ self) -> &'_ str {
-        &self.message
+        &self.data.message
     }
 
-    pub fn consume<I: fmt::Display>(self, info: I) -> Self {
-        Self {
-            code: self.code,
-            message: format!("{}: {}", info, self.message),
-        }
+    pub fn consume<I: fmt::Display>(mut self, info: I) -> Self {
+        self.data.stack.push(info.to_string());
+        self
     }
 }
 
@@ -210,7 +240,7 @@ impl std::error::Error for TCError {}
 impl<'en> en::ToStream<'en> for TCError {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, &self.message)?;
+        map.encode_entry(self.code, &self.data)?;
         map.end()
     }
 }
@@ -218,7 +248,7 @@ impl<'en> en::ToStream<'en> for TCError {
 impl<'en> en::IntoStream<'en> for TCError {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, self.message)?;
+        map.encode_entry(self.code, self.data)?;
         map.end()
     }
 }
@@ -231,6 +261,6 @@ impl fmt::Debug for TCError {
 
 impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.code, self.message)
+        write!(f, "{}: {}", self.code, self.data.message)
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "tc-table"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's Table collection type"
@@ -20,7 +20,7 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
 tc-btree = { path = "../btree" }
-tc-error = "0.5"
+tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
-tcgeneric = "0.4"
+tcgeneric = { path = "../generic" }
