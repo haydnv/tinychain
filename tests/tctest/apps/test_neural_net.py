@@ -82,19 +82,6 @@ class NeuralNetTests(unittest.TestCase):
         elapsed = time.time() - start
         print(f"trained a deep neural net in {elapsed:.2}s")
 
-    def testTrainer(self):
-        def cost(i, o):
-            return (o - tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())**2)
-
-        dnn = tc.ml.nn.DNN.create([[2, 2, tc.ml.sigmoid], [2, 1]])
-        optimizer = tc.ml.optimizer.Adam(dnn, cost)
-        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-
-        start = time.time()
-        self.host.post(tc.uri(tc.ml.service.ML).append("train"), {"optimizer": optimizer, "inputs": load_dense(inputs)})
-        elapsed = time.time() - start
-        print(f"trained a deep neural net in {elapsed:.2}s")
-
     @classmethod
     def tearDownClass(cls) -> None:
         cls.host.stop()

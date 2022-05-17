@@ -2,7 +2,7 @@ import typing
 
 from .interface import Functional
 from .scalar.bound import Range
-from .scalar.ref import form_of, get_ref, is_literal, Get, Post
+from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
 from .uri import uri
@@ -113,6 +113,9 @@ class Map(State):
     def eq(self, other):
         """Return a `Bool` indicating whether all the keys and values in this map are equal to the given `other`."""
 
+        if same_as(self, other):
+            return True
+
         from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)
 
@@ -216,8 +219,8 @@ class Tuple(State, Functional):
             if i.step is not None:
                 raise NotImplementedError(f"slice with step: {i}")
 
-            start = form_of(i.start)
-            stop = form_of(i.stop)
+            start = deref(i.start)
+            stop = deref(i.stop)
 
             if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
                 # the contents may be literal, so compute the slice now if possible
@@ -258,6 +261,9 @@ class Tuple(State, Functional):
 
     def eq(self, other):
         """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
+
+        if same_as(self, other):
+            return True
 
         from .scalar.number import Bool
         return self._post("eq", {"eq": other}, Bool)

@@ -1,8 +1,10 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
-from ..interface import Compare, Order
-from ..uri import uri, URI
 from ..context import to_json
+from ..interface import Compare, Order
+from ..scalar.ref import deref, is_literal
+from ..uri import uri, URI
+
 
 from .base import Scalar
 from .ref import form_of, Ref
@@ -14,6 +16,12 @@ class Value(Scalar, Compare, Order):
     """A scalar `Value` which supports equality and collation."""
 
     __uri__ = uri(Scalar) + "/value"
+
+    def eq(self, other):
+        if is_literal(self) and is_literal(other):
+            return deref(self) == deref(other)
+
+        return Scalar.eq(self, other)
 
     def gt(self, other):
         from .number import Bool

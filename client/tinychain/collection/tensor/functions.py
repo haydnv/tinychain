@@ -42,8 +42,8 @@ def einsum(format, tensors):
         if not isinstance(tensor, NDArray):
             raise TypeError(f"einsum requires a tensor, not: {tensor}")
 
-    rtype = _gcs(tensors)
-    rtype = rtype if issubclass(rtype, State) else type("NDArrayState", (State, NDArray), {})
+    rtype = _gcs(*tensors)
+    rtype = rtype if issubclass(rtype, Tensor) else Tensor
     return rtype(form=Post(uri(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
 
 
@@ -103,8 +103,7 @@ def tile(tensor, multiples):
     `multiples` must be a positive integer or a `Tuple` of length `tensor.ndim`.
     """
 
-    rtype = tensor.__class__ if isinstance(tensor, Tensor) else Tensor
-    return rtype(form=Tile(tensor, multiples))
+    return Tensor(form=Tile(tensor, multiples))
 
 
 def where(cond, x, y):

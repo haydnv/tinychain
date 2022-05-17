@@ -151,7 +151,7 @@ class Shape(Tuple):
                 elif r == 1:
                     dim = l
                 else:
-                    raise ValueError(f"cannot broadcast dimensions {l} and {r}")
+                    raise ValueError(f"cannot broadcast dimensions {l} and {r} (shapes are {left} and {right})")
 
             elif is_literal(l):
                 if l == 1:
@@ -215,13 +215,16 @@ class Shape(Tuple):
             raise ValueError(f"Shape.reshape supports a maximum of one unknown dimension, not {new_shape}")
 
         if is_literal(self):
-            this_size = functools.reduce(operator.mul, deref(self))
+            this_size = int(functools.reduce(operator.mul, deref(self)))
             for x in range(len(new_shape)):
                 if new_shape[x] is None:
-                    that_size = functools.reduce(operator.mul, new_shape[:x] + new_shape[x + 1:])
-                    new_shape[x] = this_size / that_size
+                    that_size = int(functools.reduce(operator.mul, new_shape[:x] + new_shape[x + 1:]))
+                    if this_size % that_size == 0:
+                        new_shape[x] = this_size // that_size
+                    else:
+                        raise ValueError(f"cannot reshape {self} into {new_shape}")
 
-            that_size = functools.reduce(operator.mul, (dim for dim in new_shape if dim is not None))
+            that_size = int(functools.reduce(operator.mul, (dim for dim in new_shape if dim is not None)))
             if this_size != that_size:
                 raise ValueError(f"cannot reshape {self} into {new_shape}")
 

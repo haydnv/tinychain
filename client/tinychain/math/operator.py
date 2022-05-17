@@ -445,8 +445,9 @@ class Pow(Dual):
 class DualBroadcast(Operator):
     @property
     def shape(self):
-        if is_literal(self.args):
-            # it's a literal number
+        if is_literal(self.subject):
+            return self.args.shape
+        elif is_literal(self.args):
             return self.subject.shape
 
         return self.subject.shape.broadcast(self.args.shape)
@@ -551,13 +552,18 @@ class Div(DualBroadcast):
 def constant(numeric):
     """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
-    while operator(numeric):
-        numeric = type(numeric)(form=operator(numeric).forward())
-
-    if is_numeric(numeric):
+    if is_literal(numeric):
         return numeric
-    else:
-        raise TypeError(f"not a numeric state: {numeric}")
+
+    rtype = type(numeric)
+
+    if not is_numeric(numeric):
+        raise ValueError(f"a non-numeric state {numeric} (type {rtype}) cannot be a numeric constant")
+
+    while operator(numeric):
+        numeric = rtype(form=operator(numeric).forward())
+
+    return numeric
 
 
 def derivative_of(state, variable=None):
@@ -585,10 +591,12 @@ def derivative_of(state, variable=None):
             # it's a partial derivative and this variable is held constant
             return zeros_like(state)
 
-    if operator(state):
+    if is_constant(state):
+        return zeros_like(state)
+    elif operator(state):
         return operator(state).backward(variable)
-
-    return zeros_like(state)
+    else:
+        raise ValueError(f"the derivative of {state} is not defined")
 
 
 def gradients(numeric, loss, variables=None):
@@ -631,7 +639,7 @@ def is_constant(numeric):
     """
 
     if not is_numeric(numeric):
-        raise TypeError(f"not a numeric state: {numeric}")
+        raise TypeError(f"a non-numeric state {numeric} (type {type(numeric)}) cannot be a numeric constant")
 
     return operator(numeric) is None
 
@@ -659,7 +667,10 @@ def ones_like(state):
     from ..collection.tensor import Dense
 
     if is_literal(state) or same_as(state.shape.ndim(), 0):
-        return 1.
+        if isinstance(state, Numeric):
+            return type(state)(form=1)
+        else:
+            return 1.
     else:
         return Dense.ones_like(state)
 
@@ -687,7 +698,10 @@ def zeros_like(state):
     from ..collection.tensor import Sparse
 
     if is_literal(state) or same_as(state.shape.ndim(), 0):
-        return 0.
+        if isinstance(state, Numeric):
+            return type(state)(form=0)
+        else:
+            return 0.
     else:
         return Sparse.zeros_like(state)
 
@@ -699,6 +713,16 @@ def operator(state_or_ref):
         return state_or_ref
     elif deref(state_or_ref) is not state_or_ref:
         return operator(deref(state_or_ref))
+
+
+def shape_of(numeric):
+    if isinstance(numeric, (bool, float, int)):
+        from ..shape import Shape
+        return Shape(tuple())
+    elif isinstance(numeric, Numeric):
+        return numeric.shape
+    else:
+        raise ValueError(f"{numeric} has no shape")
 
 
 def debug_shape(numeric):

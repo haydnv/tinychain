@@ -6,6 +6,7 @@ from ..app import Dynamic, Model
 from ..collection.tensor import Dense, NDArray, Tensor
 from ..decorators import differentiable
 from ..generic import Tuple
+from ..scalar.number import Float
 from ..scalar.ref import After
 
 from .constants import LIB_URI
@@ -82,6 +83,9 @@ class ConvLayer(Layer, Dynamic):
     def eval(self, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
+        # TODO: this expectation should be set using a generic type
+        inputs = Tensor.expect([batch_size] + self._inputs_shape, Float)(form=inputs)
+
         padding = self._padding
         stride = self._stride
 
@@ -148,6 +152,11 @@ class Linear(Layer, Dynamic):
 
     @differentiable
     def eval(self, inputs: Tensor) -> Tensor:
+        batch_size = inputs.shape[0]
+
+        # TODO: this expectation should be set using a generic type
+        inputs = Tensor.expect([batch_size, self.weights.shape[0]], Float)(form=inputs)
+
         x = (inputs @ self.weights) + self.bias
         if self._activation is None:
             return x

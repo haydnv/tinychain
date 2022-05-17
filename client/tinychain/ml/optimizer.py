@@ -7,7 +7,6 @@ from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, NDArray, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..math.equation import Function
 from ..math.interface import Numeric
 from ..math.operator import constant, derivative_of, is_constant, gradients
 from ..scalar.number import F32, F64, UInt
@@ -53,8 +52,6 @@ class _Optimizer(Optimizer, Dynamic):
 
         grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
         logging.debug("constructed gradients")
-        grads = Function(grads).optimize()
-        logging.debug("optimized gradients")
 
         if not grads:
             raise ValueError(f"model output {outputs} has no gradients")

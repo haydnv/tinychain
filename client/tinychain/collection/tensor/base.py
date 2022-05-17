@@ -14,7 +14,7 @@ from ...math.operator import Add, Mul, MatMul, Div, Sub
 from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
 from ...math.operator import LogicalAnd, LogicalNot, LogicalOr, LogicalXor
 from ...scalar.bound import handle_bounds
-from ...scalar.number import Bool, F32, F64, Number, UInt
+from ...scalar.number import Bool, F32, F64, Number, U64
 from ...scalar import ref
 from ...shape import Shape
 from ...state import Class, State, Stream
@@ -41,8 +41,8 @@ class NDArray(Interface):
         return Class(ref.Get(ref.MethodSubject(self, "dtype")))
 
     @property
-    def shape(self):
-        return Shape(ref.Get(ref.MethodSubject(self, "ndim")))
+    def ndim(self):
+        return U64(ref.Get(ref.MethodSubject(self, "ndim")))
 
     @property
     def shape(self):
@@ -50,7 +50,7 @@ class NDArray(Interface):
 
     @property
     def size(self):
-        return Shape(ref.Get(ref.MethodSubject(self, "size")))
+        return U64(ref.Get(ref.MethodSubject(self, "size")))
 
     def all(self):
         """Return `True` if all elements in this :class:`NDArray` are nonzero."""
@@ -260,6 +260,17 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         class _Tensor(cls):
             __spec__ = spec
 
+            def __init__(self, form):
+                if ref.is_literal(shape) and operator(form):
+                    try:
+                        actual_shape = operator(form).shape
+                        if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
+                            raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
+                    except (RuntimeError, ValueError) as e:
+                        logging.debug(lambda: f"{form} does not have a literal shape: {e}")
+
+                Tensor.__init__(self, form)
+
             @classmethod
             def create(cls):
                 op_ref = ref.Get(cls, (shape, dtype))
@@ -336,7 +347,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if hasattr(self.shape, "__len__"):
             return len(self.shape)
         else:
-            return self._get("ndim", rtype=UInt)
+            return self._get("ndim", rtype=U64)
 
     @property
     def shape(self):
@@ -347,8 +358,6 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                 return operator(self).shape
             except (RuntimeError, ValueError):
                 logging.debug(f"{self} does not have a literal shape")
-        elif hasattr(deref(self), "shape"):
-            return deref(self).shape
 
         return self._get("shape", rtype=Shape)
 
@@ -370,6 +379,9 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Add(self, other))
 
     def broadcast(self, shape):
+        if ref.same_as(shape, self.shape):
+            return self
+
         return Tensor(form=Broadcast(self, shape))
 
     def cast(self, dtype):

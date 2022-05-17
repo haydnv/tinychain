@@ -57,10 +57,7 @@ class Concatenate(Operator):
 
         if isinstance(loss, Number):
             for tensor in self.subject:
-                if operator(tensor):
-                    grads.update(operator(tensor).gradients(loss))
-                else:
-                    grads[hex_id(tensor)] = loss
+                grads += gradients(tensor, loss)
 
             return grads
 
@@ -79,10 +76,7 @@ class Concatenate(Operator):
         assert len(losses) == len(self.subject)
 
         for (tensor, loss) in zip(self.subject, losses):
-            if operator(tensor):
-                grads.update(operator(tensor).gradients(loss))
-            else:
-                grads[hex_id(tensor)] = loss
+            grads += gradients(tensor, loss)
 
         return grads
 
@@ -103,10 +97,7 @@ class Copy(Unary):
         return derivative_of(self.subject, variable).copy()
 
     def gradients(self, loss):
-        if operator(self.subject):
-            return operator(self.subject).gradients(loss)
-
-        return Gradients()
+        return gradients(self.subject, loss)
 
 
 class Read(Operator):
@@ -138,6 +129,9 @@ class Reduce(Operator):
 
 
 class Norm(Operator):
+    def __init__(self, tensor, axis=None, keepdims=False):
+        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
+
     def __repr__(self):
         if self.args:
             return f"norm({self.subject}[{self.args}])"
@@ -149,26 +143,17 @@ class Norm(Operator):
         if self.args is None:
             return self.subject.shape[:-2]
         else:
-            return self.subject.shape.reduce(self.args)
+            return self.subject.shape.reduce(**self.args)
 
     def forward(self):
         from .base import NDArray
-        return NDArray.norm(self.subject, self.args)
+        return NDArray.norm(self.subject, **self.args)
 
     def backward(self, variable=None):
-        return self.subject / self.subject.norm(self.args)
+        return self.subject / self.subject.norm(**self.args)
 
     def gradients(self, loss):
-        loss *= self.backward()
-
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss * self.backward())
 
 
 class Sum(Reduce):
@@ -186,24 +171,24 @@ class Sum(Reduce):
         return derivative_of(self.subject).sum(**self.args)
 
     def gradients(self, loss):
-        from .base import Dense, NDArray
+        if not is_literal(self.subject.ndim):
+            raise RuntimeError(f"gradients of Sum require a literal number of dimensions, not {self.subject.ndim}")
 
-        if "axis" not in self.args:
-            loss = self.backward() * loss
-        elif isinstance(loss, NDArray):
-            # TODO: is this correct?
-            loss = Dense.ones_like(self.subject) * loss
-        
-        return gradients(self.subject, loss)
+        if self.args.get("axis") is None:
+            from .base import Dense
+            loss = loss * Dense.ones([1] * deref(self.subject.ndim))
+            return gradients(self.subject, self.backward() * loss)
+        elif not self.args.get("keepdims"):
+            return gradients(self.subject, (self.backward() * loss).expand_dims(self.args["axis"]))
+        else:
+            return gradients(self.subject, self.backward() * loss)
 
 
 class Transform(Operator):
     def backward(self, variable=None):
         from .base import Tensor
-
-        rtype = type(self.subject) if isinstance(self.subject, Tensor) else Tensor
         d = type(self)(derivative_of(self.subject, variable), self.args)
-        return rtype(form=d)
+        return Tensor(form=d)
 
     def invert(self, loss):
         raise NotImplementedError(f"{self.__class__.__name__}.invert")
@@ -228,6 +213,10 @@ class Broadcast(Transform):
     def __repr__(self):
         return str(self.subject)
 
+    @property
+    def shape(self):
+        return self.subject.shape.broadcast(self.args)
+
     def forward(self):
         from .base import NDArray
         return NDArray.broadcast(self.subject, self.args)
@@ -246,7 +235,7 @@ class Expand(Transform):
         return NDArray.expand_dims(self.subject, self.args)
 
     def invert(self, loss):
-        return loss.reshape(self.subject.shape)
+        return loss.sum(self.args)
 
 
 class Flip(Transform):
@@ -263,6 +252,69 @@ class Flip(Transform):
 
     def invert(self, loss):
         return loss.flip(self.args)
+
+
+class Reshape(Transform):
+    def __repr__(self):
+        return f"{self.subject}.reshape({self.args})"
+
+    @property
+    def shape(self):
+        return Shape.reshape(self.subject.shape, self.args)
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.reshape(self.subject, self.args)
+
+    def invert(self, loss):
+        return loss.reshape(self.subject.shape)
+
+
+class Slice(Transform):
+    def __init__(self, tensor, bounds):
+        if not is_literal(tensor.shape):
+            logging.debug(f"slice of {tensor} will not support automatic differentiation")
+
+        Transform.__init__(self, tensor, bounds)
+
+    def __repr__(self):
+        return f"{self.subject}.slice({self.args})"
+
+    @property
+    def shape(self):
+        return Shape.slice(self.subject.shape, self.args)
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.slice(self.subject, self.args)
+
+    def invert(self, loss):
+        from .base import Dense
+
+        grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
+
+        # TODO: there must be a better way to do this
+        class SliceGradient(Operator):
+            def __init__(self, grad):
+                Operator.__init__(self, grad, None)
+
+            def __repr__(self):
+                return f"{self.subject}[{self.args}]"
+
+            def __ns__(self, context):
+                return deanonymize(self.subject, context)
+
+            @property
+            def shape(self):
+                return grad.shape
+
+            def forward(self):
+                return self.subject
+
+            def backward(self, _variable=None):
+                return self.subject
+
+        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
 
 
 class Tile(Transform):
@@ -338,69 +390,6 @@ class Transpose(Transform):
             inverse_permutation = tuple(i for _x, i in sorted((x, i) for i, x in enumerate(self.args)))
 
         return loss.transpose(inverse_permutation)
-
-
-class Reshape(Transform):
-    def __repr__(self):
-        return f"{self.subject}.reshape({self.args})"
-
-    @property
-    def shape(self):
-        return Shape.reshape(self.subject.shape, self.args)
-
-    def forward(self):
-        from .base import NDArray
-        return NDArray.reshape(self.subject, self.args)
-
-    def invert(self, loss):
-        return loss.reshape(self.subject.shape)
-
-
-class Slice(Transform):
-    def __init__(self, tensor, bounds):
-        if not is_literal(tensor.shape):
-            logging.debug(f"slice of {tensor} will not support automatic differentiation")
-
-        Transform.__init__(self, tensor, bounds)
-
-    def __repr__(self):
-        return f"{self.subject}.slice({self.args})"
-
-    @property
-    def shape(self):
-        return Shape.slice(self.subject.shape, self.args)
-
-    def forward(self):
-        from .base import NDArray
-        return NDArray.slice(self.subject, self.args)
-
-    def invert(self, loss):
-        from .base import Dense
-
-        grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
-
-        # TODO: there must be a better way to do this
-        class SliceGradient(Operator):
-            def __init__(self, grad):
-                Operator.__init__(self, grad, None)
-
-            def __repr__(self):
-                return f"{self.subject}[{self.args}]"
-
-            def __ns__(self, context):
-                return deanonymize(self.subject, context)
-
-            @property
-            def shape(self):
-                return grad.shape
-
-            def forward(self):
-                return self.subject
-
-            def backward(self, _variable=None):
-                return self.subject
-
-        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
 
 
 def _reduce_args(axis=None, keepdims=False):
