@@ -60,8 +60,8 @@ class Shape(Tuple):
             if hasattr(deref(self), "__getitem__"):
                 try:
                     item = deref(self)[x]
-                except KeyError as e:
-                    raise KeyError(f"{self} has no axis {x}: {e}")
+                except IndexError as e:
+                    raise IndexError(f"{self} has no axis {x}: {e}")
 
                 if uri(self) == uri(self.__class__):
                     return item
@@ -175,6 +175,8 @@ class Shape(Tuple):
     def expand(self, axis=None):
         if not hasattr(self, "__len__"):
             raise RuntimeError(f"Shape.expand requires a literal number of dimensions")
+        elif len(self) == 0:
+            raise RuntimeError(f"cannot expand shape {self}")
 
         if not is_literal(axis):
             raise ValueError(f"Shape.expand requires a literal axis, not {axis}")
@@ -182,6 +184,8 @@ class Shape(Tuple):
         if axis is None:
             return Shape(self + [1])
         else:
+            axis = len(self) + axis if axis < 0 else axis
+            assert axis >= 0
             return Shape(self[:axis] + [1] + self[axis:])
 
     def reduce(self, axis=None, keepdims=False):

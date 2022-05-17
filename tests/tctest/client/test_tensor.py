@@ -79,53 +79,8 @@ class TensorTests(ClientTest):
         self.assertTrue(abs(std - 1) < tolerance)
 
 
-# Example of a matrix transpose implemented using a nested loop.
-# This is not intended to be performant. Use `Tensor.transpose` to transpose any `Tensor`.
-@tc.post
-def transpose(cxt, a: tc.tensor.Dense) -> tc.tensor.Dense:
-    m, n = a.shape.unpack(2)
-
-    # this creates one `Tensor` in this `Op` context, to write to
-    cxt.transposed = tc.tensor.Dense.zeros([n, m])
-
-    # this is a tensor creation `Op` itself, i.e. each usage of `transposed` would create a new tensor
-    # transposed = tc.tensor.Dense.zeros([n, m])
-
-    @tc.closure(a, cxt.transposed)
-    @tc.get
-    def row_step(x: tc.U64):
-
-        @tc.closure(a, x, cxt.transposed)
-        @tc.get
-        def step(y: tc.U64):
-            return cxt.transposed[y, x].write(a[x, y])
-
-        return tc.Stream.range((0, n)).for_each(step)
-
-    rows = tc.Stream.range((0, m)).for_each(row_step)
-
-    return tc.If(
-        a.ndim == 2,
-        tc.After(rows, cxt.transposed),
-        tc.error.BadRequest("this test only supports a 2D Tensor"))
-
-
-class NestedLoopTests(ClientTest):
-    def testTranspose(self):
-        cxt = tc.Context()
-        cxt.transpose = transpose
-        cxt.a = tc.tensor.Dense.arange([3, 4], 0, 12)
-        cxt.a_t = cxt.transpose(a=cxt.a)
-        cxt.test = (cxt.a.transpose() == cxt.a_t).all()
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
-
-
 def all_close(actual, expected):
     return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
-
-
-def expect_dense(x, dtype=tc.I64):
-    return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}
 
 
 def load_dense(x, dtype=tc.F32):

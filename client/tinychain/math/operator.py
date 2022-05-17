@@ -2,7 +2,7 @@ import logging
 import typing
 
 from ..context import deanonymize, to_json
-from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, If, Op
+from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, Op
 from ..scalar.value import Id
 
 from .base import is_numeric
@@ -42,15 +42,15 @@ class Operator(Op):
     def __json__(self):
         return to_json(self.forward())
 
-    def __ns__(self, context):
-        deanonymize(self.subject, context)
-        deanonymize(self.args, context)
+    def __ns__(self, context, name_hint):
+        deanonymize(self.subject, context, name_hint + "_subject")
+        deanonymize(self.args, context, name_hint + "_args")
 
         if is_op_ref(self.subject):
-            self.subject = reference(context, self.subject)
+            self.subject = reference(context, self.subject, name_hint + "_subject")
 
         if is_op_ref(self.args):
-            self.args = reference(context, self.args)
+            self.args = reference(context, self.args, name_hint + "_args")
 
     def __repr__(self):
         raise NotImplementedError(f"human-readable string representation of {self.__class__.__name__}")
@@ -99,13 +99,13 @@ class Unary(Operator):
 
         Operator.__init__(self, subject, None)
 
-    def __ns__(self, context):
+    def __ns__(self, context, name_hint):
         assert self.args is None
 
-        deanonymize(self.subject, context)
+        deanonymize(self.subject, context, name_hint + "_subject")
 
         if is_op_ref(self.subject):
-            self.subject = reference(context, self.subject)
+            self.subject = reference(context, self.subject, name_hint + "_subject")
 
 
 class Custom(Unary):
@@ -118,9 +118,9 @@ class Custom(Unary):
     def __json__(self):
         return to_json(self._op)
 
-    def __ns__(self, context):
-        Unary.__ns__(self, context)
-        deanonymize(self._op, context)
+    def __ns__(self, context, name_hint):
+        Unary.__ns__(self, context, name_hint)
+        deanonymize(self._op, context, name_hint + "_custom_op")
 
     @property
     def shape(self):

@@ -92,7 +92,7 @@ class Context(object):
 
         name = self._get_name(name)
 
-        deanonymize(state, self)
+        deanonymize(state, self, name)
 
         if name in self.form:
             raise ValueError(f"Context already has a value named {name} (contents are {self.form}")
@@ -155,8 +155,8 @@ def to_json(state_or_ref):
         return state_or_ref
 
 
-def deanonymize(state, context):
-    """Assign an auto-generated name to the given state within the given context."""
+def deanonymize(state, context, name_hint):
+    """Assign an auto-generated name based on the given `name_hint` to the given state within the given context."""
 
     if isinstance(state, Context):
         raise ValueError(f"cannot deanonymize an Op context itself")
@@ -164,10 +164,10 @@ def deanonymize(state, context):
     if inspect.isclass(state):
         return
     elif hasattr(state, "__ns__"):
-        state.__ns__(context)
+        state.__ns__(context, name_hint)
     elif isinstance(state, (tuple, list)):
         for item in state:
-            deanonymize(item, context)
+            deanonymize(item, context, name_hint)
     elif isinstance(state, dict):
         for key in state:
-            deanonymize(state[key], context)
+            deanonymize(state[key], context, name_hint)

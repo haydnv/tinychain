@@ -20,8 +20,8 @@ class TinyChainError(Exception):
     def __json__(self):
         return {str(uri(self)): [to_json(self.message)]}
 
-    def __ns__(self, cxt):
-        deanonymize(self.message, cxt)
+    def __ns__(self, cxt, name_hint):
+        deanonymize(self.message, cxt, name_hint + "_message")
 
 
 class BadRequest(TinyChainError):

@@ -72,7 +72,7 @@ class Model(Object, metaclass=Meta):
         else:
             return {str(uri(self)): to_json(form)}
 
-    def __ns__(self, _context):
+    def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize model {self}")
 
     def __ref__(self, name):
@@ -149,7 +149,7 @@ class Dynamic(Instance):
         form = form if form else [None]
         return {str(uri(self)): to_json(form)}
 
-    def __ns__(self, _context):
+    def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize dynamic model {self}")
 
     def __repr__(self):

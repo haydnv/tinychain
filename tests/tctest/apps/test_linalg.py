@@ -112,7 +112,7 @@ class LinearAlgebraTests(unittest.TestCase):
         self._check_svd(matrix, actual)
 
     def testParallelSVD_NltM(self):
-        num_matrices = 50
+        num_matrices = 25
         n = 2
         m = 3
         shape = [num_matrices, n, m]

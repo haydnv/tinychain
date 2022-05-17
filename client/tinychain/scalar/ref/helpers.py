@@ -248,10 +248,15 @@ def is_ref(state):
         return False
 
 
-def reference(context, state):
+def reference(context, state, name_hint):
     """Create a reference to `state` in `context` using its `hex_id`"""
 
-    name = f"{state.__class__.__name__}_{hex_id(state)}"
+    i = 0
+    name = name_hint
+    while name in context and not same_as(getattr(context, name), state):
+        name = f"{name_hint}_{i}"
+        i += 1
+
     if name not in context:
         logging.debug(f"assigned name {name} to {state} in {context}")
         setattr(context, name, state)

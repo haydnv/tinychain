@@ -50,10 +50,10 @@ class State(_Base):
     def __id__(self):
         return hex_id(form_of(self))
 
-    def __ns__(self, cxt):
+    def __ns__(self, cxt, name_hint):
         form = form_of(self)
 
-        deanonymize(form, cxt)
+        deanonymize(form, cxt, name_hint)
 
         if isinstance(self.__form__, URI):
             self.__uri__ = self.__form__
@@ -193,5 +193,5 @@ class StateRef(Ref):
     def __json__(self):
         return to_json(uri(self))
 
-    def __ns__(self, cxt):
-        deanonymize(self.state, cxt)
+    def __ns__(self, cxt, name_hint):
+        deanonymize(self.state, cxt, name_hint + '_' + str(uri(self))[1:].replace('/', '_'))

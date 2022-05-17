@@ -289,6 +289,8 @@ class Slice(Transform):
         return NDArray.slice(self.subject, self.args)
 
     def invert(self, loss):
+        assert is_literal(self.subject.shape)
+
         from .base import Dense
 
         grad = Dense.zeros_like(self.subject)  # TODO: this should support Sparse tensors as well
@@ -301,8 +303,8 @@ class Slice(Transform):
             def __repr__(self):
                 return f"{self.subject}[{self.args}]"
 
-            def __ns__(self, context):
-                return deanonymize(self.subject, context)
+            def __ns__(self, context, name_hint):
+                return deanonymize(self.subject, context, name_hint + "_subject")
 
             @property
             def shape(self):
