@@ -586,14 +586,19 @@ def derivative_of(state, variable=None):
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
+            print(f"state: {ones_like(state)}")
             return ones_like(state)
         else:
             # it's a partial derivative and this variable is held constant
+            print("HERE")
             return zeros_like(state)
 
     if is_constant(state):
         return zeros_like(state)
     elif operator(state):
+        print("I'm here")
+        print(f"output: {operator(state).backward(variable)}")
+        print(f"var: {variable}")
         return operator(state).backward(variable)
     else:
         raise ValueError(f"the derivative of {state} is not defined")

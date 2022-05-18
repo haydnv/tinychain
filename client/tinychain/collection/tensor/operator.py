@@ -168,20 +168,23 @@ class Sum(Reduce):
         return NDArray.sum(self.subject, **self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject).sum(**self.args)
+        return derivative_of(self.subject)#.sum(**self.args)
 
     def gradients(self, loss):
+        from tinychain.collection.tensor.base import Dense
+
         if not is_literal(self.subject.ndim):
             raise RuntimeError(f"gradients of Sum require a literal number of dimensions, not {self.subject.ndim}")
 
-        if self.args.get("axis") is None:
-            from .base import Dense
-            loss = loss * Dense.ones([1] * deref(self.subject.ndim))
-            return gradients(self.subject, self.backward() * loss)
-        elif not self.args.get("keepdims"):
-            return gradients(self.subject, (self.backward() * loss).expand_dims(self.args["axis"]))
+        loss =  self.backward()# * loss
+        grads = Gradients()
+        
+        if operator(self.subject):
+            grads.update(operator(self.subject).gradients(loss))
         else:
-            return gradients(self.subject, self.backward() * loss)
+            grads[hex_id(self.subject)] = loss
+
+        return grads
 
 
 class Transform(Operator):
