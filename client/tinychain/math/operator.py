@@ -433,8 +433,7 @@ class Pow(Dual):
         if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        # here derivative_of(self.subject) is explicitly included according to the chain rule
-        return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
+        return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
