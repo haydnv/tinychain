@@ -5,7 +5,7 @@ import torch
 
 from torch.autograd import grad as grad_torch
 from tinychain.collection.tensor import Dense
-from tinychain.math.operator import gradients as grad_tc
+from tinychain.math.operator import derivative_of, gradients as grad_tc
 
 TENSOR_URI = str(tc.uri(Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
@@ -1014,32 +1014,36 @@ class OperatorTests(unittest.TestCase):
 
     #     self.assertEqual(HOST.post(ENDPOINT, cxt), [expected_d, expected_d2])
 
-    # # @unittest.skip # TODO: make it work
-    # def testSum2ndDerivative(self):
-    #     y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
-    #     y2_torch = torch.sum(y_torch, 0)**0.5
-    #     dy_dw1_torch = grad_torch(y2_torch,
-    #                         self.w1_torch, 
-    #                         grad_outputs=torch.ones_like(y2_torch),
-    #                         create_graph=True,
-    #                         retain_graph=True)[0]
-    #     d2y_dw12_torch = grad_torch(dy_dw1_torch,
-    #                           self.w1_torch,
-    #                           grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+    @unittest.skip # TODO: make it work
+    def testSum2ndDerivative(self):
+        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**0.5
+        dy_dw1_torch = grad_torch(y2_torch,
+                            self.w1_torch, 
+                            grad_outputs=torch.ones_like(y2_torch),
+                            create_graph=True,
+                            retain_graph=True)[0]
+        d2y_dw12_torch = grad_torch(dy_dw1_torch,
+                              self.w1_torch,
+                              grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+        print(f"dy_dw1_torch: {dy_dw1_torch}")
+        print(f"d2y_dw12_torch: {d2y_dw12_torch}")
 
-    #     cxt = tc.Context()
-    #     y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
-    #     y_2tc = y_tc.sum(0)**0.5
-    #     _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
-    #     _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-    #     cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt = tc.Context()
+        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
+        y_2tc = y_tc.sum(0)**0.5
+        _dy_dw1_tc = derivative_of(y_2tc, self.w1_tc)
+        _d2y_dw2_tc = derivative_of(_dy_dw1_tc, self.w1_tc)
+        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
 
-    #     result = HOST.post(ENDPOINT, cxt)
-    #     dy_dw1_tc = result['the_first_derivative']
-    #     d2y_dw2_tc = result['the_second_derivative']
+        result = HOST.post(ENDPOINT, cxt)
+        dy_dw1_tc = result['the_first_derivative']
+        d2y_dw2_tc = result['the_second_derivative']
+        print(f"dy_dw1_tc: {dy_dw1_tc}")
+        print(f"d2y_dw2_tc: {d2y_dw2_tc}")
 
-    #     self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
-    #     self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def assertAllClose(self, tensor_torch, tensor_tc, threshold=0.0001):
         self.assertTrue((abs(load_np(tensor_tc) - [t.detach().numpy() for t in tensor_torch]) < threshold).all())
@@ -1048,16 +1052,16 @@ class OperatorTests(unittest.TestCase):
         w1 = np.array([1,2,3,4]).reshape(2, 2)
 
         w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
-        y_torch = w1_torch**2
+        y_torch = (self.w1_torch + self.b1_torch)**2
         y2_torch = torch.sum(y_torch, 0)
-        w1_torch_grad = grad_torch(y2_torch, w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
         print(f"w1_torch_grad: {w1_torch_grad}")
         
         w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         cxt = tc.Context()
-        cxt.y_tc = w1_tc**2
+        cxt.y_tc = (self.w1_tc + self.b1_tc)**2
         cxt.y_2tc = cxt.y_tc.sum(0)
-        cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), w1_tc)
+        cxt.result = derivative_of(cxt.y_2tc, self.w1_tc)
 
         w1_tc_grad = HOST.post(ENDPOINT, cxt)
         print(f"w1_tc_grad: {w1_tc_grad}")
