@@ -892,8 +892,8 @@ class OperatorTests(unittest.TestCase):
         dy_dw1_tc = result['the_first_derivative']
         d2y_dw2_tc = result['the_second_derivative']
 
-        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
-        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc, 0.01)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc, 0.01)
 
     def testMultipleFunctions(self):
         y_torch = self.x_torch @ self.w1_torch + self.w1_torch
@@ -986,8 +986,8 @@ class OperatorTests(unittest.TestCase):
         x = np.arange(n).reshape([n])
 
         cxt = tc.Context()
-        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3])
-        cxt.x = tc.tensor.Dense.arange([n], 0, n)
+        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3], name="mu")
+        cxt.x = tc.tensor.Dense.arange([n], 0, n, name="x")
         cxt.f_x = ((cxt.x - cxt.mu)**2).sum()
         cxt.d_f_x = derivative_of(cxt.f_x)
         cxt.d2_f_x = derivative_of(cxt.d_f_x)

@@ -433,7 +433,7 @@ class Pow(Dual):
         if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        return derivative_of(self.subject) * (self.args * (self.subject**(self.args - 1)))
+        return self.args * (self.subject**(self.args - 1))
 
     def gradients(self, loss):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
@@ -548,17 +548,21 @@ class Div(DualBroadcast):
         return gradients(self.subject, loss / self.args) + gradients(self.args, -self.subject * loss / self.args**2)
 
 
-def chain_rule(op):
+def chain_rule(numeric):
     """
     Compute the chain rule coefficient of the given :class:`Operator`.
 
-    This function will return `1` if the given `op` has only constant inputs.
+    This function will return `1` if the given `numeric` is constant, or has only constant inputs.
     """
 
-    if operator(op):
-        op = operator(op)
+    if operator(numeric):
+        op = operator(numeric)
     else:
-        raise TypeError(f"chain rule coefficient requires an Operator, not {op}")
+        raise ValueError(f"cannot apply the chain rule to a constant {numeric}")
+
+    # only apply the chain rule for ops that have been explicitly tested
+    if not isinstance(op, (Exp, Pow)):
+        return 1
 
     if operator(op.subject) and operator(op.args):
         return derivative_of(op.subject, op.args) + derivative_of(op.args, op.subject)
@@ -615,7 +619,9 @@ def derivative_of(state, variable=None):
     if is_constant(state):
         return 0
     elif operator(state):
-        return operator(state).backward(variable)
+        coeff = chain_rule(state)
+        d = operator(state).backward(variable)
+        return coeff * d
     else:
         raise ValueError(f"the derivative of {state} is not defined")
 

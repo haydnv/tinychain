@@ -168,7 +168,14 @@ class Sum(Reduce):
         return NDArray.sum(self.subject, **self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject, variable).sum(**self.args)
+        from .base import NDArray
+
+        subject = derivative_of(self.subject, variable)
+
+        if isinstance(subject, NDArray):
+            return subject.sum(**self.args)
+        else:
+            return subject
 
     def gradients(self, loss):
         if not is_literal(self.subject.ndim):

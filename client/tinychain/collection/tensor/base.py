@@ -121,13 +121,6 @@ class NDArray(Interface):
             return self.sum(axis) / self.shape[axis]
 
     def logical_and(self, other):
-        from .functions import broadcast_into
-
-        if is_zero(other):
-            return broadcast_into(Sparse.zeros_like(self), other)
-        elif is_one(other):
-            return broadcast_into(self, other)
-
         return Tensor(form=LogicalAnd(self, other))
 
     def logical_not(self):
@@ -139,23 +132,9 @@ class NDArray(Interface):
         return Tensor(form=LogicalNot(self))
 
     def logical_or(self, other):
-        from .functions import broadcast_into
-
-        if is_one(other):
-            return broadcast_into(Dense.ones_like(self), other)
-        elif is_zero(other):
-            return broadcast_into(self, other)
-
         return Tensor(form=LogicalOr(self, other))
 
     def logical_xor(self, other):
-        from .functions import broadcast_into
-
-        if is_one(other):
-            return broadcast_into(self.logical_not(), other)
-        elif is_zero(other):
-            return broadcast_into(self, other)
-
         return Tensor(form=LogicalXor(self, other))
 
     def norm(self, axis=None, keepdims=False):
@@ -365,16 +344,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Abs(self))
 
     def add(self, other):
-        if is_zero(self) and is_zero(other):
-            return Sparse.zeros_like(self).broadcast(other.shape)
-
-        from .functions import broadcast_into
-
-        if is_zero(other):
-            return broadcast_into(self, other)
-
-        if is_zero(self):
-            return broadcast_into(other, self)
+        if ref.same_as(other, 0):
+            return self
 
         return Tensor(form=Add(self, other))
 
@@ -391,29 +362,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Copy(self))
 
     def div(self, other):
-        from .functions import broadcast_into
-
-        if is_zero(self):
-            return broadcast_into(Sparse.zeros_like(self), other)
-
-        if is_one(other):
-            return broadcast_into(self, other)
-
-        # TODO: simplify both numerator and denominator into a product of multiplicands
-
-        if operator(self) and isinstance(operator(self), Mul):
-            numerator = operator(self)
-            if ref.same_as(numerator.subject, other):
-                return numerator.args
-            elif ref.same_as(numerator.args, other):
-                return numerator.subject
-
-        if operator(other) and isinstance(operator(other), Mul):
-            denominator = operator(other)
-            if ref.same_as(denominator.subject, self):
-                return 1 / denominator.args
-            elif ref.same_as(denominator.args, self):
-                return 1 / denominator.subject
+        if ref.same_as(other, 1):
+            return self
 
         return Tensor(form=Div(self, other))
 
@@ -506,16 +456,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return self._post("lte", {"r": other}, Tensor)
 
     def mul(self, other):
-        from .functions import broadcast_into
-
-        if is_zero(self) or is_zero(other):
-            return broadcast_into(Sparse.zeros_like(self), other)
-
-        if is_one(other):
-            return broadcast_into(self, other)
-
-        if is_one(self):
-            return broadcast_into(other, self)
+        if ref.same_as(other, 1):
+            return self
 
         return Tensor(form=Mul(self, other))
 
@@ -534,12 +476,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Norm(self, axis, keepdims))
 
     def pow(self, other):
-        from .functions import broadcast_into
-
-        if is_one(self) or is_zero(self) or is_one(other):
-            return broadcast_into(self, other)
-        elif is_zero(other):
-            return Dense.ones_like(self).broadcast(other)
+        if ref.same_as(other, 1):
+            return self
 
         return Tensor(form=Pow(self, other))
 
@@ -579,11 +517,6 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return WritableView(Slice(self, bounds))
 
     def sub(self, other):
-        from .functions import broadcast_into
-
-        if is_zero(other):
-            return broadcast_into(self, other)
-
         return Tensor(form=Sub(self, other))
 
     def sum(self, axis=None, keepdims=False):
@@ -745,6 +678,9 @@ class Dense(Tensor):
         return cls(truncated)
 
     def add(self, other):
+        if ref.same_as(other, 0):
+            return self
+
         return Dense(form=Tensor.add(self, other))
 
     def argsort(self):
@@ -807,6 +743,9 @@ class Sparse(Tensor):
         return self._get("dense", rtype=Dense)
 
     def div(self, other):
+        if ref.same_as(other, 1):
+            return self
+
         return Sparse(form=Div(self, other))
 
     def elements(self, bounds=None):
@@ -820,6 +759,9 @@ class Sparse(Tensor):
         return self._get("elements", bounds, Stream)
 
     def mul(self, other):
+        if ref.same_as(other, 1):
+            return self
+
         return Sparse(form=Tensor.mul(self, other))
 
 
