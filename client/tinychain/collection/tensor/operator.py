@@ -181,14 +181,17 @@ class Sum(Reduce):
         if not is_literal(self.subject.ndim):
             raise RuntimeError(f"gradients of Sum require a literal number of dimensions, not {self.subject.ndim}")
 
+        # here we explicitly backpropagate the loss to the subject of this op
+        # so we know it will be multiplied by its derivative there; here we just need to set the correct shape
+
         if self.args.get("axis") is None:
             from .base import Dense
             loss = loss * Dense.ones([1] * deref(self.subject.ndim))
-            return gradients(self.subject, self.backward() * loss)
+            return gradients(self.subject, loss)
         elif not self.args.get("keepdims"):
-            return gradients(self.subject, (self.backward() * loss).expand_dims(self.args["axis"]))
+            return gradients(self.subject, loss.expand_dims(self.args["axis"]))
         else:
-            return gradients(self.subject, self.backward() * loss)
+            return gradients(self.subject, loss)
 
 
 class Transform(Operator):

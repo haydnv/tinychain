@@ -427,7 +427,6 @@ class OperatorTests(unittest.TestCase):
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
-    @unittest.skip
     def testLog2ndDerivative(self):
         w_torch = self.w1_torch.log()
         y_torch = self.x_torch*w_torch
@@ -1049,6 +1048,32 @@ class OperatorTests(unittest.TestCase):
         actual_d, actual_d2 = HOST.post(ENDPOINT, cxt)
         self.assertEqual(actual_d, expected_d)
         self.assertEqual(actual_d2, expected_d2)
+
+    def testSum2ndDerivative(self):
+        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch) ** 2
+        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        dy_dw1_torch = grad_torch(y2_torch,
+                                  self.w1_torch,
+                                  grad_outputs=torch.ones_like(y2_torch),
+                                  create_graph=True,
+                                  retain_graph=True)[0]
+        d2y_dw12_torch = grad_torch(dy_dw1_torch,
+                                    self.w1_torch,
+                                    grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+
+        cxt = tc.Context()
+        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc) ** 2
+        y_2tc = y_tc.sum(0) ** 0.5
+        _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
+        _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
+        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+
+        result = HOST.post(ENDPOINT, cxt)
+        dy_dw1_tc = result['the_first_derivative']
+        d2y_dw2_tc = result['the_second_derivative']
+
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def assertAllClose(self, tensor_torch, tensor_tc, threshold=0.0001):
         self.assertTrue((abs(load_np(tensor_tc) - [t.detach().numpy() for t in tensor_torch]) < threshold).all())
