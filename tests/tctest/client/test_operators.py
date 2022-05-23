@@ -1025,7 +1025,7 @@ class OperatorTests(unittest.TestCase):
         for (expected, actual) in zip(torch_grad, tc_grad.values()):
             self.assertAllClose(expected, actual)
 
-    def testSum(self):
+    def testSum_derivative(self):
         # based on https://math.stackexchange.com/questions/289989/first-and-second-derivative-of-a-summation
 
         from tinychain.math.operator import derivative_of
@@ -1048,6 +1048,19 @@ class OperatorTests(unittest.TestCase):
         actual_d, actual_d2 = HOST.post(ENDPOINT, cxt)
         self.assertEqual(actual_d, expected_d)
         self.assertEqual(actual_d2, expected_d2)
+
+    def testSum_gradient(self):
+        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch) ** 2
+        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+
+        cxt = tc.Context()
+        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc) ** 2
+        cxt.y_2tc = cxt.y_tc.sum(0) ** 0.5
+        cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
+
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSum2ndDerivative(self):
         y_torch = (self.x_torch @ self.w1_torch + self.b1_torch) ** 2
