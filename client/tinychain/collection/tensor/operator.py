@@ -2,7 +2,7 @@ import itertools
 import logging
 
 from ...context import deanonymize
-from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
+from ...math.operator import chain_rule, derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, hex_id, is_literal, After, MethodSubject, Post
 from ...shape import Shape
@@ -168,7 +168,7 @@ class Sum(Reduce):
         return NDArray.sum(self.subject, **self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject).sum(**self.args)
+        return derivative_of(self.subject, variable).sum(**self.args)
 
     def gradients(self, loss):
         if not is_literal(self.subject.ndim):

@@ -433,8 +433,7 @@ class Pow(Dual):
         if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
 
-        # here derivative_of(self.subject) is explicitly included according to the chain rule
-        return derivative_of(self.subject) * self.args * (self.subject**(self.args - 1))
+        return derivative_of(self.subject) * (self.args * (self.subject**(self.args - 1)))
 
     def gradients(self, loss):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
@@ -549,6 +548,28 @@ class Div(DualBroadcast):
         return gradients(self.subject, loss / self.args) + gradients(self.args, -self.subject * loss / self.args**2)
 
 
+def chain_rule(op):
+    """
+    Compute the chain rule coefficient of the given :class:`Operator`.
+
+    This function will return `1` if the given `op` has only constant inputs.
+    """
+
+    if operator(op):
+        op = operator(op)
+    else:
+        raise TypeError(f"chain rule coefficient requires an Operator, not {op}")
+
+    if operator(op.subject) and operator(op.args):
+        return derivative_of(op.subject, op.args) + derivative_of(op.args, op.subject)
+    elif operator(op.subject):
+        return derivative_of(op.subject)
+    elif operator(op.args):
+        return derivative_of(op.args)
+    else:
+        return 1
+
+
 def constant(numeric):
     """Return the given `numeric` state as a constant, i.e. not the result of a differentiable :class:`Operator`."""
 
@@ -579,20 +600,20 @@ def derivative_of(state, variable=None):
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
-        return ones_like(state)
+        return 1
 
     from ..ml.optimizer import Variable
 
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
-            return ones_like(state)
+            return 1
         else:
             # it's a partial derivative and this variable is held constant
-            return zeros_like(state)
+            return 0
 
     if is_constant(state):
-        return zeros_like(state)
+        return 0
     elif operator(state):
         return operator(state).backward(variable)
     else:
@@ -663,18 +684,6 @@ def is_one(numeric):
     return False
 
 
-def ones_like(state):
-    from ..collection.tensor import Dense
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=1)
-        else:
-            return 1.
-    else:
-        return Dense.ones_like(state)
-
-
 def is_zero(numeric):
     """Return `True` if the given `numeric` state is a constant with value zero."""
 
@@ -692,18 +701,6 @@ def is_zero(numeric):
         return True
 
     return False
-
-
-def zeros_like(state):
-    from ..collection.tensor import Sparse
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=0)
-        else:
-            return 0.
-    else:
-        return Sparse.zeros_like(state)
 
 
 def operator(state_or_ref):
