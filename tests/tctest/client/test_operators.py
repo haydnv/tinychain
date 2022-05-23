@@ -53,6 +53,18 @@ class ChainRuleTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
 
+    def testLog(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = (cxt.x**2 + 1).log()
+        cxt.result = tc.math.derivative_of(cxt.g_x)
+
+        x = np.array([1])
+        expected = (2 * x) / (x**2 + 1)
+        actual = HOST.post(ENDPOINT, cxt)
+
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+
 
 class OperatorTests(unittest.TestCase):
     def __init__(self, *args, **kwargs):

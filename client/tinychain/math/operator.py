@@ -561,7 +561,7 @@ def chain_rule(numeric):
         raise ValueError(f"cannot apply the chain rule to a constant {numeric}")
 
     # only apply the chain rule for ops that have been explicitly tested
-    if not isinstance(op, (Exp, Pow)):
+    if not isinstance(op, (Exp, Log, Pow)):
         return 1
 
     if operator(op.subject) and operator(op.args):
