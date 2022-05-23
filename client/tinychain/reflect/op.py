@@ -43,9 +43,6 @@ class Get(Op):
         _, cxt = ref.form_of(self)
         return [cxt]
 
-    def __call__(self, key=None):
-        return self.rtype(form=ref.Get(self, key))
-
     def __form__(self):
         cxt, args = _maybe_first_arg(self)
 
