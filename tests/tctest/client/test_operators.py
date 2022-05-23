@@ -30,7 +30,7 @@ class ChainRuleTests(unittest.TestCase):
 
         self.assertTrue(HOST.post(ENDPOINT, cxt))
 
-    def testExp(self):
+    def testExp_simple(self):
         cxt = tc.Context()
         cxt.x = tc.ml.Variable.ones([1])
         cxt.g_x = 4 * cxt.x
@@ -39,6 +39,18 @@ class ChainRuleTests(unittest.TestCase):
 
         expected = 4 * math.e**4
         actual = HOST.post(ENDPOINT, cxt)
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+
+    def testExp_withOperatorExponent(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.f_g_x = (3 * (cxt.x**2) + 2).exp()
+        cxt.result = tc.math.derivative_of(cxt.f_g_x)
+
+        x = np.array([1])
+        expected = 6 * x * math.e**(3 * x**2 + 2)
+        actual = HOST.post(ENDPOINT, cxt)
+
         self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
 
 
