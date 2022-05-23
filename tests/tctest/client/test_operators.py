@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import unittest
 import tinychain as tc
@@ -14,6 +15,55 @@ ENDPOINT = '/transact/hypothetical'
 
 ones_like_torch = torch.ones_like
 ones_like_tc = tc.tensor.Dense.ones_like
+
+
+# based on https://mathinsight.org/chain_rule_simple_examples
+class ChainRuleTests(unittest.TestCase):
+    def testAdd(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = -2 * cxt.x + 5
+        cxt.f_x = 6 * cxt.g_x + 3
+        cxt.d_f_x = tc.math.derivative_of(cxt.f_x)
+        cxt.f_x_grad = tc.math.gradients(cxt.f_x, ones_like_tc(cxt.f_x), cxt.x)
+        cxt.passed = (cxt.d_f_x == cxt.f_x_grad).all()
+
+        self.assertTrue(HOST.post(ENDPOINT, cxt))
+
+    def testExp_simple(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = 4 * cxt.x
+        cxt.h_x = cxt.g_x.exp()
+        cxt.result = tc.math.derivative_of(cxt.h_x)
+
+        expected = 4 * math.e**4
+        actual = HOST.post(ENDPOINT, cxt)
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+
+    def testExp_withOperatorExponent(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.f_g_x = (3 * (cxt.x**2) + 2).exp()
+        cxt.result = tc.math.derivative_of(cxt.f_g_x)
+
+        x = np.array([1])
+        expected = 6 * x * math.e**(3 * x**2 + 2)
+        actual = HOST.post(ENDPOINT, cxt)
+
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+
+    def testLog(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = (cxt.x**2 + 1).log()
+        cxt.result = tc.math.derivative_of(cxt.g_x)
+
+        x = np.array([1])
+        expected = (2 * x) / (x**2 + 1)
+        actual = HOST.post(ENDPOINT, cxt)
+
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
 
 
 class OperatorTests(unittest.TestCase):
@@ -377,7 +427,6 @@ class OperatorTests(unittest.TestCase):
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
-    @unittest.skip
     def testLog2ndDerivative(self):
         w_torch = self.w1_torch.log()
         y_torch = self.x_torch*w_torch
@@ -868,7 +917,7 @@ class OperatorTests(unittest.TestCase):
         w1_tc_grad = HOST.post(ENDPOINT, cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
-    
+
     def testAtanh2ndDerivative(self):
         w_torch = self.w1_torch.atanh()
         y_torch = self.x_torch*w_torch
@@ -892,8 +941,8 @@ class OperatorTests(unittest.TestCase):
         dy_dw1_tc = result['the_first_derivative']
         d2y_dw2_tc = result['the_second_derivative']
 
-        self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
-        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
+        self.assertAllClose(dy_dw1_torch, dy_dw1_tc, 0.01)
+        self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc, 0.01)
 
     def testMultipleFunctions(self):
         y_torch = self.x_torch @ self.w1_torch + self.w1_torch
@@ -976,20 +1025,6 @@ class OperatorTests(unittest.TestCase):
         for (expected, actual) in zip(torch_grad, tc_grad.values()):
             self.assertAllClose(expected, actual)
 
-    @unittest.skip  # TODO: why doesn't this work?
-    def testSum_gradient(self):
-        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0) ** 0.5
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
-
-        cxt = tc.Context()
-        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
-        cxt.y_2tc = cxt.y_tc.sum(0)**0.5
-        cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
-
-        w1_tc_grad = HOST.post(ENDPOINT, cxt)
-        self.assertAllClose(w1_torch_grad, w1_tc_grad)
-
     def testSum_derivative(self):
         # based on https://math.stackexchange.com/questions/289989/first-and-second-derivative-of-a-summation
 
@@ -1000,8 +1035,8 @@ class OperatorTests(unittest.TestCase):
         x = np.arange(n).reshape([n])
 
         cxt = tc.Context()
-        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3])
-        cxt.x = tc.tensor.Dense.arange([n], 0, n)
+        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3], name="mu")
+        cxt.x = tc.tensor.Dense.arange([n], 0, n, name="x")
         cxt.f_x = ((cxt.x - cxt.mu)**2).sum()
         cxt.d_f_x = derivative_of(cxt.f_x)
         cxt.d2_f_x = derivative_of(cxt.d_f_x)
@@ -1010,20 +1045,34 @@ class OperatorTests(unittest.TestCase):
         expected_d = -2 * np.sum(x - mu)
         expected_d2 = 2 * n
 
-        self.assertEqual(HOST.post(ENDPOINT, cxt), [expected_d, expected_d2])
+        actual_d, actual_d2 = HOST.post(ENDPOINT, cxt)
+        self.assertEqual(actual_d, expected_d)
+        self.assertEqual(actual_d2, expected_d2)
 
-    @unittest.skip # TODO: make it work
+    def testSum_gradient(self):
+        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**0.5
+        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+
+        cxt = tc.Context()
+        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
+        cxt.y_2tc = cxt.y_tc.sum(0)**0.5
+        cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
+
+        w1_tc_grad = HOST.post(ENDPOINT, cxt)
+        self.assertAllClose(w1_torch_grad, w1_tc_grad)
+
     def testSum2ndDerivative(self):
         y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
         y2_torch = torch.sum(y_torch, 0)**0.5
         dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch, 
-                            grad_outputs=torch.ones_like(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
+                                  self.w1_torch,
+                                  grad_outputs=torch.ones_like(y2_torch),
+                                  create_graph=True,
+                                  retain_graph=True)[0]
         d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+                                    self.w1_torch,
+                                    grad_outputs=torch.ones_like(dy_dw1_torch))[0]
 
         cxt = tc.Context()
         y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
