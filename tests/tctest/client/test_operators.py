@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import unittest
 import tinychain as tc
@@ -14,6 +15,31 @@ ENDPOINT = '/transact/hypothetical'
 
 ones_like_torch = torch.ones_like
 ones_like_tc = tc.tensor.Dense.ones_like
+
+
+# based on https://mathinsight.org/chain_rule_simple_examples
+class ChainRuleTests(unittest.TestCase):
+    def testAdd(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = -2 * cxt.x + 5
+        cxt.f_x = 6 * cxt.g_x + 3
+        cxt.d_f_x = tc.math.derivative_of(cxt.f_x)
+        cxt.f_x_grad = tc.math.gradients(cxt.f_x, ones_like_tc(cxt.f_x), cxt.x)
+        cxt.passed = (cxt.d_f_x == cxt.f_x_grad).all()
+
+        self.assertTrue(HOST.post(ENDPOINT, cxt))
+
+    def testExp(self):
+        cxt = tc.Context()
+        cxt.x = tc.ml.Variable.ones([1])
+        cxt.g_x = 4 * cxt.x
+        cxt.h_x = cxt.g_x.exp()
+        cxt.result = tc.math.derivative_of(cxt.h_x)
+
+        expected = 4 * math.e**4
+        actual = HOST.post(ENDPOINT, cxt)
+        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
 
 
 class OperatorTests(unittest.TestCase):
