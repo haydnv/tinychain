@@ -2,7 +2,7 @@ import itertools
 import logging
 
 from ...context import deanonymize
-from ...math.operator import chain_rule, derivative_of, gradients, operator, Gradients, Operator, Unary
+from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, hex_id, is_literal, After, MethodSubject, Post
 from ...shape import Shape

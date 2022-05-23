@@ -1050,21 +1050,21 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(actual_d2, expected_d2)
 
     def testSum_gradient(self):
-        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch) ** 2
-        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**0.5
         w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
 
         cxt = tc.Context()
-        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc) ** 2
-        cxt.y_2tc = cxt.y_tc.sum(0) ** 0.5
+        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
+        cxt.y_2tc = cxt.y_tc.sum(0)**0.5
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
         w1_tc_grad = HOST.post(ENDPOINT, cxt)
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSum2ndDerivative(self):
-        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch) ** 2
-        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
+        y2_torch = torch.sum(y_torch, 0)**0.5
         dy_dw1_torch = grad_torch(y2_torch,
                                   self.w1_torch,
                                   grad_outputs=torch.ones_like(y2_torch),
@@ -1075,8 +1075,8 @@ class OperatorTests(unittest.TestCase):
                                     grad_outputs=torch.ones_like(dy_dw1_torch))[0]
 
         cxt = tc.Context()
-        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc) ** 2
-        y_2tc = y_tc.sum(0) ** 0.5
+        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
+        y_2tc = y_tc.sum(0)**0.5
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
         cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
