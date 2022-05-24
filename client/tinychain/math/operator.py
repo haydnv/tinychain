@@ -729,8 +729,17 @@ def derivative_of(state, variable=None, keepdims=False):
     if is_constant(state):
         return zeros_like(state, keepdims)
     elif operator(state):
+        from ..collection.tensor import Dense, NDArray
+
         coeff = chain_rule(state)
         d = operator(state).backward(variable)
+
+        if isinstance(state, NDArray) and keepdims:
+            if same_as(d, 0):
+                d = zeros_like(state)
+            elif same_as(d, 1):
+                d = ones_like(state)
+
         return coeff * d
     else:
         raise ValueError(f"the derivative of {state} is not defined")

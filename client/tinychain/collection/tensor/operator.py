@@ -4,11 +4,12 @@ import logging
 from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
 from ...scalar.number import Number
-from ...scalar.ref import deref, hex_id, is_literal, After, MethodSubject, Post
+from ...scalar.ref import deref, hex_id, is_literal, same_as, After, MethodSubject, Post
 from ...shape import Shape
 from ...uri import uri
 
 
+# TODO: support concatenating Sparse tensors
 class Concatenate(Operator):
     def __init__(self, tensors, axis=None):
         if not hasattr(tensors, "__len__"):
@@ -38,16 +39,26 @@ class Concatenate(Operator):
         if self.args:
             params["axis"] = self.args
 
-        # TODO: support concatenating Sparse tensors
         return Dense(form=Post(uri(Dense) + "/concatenate", params))
 
     def backward(self, variable=None):
         if not isinstance(deref(self.subject), (list, tuple)):
             raise ValueError(f"the derivative of a tensor concatenation requires a literal list, not {self.subject}")
 
-        # TODO: support concatenating Sparse tensors
-        from .base import Dense
-        return Dense(Concatenate([derivative_of(t, variable) for t in self.subject], self.args))
+        from .base import Dense, NDArray
+
+        d = [derivative_of(t, variable) for t in self.subject]
+
+        if all(same_as(d_i, 0) for d_i in d):
+            return 0
+        elif all(same_as(d_i, 1) for d_i in d):
+            return 1
+        elif all(isinstance(d_i, NDArray) for d_i in d):
+            return Dense(Concatenate(d, self.args))
+        else:
+            d = [derivative_of(t, variable, keepdims=True) for t in self.subject]
+            assert all(isinstance(d_i, NDArray) for d_i in d)
+            return Dense(Concatenate(d, self.args))
 
     def gradients(self, loss):
         if not isinstance(deref(self.subject), (list, tuple)):
@@ -94,7 +105,13 @@ class Copy(Unary):
         return Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
 
     def backward(self, variable=None):
-        return derivative_of(self.subject, variable).copy()
+        from .base import NDArray
+
+        d = derivative_of(self.subject, variable)
+        if isinstance(d, NDArray):
+            return d.copy()
+        else:
+            return d
 
     def gradients(self, loss):
         return gradients(self.subject, loss)
@@ -195,10 +212,22 @@ class Sum(Reduce):
 
 
 class Transform(Operator):
+    def __init__(self, subject, args):
+        from .base import NDArray
+
+        if not isinstance(subject, NDArray):
+            raise TypeError(f"transform requires an instance of NDArray, not {subject}")
+
+        Operator.__init__(self, subject, args)
+
     def backward(self, variable=None):
-        from .base import Tensor
-        d = type(self)(derivative_of(self.subject, variable), self.args)
-        return Tensor(form=d)
+        from .base import NDArray, Tensor
+        d = derivative_of(self.subject, variable)
+
+        if isinstance(d, NDArray):
+            return Tensor(type(self)(d, self.args))
+        else:
+            return d
 
     def invert(self, loss):
         raise NotImplementedError(f"{self.__class__.__name__}.invert")
