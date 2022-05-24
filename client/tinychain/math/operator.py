@@ -408,8 +408,8 @@ class MatMul(Dual):
         return NDArray.__matmul__(self.subject, self.args)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable)
-        arg = derivative_of(self.args, variable)
+        subject = derivative_of(self.subject, variable, keepdims=True)
+        arg = derivative_of(self.args, variable, keepdims=True)
         return (subject @ self.args) + (self.subject @ arg)
 
     def gradients(self, loss):
@@ -591,7 +591,7 @@ def constant(numeric):
     return numeric
 
 
-def derivative_of(state, variable=None):
+def derivative_of(state, variable=None, keepdims=False):
     """
     Find the derivative of the given `state`.
 
@@ -604,20 +604,20 @@ def derivative_of(state, variable=None):
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
-        return 1
+        return ones_like(state, keepdims)
 
     from ..ml.optimizer import Variable
 
     if isinstance(state, Variable):
         if variable is None:
             # it's not a partial derivative
-            return 1
+            return ones_like(state, keepdims)
         else:
             # it's a partial derivative and this variable is held constant
-            return 0
+            return zeros_like(state, keepdims)
 
     if is_constant(state):
-        return 0
+        return zeros_like(state, keepdims)
     elif operator(state):
         coeff = chain_rule(state)
         d = operator(state).backward(variable)
@@ -726,6 +726,36 @@ def shape_of(numeric):
         return numeric.shape
     else:
         raise ValueError(f"{numeric} has no shape")
+
+
+def ones_like(state, keepdims=False):
+    from ..collection.tensor import Dense
+
+    if not keepdims:
+        return 1
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        if isinstance(state, Numeric):
+            return type(state)(form=1)
+        else:
+            return 1
+    else:
+        return Dense.ones_like(state)
+
+
+def zeros_like(state, keepdims=False):
+    from ..collection.tensor import Sparse
+
+    if not keepdims:
+        return 0
+
+    if is_literal(state) or same_as(state.shape.ndim(), 0):
+        if isinstance(state, Numeric):
+            return type(state)(form=0)
+        else:
+            return 0
+    else:
+        return Sparse.zeros_like(state)
 
 
 def debug_shape(numeric):
