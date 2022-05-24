@@ -8,7 +8,7 @@ from ..collection.tensor import Dense, NDArray, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.interface import Numeric
-from ..math.operator import constant, derivative_of, is_constant, gradients
+from ..math.operator import constant, derivative_of, is_constant
 from ..scalar.number import F32, F64, UInt
 from ..scalar.ref import form_of, hex_id, After
 from ..scalar.value import Id
@@ -50,15 +50,13 @@ class _Optimizer(Optimizer, Dynamic):
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
-        grads = gradients(outputs, cxt.d_loss, list(trainable_vars.values()))
+        grads = {var_id: derivative_of(outputs, cxt.d_loss, var) for var_id, var in trainable_vars.items()}
         logging.debug("constructed gradients")
 
         if not grads:
             raise ValueError(f"model output {outputs} has no gradients")
 
-        return {
-            var_id: grads[i].sum(0) if isinstance(grads[i], NDArray) else grads[i]
-            for i, var_id in enumerate(trainable_vars.keys())}
+        return {var_id: grad.sum(0) for var_id, grad in grads.items()}
 
 
 class GradientDescent(_Optimizer):
