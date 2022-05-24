@@ -4,11 +4,11 @@ import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
-from ..collection.tensor import Dense, NDArray, Tensor
+from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.interface import Numeric
-from ..math.operator import constant, derivative_of, is_constant
+from ..math.operator import constant, derivative_of, is_constant, simplify
 from ..scalar.number import F32, F64, UInt
 from ..scalar.ref import form_of, hex_id, After
 from ..scalar.value import Id
@@ -50,7 +50,7 @@ class _Optimizer(Optimizer, Dynamic):
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
-        grads = {var_id: derivative_of(outputs, cxt.d_loss, var) for var_id, var in trainable_vars.items()}
+        grads = {var_id: simplify(derivative_of(outputs, cxt.d_loss, var)) for var_id, var in trainable_vars.items()}
         logging.debug("constructed gradients")
 
         if not grads:

@@ -91,6 +91,17 @@ class Operator(Op):
 
         raise NotImplementedError(f"{self.__class__}.gradients")
 
+    def simplify(self):
+        """
+        Return a simplified but logically equivalent version of this operator, if possible.
+        For example, `Mul(2, 1).simplify()` will return 2.
+
+        IMPORTANT: don't call `simplify` until after constructing an entire operator graph.
+        This is because `simplify` may discard parts of the operator graph needed to apply the chain rule correctly.
+        """
+
+        return self
+
 
 class Unary(Operator):
     def __init__(self, subject):
@@ -145,6 +156,10 @@ class Abs(Unary):
     def gradients(self, loss):
         return gradients(self.subject, loss * self.backward())
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        return Abs(subject)
+
 
 class Exp(Unary):
     def __repr__(self):
@@ -163,6 +178,16 @@ class Exp(Unary):
     def gradients(self, loss):
         return gradients(self.subject, loss * self.backward())
 
+    def simplify(self):
+        subject = simplify(self.subject)
+
+        if is_one(subject):
+            return 1
+        elif is_zero(subject):
+            return 0
+        else:
+            return Exp(subject)
+
 
 class LogicalNot(Unary):
     def __repr__(self):
@@ -175,11 +200,19 @@ class LogicalNot(Unary):
     def forward(self):
         return Boolean.logical_not(self.subject)
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        return LogicalNot(subject)
+
 
 class Trig(Unary):
     @property
     def shape(self):
         return self.subject.shape
+
+    def simplify(self):
+        subject = simplify(self.subject)
+        return type(self)(subject)
 
 
 class Sin(Trig):
@@ -393,6 +426,11 @@ class Log(Operator):
     def gradients(self, loss):
         return gradients(self.subject, loss * self.backward())
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+        return Log(subject, args)
+
 
 class MatMul(Dual):
     def __repr__(self):
@@ -417,6 +455,19 @@ class MatMul(Dual):
         return (gradients(self.subject, loss @ self.args.transpose([1, 0])) +
                 gradients(self.args, self.subject.transpose([1, 0]) @ loss))
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        from ..collection.tensor import NDArray
+
+        if is_zero(subject) or is_zero(args):
+            return zeros_like(self)
+        elif isinstance(subject, NDArray) and isinstance(args, NDArray):
+            return MatMul(subject, args)
+        else:
+            return self
+
 
 class Pow(Dual):
     def __repr__(self):
@@ -439,6 +490,17 @@ class Pow(Dual):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
         args_grad = loss * self.subject.log() * self.subject**self.args
         return gradients(self.subject, subject_grad) + gradients(self.args, args_grad)
+
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        if is_one(subject) or is_zero(args):
+            return 1
+        elif is_one(args):
+            return subject
+
+        return Pow(subject, args)
 
 
 class DualBroadcast(Operator):
@@ -491,6 +553,19 @@ class Add(DualBroadcast):
     def gradients(self, loss):
         return gradients(self.subject, loss) + gradients(self.args, loss)
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        if is_zero(subject) and is_zero(args):
+            return 0
+        if is_zero(subject):
+            return args
+        elif is_zero(args):
+            return subject
+        else:
+            return Add(subject, args)
+
 
 class Mul(DualBroadcast):
     def __repr__(self):
@@ -507,6 +582,21 @@ class Mul(DualBroadcast):
     def gradients(self, loss):
         return gradients(self.subject, self.args * loss) + gradients(self.args, self.subject * loss)
 
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        if is_zero(subject) or is_zero(args):
+            return 0
+        elif is_one(subject) and is_one(args):
+            return 1
+        elif is_one(subject):
+            return args
+        elif is_one(args):
+            return subject
+        else:
+            return Mul(subject, args)
+
 
 class Sub(DualBroadcast):
     def __repr__(self):
@@ -522,6 +612,17 @@ class Sub(DualBroadcast):
 
     def gradients(self, loss):
         return gradients(self.subject, loss) + gradients(self.args, -loss)
+
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        if is_zero(args):
+            return subject
+        elif same_as(subject, args):
+            return 0
+        else:
+            return Sub(subject, args)
 
 
 class Div(DualBroadcast):
@@ -540,12 +641,21 @@ class Div(DualBroadcast):
     def backward(self, variable=None):
         subject = derivative_of(self.subject, variable)
         arg = derivative_of(self.args, variable)
-
         return ((subject * self.args) - (self.subject * arg)) / (self.args**2)
 
     def gradients(self, loss):
-
         return gradients(self.subject, loss / self.args) + gradients(self.args, -self.subject * loss / self.args**2)
+
+    def simplify(self):
+        subject = simplify(self.subject)
+        args = simplify(self.args)
+
+        if is_zero(subject):
+            return 0
+        elif is_one(args):
+            return subject
+        else:
+            return Div(subject, args)
 
 
 def chain_rule(numeric):
@@ -677,14 +787,14 @@ def is_one(numeric):
     if same_as(numeric, 1):
         return True
 
-    from ..collection.tensor import NDArray, Sparse, Transform
+    from ..collection.tensor import Dense, NDArray, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
     if same_as(numeric, 1):
         return True
-    elif isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros_like(numeric)):
+    elif isinstance(numeric, NDArray) and same_as(numeric, Dense.ones_like(numeric)):
         return True
 
     return False
@@ -696,14 +806,14 @@ def is_zero(numeric):
     if same_as(numeric, 0):
         return True
 
-    from ..collection.tensor import Dense, NDArray, Transform
+    from ..collection.tensor import Sparse, NDArray, Transform
 
     while isinstance(operator(numeric), Transform):
         numeric = operator(numeric).subject
 
     if same_as(numeric, 0):
         return True
-    elif isinstance(numeric, NDArray) and same_as(numeric, Dense.ones_like(numeric)):
+    elif isinstance(numeric, NDArray) and same_as(numeric, Sparse.zeros_like(numeric)):
         return True
 
     return False
@@ -718,6 +828,33 @@ def operator(state_or_ref):
         return operator(deref(state_or_ref))
 
 
+def simplify(state):
+    """
+    Simplify the given operator graph, if possible.
+    For example, `simplify(Add(0, 2))` will return `2`.
+    """
+
+    if is_literal(state):
+        return state
+
+    if not is_numeric(state):
+        raise TypeError(f"cannot simplify a non-numeric state: {state}")
+
+    rtype = type(state)
+
+    while operator(state):
+        simplified = operator(state).simplify()
+        if same_as(simplified, state):
+            break
+
+        state = simplified
+
+    if is_literal(state):
+        return state
+    else:
+        return rtype(form=state)
+
+
 def shape_of(numeric):
     if isinstance(numeric, (bool, float, int)):
         from ..shape import Shape
@@ -728,7 +865,7 @@ def shape_of(numeric):
         raise ValueError(f"{numeric} has no shape")
 
 
-def ones_like(state, keepdims=False):
+def ones_like(state, keepdims=True):
     from ..collection.tensor import Dense
 
     if not keepdims:
@@ -743,7 +880,7 @@ def ones_like(state, keepdims=False):
         return Dense.ones_like(state)
 
 
-def zeros_like(state, keepdims=False):
+def zeros_like(state, keepdims=True):
     from ..collection.tensor import Sparse
 
     if not keepdims:
