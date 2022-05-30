@@ -408,7 +408,7 @@ class Dual(Operator):
         Operator.__init__(self, subject, args)
 
 
-#TODO: Tensor.log(base!=None)
+# TODO: logarithm with an explicit base
 class Log(Operator):
     def __repr__(self):
         return f"log({self.subject})"
@@ -420,8 +420,9 @@ class Log(Operator):
     def forward(self):
         return Numeric.log(self.subject, self.args)
 
-    def backward(self, _variable=None):
-        return 1 / self.subject
+    def backward(self, variable=None):
+        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
+        return 1 / subject
 
     def gradients(self, loss):
         return gradients(self.subject, loss * self.backward())
@@ -675,7 +676,7 @@ def chain_rule(numeric):
         return 1
 
     if operator(op.subject) and operator(op.args):
-        return derivative_of(op.subject, op.args) + derivative_of(op.args, op.subject)
+        raise NotImplementedError("multivariate chain rule")
     elif operator(op.subject):
         return derivative_of(op.subject)
     elif operator(op.args):
