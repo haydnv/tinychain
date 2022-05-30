@@ -30,4 +30,4 @@ serde_json = { version = "1.0", features = [] }
 sha2 = "0.10"
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
-uuid = "0.8"
+uuid = "1.1"
