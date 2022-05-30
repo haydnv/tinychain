@@ -73,50 +73,10 @@ class Numeric(Interface):
 
         return self._get("abs", rtype=self.__class__)
 
-    def acos(self):
-        """Arccosine"""
-
-        return self._get("acos", rtype=self.__class__)
-
-    def acosh(self):
-        """Hyperbolic arccosine"""
-
-        return self._get("acosh", rtype=self.__class__)
-
     def add(self, other):
         """Addition"""
 
         return self._post("add", {"r": other}, self.__class__)
-
-    def asin(self):
-        """Arcsine"""
-
-        return self._get("asin", rtype=self.__class__)
-
-    def asinh(self):
-        """Hyperbolic arcsine"""
-
-        return self._get("asinh", rtype=self.__class__)
-
-    def atan(self):
-        """Arctangent"""
-
-        return self._get("atan", rtype=self.__class__)
-
-    def atanh(self):
-        """Hyperbolic arctangent"""
-
-        return self._get("atanh", rtype=self.__class__)
-
-    def cos(self):
-        """Cosine"""
-
-        return self._get("cos", rtype=self.__class__)
-
-    def cosh(self):
-        """Hyperbolic cosine"""
-
-        return self._get("cosh", rtype=self.__class__)
 
     def div(self, other):
         """Division"""
@@ -166,30 +126,10 @@ class Numeric(Interface):
             places = UInt(10) ** digits
             return (self * places).round() / places
 
-    def sin(self):
-        """Sine"""
-
-        return self._get("sin", rtype=self.__class__)
-
-    def sinh(self):
-        """Hyperbolic sine"""
-
-        return self._get("sinh", rtype=self.__class__)
-
     def sub(self, other):
         """Subtraction"""
 
         return self._post("sub", {"r": other}, self.__class__)
-
-    def tan(self):
-        """Tangent"""
-
-        return self._get("tan", rtype=self.__class__)
-
-    def tanh(self):
-        """Hyperbolic tangent"""
-
-        return self._get("tanh", rtype=self.__class__)
 
 
 class Trigonometric(Interface):
