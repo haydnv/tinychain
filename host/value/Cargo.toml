@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.7.0"
+version = "0.6.0"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 description = "TinyChain's representation of a value which can be collated and stored. Unstable."
@@ -20,7 +20,7 @@ collate = "~0.2.3"
 destream = "0.5"
 email-address-parser = "1.0"
 futures = "0.3"
-handlebars = "4.1"
+handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
 number-general = { version = "0.8", features=["hash", "serde", "stream"] }
@@ -28,6 +28,6 @@ safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 sha2 = "0.10"
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
+tcgeneric = "0.5"
+tc-error = "0.6"
 uuid = "1.1"
