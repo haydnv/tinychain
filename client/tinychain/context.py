@@ -134,7 +134,7 @@ def to_json(state_or_ref):
         raise ValueError(f"the Python generator {state_or_ref} is not JSON serializable")
 
     if callable(state_or_ref) and not hasattr(state_or_ref, "__json__"):
-        raise ValueError(f"Python callable {state_or_ref} is not JSON serializable; consider using a decorator like @get")
+        raise ValueError(f"Python callable {state_or_ref} is not JSON serializable; consider a decorator like @get")
 
     if inspect.isclass(state_or_ref):
         if hasattr(type(state_or_ref), "__json__"):

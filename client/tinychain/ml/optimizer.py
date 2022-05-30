@@ -10,7 +10,7 @@ from ..generic import Map, Tuple
 from ..math.interface import Numeric
 from ..math.operator import constant, derivative_of, is_constant, simplify
 from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import form_of, hex_id, After
+from ..scalar.ref import form_of, hex_id, After, If
 from ..scalar.value import Id
 from ..state import State
 
@@ -56,7 +56,9 @@ class _Optimizer(Optimizer, Dynamic):
         if not grads:
             raise ValueError(f"model output {outputs} has no gradients")
 
-        return {var_id: grad.sum(0) for var_id, grad in grads.items()}
+        return {
+            var_id: If(grad.shape[1:] == trainable_vars[var_id].shape, grad.sum(0), grad.sum())
+            for var_id, grad in grads.items()}
 
 
 class GradientDescent(_Optimizer):

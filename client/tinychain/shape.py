@@ -82,6 +82,8 @@ class Shape(Tuple):
             raise ValueError("cannot concatenate an empty list of shapes")
         elif not hasattr(shapes, "__len__"):
             raise ValueError(f"can only concatenate a literal list of shapes, not {shapes}")
+        else:
+            shapes = [Shape(shape) for shape in shapes]
 
         ndim = shapes[0].ndim(True, "concatenate")
         for shape in shapes:
@@ -298,7 +300,7 @@ class Shape(Tuple):
             if not hasattr(self, "__reversed__"):
                 raise RuntimeError(f"Shape.transpose requires a literal-length shape, not {self}")
 
-            return reversed(self)
+            return Shape(tuple(reversed(self)))
         elif is_literal(permutation):
             return Shape(tuple(self[x] for x in permutation))
         else:
