@@ -79,8 +79,8 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
 def expect_dense(dtype, shape, flat):
     return {
-        str(tc.uri(tc.tensor.Dense)): [
-            [list(shape), str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Dense)): [
+            [list(shape), str(tc.URI(dtype))],
             list(flat),
         ]
     }
@@ -91,8 +91,8 @@ def expect_sparse(dtype, shape, values):
         values = nparray_to_sparse(values, dtype)
 
     return {
-        str(tc.uri(tc.tensor.Sparse)): [
-            [list(shape), str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Sparse)): [
+            [list(shape), str(tc.URI(dtype))],
             list(values),
         ]
     }

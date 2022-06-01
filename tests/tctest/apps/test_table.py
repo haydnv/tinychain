@@ -95,4 +95,4 @@ class TableErrorTest(unittest.TestCase):
 
 
 def expected(schema, rows):
-    return {str(tc.uri(tc.table.Table)): [tc.to_json(schema), rows]}
+    return {str(tc.URI(tc.table.Table)): [tc.to_json(schema), rows]}

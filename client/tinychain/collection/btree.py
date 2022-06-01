@@ -5,7 +5,7 @@ from ..scalar.bound import Range
 from ..scalar.number import UInt
 from ..scalar.ref import form_of, Ref
 from ..state import State, Stream
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json
 
 from .base import Collection
@@ -24,7 +24,7 @@ class Schema(object):
 class BTree(Collection):
     """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
-    __uri__ = uri(Collection) + "/btree"
+    __uri__ = URI(Collection) + "/btree"
 
     def __getitem__(self, prefix):
         """

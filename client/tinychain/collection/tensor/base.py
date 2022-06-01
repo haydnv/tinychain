@@ -18,7 +18,7 @@ from ...scalar.number import Bool, F32, F64, Number, U64
 from ...scalar import ref
 from ...shape import Shape
 from ...state import Class, State, Stream
-from ...uri import uri
+from ...uri import URI
 
 from ..base import Collection
 
@@ -84,7 +84,7 @@ class NDArray(Interface):
     def copy(self):
         """Return a copy of this :class:`NDArray`"""
 
-        return ref.Post(uri(Tensor) + "/copy_from", {"tensor": self})
+        return ref.Post(URI(Tensor) + "/copy_from", {"tensor": self})
 
     def expand_dims(self, axis=-1):
         """Expand the given `axis` of this :class:`NDArray`, or append a new axis if no `axis` is given."""
@@ -201,7 +201,7 @@ class NDArray(Interface):
 class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
     """An n-dimensional array of numbers."""
 
-    __uri__ = uri(Collection) + "/tensor"
+    __uri__ = URI(Collection) + "/tensor"
     __spec__ = (Shape, Number)
 
     def __init__(self, form):
@@ -302,7 +302,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         name = name if name else f"load {shape}"
 
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/load", ((shape, dtype), data), name)
+        op_ref = ref.Get(URI(cls) + "/load", ((shape, dtype), data), name)
         return cls(op_ref)
 
     def __repr__(self):
@@ -544,7 +544,7 @@ class Dense(Tensor):
     you can safely treat this response as a divide-by-zero error.
     """
 
-    __uri__ = uri(Tensor) + "/dense"
+    __uri__ = URI(Tensor) + "/dense"
 
     @classmethod
     def arange(cls, shape, start, stop, name=None):
@@ -558,7 +558,7 @@ class Dense(Tensor):
         name = name if name else f"arange({start}, {stop})x{shape}"
         dtype = type(start) if isinstance(start, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/range", (shape, start, stop), name)
+        op_ref = ref.Get(URI(cls) + "/range", (shape, start, stop), name)
         return cls(op_ref)
 
     @classmethod
@@ -578,7 +578,7 @@ class Dense(Tensor):
         name = name if name else f"{value}x{shape}"
         dtype = type(value) if isinstance(value, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(uri(cls) + "/constant", (shape, value), name)
+        op_ref = ref.Get(URI(cls) + "/constant", (shape, value), name)
 
         if ref.same_as(value, 1):
             return cls(op_ref)
@@ -622,7 +622,7 @@ class Dense(Tensor):
         name = name if name else f"random {shape}"
         cls = cls.expect(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
-        op_ref = ref.Post(uri(cls) + "/random/normal", args, name)
+        op_ref = ref.Post(URI(cls) + "/random/normal", args, name)
         return cls(op_ref)
 
     @classmethod
@@ -637,7 +637,7 @@ class Dense(Tensor):
 
         assert maxval > minval
 
-        random = cls(ref.Get(uri(cls) + "/random/uniform", shape))
+        random = cls(ref.Get(URI(cls) + "/random/uniform", shape))
         if (minval, maxval) == (0, 1):
             return random
         else:
@@ -715,7 +715,7 @@ class Sparse(Tensor):
     which are not filled in the left-hand `Tensor`.
     """
 
-    __uri__ = uri(Tensor) + "/sparse"
+    __uri__ = URI(Tensor) + "/sparse"
 
     @classmethod
     def zeros(cls, shape, dtype=F32, name=None):

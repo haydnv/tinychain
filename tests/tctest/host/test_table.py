@@ -74,7 +74,7 @@ class TableTests(HostTest):
         cxt.result = tc.After(cxt.inserts, cxt.table.select(["name"]))
 
         expected = {
-            str(tc.uri(tc.table.Table)): [
+            str(tc.URI(tc.table.Table)): [
                 tc.to_json(tc.table.Schema([tc.Column("name", tc.String, 512)])),
                 list(sorted(keys))
             ]
@@ -126,7 +126,7 @@ class SparseTests(HostTest):
 
 
 def expected(schema, rows):
-    return {str(tc.uri(tc.table.Table)): [tc.to_json(schema), rows]}
+    return {str(tc.URI(tc.table.Table)): [tc.to_json(schema), rows]}
 
 
 if __name__ == "__main__":

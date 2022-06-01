@@ -105,7 +105,7 @@ class TableTests(ClientTest):
 
 
 def expected(schema, rows):
-    return {str(tc.uri(tc.table.Table)): [tc.to_json(schema), rows]}
+    return {str(tc.URI(tc.table.Table)): [tc.to_json(schema), rows]}
 
 
 if __name__ == "__main__":

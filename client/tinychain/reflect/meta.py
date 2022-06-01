@@ -1,7 +1,7 @@
 import inspect
 import logging
 
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json
 
 
@@ -14,7 +14,7 @@ class Meta(type):
         parents = []
         for parent in cls.mro()[1:]:
             if issubclass(parent, State):
-                if uri(parent) != uri(cls):
+                if URI(parent) != URI(cls):
                     parents.append(parent)
 
         return parents
@@ -71,10 +71,10 @@ class Meta(type):
 
         parents = cls.parents()
 
-        if not parents or uri(parents[0]).startswith(uri(State)):
-            return {str(uri(Class)): to_json(form_of(cls))}
+        if not parents or URI(parents[0]).startswith(URI(State)):
+            return {str(URI(Class)): to_json(form_of(cls))}
         else:
-            return {str(uri(parents[0])): to_json(form_of(cls))}
+            return {str(URI(parents[0])): to_json(form_of(cls))}
 
 
 class MethodStub(object):

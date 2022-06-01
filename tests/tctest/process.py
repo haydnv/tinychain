@@ -87,7 +87,7 @@ def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_ti
     deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 
     for lib in deps:
-        lib_path = tc.uri(lib).path()
+        lib_path = tc.URI(lib).path()
         tc.app.write_config(lib, f"{config_dir}{lib_path}", overwrite)
         app_configs.append(lib_path)
 
@@ -173,8 +173,8 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
         port = host_uri.port()
-    elif deps and tc.uri(deps[0]).port():
-        port = tc.uri(deps[0]).port()
+    elif deps and tc.URI(deps[0]).port():
+        port = tc.URI(deps[0]).port()
 
     config_dir = os.getcwd()
     config_dir += f"/{CONFIG}/{name}/{port}"
@@ -182,7 +182,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
 
     app_configs = []
     for dep in deps:
-        app_path = tc.uri(dep).path()
+        app_path = tc.URI(dep).path()
         app_path = f"{config_dir}{app_path}"
         tc.app.write_config(dep, app_path, overwrite)
         app_configs.append(app_path)

@@ -20,11 +20,11 @@ class Host(object):
     RETRYABLE = [409, 502, 503]
 
     def __init__(self, host):
-        self.__uri__ = tc.uri(host)
+        self.__uri__ = tc.URI(host)
         self._host = host  # keep a reference here so it doesn't get dropped
 
     async def get(self, path, key=None):
-        endpoint = str(tc.uri(self) + path)
+        endpoint = str(tc.URI(self) + path)
 
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.get(endpoint, params={"key": json.dumps(tc.to_json(key))})
@@ -38,7 +38,7 @@ class Host(object):
             return response
 
     async def put(self, path, key=None, value=None):
-        endpoint = str(tc.uri(self) + path)
+        endpoint = str(tc.URI(self) + path)
 
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.put(endpoint, params={"key": json.dumps(tc.to_json(key))}, json=tc.to_json(value))
@@ -52,7 +52,7 @@ class Host(object):
             return response
 
     async def post(self, path, params={}):
-        endpoint = str(tc.uri(self) + path)
+        endpoint = str(tc.URI(self) + path)
 
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.post(endpoint, json=tc.to_json(params))
@@ -66,7 +66,7 @@ class Host(object):
             return response
 
     async def delete(self, path, key=None):
-        endpoint = str(tc.uri(self) + path)
+        endpoint = str(tc.URI(self) + path)
 
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             response = await session.delete(endpoint, params={"key": json.dumps(tc.to_json(key))})

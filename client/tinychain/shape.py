@@ -7,7 +7,7 @@ from .scalar.bound import Range
 from .scalar.number import Number, U64
 from .scalar.ref import deref, is_literal, get_ref
 from .state import State
-from .uri import uri
+from .uri import URI
 
 
 class Shape(Tuple):
@@ -63,10 +63,10 @@ class Shape(Tuple):
                 except IndexError as e:
                     raise IndexError(f"{self} has no axis {x}: {e}")
 
-                if uri(self) == uri(self.__class__):
+                if URI(self) == URI(self.__class__):
                     return item
                 else:
-                    return get_ref(item, uri(self).append(x))
+                    return get_ref(item, URI(self).append(x))
 
         return self._get("", x, U64)
 

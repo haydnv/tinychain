@@ -5,8 +5,8 @@ import unittest
 
 from ..process import start_host
 
-LIB_URI = tc.uri(tc.math.linalg.LinearAlgebra)
-TENSOR_URI = str(tc.uri(tc.tensor.Dense))
+LIB_URI = tc.URI(tc.math.linalg.LinearAlgebra)
+TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 
 
 class LinearAlgebraTests(unittest.TestCase):

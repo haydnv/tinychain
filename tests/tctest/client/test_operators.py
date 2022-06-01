@@ -8,7 +8,7 @@ from torch.autograd import grad as grad_torch
 from tinychain.collection.tensor import Dense
 from tinychain.math.operator import gradients as grad_tc
 
-TENSOR_URI = str(tc.uri(Dense))
+TENSOR_URI = str(tc.URI(Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
 ENDPOINT = '/transact/hypothetical'
 

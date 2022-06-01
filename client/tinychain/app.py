@@ -14,7 +14,7 @@ from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
 from .scalar.value import Nil
 from .scalar import Scalar
 from .state import Class, Instance, Object, State
-from .uri import uri, URI
+from .uri import URI
 from .context import to_json
 
 
@@ -33,7 +33,7 @@ class Model(Object, metaclass=Meta):
 
         Object.__init__(self, form)  # this will generate method headers
 
-        if not uri(self):
+        if not hasattr(self, "__uri__"):
             raise ValueError(f"{self} has no URI defined (consider setting the __uri__ attribute)")
 
         for name, attr in inspect.getmembers(self):
@@ -66,11 +66,11 @@ class Model(Object, metaclass=Meta):
         if isinstance(form, URI) or isinstance(form, Ref):
             return to_json(form)
 
-        elif uri(self).startswith("/state"):
+        elif URI(self).startswith("/state"):
             raise ValueError(f"{self} has no URI defined (consider overriding the __uri__ attribute)")
 
         else:
-            return {str(uri(self)): to_json(form)}
+            return {str(URI(self)): to_json(form)}
 
     def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize model {self}")
@@ -147,7 +147,7 @@ class Dynamic(Instance):
     def __json__(self):
         form = form_of(self)
         form = form if form else [None]
-        return {str(uri(self)): to_json(form)}
+        return {str(URI(self)): to_json(form)}
 
     def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize dynamic model {self}")
@@ -183,10 +183,10 @@ class ModelRef(Ref):
                 stub = getattr(instance.__class__, name)
                 setattr(self, name, stub.method(self, name))
             else:
-                setattr(self, name, get_ref(attr, uri(self).append(name)))
+                setattr(self, name, get_ref(attr, URI(self).append(name)))
 
     def __json__(self):
-        return to_json(uri(self))
+        return to_json(URI(self))
 
     def __ref__(self, name):
         return ModelRef(self.instance, name)
@@ -235,7 +235,7 @@ class Library(object):
                 setattr(self, name, attr.method(self, name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({uri(self)})"
+        return f"{self.__class__.__name__}({URI(self)})"
 
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
@@ -260,7 +260,7 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return {str(uri(self)): form}
+        return {str(URI(self)): form}
 
 
 class App(Library):
@@ -269,7 +269,7 @@ class App(Library):
 
         for name, attr in inspect.getmembers(self, _is_mutable):
             if isinstance(attr, Chain):
-                attr.__uri__ = uri(self).append(name)
+                attr.__uri__ = URI(self).append(name)
             else:
                 raise RuntimeError(f"{attr} must be managed by a Chain")
 
@@ -315,16 +315,16 @@ class App(Library):
 
                 if isinstance(collection, Collection):
                     schema = form_of(collection)
-                    form[name] = {str(uri(chain_type)): [{str(uri(type(collection))): [to_json(schema)]}]}
+                    form[name] = {str(URI(chain_type)): [{str(URI(type(collection))): [to_json(schema)]}]}
                 elif isinstance(collection, (dict, list, tuple, Map, Tuple)):
-                    form[name] = {str(uri(chain_type)): [to_json(collection)]}
+                    form[name] = {str(URI(chain_type)): [to_json(collection)]}
                 else:
                     raise TypeError(f"invalid subject for Chain: {collection}")
 
             else:
                 form[name] = to_json(attr)
 
-        return {str(uri(self)): form}
+        return {str(URI(self)): form}
 
 
 def dependencies(lib_or_model):

@@ -2,7 +2,7 @@
 
 import logging
 
-from ...uri import uri, URI
+from ...uri import URI
 from ...context import deanonymize, to_json
 
 
@@ -33,7 +33,7 @@ class After(FlowControl):
             num_rows = After(table.insert(["key"], ["value"]), table.count())`
     """
 
-    __uri__ = uri(Ref) + "/after"
+    __uri__ = URI(Ref) + "/after"
 
     def __init__(self, when, then):
         from .helpers import is_conditional
@@ -48,7 +48,7 @@ class After(FlowControl):
         return [self.when, self.then]
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.when, self.then])}
+        return {str(URI(self)): to_json([self.when, self.then])}
 
     def __ns__(self, cxt, name_hint):
         from .helpers import is_conditional, reference
@@ -81,7 +81,7 @@ class Case(FlowControl):
         `BadRequestError` if `case` is the wrong length or if `cond` or `switch` contains a nested conditional
     """
 
-    __uri__ = uri(Ref) + "/case"
+    __uri__ = URI(Ref) + "/case"
 
     def __init__(self, cond, switch, case):
         self.cond = cond
@@ -92,7 +92,7 @@ class Case(FlowControl):
         return [self.cond, self.switch, self.case]
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.cond, self.switch, self.case])}
+        return {str(URI(self)): to_json([self.cond, self.switch, self.case])}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.cond, cxt, name_hint + "_cond")
@@ -118,7 +118,7 @@ class If(FlowControl):
         `BadRequestError` if `cond` does not resolve to a :class:`Bool` or in case of a nested conditional
     """
 
-    __uri__ = uri(Ref) + "/if"
+    __uri__ = URI(Ref) + "/if"
 
     def __init__(self, cond, then, or_else=None):
         from .helpers import is_conditional
@@ -143,7 +143,7 @@ class If(FlowControl):
             else:
                 return to_json(self.or_else)
 
-        return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
+        return {str(URI(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt, name_hint):
         from .helpers import is_conditional, is_op_ref, reference
@@ -183,7 +183,7 @@ class While(FlowControl):
         state (State): The initial state of the loop.
     """
 
-    __uri__ = uri(Ref) + "/while"
+    __uri__ = URI(Ref) + "/while"
 
     def __init__(self, cond, op, state=None):
         self.cond = cond
@@ -194,7 +194,7 @@ class While(FlowControl):
         return [self.cond, self.op, self.state]
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.cond, self.op, self.state])}
+        return {str(URI(self)): to_json([self.cond, self.op, self.state])}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.cond, cxt, name_hint + "_cond")
@@ -215,13 +215,13 @@ class With(FlowControl):
         op (Op): The Op to close over.
     """
 
-    __uri__ = uri(Ref) + "/with"
+    __uri__ = URI(Ref) + "/with"
 
     def __init__(self, capture, op):
         self.capture = []
 
         for ref in capture:
-            id = uri(ref).id()
+            id = URI(ref).id()
             if id is None:
                 raise ValueError(f"With can only capture states with an ID in the current context, not {ref}")
 
@@ -236,7 +236,7 @@ class With(FlowControl):
         return [self.capture, self.op]
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.capture, self.op])}
+        return {str(URI(self)): to_json([self.capture, self.op])}
 
     def __ns__(self, _cxt, _name_hint):
         pass
@@ -252,7 +252,7 @@ class With(FlowControl):
 class Op(Ref):
     """A resolvable reference to an :class:`Op`."""
 
-    __uri__ = uri(Ref) + "/op"
+    __uri__ = URI(Ref) + "/op"
 
     def __init__(self, subject, args, debug_name=None):
         self._debug_name = debug_name
@@ -276,10 +276,10 @@ class Op(Ref):
         else:
             subject = self.subject
 
-        if uri(subject) is None:
+        if URI(subject) is None:
             raise ValueError(f"subject {self.subject} of {self} has no URI")
 
-        return {str(uri(subject)): to_json(self.args)}
+        return {str(URI(subject)): to_json(self.args)}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.subject, cxt, name_hint + "_subject")
@@ -299,7 +299,7 @@ class Get(Op):
         key (Value or Ref): The `key` with which to call this `Op`.
     """
 
-    __uri__ = uri(Op) + "/get"
+    __uri__ = URI(Op) + "/get"
 
     def __init__(self, subject, key=None, debug_name=None):
         if subject is None:
@@ -311,10 +311,10 @@ class Get(Op):
         from .helpers import is_ref
 
         if isinstance(self.subject, Ref):
-            subject = uri(self.subject)
+            subject = URI(self.subject)
             is_scalar = False
         elif isinstance(self.subject, URI) or hasattr(self.subject, "__uri__"):
-            subject = uri(self.subject)
+            subject = URI(self.subject)
             if subject is None:
                 raise ValueError(f"subject of Get op ref {self.subject} ({type(self.subject)}) has no URI")
 
@@ -360,7 +360,7 @@ class Put(Op):
         value (State or Ref): The `value` with which to call this `Op`.
     """
 
-    __uri__ = uri(Op) + "/put"
+    __uri__ = URI(Op) + "/put"
 
     def __init__(self, subject, key, value):
         Op.__init__(self, subject, (key, value))
@@ -399,7 +399,7 @@ class Post(Op):
         args (Map or Ref): The parameters with which to call this `Op`.
     """
 
-    __uri__ = uri(Op) + "/post"
+    __uri__ = URI(Op) + "/post"
 
     def __init__(self, subject, args, debug_name=None):
         if not hasattr(args, "__iter__"):
@@ -450,13 +450,13 @@ class Delete(Op):
         key (Value or Ref): The `key` with which to call this `Op`.
     """
 
-    __uri__ = uri(Op) + "/delete"
+    __uri__ = URI(Op) + "/delete"
 
     def __init__(self, subject, key=None):
         Op.__init__(self, subject, key)
 
     def __json__(self):
-        return {str(uri(self)): to_json([self.subject, self.args])}
+        return {str(URI(self)): to_json([self.subject, self.args])}
 
     def __repr__(self):
         return f"DELETE {repr(self.subject)}: {repr(self.args)}"
@@ -474,8 +474,8 @@ class Delete(Op):
 
 class MethodSubject(object):
     def __init__(self, subject, method_name=""):
-        if uri(subject).startswith('$'):
-            self.__uri__ = uri(subject).append(method_name)
+        if URI(subject).startswith('$'):
+            self.__uri__ = URI(subject).append(method_name)
 
         self.subject = subject
         self.method_name = method_name
@@ -496,13 +496,13 @@ class MethodSubject(object):
         auto_uri = URI(name).append(self.method_name)
 
         if hasattr(self, "__uri__"):
-            if uri(self) == auto_uri and name not in cxt:
+            if URI(self) == auto_uri and name not in cxt:
                 logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
                 setattr(cxt, name, self.subject)
             else:
                 return
 
-        elif uri(self.subject).startswith("/state"):
+        elif URI(self.subject).startswith("/state"):
             self.__uri__ = auto_uri
 
             if name not in cxt:
@@ -513,19 +513,19 @@ class MethodSubject(object):
 
         else:
             deanonymize(self.subject, cxt, name_hint)
-            self.__uri__ = uri(self.subject).append(self.method_name)
+            self.__uri__ = URI(self.subject).append(self.method_name)
 
     def __json__(self):
         if self.__uri__ is None:
             raise ValueError(f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
 
-        return to_json(uri(self))
+        return to_json(URI(self))
 
     def __str__(self):
         if not hasattr(self, "__uri__"):
-            return str(uri(self.subject).append(self.method_name))
+            return str(URI(self.subject).append(self.method_name))
         else:
-            return str(uri(self))
+            return str(URI(self))
 
     def __repr__(self):
         return f"{repr(self.subject)}/{self.method_name}"

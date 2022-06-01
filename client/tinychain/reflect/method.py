@@ -3,7 +3,7 @@ import inspect
 from ..scalar import Value
 from ..scalar import op, ref
 from ..state import State
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json, Context
 
 from . import _get_rtype, parse_args, resolve_class
@@ -13,7 +13,7 @@ EMPTY = inspect.Parameter.empty
 
 
 class Method(object):
-    __uri__ = uri(op.Op)
+    __uri__ = URI(op.Op)
 
     def __init__(self, header, form, name):
         if not inspect.isfunction(form):
@@ -30,7 +30,7 @@ class Method(object):
         return False
 
     def __json__(self):
-        return {str(uri(self)): to_json(ref.form_of(self))}
+        return {str(URI(self)): to_json(ref.form_of(self))}
 
     def dtype(self):
         return self.__class__.__name__
@@ -39,11 +39,11 @@ class Method(object):
         if isinstance(self.header, State):
             return ref.MethodSubject(self.header, self.name)
         else:
-            return uri(self.header).append(self.name)
+            return URI(self.header).append(self.name)
 
 
 class Get(Method):
-    __uri__ = uri(op.Get)
+    __uri__ = URI(op.Get)
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
@@ -80,7 +80,7 @@ class Get(Method):
 
 
 class Put(Method):
-    __uri__ = uri(op.Put)
+    __uri__ = URI(op.Put)
 
     def __init__(self, header, form, name):
         rtype = _get_rtype(form, None)
@@ -141,7 +141,7 @@ class Put(Method):
 
 
 class Post(Method):
-    __uri__ = uri(op.Post)
+    __uri__ = URI(op.Post)
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
@@ -196,7 +196,7 @@ class Post(Method):
 
 
 class Delete(Method):
-    __uri__ = uri(op.Delete)
+    __uri__ = URI(op.Delete)
 
     def __init__(self, header, form, name):
         rtype = _get_rtype(form, None)

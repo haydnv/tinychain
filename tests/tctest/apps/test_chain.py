@@ -48,4 +48,4 @@ class ChainTests(PersistenceTest, unittest.TestCase):
 
 
 def load_dense(shape, dtype, elements):
-    return {str(tc.uri(tc.tensor.Dense)): [[shape, dtype], elements]}
+    return {str(tc.URI(tc.tensor.Dense)): [[shape, dtype], elements]}

@@ -3,7 +3,7 @@ import math
 from ..math.interface import Boolean, Numeric, Trigonometric
 from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
 from ..math.operator import Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
-from ..uri import uri
+from ..uri import URI
 
 from .ref import deref, form_of, is_literal, same_as
 from .value import Value
@@ -12,7 +12,7 @@ from .value import Value
 class Number(Value, Numeric, Trigonometric):
     """A numeric :class:`Value`."""
 
-    __uri__ = uri(Value) + "/number"
+    __uri__ = URI(Value) + "/number"
 
     @classmethod
     def trig_rtype(cls):
@@ -160,7 +160,7 @@ class Number(Value, Numeric, Trigonometric):
 class Bool(Number, Boolean):
     """A boolean :class:`Value`."""
 
-    __uri__ = uri(Number) + "/bool"
+    __uri__ = URI(Number) + "/bool"
 
     @classmethod
     def _trig_rtype(cls):
@@ -230,7 +230,7 @@ class Bool(Number, Boolean):
 class Complex(Number):
     """A complex number."""
 
-    __uri__ = uri(Number) + "/complex"
+    __uri__ = URI(Number) + "/complex"
 
     def abs(self):
         """Return the linear norm of this complex number."""
@@ -246,37 +246,37 @@ class Complex(Number):
 class C32(Complex):
     """A complex 32-bit floating point number."""
 
-    __uri__ = uri(Complex) + "/32"
+    __uri__ = URI(Complex) + "/32"
 
 
 class C64(Complex):
     """A complex 64-bit floating point number."""
 
-    __uri__ = uri(Complex) + "/64"
+    __uri__ = URI(Complex) + "/64"
 
 
 class Float(Number):
     """A floating-point decimal number."""
 
-    __uri__ = uri(Number) + "/float"
+    __uri__ = URI(Number) + "/float"
 
 
 class F32(Float):
     """A 32-bit floating point number."""
 
-    __uri__ = uri(Float) + "/32"
+    __uri__ = URI(Float) + "/32"
 
 
 class F64(Float):
     """A 64-bit floating point number."""
 
-    __uri__ = uri(Float) + "/64"
+    __uri__ = URI(Float) + "/64"
 
 
 class Int(Number):
     """An integer."""
 
-    __uri__ = uri(Number) + "/int"
+    __uri__ = URI(Number) + "/int"
 
     @classmethod
     def _trig_rtype(cls):
@@ -302,7 +302,7 @@ class Int(Number):
 class I16(Int):
     """A 16-bit integer."""
 
-    __uri__ = uri(Int) + "/16"
+    __uri__ = URI(Int) + "/16"
 
     @staticmethod
     def size():
@@ -312,7 +312,7 @@ class I16(Int):
 class I32(Int):
     """A 32-bit integer."""
 
-    __uri__ = uri(Int) + "/32"
+    __uri__ = URI(Int) + "/32"
 
     @staticmethod
     def size():
@@ -322,7 +322,7 @@ class I32(Int):
 class I64(Int):
     """A 64-bit integer."""
 
-    __uri__ = uri(Int) + "/64"
+    __uri__ = URI(Int) + "/64"
 
     @classmethod
     def _trig_rtype(cls):
@@ -336,7 +336,7 @@ class I64(Int):
 class UInt(Number):
     """An unsigned integer."""
 
-    __uri__ = uri(Number) + "/uint"
+    __uri__ = URI(Number) + "/uint"
 
     @classmethod
     def _trig_rtype(cls):
@@ -362,7 +362,7 @@ class UInt(Number):
 class U8(UInt):
     """An 8-bit unsigned integer (a byte)."""
 
-    __uri__ = uri(UInt) + "/8"
+    __uri__ = URI(UInt) + "/8"
 
     @staticmethod
     def size():
@@ -372,7 +372,7 @@ class U8(UInt):
 class U16(UInt):
     """A 16-bit unsigned integer."""
 
-    __uri__ = uri(UInt) + "/16"
+    __uri__ = URI(UInt) + "/16"
 
     @staticmethod
     def size():
@@ -382,7 +382,7 @@ class U16(UInt):
 class U32(UInt):
     """A 32-bit unsigned integer."""
 
-    __uri__ = uri(UInt) + "/32"
+    __uri__ = URI(UInt) + "/32"
 
     @staticmethod
     def size():
@@ -392,7 +392,7 @@ class U32(UInt):
 class U64(UInt):
     """A 64-bit unsigned integer."""
 
-    __uri__ = uri(UInt) + "/64"
+    __uri__ = URI(UInt) + "/64"
 
     @classmethod
     def _trig_rtype(cls):
@@ -406,6 +406,6 @@ class U64(UInt):
         form = form_of(self)
         if isinstance(form, int):
             if form >= 2 ** I32.size():
-                return {str(uri(U64)): form}
+                return {str(URI(U64)): form}
 
         return super().__json__()

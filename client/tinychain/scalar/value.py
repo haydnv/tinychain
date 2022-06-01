@@ -3,7 +3,7 @@
 from ..context import to_json
 from ..interface import Compare, Order
 from ..scalar.ref import deref, is_literal
-from ..uri import uri, URI
+from ..uri import URI
 
 
 from .base import Scalar
@@ -15,7 +15,7 @@ from .ref import form_of, Ref
 class Value(Scalar, Compare, Order):
     """A scalar `Value` which supports equality and collation."""
 
-    __uri__ = uri(Scalar) + "/value"
+    __uri__ = URI(Scalar) + "/value"
 
     def eq(self, other):
         if is_literal(self) and is_literal(other):
@@ -43,7 +43,7 @@ class Value(Scalar, Compare, Order):
 class Nil(Value):
     """A `Value` to represent `None`."""
 
-    __uri__ = uri(Value) + "/none"
+    __uri__ = URI(Value) + "/none"
 
     def __init__(self, form=None):
         if form is None:
@@ -63,19 +63,19 @@ class Nil(Value):
 class Bytes(Value):
     """A binary `Value`"""
 
-    __uri__ = uri(Value) + "/bytes"
+    __uri__ = URI(Value) + "/bytes"
 
 
 class EmailAddress(Value):
     """An email address"""
 
-    __uri__ = uri(Value) + "/email"
+    __uri__ = URI(Value) + "/email"
 
 
 class Id(Value):
     """An identifier"""
 
-    __uri__ = uri(Value) + "/id"
+    __uri__ = URI(Value) + "/id"
 
     def __json__(self):
         from .ref.helpers import form_of
@@ -94,7 +94,7 @@ class Id(Value):
 class String(Value):
     """A string."""
 
-    __uri__ = uri(Value) + "/string"
+    __uri__ = URI(Value) + "/string"
 
     def render(self, params=None, **kwargs):
         if kwargs and params is not None:
@@ -113,5 +113,5 @@ class Version(Value):
     See https://semver.org for the full specification.
     """
 
-    __uri__ = uri(Value) + "/version"
+    __uri__ = URI(Value) + "/version"
 

@@ -1,7 +1,7 @@
 """Generic error types."""
 
 from .scalar.value import String
-from .uri import uri, URI
+from .uri import URI
 from .context import deanonymize, to_json
 
 
@@ -18,7 +18,7 @@ class TinyChainError(Exception):
         self.message = String(message).render(params) if params else message
 
     def __json__(self):
-        return {str(uri(self)): [to_json(self.message)]}
+        return {str(URI(self)): [to_json(self.message)]}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.message, cxt, name_hint + "_message")
@@ -29,7 +29,7 @@ class BadRequest(TinyChainError):
 
     CODE = 400
 
-    __uri__ = uri(TinyChainError) + "/bad_request"
+    __uri__ = URI(TinyChainError) + "/bad_request"
 
 
 class Conflict(TinyChainError):
@@ -37,7 +37,7 @@ class Conflict(TinyChainError):
 
     CODE = 409
 
-    __uri__ = uri(TinyChainError) + "/conflict"
+    __uri__ = URI(TinyChainError) + "/conflict"
 
 
 class Forbidden(TinyChainError):
@@ -45,7 +45,7 @@ class Forbidden(TinyChainError):
 
     CODE = 403
 
-    __uri__ = uri(TinyChainError) + "/forbidden"
+    __uri__ = URI(TinyChainError) + "/forbidden"
 
 
 class MethodNotAllowed(TinyChainError):
@@ -56,7 +56,7 @@ class MethodNotAllowed(TinyChainError):
 
     CODE = 405
 
-    __uri__ = uri(TinyChainError) + "/method_not_allowed"
+    __uri__ = URI(TinyChainError) + "/method_not_allowed"
 
 
 class NotFound(TinyChainError):
@@ -64,7 +64,7 @@ class NotFound(TinyChainError):
 
     CODE = 404
 
-    __uri__ = uri(TinyChainError) + "/not_found"
+    __uri__ = URI(TinyChainError) + "/not_found"
 
 
 class NotImplemented(TinyChainError):
@@ -74,7 +74,7 @@ class NotImplemented(TinyChainError):
 
     CODE = 501
 
-    __uri__ = uri(TinyChainError) + "/not_implemented"
+    __uri__ = URI(TinyChainError) + "/not_implemented"
 
 
 class Timeout(TinyChainError):
@@ -82,7 +82,7 @@ class Timeout(TinyChainError):
 
     CODE = 408
 
-    __uri__ = uri(TinyChainError) + "/timeout"
+    __uri__ = URI(TinyChainError) + "/timeout"
 
 
 class Unauthorized(TinyChainError):
@@ -90,7 +90,7 @@ class Unauthorized(TinyChainError):
 
     CODE = 401
 
-    __uri__ = uri(TinyChainError) + "/unauthorized"
+    __uri__ = URI(TinyChainError) + "/unauthorized"
 
 
 class UnknownError(TinyChainError):
@@ -98,4 +98,4 @@ class UnknownError(TinyChainError):
 
     CODE = 500
 
-    __uri__ = uri(TinyChainError) + "/unknown"
+    __uri__ = URI(TinyChainError) + "/unknown"
