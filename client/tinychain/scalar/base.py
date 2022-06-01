@@ -1,6 +1,6 @@
 from ..interface import Equality
 from ..state import State
-from ..uri import uri
+from ..uri import URI
 from ..context import to_json
 
 
@@ -11,7 +11,7 @@ class Scalar(State, Equality):
     Do not subclass :class:`Scalar` directly. Use :class:`Value` instead.
     """
 
-    __uri__ = uri(State) + "/scalar"
+    __uri__ = URI(State) + "/scalar"
 
     def __json__(self):
         from .ref.helpers import form_of

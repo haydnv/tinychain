@@ -76,7 +76,7 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
     SCALES = [1, 5, 10, 100]
 
     def __init__(self):
-        self._base_path = tc.uri(DataStructures).path()
+        self._base_path = tc.URI(DataStructures).path()
         self.host = None
 
     def __repr__(self):
@@ -138,7 +138,7 @@ class LoadBenchmarks(benchmark.Benchmark):
     SCALES = [1, 5, 10, 100, 1000, 10000]
 
     def __init__(self):
-        self._base_path = tc.uri(DataStructures).path()
+        self._base_path = tc.URI(DataStructures).path()
         self.host = None
 
     def __repr__(self):
@@ -179,14 +179,14 @@ class ReplicationBenchmarks(benchmark.Benchmark):
     NUM_HOSTS = 4
 
     def __init__(self):
-        self._base_path = tc.uri(DataStructures).path()
+        self._base_path = tc.URI(DataStructures).path()
         self.hosts = []
 
     def __repr__(self):
         return f"replication benchmarks with {self.NUM_HOSTS} hosts"
 
     def start(self, **flags):
-        default_port = tc.uri(DataStructures).port()
+        default_port = tc.URI(DataStructures).port()
         assert default_port
 
         for i in range(self.NUM_HOSTS):

@@ -66,16 +66,16 @@ class NeuralNetTests(unittest.TestCase):
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
-        self.host.post(tc.uri(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
-        self.host.post(tc.uri(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
+        self.host.post(tc.URI(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
+        self.host.post(tc.URI(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
 
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
 
-        self.host.post(tc.uri(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
+        self.host.post(tc.URI(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
 
         start = time.time()
-        self.host.post(tc.uri(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
+        self.host.post(tc.URI(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
         elapsed = time.time() - start
         print(f"trained a deep neural net in {elapsed:.2}s")
 
@@ -89,4 +89,4 @@ def load_dense(nparray):
 
 
 def output_shape(as_json):
-    return as_json[tc.uri(tc.tensor.Dense)][0][0]
+    return as_json[tc.URI(tc.tensor.Dense)][0][0]

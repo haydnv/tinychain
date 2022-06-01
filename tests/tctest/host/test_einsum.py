@@ -156,8 +156,8 @@ def expect_dense(ndarray):
     dtype = np_to_tc_dtype(ndarray.dtype)
 
     return {
-        str(tc.uri(tc.tensor.Dense)): [
-            [shape, str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Dense)): [
+            [shape, str(tc.URI(dtype))],
             ndarray.flatten().tolist(),
         ]
     }
@@ -173,8 +173,8 @@ def expect_sparse(ndarray):
         for (coord, n) in zip(coords, (n for n in ndarray.flatten().tolist())) if n != 0]
 
     return {
-        str(tc.uri(tc.tensor.Sparse)): [
-            [shape, str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Sparse)): [
+            [shape, str(tc.URI(dtype))],
             elements,
         ]
     }

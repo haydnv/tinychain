@@ -3,13 +3,13 @@
 from .scalar import ref
 from .scalar.value import Nil
 from .state import State
-from .uri import uri, URI
+from .uri import URI
 
 
 class Chain(State):
     """Data structure responsible for keeping track of mutations to a :class:`Value` or :class:`Collection`."""
 
-    __uri__ = uri(State) + "/chain"
+    __uri__ = URI(State) + "/chain"
 
     def __new__(cls, form):
         if ref.is_ref(form):
@@ -33,37 +33,37 @@ class Chain(State):
         if isinstance(form, URI):
             self.__uri__ = form
         elif ref.is_ref(form) and hasattr(form, "__uri__"):
-            self.__uri__ = uri(form)
+            self.__uri__ = URI(form)
 
         self.__form__ = form
 
     def set(self, value):
         """Update the value of this `Chain`."""
 
-        return ref.Put(uri(self), None, value)
+        return ref.Put(URI(self), None, value)
 
     # TODO: delete these overrides and make MethodSubject compatible with Chain
     def _get(self, name, key=None, rtype=State):
-        op_ref = ref.Get(uri(self).append(name), key)
+        op_ref = ref.Get(URI(self).append(name), key)
         rtype = Nil if rtype is None else rtype
         return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
-        return Nil(ref.Put(uri(self).append(name), key, value))
+        return Nil(ref.Put(URI(self).append(name), key, value))
 
     def _post(self, name, params, rtype=State):
-        op_ref = ref.Post(uri(self).append(name), params)
+        op_ref = ref.Post(URI(self).append(name), params)
         rtype = Nil if rtype is None else rtype
         return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
-        return Nil(ref.Delete(uri(self).append(name), key))
+        return Nil(ref.Delete(URI(self).append(name), key))
 
 
 class Block(Chain):
     """A :class:`Chain` which keeps track of the entire update history of its subject."""
 
-    __uri__ = uri(Chain) + "/block"
+    __uri__ = URI(Chain) + "/block"
 
 
 class Sync(Chain):
@@ -72,4 +72,4 @@ class Sync(Chain):
     in order to recover from a transaction failure (e.g. if the host crashes).
     """
 
-    __uri__ = uri(Chain) + "/sync"
+    __uri__ = URI(Chain) + "/sync"

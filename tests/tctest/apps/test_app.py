@@ -34,7 +34,7 @@ class UserTests(unittest.TestCase):
 
     def testCreateUser(self):
         details = {"first_name": "First", "last_name": "Last", "email": "email@example.com"}
-        self.host.post(tc.uri(TestApp).append("create_user"), details)
+        self.host.post(tc.URI(TestApp).append("create_user"), details)
 
     @classmethod
     def tearDownClass(cls) -> None:

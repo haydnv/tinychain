@@ -5,7 +5,7 @@ import inspect
 from .base import _Base
 from .interface import Functional
 from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
-from .uri import uri, URI
+from .uri import URI
 from .context import deanonymize, to_json
 
 
@@ -30,8 +30,7 @@ class State(_Base):
             if isinstance(form, URI):
                 self.__uri__ = form
             elif is_ref(form) and hasattr(form, "__uri__"):
-                assert uri(form)
-                self.__uri__ = uri(form)
+                self.__uri__ = URI(form)
 
             self.__form__ = form
 
@@ -42,10 +41,12 @@ class State(_Base):
     def __json__(self):
         form = form_of(self)
 
-        if uri(form) == uri(self):
+        if isinstance(form, URI) and form == URI(self):
+            return to_json(form)
+        elif hasattr(form, "__uri__") and URI(form) == URI(self):
             return to_json(form)
         else:
-            return {str(uri(self)): [to_json(form)]}
+            return {str(URI(self)): [to_json(form)]}
 
     def __id__(self):
         return hex_id(form_of(self))
@@ -108,7 +109,7 @@ class State(_Base):
 class Stream(State, Functional):
     """A stream of states which supports functional methods like `fold` and `map`."""
 
-    __uri__ = uri(State) + "/stream"
+    __uri__ = URI(State) + "/stream"
 
     @classmethod
     def range(cls, range):
@@ -119,7 +120,7 @@ class Stream(State, Functional):
         """
 
         from .scalar.ref import Get
-        return cls(Get(uri(cls) + "/range", range))
+        return cls(Get(URI(cls) + "/range", range))
 
     def aggregate(self):
         return self._get("aggregate", rtype=Stream)
@@ -138,13 +139,13 @@ class Stream(State, Functional):
 class Object(State):
     """A user-defined type"""
 
-    __uri__ = uri(State) + "/object"
+    __uri__ = URI(State) + "/object"
 
 
 class Class(Object):
     """A TinyChain class (possibly a user-defined class)."""
 
-    __uri__ = uri(Object) + "/class"
+    __uri__ = URI(Object) + "/class"
 
     def __call__(self, *args, **kwargs):
         if args and kwargs:
@@ -162,7 +163,7 @@ class Class(Object):
 class Instance(Object):
     """An instance of a user-defined :class:`Class`."""
 
-    __uri__ = uri(Object) + "/instance"
+    __uri__ = URI(Object) + "/instance"
 
     def copy(self):
         raise NotImplementedError("abstract method")
@@ -176,7 +177,7 @@ class StateRef(Ref):
     def __repr__(self):
         is_auto_assigned = False
 
-        address = str(uri(self)).split('_')[-1]
+        address = str(URI(self)).split('_')[-1]
         try:
             is_auto_assigned = int(address, 16)
         except ValueError:
@@ -185,13 +186,13 @@ class StateRef(Ref):
         if is_auto_assigned:
             return repr(self.state)
         else:
-            return str(uri(self))
+            return str(URI(self))
 
     def __id__(self):
         return hex_id(self.state)
 
     def __json__(self):
-        return to_json(uri(self))
+        return to_json(URI(self))
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.state, cxt, name_hint + '_' + str(uri(self))[1:].replace('/', '_'))
+        deanonymize(self.state, cxt, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))

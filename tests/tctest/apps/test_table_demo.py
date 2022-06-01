@@ -57,7 +57,7 @@ class TableDemoTests(unittest.TestCase):
         self.hosts = []
         for i in range(3):
             port = DEFAULT_PORT + i
-            host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.uri(Web).path()
+            host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.URI(Web).path()
             host = start_host("table_demo", web, True, host_uri, wait_time=2)
             self.hosts.append(host)
 

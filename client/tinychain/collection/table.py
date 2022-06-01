@@ -5,7 +5,7 @@ from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
 from ..scalar.ref import form_of, If, Ref
 from ..state import State, Stream
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json
 
 from .base import Collection
@@ -34,7 +34,7 @@ class Schema(object):
 class Table(Collection):
     """A `Table` defined by a primary key, values, and optional indices."""
 
-    __uri__ = uri(Collection) + "/table"
+    __uri__ = URI(Collection) + "/table"
 
     def __getitem__(self, key):
         """Return the row with the given key, or a :class:`NotFound` error."""
@@ -85,7 +85,7 @@ class Table(Collection):
         """
 
         delete_row = delete(lambda cxt, key: self.delete_row(key))
-        if uri(self).id():
+        if URI(self).id():
             delete_row = closure(self)(delete_row)
 
         to_delete = self.where(where) if where else self

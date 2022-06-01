@@ -6,7 +6,7 @@ from ...math.operator import derivative_of, gradients, operator, Gradients, Oper
 from ...scalar.number import Number
 from ...scalar.ref import deref, hex_id, is_literal, same_as, After, MethodSubject, Post
 from ...shape import Shape
-from ...uri import uri
+from ...uri import URI
 
 
 # TODO: support concatenating Sparse tensors
@@ -39,7 +39,7 @@ class Concatenate(Operator):
         if self.args:
             params["axis"] = self.args
 
-        return Dense(form=Post(uri(Dense) + "/concatenate", params))
+        return Dense(form=Post(URI(Dense) + "/concatenate", params))
 
     def backward(self, variable=None):
         if not isinstance(deref(self.subject), (list, tuple)):
@@ -102,7 +102,7 @@ class Copy(Unary):
 
     def forward(self):
         from .base import Tensor
-        return Post(uri(Tensor) + "/copy_from", {"tensor": self.subject})
+        return Post(URI(Tensor) + "/copy_from", {"tensor": self.subject})
 
     def backward(self, variable=None):
         from .base import NDArray
@@ -367,7 +367,7 @@ class Tile(Transform):
 
     def forward(self):
         from .base import Tensor
-        return Post(uri(Tensor) + "/tile", {"tensor": self.subject, "multiples": self.args})
+        return Post(URI(Tensor) + "/tile", {"tensor": self.subject, "multiples": self.args})
 
     def invert(self, loss):
         from .base import NDArray

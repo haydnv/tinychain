@@ -90,7 +90,7 @@ class DenseTests(HostTest):
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [{tc.uri(tc.Class): {tc.uri(tc.F64): {}}}] * 3)
+        self.assertEqual(actual, [{tc.URI(tc.Class): {tc.URI(tc.F64): {}}}] * 3)
 
     def testDiv(self):
         shape = [3]
@@ -131,8 +131,8 @@ class DenseTests(HostTest):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = tau * (v @ v.T)
-        self.assertEqual(expected.shape, tuple(actual[tc.uri(tc.tensor.Dense)][0][0]))
-        self.assertTrue(np.allclose(expected.flatten(), actual[tc.uri(tc.tensor.Dense)][1]))
+        self.assertEqual(expected.shape, tuple(actual[tc.URI(tc.tensor.Dense)][0][0]))
+        self.assertTrue(np.allclose(expected.flatten(), actual[tc.URI(tc.tensor.Dense)][1]))
 
     def testNorm_matrix(self):
         threshold = 0.0001
@@ -731,13 +731,13 @@ class TensorTests(HostTest):
 
 
 def all_close(actual, expected):
-    return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
+    return np.allclose(actual[tc.URI(tc.tensor.Dense)][1], expected.flatten())
 
 
 def expect_dense(dtype, shape, flat):
     return {
-        str(tc.uri(tc.tensor.Dense)): [
-            [list(shape), str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Dense)): [
+            [list(shape), str(tc.URI(dtype))],
             list(flat),
         ]
     }
@@ -748,8 +748,8 @@ def expect_sparse(dtype, shape, values):
         values = nparray_to_sparse(values, dtype)
 
     return {
-        str(tc.uri(tc.tensor.Sparse)): [
-            [list(shape), str(tc.uri(dtype))],
+        str(tc.URI(tc.tensor.Sparse)): [
+            [list(shape), str(tc.URI(dtype))],
             list(values),
         ]
     }

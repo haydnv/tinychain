@@ -5,7 +5,7 @@ from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
-from .uri import uri
+from .uri import URI
 from .context import to_json
 
 
@@ -13,7 +13,7 @@ from .context import to_json
 class Map(State):
     """A key-value map whose keys are `Id`s and whose values are `State` s."""
 
-    __uri__ = uri(State) + "/map"
+    __uri__ = URI(State) + "/map"
     __spec__ = typing.Dict[Id, State]
 
     @staticmethod
@@ -53,17 +53,21 @@ class Map(State):
 
     @classmethod
     def expect(cls, spec):
-        class _Map(cls):
-            __spec__ = spec
+        if isinstance(spec, dict):
+            class _Map(cls):
+                __spec__ = spec
 
-            def __contains__(self, key):
-                return key in spec
+                def __contains__(self, key):
+                    return key in spec
 
-            def __len__(self):
-                return len(spec)
+                def __len__(self):
+                    return len(spec)
 
-            def __iter__(self):
-                return iter(spec)
+                def __iter__(self):
+                    return iter(spec)
+        else:
+            class _Map(cls):
+                __spec__ = spec
 
         return _Map
 
@@ -87,10 +91,10 @@ class Map(State):
 
     def __getitem__(self, key):
         if hasattr(form_of(self), "__getitem__"):
-            if uri(self) == uri(self.__class__):
+            if URI(self) == URI(self.__class__):
                 return form_of(self)[key]
             else:
-                return get_ref(form_of(self)[key], uri(self).append(key))
+                return get_ref(form_of(self)[key], URI(self).append(key))
         elif isinstance(self.__spec__, dict):
             if key in self.__spec__:
                 rtype = self.__spec__[key]
@@ -139,7 +143,7 @@ class MapRef(StateRef):
 class Tuple(State, Functional):
     """A tuple of `State` s."""
 
-    __uri__ = uri(State) + "/tuple"
+    __uri__ = URI(State) + "/tuple"
     __spec__ = (State, ...)
 
     @classmethod
@@ -173,7 +177,7 @@ class Tuple(State, Functional):
 
     @classmethod
     def concatenate(cls, l, r):
-        return cls(Post(uri(cls).append("concatenate"), {'l': l, 'r': r}))
+        return cls(Post(URI(cls).append("concatenate"), {'l': l, 'r': r}))
 
     @classmethod
     def range(cls, range):
@@ -184,7 +188,7 @@ class Tuple(State, Functional):
         """
 
         from .scalar.number import Number
-        return cls.expect(typing.Tuple[Number, ...])(Get(uri(cls) + "/range", range))
+        return cls.expect(typing.Tuple[Number, ...])(Get(URI(cls) + "/range", range))
 
     def __new__(cls, form):
         if hasattr(form, "__iter__"):
@@ -242,10 +246,10 @@ class Tuple(State, Functional):
 
             if hasattr(form_of(self), "__getitem__"):
                 item = form_of(self)[i]
-                if uri(self) == uri(self.__class__):
+                if URI(self) == URI(self.__class__):
                     return item
                 else:
-                    return get_ref(item, uri(self).append(i))
+                    return get_ref(item, URI(self).append(i))
 
         return self._get("", i, rtype)
 

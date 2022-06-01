@@ -80,7 +80,7 @@ class TensorTests(ClientTest):
 
 
 def all_close(actual, expected):
-    return np.allclose(actual[tc.uri(tc.tensor.Dense)][1], expected.flatten())
+    return np.allclose(actual[tc.URI(tc.tensor.Dense)][1], expected.flatten())
 
 
 def load_dense(x, dtype=tc.F32):

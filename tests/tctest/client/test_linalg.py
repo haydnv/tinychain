@@ -7,7 +7,7 @@ import unittest
 from .base import ClientTest
 
 ENDPOINT = "/transact/hypothetical"
-TENSOR_URI = str(tc.uri(tc.tensor.Dense))
+TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 
 
 class LinearAlgebraTests(ClientTest):
@@ -48,13 +48,13 @@ class LinearAlgebraTests(ClientTest):
 
         expected = np.matmul(l, r)
         actual = self.host.post(ENDPOINT, cxt)
-        actual = actual[tc.uri(tc.tensor.Dense)][1]
+        actual = actual[tc.URI(tc.tensor.Dense)][1]
 
         self.assertTrue(np.allclose(expected.flatten(), actual))
 
 
 def expect_dense(x, dtype):
-    return {tc.uri(tc.tensor.Dense): [[list(x.shape), tc.uri(dtype)], x.flatten().tolist()]}
+    return {tc.URI(tc.tensor.Dense): [[list(x.shape), tc.URI(dtype)], x.flatten().tolist()]}
 
 
 def load_np(as_json: t.Dict[str, t.Any], dtype=np.float32) -> np.ndarray:

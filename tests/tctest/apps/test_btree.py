@@ -59,4 +59,4 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
 
 
 def expected(rows):
-    return {str(tc.uri(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}
+    return {str(tc.URI(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}

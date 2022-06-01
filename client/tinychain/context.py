@@ -104,13 +104,13 @@ class Context(object):
         return f"Op context with data {data}"
 
     def _get_name(self, item):
-        from .uri import uri
+        from .uri import URI
 
         if hasattr(item, "__uri__"):
-            if uri(item).id() != uri(item):
+            if URI(item).id() != URI(item):
                 raise ValueError(f"invalid name: {item}")
             else:
-                return uri(item).id()
+                return URI(item).id()
         else:
             return str(item)
 
@@ -128,7 +128,7 @@ def print_json(state_or_ref):
 def to_json(state_or_ref):
     """Return a JSON-encodable representation of the given state or reference."""
 
-    from .uri import uri
+    from .uri import URI
 
     if inspect.isgenerator(state_or_ref):
         raise ValueError(f"the Python generator {state_or_ref} is not JSON serializable")
@@ -140,13 +140,10 @@ def to_json(state_or_ref):
         if hasattr(type(state_or_ref), "__json__"):
             return type(state_or_ref).__json__(state_or_ref)
         elif hasattr(state_or_ref, "__uri__"):
-            return to_json({str(uri(state_or_ref)): {}})
+            return to_json({str(URI(state_or_ref)): {}})
 
     if hasattr(state_or_ref, "__json__"):
-        try:
-            return state_or_ref.__json__()
-        except TypeError as e:
-            raise TypeError(f"error encoding {state_or_ref} to JSON: {e}")
+        return state_or_ref.__json__()
     elif isinstance(state_or_ref, (list, tuple)):
         return [to_json(i) for i in state_or_ref]
     elif isinstance(state_or_ref, dict):

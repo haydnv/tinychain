@@ -13,18 +13,26 @@ class URI(object):
             URI("/state/scalar/value/none")
     """
 
-    def __init__(self, root, path=[]):
-        root = str(root)
-        if not root:
-            raise ValueError(f"invalid URI root: {root}")
+    def __init__(self, subject, *path):
+        if not subject:
+            raise ValueError(f"invalid URI root: {subject}")
 
-        if root.startswith("$$"):
-            raise ValueError(f"invalid reference: {root}")
-        elif root.startswith('$'):
-            root = root[1:]
+        if isinstance(subject, URI):
+            self._subject = subject._subject
+            self._path = subject._path
+            self._path += path
+            return
 
-        self._root = root
-        self._path = path
+        if isinstance(subject, str):
+            if subject.startswith("$$"):
+                raise ValueError(f"invalid reference: {subject}")
+            elif subject.startswith('$'):
+                subject = subject[1:]
+        else:
+            self._subject = subject
+
+        self._subject = subject
+        self._path = tuple(str(path_segment) for path_segment in path)
 
     def __add__(self, other):
         if other == "/":
@@ -63,8 +71,14 @@ class URI(object):
         return str(self)
 
     def __str__(self):
-        root = self._root
-        if root.startswith('/') or "://" in root:
+        if isinstance(self._subject, str):
+            root = self._subject
+        elif hasattr(self._subject, "__uri__"):
+            root = str(self._subject.__uri__)
+        else:
+            raise RuntimeError(f"{self._subject} is missing a __uri__ attribute")
+
+        if root.startswith('/') or root.startswith('$') or "://" in root:
             pass
         else:
             root = f"${root}"
@@ -89,7 +103,9 @@ class URI(object):
         if not str(name):
             return self
 
-        return URI(str(self), [str(name)])
+        path = list(self._path)
+        path.append(name)
+        return URI(self._subject, *path)
 
     def id(self):
         """Return the ID segment of this `URI`, if present."""
@@ -110,75 +126,60 @@ class URI(object):
     def host(self):
         """Return the host segment of this `URI`, if present."""
 
-        if "://" not in self._root:
+        uri = str(self)
+
+        if "://" not in uri:
             return None
 
-        start = self._root.index("://") + 3
-        if '/' not in self._root[start:]:
-            return self._root[start:]
+        start = uri.index("://") + 3
+        if '/' not in uri[start:]:
+            return uri[start:]
 
         end = (
-            self._root.index(':', start) if ':' in self._root[start:]
-            else self._root.index('/', start))
+            uri.index(':', start) if ':' in uri[start:]
+            else uri.index('/', start))
 
         if end > start:
-            return self._root[start:end]
+            return uri[start:end]
         else:
-            return self._root[start:]
+            return uri[start:]
 
     def path(self):
         """Return the path segment of this `URI`."""
 
-        if "://" not in str(self._root):
-            return URI(self._root) + "/".join(self._path)
+        uri = str(self)
 
-        start = self._root.index("://")
+        if "://" not in uri:
+            return uri[uri.index('/'):]
 
-        if '/' not in self._root[(start + 3):]:
+        start = uri.index("://")
+
+        if '/' not in uri[(start + 3):]:
             return None
 
-        start = self._root.index('/', start + 3)
-
-        prefix = URI(self._root[start:])
-        if self._path:
-            return prefix + "/".join(self._path)
-        else:
-            return prefix
+        start = uri.index('/', start + 3)
+        return URI(uri[start:])
 
     def port(self):
         """Return the port of this `URI`, if present."""
 
         prefix = self.protocol() + "://" if self.protocol() else ""
         prefix += self.host() if self.host() else ""
-        if prefix and self._root[len(prefix)] == ':':
-            end = self._root.index('/', len(prefix))
-            return int(self._root[len(prefix) + 1:end])
+
+        uri = str(self)
+
+        if prefix and uri[len(prefix)] == ':':
+            end = uri.index('/', len(prefix))
+            return int(uri[(len(prefix) + 1):end])
 
     def protocol(self):
         """Return the protocol of this `URI` (e.g. "http"), if present."""
 
-        if "://" in self._root:
-            i = self._root.index("://")
+        uri = str(self)
+        if "://" in uri:
+            i = uri.index("://")
             if i > 0:
-                return self._root[:i]
+                return uri[:i]
 
     def startswith(self, prefix):
         return str(self).startswith(str(prefix))
-
-
-def uri(subject):
-    """Return the `URI` of the given state."""
-
-    if isinstance(subject, URI):
-        return subject
-
-    if hasattr(subject, "__uri__"):
-        if subject.__uri__ is None:
-            raise ValueError(f"{subject} (a {type(subject)}) has a URI of {None}")
-
-        return subject.__uri__
-
-    if hasattr(type(subject), "__uri__"):
-        return uri(type(subject))
-
-    return None

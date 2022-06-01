@@ -7,7 +7,7 @@ import urllib.parse
 
 from .error import *
 from .scalar.value import Nil
-from .uri import uri, URI
+from .uri import URI
 from .context import to_json
 
 
@@ -28,8 +28,8 @@ class Host(object):
 
         self.__uri__ = URI(address)
 
-        if uri(self).path():
-            raise ValueError(f"Host address should not include the application path {uri(self).path()}")
+        if URI(self).path():
+            raise ValueError(f"Host address should not include the application path {URI(self).path()}")
 
     def _handle(self, req):
         response = req()
@@ -67,11 +67,11 @@ class Host(object):
         """Return a link to the given path at this host."""
 
         if hasattr(path, "__uri__"):
-            path = uri(path)
+            path = URI(path)
         else:
             path = URI(path)
 
-        return uri(self) + path
+        return URI(self) + path
 
     def get(self, path, key=None, auth=None):
         """Execute a GET request."""

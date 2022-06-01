@@ -1,6 +1,6 @@
 """User-defined ops"""
 
-from ..uri import uri
+from ..uri import URI
 
 from . import ref
 from .base import Scalar
@@ -9,13 +9,13 @@ from .base import Scalar
 class Op(Scalar):
     """A callable function."""
 
-    __uri__ = uri(Scalar) + "/op"
+    __uri__ = URI(Scalar) + "/op"
 
 
 class Get(Op):
     """A function which can be called via a GET request."""
 
-    __uri__ = uri(Op) + "/get"
+    __uri__ = URI(Op) + "/get"
 
     def __call__(self, key=None):
         return ref.Get(self, key)
@@ -24,7 +24,7 @@ class Get(Op):
 class Put(Op):
     """A function which can be called via a PUT request."""
 
-    __uri__ = uri(Op) + "/put"
+    __uri__ = URI(Op) + "/put"
 
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
@@ -33,7 +33,7 @@ class Put(Op):
 class Post(Op):
     """A function which can be called via a POST request."""
 
-    __uri__ = uri(Op) + "/post"
+    __uri__ = URI(Op) + "/post"
 
     def __call__(self, params=None, **kwargs):
         if kwargs and params is not None:
@@ -46,7 +46,7 @@ class Post(Op):
 class Delete(Op):
     """A function which can be called via a DELETE request."""
 
-    __uri__ = uri(Op) + "/delete"
+    __uri__ = URI(Op) + "/delete"
 
     def __call__(self, key=None):
         return ref.Delete(self, key)

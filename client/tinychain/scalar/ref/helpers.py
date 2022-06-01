@@ -1,7 +1,7 @@
 import inspect
 import logging
 
-from ...uri import uri, URI
+from ...uri import URI
 from ...context import to_json
 
 from .base import Case, If, MethodSubject, Ref
@@ -89,7 +89,7 @@ def get_ref(state, name):
             return state(*args, **kwargs)
 
         ctr.__uri__ = name
-        ctr.__json__ = lambda: to_json(uri(ctr))
+        ctr.__json__ = lambda: to_json(URI(ctr))
         return ctr
     elif hasattr(state, "__ref__"):
         return state.__ref__(name)
@@ -206,7 +206,7 @@ def is_op_ref(state_or_ref, allow_literals=True):
         return False
     elif isinstance(state_or_ref, (Op, After, If, Case)):
         return True
-    elif uri(state_or_ref) and uri(type(state_or_ref)) and uri(state_or_ref) >= uri(type(state_or_ref)):
+    elif hasattr(state_or_ref, "__uri__") and hasattr(type(state_or_ref), "__uri__") and URI(state_or_ref) >= URI(type(state_or_ref)):
         return True
     elif form_of(state_or_ref) is not state_or_ref:
         return is_op_ref(form_of(state_or_ref), allow_literals)

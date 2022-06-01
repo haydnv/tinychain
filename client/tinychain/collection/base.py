@@ -1,7 +1,7 @@
 from ..generic import Tuple
 from ..scalar.ref import form_of, is_ref, Post, Put
 from ..state import State
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json
 
 
@@ -32,7 +32,7 @@ class Column(object):
 class Collection(State):
     """Data structure responsible for storing a collection of :class:`Value`s."""
 
-    __uri__ = uri(State) + "/collection"
+    __uri__ = URI(State) + "/collection"
 
     @classmethod
     def copy_from(cls, schema, source):
@@ -51,7 +51,7 @@ class Collection(State):
                 table = tc.table.Table.copy_from(table_schema, btree.keys())
         """
 
-        return cls(Post(uri(cls) + "/copy_from", {"schema": schema, "source": source}))
+        return cls(Post(URI(cls) + "/copy_from", {"schema": schema, "source": source}))
 
     @classmethod
     def load(cls, schema, data):

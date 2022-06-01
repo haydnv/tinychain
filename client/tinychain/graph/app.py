@@ -8,7 +8,7 @@ from ..decorators import closure, get, put
 from ..generic import Tuple
 from ..scalar.number import Bool, U32
 from ..scalar.ref import After, If, Put
-from ..uri import uri
+from ..uri import URI
 
 from .edge import DIM, Edge, ForeignKey
 
@@ -97,7 +97,7 @@ class Graph(App):
 
 
 def graph_table(graph, schema, table_name):
-    if uri(graph).startswith("/state"):
+    if URI(graph).startswith("/state"):
         raise RuntimeError("Graph requires an absolute URI--set this using your subclass's __uri__ attribute")
 
     table_schema = schema.tables[table_name]
@@ -135,7 +135,7 @@ def graph_table(graph, schema, table_name):
         args = closure(new_id)(get(lambda row: [new_id, Tuple(row)[0]]))
 
         # assumes row[0] is always the key
-        add = put(lambda new_id, key: Put(uri(adjacent), [new_id, key], True))
+        add = put(lambda new_id, key: Put(URI(adjacent), [new_id, key], True))
         add = to_table.where({edge.column: new_id}).rows().map(args).for_each(add)
 
         return After(If(cond, delete_row(edge, adjacent, row)), add)

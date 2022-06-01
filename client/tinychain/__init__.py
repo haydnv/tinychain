@@ -20,4 +20,4 @@ from tinychain.scalar.ref import form_of, get_ref, is_literal, is_conditional, i
 from tinychain.scalar.value import EmailAddress, Id, String, Value
 from tinychain.scalar.number import Number, Bool, Complex, C32, C64, Float, F32, F64, Int, I16, I32, I64, UInt, U8, U16, U32, U64
 from tinychain.state import Class, Instance, State, Stream
-from tinychain.uri import uri, URI
+from tinychain.uri import URI

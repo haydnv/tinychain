@@ -4,7 +4,7 @@ import logging
 from ..scalar.value import Nil, Value
 from ..scalar import op, ref
 from ..state import State
-from ..uri import uri, URI
+from ..uri import URI
 from ..context import to_json, Context
 
 from . import _get_rtype, parse_args, resolve_class
@@ -14,7 +14,7 @@ EMPTY = inspect.Parameter.empty
 
 
 class Op(object):
-    __uri__ = uri(op.Op)
+    __uri__ = URI(op.Op)
 
     def __init__(self, form):
         if not inspect.isfunction(form):
@@ -23,7 +23,7 @@ class Op(object):
         self.form = form
 
     def __json__(self):
-        return {str(uri(self)): to_json(ref.form_of(self))}
+        return {str(URI(self)): to_json(ref.form_of(self))}
 
     def __ref__(self):
         raise RuntimeError("cannot reference a reflected Op; use Get, Put, Post, or Delete instead")
@@ -33,7 +33,7 @@ class Op(object):
 
 
 class Get(Op):
-    __uri__ = uri(op.Get)
+    __uri__ = URI(op.Get)
 
     def __init__(self, form):
         self.rtype = _get_rtype(form, State)
@@ -74,7 +74,7 @@ class Get(Op):
 
 
 class Put(Op):
-    __uri__ = uri(op.Put)
+    __uri__ = URI(op.Put)
 
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
@@ -134,7 +134,7 @@ class Put(Op):
 
 
 class Post(Op):
-    __uri__ = uri(op.Post)
+    __uri__ = URI(op.Post)
 
     def __init__(self, form):
         self.rtype = _get_rtype(form, State)
@@ -178,7 +178,7 @@ class Post(Op):
 
 
 class Delete(Op):
-    __uri__ = uri(op.Delete)
+    __uri__ = URI(op.Delete)
 
     def __args__(self):
         _, cxt = ref.form_of(self)
@@ -230,7 +230,7 @@ def validate(cxt, provided):
             if not hasattr(ref, "__uri__") and not isinstance(ref, URI):
                 return
 
-            ref = uri(ref)
+            ref = URI(ref)
             if ref.id() is not None and ref.id() not in defined:
                 logging.info(f"{cxt} depends on undefined state {ref.id()}--is it part of a Closure?")
 

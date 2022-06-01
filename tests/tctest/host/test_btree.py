@@ -95,7 +95,7 @@ class BTreeTests(HostTest):
 
 
 def expected(rows):
-    return {str(tc.uri(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}
+    return {str(tc.URI(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}
 
 
 if __name__ == "__main__":
