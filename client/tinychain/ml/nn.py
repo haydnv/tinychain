@@ -7,7 +7,7 @@ from ..collection.tensor import einsum, Dense, Tensor
 from ..context import deanonymize
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import derivative_of, operator, Dual
+from ..math.operator import derivative_of, gradients, operator, Dual
 from ..scalar.number import Float
 from ..scalar.ref import After
 
@@ -139,6 +139,21 @@ class ConvLayer(Layer, Dynamic):
                 w_col = derivative_of(self.w_col, variable, keepdims=True)
                 im2col_matrix = derivative_of(self.im2col_matrix, variable, keepdims=True)
                 return (w_col @ self.im2col_matrix) + (self.w_col @ im2col_matrix)
+
+            def gradients(self, loss):
+                grads = gradients(self.w_col, loss @ self.im2col_matrix.transpose())
+
+                if operator(self.args):
+                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
+                    loss = (self.w_col.transpose() @ loss).reshape(shape)
+
+                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
+                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                    grad = Tensor(After(grad_slice.write(loss), grad))
+
+                    grads.update(operator(self.args).gradients(grad))
+
+                return grads
 
         shape = [out_c, h_out, w_out, batch_size]
         output = Tensor(Convolution(self.weights, inputs)) + self.bias

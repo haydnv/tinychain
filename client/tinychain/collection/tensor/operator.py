@@ -238,14 +238,7 @@ class Transform(Operator):
         if isinstance(loss, NDArray):
             loss = self.invert(loss)
 
-        grads = Gradients()
-
-        if operator(self.subject):
-            grads.update(operator(self.subject).gradients(loss))
-        else:
-            grads[hex_id(self.subject)] = loss
-
-        return grads
+        return gradients(self.subject, loss)
 
 
 class Broadcast(Transform):
