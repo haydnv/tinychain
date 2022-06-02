@@ -4,21 +4,24 @@ import inspect
 import logging
 import typing
 
-from .collection import Collection
-from .reflect import parse_args
-from .reflect.meta import Meta, MethodStub
 from .chain import Chain
+from .collection import Collection, Column
+from .collection.table import Schema
+from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
-from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
-from .scalar.value import Nil
+from .reflect import parse_args
+from .reflect.meta import Meta, MethodStub
 from .scalar import Scalar
+from .scalar.number import I32
+from .scalar.ref import Ref, depends_on, form_of, get_ref, independent
+from .scalar.value import Nil
 from .state import Class, Instance, Object, State
 from .uri import URI
-from .context import to_json
 
 
 class Model(Object, metaclass=Meta):
+
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
@@ -77,6 +80,49 @@ class Model(Object, metaclass=Meta):
 
     def __ref__(self, name):
         return ModelRef(self, name)
+
+    @classmethod
+    def create_schema(cls):
+        """Create a table schema for the given model. A key for the table is auto
+        generated using the `class_name` function, then suffixed with '_id'. Each
+        attribute of the model will be considered as a column if it is of type
+        Column or Model.
+        """
+        values = []
+        indices = []
+        base_attributes = set()
+
+        for b in cls.__bases__:
+            base_attributes |= set(dir(b))
+
+        for f in base_attributes ^ set(dir(cls)):
+            attr = getattr(cls, f)
+            if isinstance(attr, Column):
+                values.append(attr)
+            else:
+                try:
+                    assert issubclass(attr, Model)
+                    values.append(Column(*attr.key()))
+                    indices.append((attr.class_name(), [attr.key()[0]]))
+                except (TypeError, AssertionError):
+                    continue
+
+        schema = Schema(cls.key(), values)
+        for i in indices:
+            schema.create_index(*i)
+        return schema
+
+    @classmethod
+    def key(cls):
+        """A Column object which will be used as the key for a given model."""
+        return [cls.class_name() + "_id", I32]
+
+    @classmethod
+    def class_name(cls):
+        """A snake case representation of the class name."""
+        return "".join(
+            ["_" + n.lower() if n.isupper() else n for n in cls.__name__]
+        ).lstrip("_")
 
 
 class _Header(object):
