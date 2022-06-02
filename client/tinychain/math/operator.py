@@ -2,7 +2,7 @@ import logging
 import typing
 
 from ..context import deanonymize, to_json
-from ..scalar.ref import deref, hex_id, is_literal, same_as, is_op_ref, reference, Op
+from ..scalar.ref import deref, is_literal, same_as, is_op_ref, reference, Op
 from ..scalar.value import Id
 
 from .base import is_numeric
@@ -752,13 +752,13 @@ def gradients(numeric, loss, variables=None):
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
     If a list of variables is given, a corresponding list of gradients will be returned.
-    If no variables are given, a :class:`Gradients` object whose keys are the `hex_id` of each input.
+    If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph.
     """
 
     if operator(numeric):
         grads = operator(numeric).gradients(loss)
     elif is_constant(numeric):
-        grads = Gradients({hex_id(numeric): loss})
+        grads = Gradients({numeric: loss})
     elif is_numeric(numeric):
         raise ValueError(f"cannot compute gradients of {numeric} w/r/t {loss}")
     else:
@@ -768,16 +768,16 @@ def gradients(numeric, loss, variables=None):
         return grads
 
     if not isinstance(variables, (list, tuple)):
-        if hex_id(variables) not in grads:
+        if variables not in grads:
             raise KeyError(f"{variables} is not reachable from operator {numeric}")
 
-        return grads[hex_id(variables)]
+        return grads[variables]
 
-    missing = [var for var in variables if hex_id(var) not in grads]
+    missing = [var for var in variables if var not in grads]
     if missing:
         raise KeyError(f"not reachable by traversing the operator graph {numeric}: {missing}")
 
-    return [grads[hex_id(var)] for var in variables]
+    return [grads[var] for var in variables]
 
 
 def is_constant(numeric):

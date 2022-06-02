@@ -38,6 +38,9 @@ class State(_Base):
 
         _Base.__init__(self)
 
+    def __hash__(self):
+        return hash(form_of(self))
+
     def __json__(self):
         form = form_of(self)
 
@@ -187,6 +190,9 @@ class StateRef(Ref):
             return repr(self.state)
         else:
             return str(URI(self))
+
+    def __hash__(self):
+        return hash(self.state)
 
     def __id__(self):
         return hex_id(self.state)

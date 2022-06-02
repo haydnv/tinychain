@@ -2,9 +2,9 @@ import itertools
 import logging
 
 from ...context import deanonymize
-from ...math.operator import derivative_of, gradients, operator, Gradients, Operator, Unary
+from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
-from ...scalar.ref import deref, hex_id, is_literal, same_as, After, MethodSubject, Post
+from ...scalar.ref import deref, is_literal, same_as, After, MethodSubject, Post
 from ...shape import Shape
 from ...uri import URI
 

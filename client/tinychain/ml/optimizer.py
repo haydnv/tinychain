@@ -10,7 +10,7 @@ from ..generic import Map, Tuple
 from ..math.interface import Numeric
 from ..math.operator import constant, derivative_of, gradients, is_constant, simplify
 from ..scalar.number import F32, F64, UInt
-from ..scalar.ref import form_of, hex_id, After, If
+from ..scalar.ref import form_of, After, If
 from ..scalar.value import Id
 from ..state import State
 
@@ -39,7 +39,8 @@ class _Optimizer(Optimizer, Dynamic):
     def gradients(self, cxt, inputs: Tensor) -> _Gradients:
         logging.debug("Optimizer constructing gradient calculations...")
 
-        trainable_vars = trainable(self.ml_model)
+        trainable = namespace(self.ml_model, self._model_name)
+        var_names = {var: name for name, var in trainable.items()}
         logging.debug("discovered trainable variables...")
 
         outputs = self.ml_model.eval(inputs)
@@ -51,10 +52,10 @@ class _Optimizer(Optimizer, Dynamic):
         assert is_constant(cxt.d_loss)
 
         grads = {
-            var_id: simplify(grad) for var_id, grad in gradients(outputs, cxt.d_loss).items()
-            if var_id in trainable_vars}
+            var_names[var]: simplify(grad) for var, grad in gradients(outputs, cxt.d_loss).items()
+            if var in var_names}
 
-        assert all(var_id in grads for var_id in trainable_vars)
+        assert all(name in grads for name in trainable)
 
         logging.debug("constructed gradients")
 
@@ -62,8 +63,8 @@ class _Optimizer(Optimizer, Dynamic):
             raise ValueError(f"model output {outputs} has no gradients")
 
         return {
-            var_id: If(grad.shape[1:] == trainable_vars[var_id].shape, grad.sum(0), grad.sum())
-            for var_id, grad in grads.items()}
+            name: If(grad.shape[1:] == trainable[name].shape, grad.sum(0), grad.sum())
+            for name, grad in grads.items()}
 
 
 class GradientDescent(_Optimizer):
@@ -85,8 +86,8 @@ class GradientDescent(_Optimizer):
         grads = self.gradients(inputs)
 
         writes = []
-        for var_id, var in trainable(self.ml_model).items():
-            delta = grads[var_id]
+        for name, var in namespace(self.ml_model, self._model_name).items():
+            delta = grads[name]
             writes.append(var.update(self._lr * delta))
 
         return writes
@@ -126,14 +127,10 @@ class Adam(_Optimizer):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
+        assert set(self.m) == set(self.v)
+
+        trainable = namespace(self.ml_model, self._model_name)
         grads = self.gradients(inputs)
-
-        trainable_vars = trainable(self.ml_model)
-        var_names = namespace(self.ml_model, self._model_name)
-        var_names = {hex_id(var): name for name, var in var_names.items()}
-        grads = {var_names[var_id]: grads[var_id] for var_id in var_names.keys()}
-
-        vars_by_name = {var_names[var_id]: trainable_vars[var_id] for var_id in var_names.keys()}
 
         update_m = {}
         for name in self.m:
@@ -148,12 +145,12 @@ class Adam(_Optimizer):
         update_v = {name: self.v[name] * self.beta2 + grads[name]**2 * (1. - self.beta2) for name in self.v}
 
         a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
-        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in grads}
+        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in self.m}
 
         updates = After([
             [self.m[name].write(new_value) for name, new_value in update_m.items()],
             [self.v[name].write(new_value) for name, new_value in update_v.items()],
-        ], [vars_by_name[name].update(delta) for name, delta in update_model.items()])
+        ], [trainable[name].update(delta) for name, delta in update_model.items()])
 
         return updates
 
@@ -222,34 +219,3 @@ def namespace(model, prefix):
         logging.debug(f"ignoring non-trainable model attribute {model}")
 
     return ns
-
-
-def trainable(model):
-    """Traverse the attributes of the given `model` to discover its trainable :class:`Variable` s."""
-
-    if isinstance(model, Variable):
-        return {hex_id(model): model}
-    elif isinstance(model, ModelRef):
-        return trainable(model.instance)
-
-    if isinstance(model, (Map, Tuple)):
-        model = form_of(model)
-
-    vars = {}
-
-    if isinstance(model, (list, tuple)):
-        for component in model:
-            vars.update(trainable(component))
-    elif isinstance(model, dict):
-        for component in model.values():
-            vars.update(trainable(component))
-    elif isinstance(model, Model):
-        for name, component in inspect.getmembers(model):
-            if name.startswith("__"):
-                continue
-
-            vars.update(trainable(component))
-    else:
-        logging.debug(f"ignoring non-trainable model attribute {model}")
-
-    return vars
