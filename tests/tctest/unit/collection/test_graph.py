@@ -1,15 +1,31 @@
+import logging
 import unittest
 
 import tinychain as tc
 
-from .models import Order, Product, User
+from ..models import Order, Product, User
+
+logger = logging.getLogger("test_graph")
+
+
+class Graph_(tc.graph.Graph):
+    __uri__ = tc.URI("/test/unit/graph")
 
 
 class GraphTests(unittest.TestCase):
+    def test_initaliseSchema_Graph(self):
+        tc.registry.Registry(create_new=True).register(User)
+        expected = tc.graph.Schema().create_table("user", tc.table.create_schema(User))
+        graph = Graph_()
+        self.assertIsInstance(graph.schema, tc.graph.Schema)
+        self.assertEqual(sorted(graph.schema.tables), sorted(expected.tables))
+
+
+class GraphCreateSchemaTests(unittest.TestCase):
     def test_createSchema_Simple(self):
         """Test that creating a schema works using a basic Model."""
-        users = tc.app.create_schema(User)
-        products = tc.app.create_schema(Product)
+        users = tc.table.create_schema(User)
+        products = tc.table.create_schema(Product)
         expected = (
             tc.graph.Schema()
             .create_table("user", users)
@@ -22,9 +38,9 @@ class GraphTests(unittest.TestCase):
 
     def test_createSchema_Complex(self):
         """Test that creating a schema works using a basic Model."""
-        users = tc.app.create_schema(User)
-        orders = tc.app.create_schema(Order)
-        products = tc.app.create_schema(Product)
+        users = tc.table.create_schema(User)
+        orders = tc.table.create_schema(Order)
+        products = tc.table.create_schema(Product)
         expected = (
             tc.graph.Schema()
             .create_table("user", users)

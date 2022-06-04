@@ -1,15 +1,21 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Type
+
+from ..context import to_json
 from ..decorators import closure, delete, get
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
-from ..scalar.ref import form_of, If, Ref
+from ..scalar.ref import If, Ref, form_of
 from ..state import State, Stream
 from ..uri import URI
-from ..context import to_json
-
-from .base import Collection
+from .base import Collection, Column
 from .btree import BTree
+
+if TYPE_CHECKING:
+    from ..app import Model
 
 
 class Schema(object):
@@ -201,3 +207,35 @@ def _handle_bounds(bounds):
         col: Range.from_slice(bounds[col]) if isinstance(bounds[col], slice) else bounds[col]
         for col in bounds
     }
+
+
+def create_schema(modelclass: Type[Model]) -> Schema:
+    """Create a table schema for the given model. A key for the table is auto
+    generated using the `class_name` function, then suffixed with '_id'. Each
+    attribute of the model will be considered as a column if it is of type
+    Column or Model.
+    """
+    values = []
+    indices = []
+    base_attributes = set()
+
+    for b in modelclass.__bases__:
+        base_attributes |= set(dir(b))
+
+    for f in base_attributes ^ set(dir(modelclass)):
+        attr = getattr(modelclass, f)
+        if isinstance(attr, Column):
+            values.append(attr)
+        else:
+            try:
+                from ..app import Model
+                assert issubclass(attr, Model)
+                values.append(*attr.key())
+                indices.append((attr.class_name(), [attr.key()[0].name]))
+            except (TypeError, AssertionError):
+                continue
+
+    schema = Schema(modelclass.key(), values)
+    for i in indices:
+        schema.create_index(*i)
+    return schema

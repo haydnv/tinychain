@@ -1,2 +1,4 @@
+from .collection.test_graph import GraphCreateSchemaTests, GraphTests
+from .collection.test_table import TableCreateSchemaTests
 from .test_app import ModelTests
-from .test_graph import GraphTests
+from .test_registry import RegistryTests

@@ -1,18 +1,25 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Type
+
 from ..app import App
 from ..chain import Sync
 from ..collection import Column
 from ..collection.table import Table
-from ..collection.table import Schema as TableSchema
+from ..collection.table import create_schema as cts
 from ..collection.tensor import Sparse
-from ..error import BadRequest
 from ..decorators import closure, get, put
+from ..error import BadRequest
 from ..generic import Tuple
-from ..scalar.number import Bool, U32
+from ..registry import Registry
+from ..scalar.number import U32, Bool
 from ..scalar.ref import After, If, Put
 from ..uri import URI
-
 from .edge import DIM, Edge, ForeignKey
 from .edge import Schema as EdgeSchema
+
+if TYPE_CHECKING:
+    from ..collection.table import Schema as TableSchema
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
 
@@ -77,10 +84,13 @@ class Graph(App):
     a table column which has an edge to itself is an `Edge`, otherwise it's a `ForeignKey`. `ForeignKey` relationships
     are automatically updated when a `Table` is updated, but `Edge` relationships require explicit management.
     """
+    schema = None
 
-    # TODO: remove the `schema` and `chain_type` parameters and generate the initial schema via reflection
-    def __init__(self, schema, chain_type=Sync):
-        for (label, edge) in schema.edges.items():
+    # TODO: remove the and `chain_type` parameters and generate the initial schema via reflection
+    def __init__(self, chain_type=Sync):
+        self._initalise_schema()
+
+        for (label, edge) in self.schema.edges.items():
             if hasattr(self, label):
                 raise IndexError(f"{label} is already reserved in {self} by {getattr(self, label)}")
 
@@ -89,13 +99,17 @@ class Graph(App):
             else:
                 setattr(self, label, chain_type(ForeignKey(([DIM, DIM], Bool))))
 
-        for name in schema.tables:
+        for name in self.schema.tables:
             if hasattr(self, name):
                 raise ValueError(f"Graph already has an entry called {name}")
 
-            setattr(self, name, chain_type(graph_table(self, schema, name)))
+            setattr(self, name, chain_type(graph_table(self, self.schema, name)))
 
         App.__init__(self)
+
+    def _initalise_schema(self):
+        """Automatically build a Graph of all models that have been registerd using the registry."""
+        self.schema = create_schema([cts(m) for m in Registry().models.values()])
 
 
 def graph_table(graph, schema, table_name):
