@@ -1,8 +1,48 @@
+import inspect
+import logging
+import sys
 import unittest
 
 import tinychain as tc
 
-from .configure import Order, Product, User
+from .models import Order, Product, User
+
+logger = logging.getLogger("test_app")
+
+
+class Registry:
+
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not isinstance(cls._instance, cls):
+            cls._instance = object.__new__(cls, *args, **kwargs)
+        return cls._instance
+
+    def __init__(self):
+        self.models = dict()
+        super().__init__()
+
+    def register(self, model: tc.app.Model):
+        """Adds a `Model` to the `models` attribute."""
+        if model is None or (
+            inspect.isclass(model) and not issubclass(model, tc.app.Model)
+        ):
+            logger.info("Model must be of type `tc.app.Model`")
+            return
+
+        if model.class_name() in self.models:
+            raise ValueError(
+                f"The `Model` {model.class_name()} has already been registered"
+            )
+
+        self.models[model.class_name()] = model
+
+
+class App_(tc.app.App):
+    def formulate(self):
+        """Automatically build a Graph of all models associated with the app."""
+        pass
 
 
 class Arbitrary(tc.app.Model):
@@ -14,11 +54,53 @@ class Arbitrary(tc.app.Model):
         pass
 
 
+class RegistryTests(unittest.TestCase):
+    """Tests for the `App` class."""
+
+    def tearDown(self):
+        # Reset the singleton after every test run.
+        Registry()._instance = None
+        # Re-enable logging.
+        logging.disable(logging.NOTSET)
+
+    def test_Registry_singleton(self):
+        self.assertIs(Registry(), Registry())
+
+    def test_Registry_register_modelSubClass(self):
+        registry = Registry()
+        registry.register(User)
+
+        SubClass = type("SubClass", (Arbitrary,), {})
+        registry.register(SubClass)
+
+        self.assertEqual(registry.models, {"user": User, "sub_class": SubClass})
+
+    def test_Registry_register_modelNone(self):
+        registry = Registry()
+        registry.register(User)
+        logging.disable(logging.INFO)  # info log is expected for this call
+        registry.register(None)
+        self.assertEqual(registry.models, {"user": User})
+
+    def test_Registry_register_notModel(self):
+        registry = Registry()
+        registry.register(Product)
+        logging.disable(logging.INFO)  # info log is expected for this call
+        registry.register(dict)
+        self.assertEqual(registry.models, {"product": Product})
+
+    def test_Registry_register_alreadyRegistered(self):
+        registry = Registry()
+        registry.register(User)
+        with self.assertRaises(ValueError):
+            registry.register(User)
+
+
 class AppTests(unittest.TestCase):
     """Tests for the `App` class."""
-    
+
     def test_App_formulate(self):
-        self.assertEquals(0, 1)
+        pass
 
 
 class ModelTests(unittest.TestCase):

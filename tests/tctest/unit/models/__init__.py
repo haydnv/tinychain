@@ -1,3 +1,4 @@
+"""Representation of a models directory. Used only for testing purposes."""
 import tinychain as tc
 
 URI = tc.URI("/test/tctest/client")

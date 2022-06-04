@@ -2,11 +2,10 @@ import unittest
 
 import tinychain as tc
 
-from .configure import Order, Product, User
+from .models import Order, Product, User
 
 
 class GraphTests(unittest.TestCase):
-
     def test_createSchema_Simple(self):
         """Test that creating a schema works using a basic Model."""
         users = tc.app.create_schema(User)
@@ -31,8 +30,13 @@ class GraphTests(unittest.TestCase):
             .create_table("user", users)
             .create_table("product", products)
             .create_table("order", orders)
-            .create_edge("order_product", tc.graph.edge.Schema("product.product_id", "order.product_id"))
-            .create_edge("order_user", tc.graph.edge.Schema("user.user_id", "order.user_id"))
+            .create_edge(
+                "order_product",
+                tc.graph.edge.Schema("product.product_id", "order.product_id"),
+            )
+            .create_edge(
+                "order_user", tc.graph.edge.Schema("user.user_id", "order.user_id")
+            )
         )
         schema = tc.graph.create_schema([users, products, orders])
         self.assertIsInstance(schema, tc.graph.Schema)
