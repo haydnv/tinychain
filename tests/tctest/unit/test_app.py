@@ -2,7 +2,6 @@ import unittest
 
 import tinychain as tc
 
-from .base import ClientTest
 from .configure import Order, Product, User
 
 
@@ -15,8 +14,17 @@ class Arbitrary(tc.app.Model):
         pass
 
 
-class ModelTests(ClientTest):
-    def testModelClassName(self):
+class AppTests(unittest.TestCase):
+    """Tests for the `App` class."""
+    
+    def test_App_formulate(self):
+        self.assertEquals(0, 1)
+
+
+class ModelTests(unittest.TestCase):
+    """Tests for the `Model` class."""
+
+    def test_Model_className(self):
         """Parameterized unit test for the `class_name` function."""
         cases = [
             (User, "user"),
@@ -30,7 +38,7 @@ class ModelTests(ClientTest):
             with self.subTest(c=c, e=e):
                 self.assertEqual(c.class_name(), e)
 
-    def testModelKey(self):
+    def test_Model_key(self):
         """Parameterized unit test for the `key` function."""
         cases = [
             (User, [tc.Column("user_id", tc.U32)]),
@@ -41,7 +49,11 @@ class ModelTests(ClientTest):
             with self.subTest(c=c, e=e):
                 self.assertEqual(c.key(), e)
 
-    def testCreateSchemaWithArbitraryValues(self):
+
+class CreateSchemaTests(unittest.TestCase):
+    """Tests for the `create_schema` function."""
+
+    def test_createSchema_withArbitraryValues(self):
         """Test that creating a schema ignores arbitrary attributes. Only
         values of Column or Model are recognised.
         """
@@ -52,7 +64,7 @@ class ModelTests(ClientTest):
             sorted(schema.columns(), key=str), sorted(expected.columns(), key=str)
         )
 
-    def testCreateSchemaSimple(self):
+    def test_createSchema_simple(self):
         """Test that creating a schema works using a basic Model."""
         schema = tc.app.create_schema(User)
         expected = tc.table.Schema(
@@ -67,7 +79,7 @@ class ModelTests(ClientTest):
             sorted(schema.columns(), key=str), sorted(expected.columns(), key=str)
         )
 
-    def testCreateSchemaComplex(self):
+    def test_createSchema_complex(self):
         """Test that creating a schema works using a complex Model."""
         schema = tc.app.create_schema(Order)
         expected = (
