@@ -3,45 +3,7 @@ import unittest
 import tinychain as tc
 
 from .base import ClientTest
-
-URI = tc.URI("/test/app")
-
-
-class Product(tc.app.Model):
-    __uri__ = URI.append("Product")
-
-    price = tc.Column("price", tc.I32)
-    name = tc.Column("name", tc.String, 100)
-
-    def __init__(self, product, name, price):
-        self.product = product
-        self.price = price
-        self.name = name
-
-
-class User(tc.app.Model):
-    __uri__ = URI.append("User")
-
-    first_name = tc.Column("first_name", tc.String, 100)
-    last_name = tc.Column("last_name", tc.String, 100)
-
-    def __init__(self, user_id, first_name, last_name):
-        self.user_id = tc.Column("user_id", tc.I32)
-        self.first_name = first_name
-        self.last_name = last_name
-
-
-class Order(tc.app.Model):
-    __uri__ = URI.append("Product")
-
-    quantity = tc.Column("quantity", tc.U32)
-    product_id = Product
-    user_id = User
-
-    def __init__(self, order_id, quantity, user_id, product_id):
-        self.quantity = quantity
-        self.user_id = user_id
-        self.product_id = product_id
+from .configure import Order, Product, User
 
 
 class Arbitrary(tc.app.Model):
@@ -54,7 +16,6 @@ class Arbitrary(tc.app.Model):
 
 
 class ModelTests(ClientTest):
-
     def testModelClassName(self):
         """Parameterized unit test for the `class_name` function."""
         cases = [
@@ -72,9 +33,9 @@ class ModelTests(ClientTest):
     def testModelKey(self):
         """Parameterized unit test for the `key` function."""
         cases = [
-            (User, ["user_id", tc.I32]),
-            (Order, ["order_id", tc.I32]),
-            (Product, ["product_id", tc.I32]),
+            (User, [tc.Column("user_id", tc.U32)]),
+            (Order, [tc.Column("order_id", tc.U32)]),
+            (Product, [tc.Column("product_id", tc.U32)]),
         ]
         for c, e in cases:
             with self.subTest(c=c, e=e):
@@ -84,8 +45,8 @@ class ModelTests(ClientTest):
         """Test that creating a schema ignores arbitrary attributes. Only
         values of Column or Model are recognised.
         """
-        schema = Arbitrary.create_schema()
-        expected = tc.table.Schema(["arbitrary_id", tc.I32], [])
+        schema = tc.app.create_schema(Arbitrary)
+        expected = tc.table.Schema([tc.Column("arbitrary_id", tc.U32)], [])
         self.assertIsInstance(schema, tc.table.Schema)
         self.assertEqual(
             sorted(schema.columns(), key=str), sorted(expected.columns(), key=str)
@@ -93,9 +54,9 @@ class ModelTests(ClientTest):
 
     def testCreateSchemaSimple(self):
         """Test that creating a schema works using a basic Model."""
-        schema = User.create_schema()
+        schema = tc.app.create_schema(User)
         expected = tc.table.Schema(
-            ["user_id", tc.I32],
+            [tc.Column("user_id", tc.U32)],
             [
                 tc.Column("first_name", tc.String, 100),
                 tc.Column("last_name", tc.String, 100),
@@ -108,14 +69,14 @@ class ModelTests(ClientTest):
 
     def testCreateSchemaComplex(self):
         """Test that creating a schema works using a complex Model."""
-        schema = Order.create_schema()
+        schema = tc.app.create_schema(Order)
         expected = (
             tc.table.Schema(
-                ["order_id", tc.I32],
+                [tc.Column("order_id", tc.U32)],
                 [
-                    tc.Column("product_id", tc.I32),
-                    tc.Column("user_id", tc.I32),
-                    tc.Column("quantity", tc.U32),
+                    tc.Column("product_id", tc.U32),
+                    tc.Column("user_id", tc.U32),
+                    tc.Column("quantity", tc.I32),
                 ],
             )
             .create_index("user", ["user_id"])

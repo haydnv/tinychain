@@ -2,6 +2,7 @@ from ..app import App
 from ..chain import Sync
 from ..collection import Column
 from ..collection.table import Table
+from ..collection.table import Schema as TableSchema
 from ..collection.tensor import Sparse
 from ..error import BadRequest
 from ..decorators import closure, get, put
@@ -11,6 +12,7 @@ from ..scalar.ref import After, If, Put
 from ..uri import URI
 
 from .edge import DIM, Edge, ForeignKey
+from .edge import Schema as EdgeSchema
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
 
@@ -209,3 +211,20 @@ def graph_table(graph, schema, table_name):
             return After(Table.upsert(self, key, values), updates)
 
     return GraphTable(table_schema)
+
+
+def create_schema(schemas: list[TableSchema]) -> Schema:
+    """Create a graph schema using model schemas."""
+    graph_schema = Schema()
+    indices = {}
+
+    for s in schemas:
+        name = s.key[0].name.removesuffix("_id")
+        graph_schema.create_table(name, s)
+        for i in s.indices:
+            indices[f"{name}_{i[0]}"] = (f"{i[0]}.{i[1][0]}", f"{name}.{i[1][0]}")
+
+    for k, v in indices.items():
+        graph_schema.create_edge(k, EdgeSchema(*v))
+
+    return graph_schema

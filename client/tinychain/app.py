@@ -13,7 +13,7 @@ from .interface import Interface
 from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .scalar import Scalar
-from .scalar.number import I32
+from .scalar.number import U32
 from .scalar.ref import Ref, depends_on, form_of, get_ref, independent
 from .scalar.value import Nil
 from .state import Class, Instance, Object, State
@@ -82,40 +82,9 @@ class Model(Object, metaclass=Meta):
         return ModelRef(self, name)
 
     @classmethod
-    def create_schema(cls):
-        """Create a table schema for the given model. A key for the table is auto
-        generated using the `class_name` function, then suffixed with '_id'. Each
-        attribute of the model will be considered as a column if it is of type
-        Column or Model.
-        """
-        values = []
-        indices = []
-        base_attributes = set()
-
-        for b in cls.__bases__:
-            base_attributes |= set(dir(b))
-
-        for f in base_attributes ^ set(dir(cls)):
-            attr = getattr(cls, f)
-            if isinstance(attr, Column):
-                values.append(attr)
-            else:
-                try:
-                    assert issubclass(attr, Model)
-                    values.append(Column(*attr.key()))
-                    indices.append((attr.class_name(), [attr.key()[0]]))
-                except (TypeError, AssertionError):
-                    continue
-
-        schema = Schema(cls.key(), values)
-        for i in indices:
-            schema.create_index(*i)
-        return schema
-
-    @classmethod
     def key(cls):
         """A Column object which will be used as the key for a given model."""
-        return [cls.class_name() + "_id", I32]
+        return [Column(cls.class_name() + "_id", U32)]
 
     @classmethod
     def class_name(cls):
@@ -429,3 +398,34 @@ def _is_mutable(state):
         return False
 
     return True
+
+
+def create_schema(modelclass: typing.Type[Model]) -> Schema:
+    """Create a table schema for the given model. A key for the table is auto
+    generated using the `class_name` function, then suffixed with '_id'. Each
+    attribute of the model will be considered as a column if it is of type
+    Column or Model.
+    """
+    values = []
+    indices = []
+    base_attributes = set()
+
+    for b in modelclass.__bases__:
+        base_attributes |= set(dir(b))
+
+    for f in base_attributes ^ set(dir(modelclass)):
+        attr = getattr(modelclass, f)
+        if isinstance(attr, Column):
+            values.append(attr)
+        else:
+            try:
+                assert issubclass(attr, Model)
+                values.append(*attr.key())
+                indices.append((attr.class_name(), [attr.key()[0].name]))
+            except (TypeError, AssertionError):
+                continue
+
+    schema = Schema(modelclass.key(), values)
+    for i in indices:
+        schema.create_index(*i)
+    return schema
