@@ -11,7 +11,7 @@ logger = logging.getLogger("test_app")
 class ModelTests(unittest.TestCase):
     """Tests for the `Model` class."""
 
-    def test_Model_className(self):
+    def test_className(self):
         """Parameterized unit test for the `class_name` function."""
         cases = [
             (User, "user"),
@@ -25,7 +25,7 @@ class ModelTests(unittest.TestCase):
             with self.subTest(c=c, e=e):
                 self.assertEqual(c.class_name(), e)
 
-    def test_Model_key(self):
+    def test_key(self):
         """Parameterized unit test for the `key` function."""
         cases = [
             (User, [tc.Column("user_id", tc.U32)]),

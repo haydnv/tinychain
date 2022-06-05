@@ -19,20 +19,20 @@ class RegistryTests(unittest.TestCase):
         # Re-enable logging.
         logging.disable(logging.NOTSET)
 
-    def test_Registry_singleton(self):
+    def test_singleton(self):
         self.assertIs(tc.registry.Registry(), self.registry)
 
-    def test_Registry_register_modelSubClass(self):
+    def test_register_modelSubClass(self):
         self.registry.register(User)
 
-        SubClassUser = type("SubClassUser", (User,), {})
-        self.registry.register(SubClassUser)
+        UserSubClass = type("UserSubClass", (User,), {})
+        self.registry.register(UserSubClass)
 
         self.assertEqual(
-            self.registry.models, {"user": User, "sub_class_user": SubClassUser}
+            self.registry.models, {"user": User, "user_sub_class": UserSubClass}
         )
 
-    def test_Registry_register_modelNone(self):
+    def test_register_modelNone(self):
         self.registry.register(User)
         logging.disable(logging.INFO)  # info log is expected for this call
 
@@ -40,7 +40,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(self.registry.models, {"user": User})
 
-    def test_Registry_register_notModel(self):
+    def test_register_notModel(self):
         self.registry.register(Product)
         logging.disable(logging.INFO)  # info log is expected for this call
 
@@ -48,7 +48,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(self.registry.models, {"product": Product})
 
-    def test_Registry_register_alreadyRegistered(self):
+    def test_egister_alreadyRegistered(self):
         self.registry.register(User)
         with self.assertRaises(ValueError):
             self.registry.register(User)

@@ -9,11 +9,13 @@ logger = logging.getLogger("test_graph")
 
 
 class Graph_(tc.graph.Graph):
+    # Needed to avoid a RecursionError.
     __uri__ = tc.URI("/test/unit/graph")
 
 
 class GraphTests(unittest.TestCase):
-    def test_initaliseSchema_Graph(self):
+
+    def test_initaliseSchema_graphCreatedOnInit(self):
         tc.registry.Registry(create_new=True).register(User)
         expected = tc.graph.Schema().create_table("user", tc.table.create_schema(User))
         graph = Graph_()
@@ -22,7 +24,8 @@ class GraphTests(unittest.TestCase):
 
 
 class GraphCreateSchemaTests(unittest.TestCase):
-    def test_createSchema_Simple(self):
+
+    def test_createSchema_simple(self):
         """Test that creating a schema works using a basic Model."""
         users = tc.table.create_schema(User)
         products = tc.table.create_schema(Product)
@@ -36,8 +39,9 @@ class GraphCreateSchemaTests(unittest.TestCase):
         self.assertEqual(sorted(schema.tables), sorted(expected.tables))
         self.assertEqual(sorted(schema.edges), sorted(expected.edges))
 
-    def test_createSchema_Complex(self):
-        """Test that creating a schema works using a basic Model."""
+    def test_createSchema_complex(self):
+        """Test that creating a schema works using a complex Model that
+        has relations."""
         users = tc.table.create_schema(User)
         orders = tc.table.create_schema(Order)
         products = tc.table.create_schema(Product)

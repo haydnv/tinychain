@@ -5,7 +5,7 @@ import tinychain as tc
 
 from ..models import Order, Product, User
 
-logger = logging.getLogger("test_tablw")
+logger = logging.getLogger("test_table")
 
 
 class Arbitrary(tc.app.Model):
