@@ -52,12 +52,8 @@ class Get(Method):
     def __call__(self, key=None):
         return self.rtype(form=ref.Get(self.subject(), key))
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -93,12 +89,8 @@ class Put(Method):
     def __call__(self, key, value):
         return ref.Put(self.subject(), key, value)
 
-    def __args__(self):
-        _, _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
 
@@ -164,12 +156,8 @@ class Post(Method):
         params = parse_args(sig, *args, **kwargs)
         return rtype(form=ref.Post(self.subject(), params))
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
         kwargs = {}
@@ -209,22 +197,8 @@ class Delete(Method):
     def __call__(self, key=None):
         return ref.Delete(self.subject(), key)
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
         return Get.__form__(self)
-
-
-class Operator(Post):
-    def __call__(self, *args, **kwargs):
-        result = self.form(self.header, *args, **kwargs)
-
-        if self.rtype:
-            return self.rtype(form=result)
-        else:
-            return result
 
 
 def _check_context_param(parameter):
@@ -236,7 +210,7 @@ def _check_context_param(parameter):
             f"a method definition takes a transaction context as its second parameter, not {param.annotation}")
 
 
-def _first_params(method):
+def first_params(method):
     sig = inspect.signature(method.form)
 
     if not sig.parameters:

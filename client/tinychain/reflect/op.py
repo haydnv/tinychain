@@ -39,12 +39,8 @@ class Get(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [cxt]
-
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -79,12 +75,8 @@ class Put(Op):
     def __call__(self, key=None, value=None):
         return ref.Put(self, key, value)
 
-    def __args__(self):
-        _, _, cxt = ref.form_of(self)
-        return [cxt]
-
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -140,11 +132,8 @@ class Post(Op):
         self.rtype = _get_rtype(form, State)
         Op.__init__(self, form)
 
-    def __args__(self):
-        return [ref.form_of(self)]
-
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         kwargs = {}
@@ -180,10 +169,6 @@ class Post(Op):
 class Delete(Op):
     __uri__ = URI(op.Delete)
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [cxt]
-
     def __form__(self):
         return Get.__form__(self)
 
@@ -198,8 +183,8 @@ class Delete(Op):
         return f"DELETE Op with form {self.form}"
 
 
-def _maybe_first_arg(op):
-    sig = inspect.signature(op.form)
+def maybe_first_arg(form):
+    sig = inspect.signature(form)
     param_names = list(sig.parameters.keys())
 
     cxt = Context()

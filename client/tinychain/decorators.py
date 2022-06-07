@@ -1,5 +1,6 @@
 import inspect
 
+from .math.equation import Function, StateFunction
 from .reflect.meta import MethodStub
 from .reflect import method, op
 from .scalar.ref import With
@@ -57,10 +58,7 @@ def delete(form):
 def differentiable(form):
     """Annotation for a callable method specifying that it returns a type of differentiable :class:`Operator`."""
 
-    if _is_method(form):
-        return MethodStub(method.Operator, form)
-    else:
-        raise ValueError(f"@differentiable expects a callable method, not {form}")
+    return MethodStub(StateFunction, form) if _is_method(form) else Function(form)
 
 
 def _is_method(form):
