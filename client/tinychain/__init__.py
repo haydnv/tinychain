@@ -12,6 +12,7 @@ from tinychain.context import print_json, to_json, Context
 from tinychain.decorators import closure, delete, differentiable, get, post, put
 from tinychain.graph import Edge, Graph
 from tinychain.math import linalg
+from tinychain.math.interface import Numeric
 from tinychain.reflect import Meta
 from tinychain.generic import Map, Tuple
 from tinychain.interface import Interface, Equality, Order

@@ -1,8 +1,9 @@
 import inspect
 import logging
 
-from ...uri import URI
+from ...interface import Interface
 from ...context import to_json
+from ...uri import URI
 
 from .base import Case, If, MethodSubject, Ref
 
@@ -97,6 +98,9 @@ def get_ref(state, name):
         return {k: get_ref(v, name.append(k)) for k, v in state.items()}
     elif isinstance(state, (list, tuple)):
         return tuple(get_ref(item, name.append(i)) for i, item in enumerate(state))
+    elif isinstance(state, Interface):
+        from ...state import State
+        return type(f"{state.__class.__name__}State", (State, type(state)), {})(form=state)
     else:
         logging.debug(f"{state} has no __ref__ method")
         return state

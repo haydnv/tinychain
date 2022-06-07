@@ -50,7 +50,7 @@ class Context(object):
             if hasattr(value, "__ref__"):
                 return get_ref(value, name)
             else:
-                logging.info(f"context attribute {value} has no __ref__ method")
+                print(f"context attribute {value} has no __ref__ method")
                 return URI(name)
         else:
             raise AttributeError(f"Context has no such value: {name}")

@@ -702,13 +702,28 @@ def constant(numeric):
     return numeric
 
 
-def derivative_of(state, variable=None, keepdims=False):
+def derivative_of(state_or_function, variable=None, keepdims=False):
     """
-    Find the derivative of the given `state`.
+    Find the derivative of the given `state_or_function`.
 
-    If a `variable` is specified, this will be the partial derivative with respect to `variable`.
-    If the given `state` is not differentiable, this will raise a `TypeError`.
+    If a differentiable state is given, this will construct a new op to calculate it derivative, which can be
+    a partial derivative if a `variable` is specified.
+
+    If a differentiable function is given, a new callable function will be returned which computes its derivative.
+
+    If `state_or_function` is not differentiable, a `TypeError` will be raised.
     """
+
+    if callable(state_or_function):
+        assert variable is None
+
+        function = state_or_function
+        if hasattr(function, "derivative"):
+            return function.derivative()
+        else:
+            raise ValueError(f"not a differentiable function: {function}")
+
+    state = state_or_function
 
     if not is_numeric(state):
         raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
