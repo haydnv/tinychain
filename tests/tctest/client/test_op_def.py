@@ -6,18 +6,19 @@ ENDPOINT = '/transact/hypothetical'
 
 
 @tc.differentiable
-def f(x: tc.Numeric) -> tc.Numeric:
-    return 2 * x
+def f(x: tc.tensor.Tensor) -> tc.tensor.Tensor:
+    return 3 * x**2
 
 
 class OpDefTests(unittest.TestCase):
     def testDerivative(self):
         cxt = tc.Context()
-        cxt.f = f
         cxt.x = tc.ml.Variable.ones([2, 2])
+        cxt.f = f
+        cxt.d_f = tc.math.derivative_of(cxt.f)
         cxt.f_x = cxt.f(cxt.x)
+        cxt.actual = cxt.d_f(cxt.x)
         cxt.expected = tc.math.derivative_of(cxt.f_x)
-        cxt.actual = tc.math.derivative_of(cxt.f)(cxt.x)
-        cxt.result = cxt.expected == cxt.actual
+        cxt.result = (cxt.expected == (6 * cxt.x)).logical_and(cxt.expected == cxt.actual)
 
         self.assertTrue(HOST.post(ENDPOINT, cxt))

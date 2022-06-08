@@ -24,7 +24,7 @@ class FunctionCall(Operator):
 
     def backward(self, variable=None):
         d_function = derivative_of(self.subject)
-        return d_function(*self.args)
+        return d_function(**self.args)
 
     def gradients(self, loss):
         raise NotImplementedError
