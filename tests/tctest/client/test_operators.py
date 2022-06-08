@@ -17,7 +17,9 @@ ones_like_torch = torch.ones_like
 ones_like_tc = tc.tensor.Dense.ones_like
 
 
-# based on https://mathinsight.org/chain_rule_simple_examples
+# based on:
+#  - https://mathinsight.org/chain_rule_simple_examples
+#  - https://math.hmc.edu/calculus/hmc-mathematics-calculus-online-tutorials/multivariable-calculus/multi-variable-chain-rule/
 class ChainRuleTests(unittest.TestCase):
     def testAdd(self):
         cxt = tc.Context()
@@ -51,7 +53,7 @@ class ChainRuleTests(unittest.TestCase):
         expected = 6 * x * math.e**(3 * x**2 + 2)
         actual = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+        self.assertTrue(np.allclose(load_np(actual), expected))
 
     def testLog(self):
         cxt = tc.Context()
@@ -63,7 +65,21 @@ class ChainRuleTests(unittest.TestCase):
         expected = (2 * x) / (x**2 + 1)
         actual = HOST.post(ENDPOINT, cxt)
 
-        self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
+        self.assertTrue(np.allclose(load_np(actual), expected))
+
+    def testMultipleVariables(self):
+        cxt = tc.Context()
+        cxt.t = tc.ml.Variable.ones([1])
+        cxt.x = cxt.t**2
+        cxt.y = 2*cxt.t
+        cxt.z = (cxt.x**2 * cxt.y) - cxt.y**2
+        cxt.result = tc.math.derivative_of(cxt.z)
+
+        t = np.array([1])
+        expected = (10 * t**4) - (8 * t)
+        actual = HOST.post(ENDPOINT, cxt)
+
+        self.assertTrue(np.allclose(load_np(actual), expected))
 
 
 class OperatorTests(unittest.TestCase):
