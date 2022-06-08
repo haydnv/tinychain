@@ -56,15 +56,7 @@ class Context(object):
             raise AttributeError(f"Context has no such value: {name}")
 
     def __getitem__(self, selector):
-        if isinstance(selector, slice):
-            cxt = Context()
-            keys = list(self.form.keys())
-            for name in keys[selector]:
-                setattr(cxt, name, self.form[name])
-
-            return cxt
-        else:
-            return getattr(self, selector)
+        return list(self.form.values())[selector]
 
     def __json__(self):
         return to_json(list(self.form.items()))

@@ -1,7 +1,9 @@
 import inspect
 
-from ..reflect import method, op, resolve_class
+from ..context import Context
+from ..reflect import method, op, get_rtype, resolve_class
 from ..scalar import ref
+from ..scalar.number import Bool, Float, Int
 from ..state import State, StateRef
 from ..uri import URI
 
@@ -22,34 +24,64 @@ class FunctionCall(Operator):
 
     def backward(self, variable=None):
         d_function = derivative_of(self.subject)
-        raise NotImplementedError
+        return d_function(*self.args)
 
     def gradients(self, loss):
         raise NotImplementedError
 
 
 class Function(op.Post):
-    def __init__(self, form):
-        params = list(inspect.signature(form).parameters.items())
+    @classmethod
+    def reflect(cls, native):
+        sig = list(inspect.signature(native).parameters.items())
 
-        if not params:
-            raise ValueError(f"{form} is a constant, not a differentiable function")
+        if not sig:
+            raise ValueError(f"{native} is a constant, not a differentiable function")
 
-        i = 1 if params[0][0] in ["cxt", "txn"] else 0
-        for name, param in params[i:]:
-            dtype = resolve_class(form, param.annotation, State)
-            if not inspect.isclass(dtype) or not issubclass(dtype, Numeric):
+        first_param_name = sig[0][0]
+
+        if first_param_name == "self":
+            raise TypeError(f"{native} is an instance method, not a stateless Op")
+        elif first_param_name == "cls":
+            raise TypeError(f"{native} is a classmethod, not a stateless Op")
+
+        placeholders = []
+        i = 1 if first_param_name in ["cxt", "txn"] else 0
+        for name, param in sig[i:]:
+            assert param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+
+            dtype = resolve_class(native, param.annotation, State)
+            if inspect.isclass(dtype) and issubclass(dtype, Numeric):
+                placeholders.append(dtype(form=URI(name)))
+            else:
                 raise TypeError(f"a differentiable function requires only numeric inputs, not {name}: {dtype}")
 
-        op.Post.__init__(self, form)
+        context = Context()
+        args = [context] + placeholders if first_param_name in ["cxt", "txn"] else placeholders
+        context._return = native(*args)
+
+        rtype = get_rtype(native, None)
+        if not inspect.isclass(rtype) or not issubclass(rtype, Numeric):
+            raise TypeError(f"a differentiable function {native} must return a numeric type, not {rtype}")
+
+        return cls(sig, context, rtype)
+
+    def __init__(self, sig, graph, rtype):
+        self.sig = sig
+        self.graph = graph
+        self.rtype = rtype
+
+    def __call__(self, *args, **kwargs):
+        sig = self.sig[1:] if self.sig[0][0] in ["cxt", "txn"] else self.sig
+        params = op.parse_args(sig, *args, **kwargs)
+        return self.rtype(form=FunctionCall(self, params))
+
+    def __form__(self):
+        return self.graph
 
     # TODO: deduplicate with Post.__ref__
     def __ref__(self, name):
-        sig = list(inspect.signature(self.form).parameters.items())
-
-        if sig:
-            if sig[0][0] in ["cxt", "txn"]:
-                sig = sig[1:]
+        sig = self.sig[1:] if self.sig[0][0] in ["cxt", "txn"] else self.sig
 
         class FunctionRef(StateRef):
             def __call__(self, *args, **kwargs):
@@ -62,13 +94,21 @@ class Function(op.Post):
         return FunctionRef(self, URI(name))
 
     def __repr__(self):
-        return f"POST Op with form {self.form}"
+        return f"POST Op with form {self.graph}"
 
     def derivative(self):
-        # construct placeholders to match inputs
-        # populate a new Op context by calling `self.form` with the placeholder inputs
+        graph = Context()
+        graph._return = derivative_of(self.graph[-1])
 
-        raise NotImplementedError
+        rtype = type(graph[-1])
+        if rtype is bool:
+            rtype = Bool
+        elif rtype is float:
+            rtype = Float
+        elif rtype is int:
+            rtype = Int
+
+        return Function(self.sig, graph, rtype)
 
 
 class StateFunction(method.Post):
@@ -90,13 +130,12 @@ class StateFunction(method.Post):
         method.Post.__init__(self, header, form, name)
 
     def __call__(self, *args, **kwargs):
-        sig = list(inspect.signature(self.form).parameters.items())
         rtype = self.rtype
 
-        if sig[1][0] in ["cxt", "txn"]:
-            sig = sig[2:]
+        if self.sig[1][0] in ["cxt", "txn"]:
+            sig = self.sig[2:]
         else:
-            sig = sig[1:]
+            sig = self.sig[1:]
 
         params = method.parse_args(sig, *args, **kwargs)
         return rtype(form=FunctionCall(self.subject(), params))

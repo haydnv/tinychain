@@ -7,7 +7,7 @@ from ..state import State
 from ..uri import URI
 from ..context import to_json, Context
 
-from . import _get_rtype, parse_args, resolve_class
+from . import get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -36,7 +36,7 @@ class Get(Op):
     __uri__ = URI(op.Get)
 
     def __init__(self, form):
-        self.rtype = _get_rtype(form, State)
+        self.rtype = get_rtype(form, State)
         Op.__init__(self, form)
 
     def __form__(self):
@@ -129,7 +129,7 @@ class Post(Op):
     __uri__ = URI(op.Post)
 
     def __init__(self, form):
-        self.rtype = _get_rtype(form, State)
+        self.rtype = get_rtype(form, State)
         Op.__init__(self, form)
 
     def __form__(self):

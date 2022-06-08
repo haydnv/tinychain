@@ -13,15 +13,9 @@ def f(x: tc.Numeric) -> tc.Numeric:
 class OpDefTests(unittest.TestCase):
     def testDerivative(self):
         cxt = tc.Context()
-
         cxt.f = f
-        assert callable(cxt.f)
-        print(f"{cxt.f} is callable")
-
         cxt.x = tc.ml.Variable.ones([2, 2])
         cxt.f_x = cxt.f(cxt.x)
-
-        print(cxt.f_x)
         cxt.expected = tc.math.derivative_of(cxt.f_x)
         cxt.actual = tc.math.derivative_of(cxt.f)(cxt.x)
         cxt.result = cxt.expected == cxt.actual

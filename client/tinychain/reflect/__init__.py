@@ -60,6 +60,7 @@ def resolve_class(subject, annotation, default):
         raise ValueError(f"unable to resolve class {classpath}")
 
 
+# TODO: move to the Interface module to dedupe logic in Context.__getattr__
 def _resolve_interface(cls):
     assert inspect.isclass(cls)
 
@@ -72,7 +73,7 @@ def _resolve_interface(cls):
         return cls
 
 
-def _get_rtype(fn, default_rtype):
+def get_rtype(fn, default_rtype):
     from ..scalar.ref import is_op
 
     if is_op(fn):

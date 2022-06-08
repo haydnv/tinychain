@@ -6,7 +6,7 @@ from ..state import State
 from ..uri import URI
 from ..context import to_json, Context
 
-from . import _get_rtype, parse_args, resolve_class
+from . import get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -47,7 +47,7 @@ class Get(Method):
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
-        self.rtype = _get_rtype(self.form, State)
+        self.rtype = get_rtype(self.form, State)
 
     def __call__(self, key=None):
         return self.rtype(form=ref.Get(self.subject(), key))
@@ -79,7 +79,7 @@ class Put(Method):
     __uri__ = URI(op.Put)
 
     def __init__(self, header, form, name):
-        rtype = _get_rtype(form, None)
+        rtype = get_rtype(form, None)
 
         if not ref.is_none(rtype):
             raise ValueError(f"PUT method must return None, not f{rtype}")
@@ -137,7 +137,7 @@ class Post(Method):
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
-        self.rtype = _get_rtype(self.form, State)
+        self.rtype = get_rtype(self.form, State)
 
     def __call__(self, *args, **kwargs):
         sig = list(inspect.signature(self.form).parameters.items())
@@ -187,7 +187,7 @@ class Delete(Method):
     __uri__ = URI(op.Delete)
 
     def __init__(self, header, form, name):
-        rtype = _get_rtype(form, None)
+        rtype = get_rtype(form, None)
 
         if not ref.is_none(rtype):
             raise ValueError(f"DELETE method must return None, not f{rtype}")
