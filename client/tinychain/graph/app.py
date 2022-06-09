@@ -11,7 +11,6 @@ from ..collection.tensor import Sparse
 from ..decorators import closure, get, put
 from ..error import BadRequest
 from ..generic import Tuple
-from ..registry import Registry
 from ..scalar.number import U32, Bool
 from ..scalar.ref import After, If, Put
 from ..uri import URI
@@ -19,6 +18,7 @@ from .edge import DIM, Edge, ForeignKey
 from .edge import Schema as EdgeSchema
 
 if TYPE_CHECKING:
+    from ..app import Model
     from ..collection.table import Schema as TableSchema
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
@@ -87,8 +87,8 @@ class Graph(App):
     schema = None
 
     # TODO: remove the and `chain_type` parameters and generate the initial schema via reflection
-    def __init__(self, chain_type=Sync):
-        self._initalise_schema()
+    def __init__(self, models: list[Model], chain_type=Sync):
+        self._initalise_schema(models)
 
         for (label, edge) in self.schema.edges.items():
             if hasattr(self, label):
@@ -107,9 +107,9 @@ class Graph(App):
 
         App.__init__(self)
 
-    def _initalise_schema(self):
+    def _initalise_schema(self, models: list[Model]):
         """Automatically build a Graph of all models that have been registerd using the registry."""
-        self.schema = create_schema([cts(m) for m in Registry().models.values()])
+        self.schema = create_schema([cts(m) for m in models])
 
 
 def graph_table(graph, schema, table_name):

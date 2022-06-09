@@ -4,7 +4,6 @@ import tinychain.graph
 import tinychain.ml
 import tinychain.ml.service
 import tinychain.scalar
-from tinychain.registry import Registry
 from tinychain.collection import Column, btree, table, tensor
 from tinychain.context import Context, print_json, to_json
 from tinychain.decorators import closure, delete, differentiable, get, post, put

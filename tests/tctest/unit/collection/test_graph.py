@@ -16,9 +16,8 @@ class Graph_(tc.graph.Graph):
 class GraphTests(unittest.TestCase):
 
     def test_initaliseSchema_graphCreatedOnInit(self):
-        tc.registry.Registry(create_new=True).register(User)
         expected = tc.graph.Schema().create_table("user", tc.table.create_schema(User))
-        graph = Graph_()
+        graph = Graph_([User])
         self.assertIsInstance(graph.schema, tc.graph.Schema)
         self.assertEqual(sorted(graph.schema.tables), sorted(expected.tables))
 
