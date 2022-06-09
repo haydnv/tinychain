@@ -15,15 +15,12 @@ class ModelTests(unittest.TestCase):
         """Parameterized unit test for the `class_name` function."""
         cases = [
             (User, "user"),
-            (Order, "order"),
-            (Product, "product"),
-            (type("A", (tc.app.Model,), {}), "a"),
-            (type("AA", (tc.app.Model,), {}), "a_a"),
+            (User(1, "first", "last"), "user"),
             (type("HiAA", (tc.app.Model,), {}), "hi_a_a"),
         ]
         for c, e in cases:
             with self.subTest(c=c, e=e):
-                self.assertEqual(c.class_name(), e)
+                self.assertEqual(tc.app.class_name(c), e)
 
     def test_key(self):
         """Parameterized unit test for the `key` function."""

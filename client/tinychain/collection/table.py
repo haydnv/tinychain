@@ -228,10 +228,10 @@ def create_schema(modelclass: Type[Model]) -> Schema:
             values.append(attr)
         else:
             try:
-                from ..app import Model
+                from ..app import Model, class_name
                 assert issubclass(attr, Model)
                 values.append(*attr.key())
-                indices.append((attr.class_name(), [attr.key()[0].name]))
+                indices.append((class_name(attr), [attr.key()[0].name]))
             except (TypeError, AssertionError):
                 continue
 

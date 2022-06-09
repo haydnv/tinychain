@@ -19,6 +19,19 @@ from .state import Class, Instance, Object, State
 from .uri import URI
 
 
+def class_name(object_):
+    """A snake case representation of the class name. You can pass a Class or object as
+    an argument.
+    """
+    if isinstance(object_, type):
+        name = object_.__name__
+    else:
+        name = object_.__class__.__name__
+
+    return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
+
+
+# fmt: off
 class Model(Object, metaclass=Meta):
 
     def __new__(cls, *args, **kwargs):
@@ -83,15 +96,7 @@ class Model(Object, metaclass=Meta):
     @classmethod
     def key(cls):
         """A Column object which will be used as the key for a given model."""
-        return [Column(cls.class_name() + "_id", U32)]
-
-    @classmethod
-    def class_name(cls):
-        """A snake case representation of the class name."""
-        return "".join(
-            ["_" + n.lower() if n.isupper() else n for n in cls.__name__]
-        ).lstrip("_")
-
+        return [Column(class_name(cls) + "_id", U32)]
 
 class _Header(object):
     pass
