@@ -8,7 +8,7 @@ from ..state import State, StateRef
 from ..uri import URI
 
 from .interface import Numeric
-from .operator import derivative_of, gradients, operator, Gradients, Operator
+from .operator import derivative_of, gradients, Gradients, Operator
 
 
 class FunctionCall(Operator):
@@ -29,12 +29,14 @@ class FunctionCall(Operator):
         grads = Gradients()
 
         for arg in self.args.values():
-           grads.update(gradients(arg, loss * self.backward(arg)))
+            grads.update(gradients(arg, loss * self.backward(arg)))
 
         return grads
 
 
+# TODO: separate into Function and NativeFunction
 class Function(op.Post):
+    # TODO: refactor this to be an instance method of NativeFunction
     @classmethod
     def reflect(cls, native):
         sig = list(inspect.signature(native).parameters.items())
@@ -115,6 +117,7 @@ class Function(op.Post):
         return Function(self.sig, graph, rtype)
 
 
+# TODO: separate into StateFunction and NativeStateFunction
 class StateFunction(method.Post):
     def __init__(self, header, form, name):
         params = list(inspect.signature(form).parameters.items())
