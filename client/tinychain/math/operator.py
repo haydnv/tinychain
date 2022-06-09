@@ -172,11 +172,17 @@ class Exp(Unary):
     def forward(self):
         return Numeric.exp(self.subject)
 
-    def backward(self, _variable=None):
-        return self.subject.exp()
+    def backward(self, variable=None):
+        if same_as(variable, self.subject):
+            return derivative_of(self.subject, variable).exp()
+        elif operator(self.subject):
+            # this operator always has exactly one argument, so it's safe to hard-code the single-variable chain rule
+            return derivative_of(self.subject) * self.subject.exp()
+        else:
+            return self.subject.exp()
 
     def gradients(self, loss):
-        return gradients(self.subject, loss * self.backward())
+        return gradients(self.subject, loss * self.subject.exp())
 
     def simplify(self):
         subject = simplify(self.subject)
@@ -408,7 +414,6 @@ class Dual(Operator):
         Operator.__init__(self, subject, args)
 
 
-# TODO: logarithm with an explicit base
 class Log(Operator):
     def __repr__(self):
         return f"log({self.subject})"
@@ -418,14 +423,18 @@ class Log(Operator):
         return self.subject.shape
 
     def forward(self):
-        return Numeric.log(self.subject, self.args)
+        return Numeric.log(self.subject)
 
     def backward(self, variable=None):
-        subject = derivative_of(self.subject, variable) if same_as(self.subject, variable) else self.subject
-        return 1 / subject
+        if variable is None:
+            return chain_rule(self, self.subject, self.args) / self.subject
+        elif same_as(self.subject, variable):
+            return 1 / derivative_of(self.subject, variable)
+        else:
+            return 1 / self.subject
 
     def gradients(self, loss):
-        return gradients(self.subject, loss * self.backward())
+        return gradients(self.subject, loss / self.subject)
 
     def simplify(self):
         subject = simplify(self.subject)
@@ -484,8 +493,10 @@ class Pow(Dual):
     def backward(self, variable=None):
         if same_as(self.args, variable):
             return (self.subject**self.args) * self.subject.log()
-
-        return self.args * (self.subject**(self.args - 1))
+        elif variable is None:
+            return chain_rule(self, self.subject, self.args) * self.args * (self.subject**(self.args - 1))
+        else:
+            return self.args * (self.subject ** (self.args - 1))
 
     def gradients(self, loss):
         subject_grad = loss * self.args * self.subject**(self.args - 1)
@@ -659,30 +670,26 @@ class Div(DualBroadcast):
             return Div(subject, args)
 
 
-def chain_rule(numeric):
+def chain_rule(op, *args):
     """
     Compute the chain rule coefficient of the given :class:`Operator`.
 
     This function will return `1` if the given `numeric` is constant, or has only constant inputs.
     """
 
-    if operator(numeric):
-        op = operator(numeric)
+    if operator(op):
+        op = operator(op)
     else:
-        raise ValueError(f"cannot apply the chain rule to a constant {numeric}")
+        raise ValueError(f"cannot apply the chain rule to a constant {op}")
 
-    # only apply the chain rule for ops that have been explicitly tested
-    if not isinstance(op, (Exp, Log, Pow)):
+    args = [arg for arg in args if operator(arg)]
+
+    if not args:
         return 1
-
-    if operator(op.subject) and operator(op.args):
-        raise NotImplementedError("multivariate chain rule")
-    elif operator(op.subject):
-        return derivative_of(op.subject)
-    elif operator(op.args):
-        return derivative_of(op.args)
+    elif len(args) == 1:
+        return derivative_of(args[0])
     else:
-        return 1
+        return sum(derivative_of(op, arg) * derivative_of(arg) for arg in args)
 
 
 def constant(numeric):
@@ -710,9 +717,6 @@ def derivative_of(state, variable=None, keepdims=False):
     If the given `state` is not differentiable, this will raise a `TypeError`.
     """
 
-    if not is_numeric(state):
-        raise ValueError(f"cannot take the derivative of a non-numeric state {state} (note the type {type(state)})")
-
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
         return ones_like(state, keepdims)
@@ -730,18 +734,7 @@ def derivative_of(state, variable=None, keepdims=False):
     if is_constant(state):
         return zeros_like(state, keepdims)
     elif operator(state):
-        from ..collection.tensor import Dense, NDArray
-
-        coeff = chain_rule(state)
-        d = operator(state).backward(variable)
-
-        if isinstance(state, NDArray) and keepdims:
-            if same_as(d, 0):
-                d = zeros_like(state)
-            elif same_as(d, 1):
-                d = ones_like(state)
-
-        return coeff * d
+        return operator(state).backward(variable)
     else:
         raise ValueError(f"the derivative of {state} is not defined")
 
@@ -784,9 +777,6 @@ def is_constant(numeric):
     """
     Return `False` if the given `numeric` state is the result of an :class:`Operator`, i.e. a differentiable function.
     """
-
-    if not is_numeric(numeric):
-        raise TypeError(f"a non-numeric state {numeric} (type {type(numeric)}) cannot be a numeric constant")
 
     return operator(numeric) is None
 
@@ -877,30 +867,32 @@ def shape_of(numeric):
 
 def ones_like(state, keepdims=True):
     from ..collection.tensor import Dense
+    from ..scalar.number import Number
 
     if not keepdims:
-        return 1
+        return Number(1)
 
     if is_literal(state) or same_as(state.shape.ndim(), 0):
         if isinstance(state, Numeric):
             return type(state)(form=1)
         else:
-            return 1
+            return Number(1)
     else:
         return Dense.ones_like(state)
 
 
 def zeros_like(state, keepdims=True):
     from ..collection.tensor import Sparse
+    from ..scalar.number import Number
 
     if not keepdims:
-        return 0
+        return Number(0)
 
     if is_literal(state) or same_as(state.shape.ndim(), 0):
         if isinstance(state, Numeric):
             return type(state)(form=0)
         else:
-            return 0
+            return Number(0)
     else:
         return Sparse.zeros_like(state)
 
