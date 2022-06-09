@@ -8,7 +8,7 @@ from ..state import State, StateRef
 from ..uri import URI
 
 from .interface import Numeric
-from .operator import derivative_of, Operator
+from .operator import derivative_of, gradients, operator, Gradients, Operator
 
 
 class FunctionCall(Operator):
@@ -23,11 +23,15 @@ class FunctionCall(Operator):
         return ref.Post(self.subject, self.args)
 
     def backward(self, variable=None):
-        d_function = derivative_of(self.subject)
-        return d_function(**self.args)
+        return derivative_of(self.subject)(**self.args)
 
     def gradients(self, loss):
-        raise NotImplementedError
+        grads = Gradients()
+
+        for arg in self.args.values():
+           grads.update(gradients(arg, loss * self.backward(arg)))
+
+        return grads
 
 
 class Function(op.Post):
