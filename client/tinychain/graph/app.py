@@ -231,8 +231,11 @@ def create_schema(schemas: list[TableSchema]) -> Schema:
     """Create a graph schema using model schemas."""
     graph_schema = Schema()
     indices = {}
+    from ..collection.table import Schema as TableSchema
 
     for s in schemas:
+        assert isinstance(s, TableSchema)
+        assert isinstance(s.key[0], Column)
         name = s.key[0].name.removesuffix("_id")
         graph_schema.create_table(name, s)
         for i in s.indices:
