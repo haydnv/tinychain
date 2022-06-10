@@ -14,16 +14,24 @@ class Graph_(tc.graph.Graph):
 
 
 class GraphTests(unittest.TestCase):
-
-    def test_initaliseSchema_graphCreatedOnInit(self):
+    def test_initaliseSchema_schemaCreatedOnInit(self):
         expected = tc.graph.Schema().create_table("user", tc.table.create_schema(User))
-        graph = Graph_([User])
+        graph = Graph_(models=[User])
         self.assertIsInstance(graph.schema, tc.graph.Schema)
         self.assertEqual(sorted(graph.schema.tables), sorted(expected.tables))
 
+    def test_initaliseSchema_schemaPassedAsArgument(self):
+        expected = tc.graph.Schema().create_table("user", tc.table.create_schema(User))
+        graph = Graph_(schema=expected)
+        self.assertIsInstance(graph.schema, tc.graph.Schema)
+        self.assertEqual(sorted(graph.schema.tables), sorted(expected.tables))
+
+    def test_initaliseSchema_noArguments(self):
+        with self.assertRaises(ValueError):
+            Graph_()
+
 
 class GraphCreateSchemaTests(unittest.TestCase):
-
     def test_createSchema_simple(self):
         """Test that creating a schema works using a basic Model."""
         users = tc.table.create_schema(User)

@@ -86,9 +86,14 @@ class Graph(App):
     """
     schema = None
 
-    # TODO: remove the and `chain_type` parameters and generate the initial schema via reflection
-    def __init__(self, models: list[Model], chain_type=Sync):
-        self._initalise_schema(models)
+    # TODO: remove the `chain_type` parameter and generate the initial schema via reflection
+    def __init__(self, models: list[Model] = None, schema: Schema = None, chain_type=Sync):
+        if isinstance(schema, Schema):
+            self.schema = schema
+        elif isinstance(models, list):
+            self._initalise_schema(models)
+        else:
+            raise ValueError("One of `models` or `schema` is required as an argument.")
 
         for (label, edge) in self.schema.edges.items():
             if hasattr(self, label):
