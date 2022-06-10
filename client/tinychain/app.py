@@ -102,7 +102,8 @@ class Dynamic(Instance):
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(self, name, attr.method(self, name))
+                for method_name, method in attr.expand(self, name):
+                    setattr(self, method_name, method)
             elif isinstance(attr, State):
                 if not independent(attr):
                     classname = self.__class__.__name__
@@ -136,7 +137,8 @@ class Dynamic(Instance):
 
             if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
                 stub = getattr(self.__class__, name)
-                form[name] = stub.method(header, name)
+                for method_name, method in stub.expand(header, name):
+                    form[method_name] = method
             elif isinstance(attr, ModelRef):
                 form[name] = attr.instance
             else:
@@ -181,7 +183,8 @@ class ModelRef(Ref):
                 setattr(self, name, attr)
             elif hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
                 stub = getattr(instance.__class__, name)
-                setattr(self, name, stub.method(self, name))
+                for method_name, method in stub.expand(self, name):
+                    setattr(self, method_name, method)
             else:
                 setattr(self, name, get_ref(attr, URI(self).append(name)))
 
@@ -232,7 +235,8 @@ class Library(object):
 
             if isinstance(attr, MethodStub):
                 self._methods[name] = attr
-                setattr(self, name, attr.method(self, name))
+                for method_name, method in attr.expand(self, name):
+                    setattr(self, method_name, method)
 
     def __repr__(self):
         return f"{self.__class__.__name__}({URI(self)})"
@@ -283,7 +287,8 @@ class App(Library):
             if name.startswith('_'):
                 continue
             elif isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(self, name))
+                for method_name, method in attr.expand(self, name):
+                    setattr(header, method_name, method)
             else:
                 setattr(header, name, get_ref(attr, f"self/{name}"))
 
@@ -306,7 +311,8 @@ class App(Library):
                 continue
 
             elif name in self._methods:
-                form[name] = to_json(self._methods[name].method(header, name))
+                for method_name, method in self._methods[name].expand(header, name):
+                    form[method_name] = to_json(method)
 
             elif _is_mutable(attr):
                 assert isinstance(attr, Chain)

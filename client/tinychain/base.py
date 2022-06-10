@@ -19,8 +19,8 @@ class _Base(object):
             attr = getattr(self, name)
 
             if isinstance(attr, MethodStub):
-                method = attr.method(self, name)
-                setattr(self, name, method)
+                for method_name, method in attr.expand(self, name):
+                    setattr(self, method_name, method)
 
     def _get(self, name, key=None, rtype=None):
         from .scalar.ref import Get, MethodSubject

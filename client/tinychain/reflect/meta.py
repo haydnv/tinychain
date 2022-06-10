@@ -59,7 +59,8 @@ class Meta(type):
 
                 form[name] = attr
             if isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(instance_header, name))
+                for method_name, method in attr.expand(instance_header, name):
+                    form[method_name] = to_json(method)
             else:
                 form[name] = attr
 
@@ -85,5 +86,5 @@ class MethodStub(object):
     def __call__(self, *args, **kwargs):
         raise RuntimeError(f"cannot call the instance method {self.form} from a static context")
 
-    def method(self, header, name):
-        return self.dtype(header, self.form, name)
+    def expand(self, header, name):
+        return self.dtype.expand(header, self.form, name)

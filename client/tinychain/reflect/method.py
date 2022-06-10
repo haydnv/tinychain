@@ -15,6 +15,10 @@ EMPTY = inspect.Parameter.empty
 class Method(object):
     __uri__ = URI(op.Op)
 
+    @classmethod
+    def expand(cls, header, form, name):
+        yield name, cls(header, form, name)
+
     def __init__(self, header, form, name):
         if not inspect.isfunction(form):
             raise ValueError(f"reflection requires a Python method, not {form}")
