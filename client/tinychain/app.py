@@ -1,24 +1,39 @@
 """A hosted :class:`App` or :class:`Library`."""
-
 import inspect
 import logging
 import typing
 
-from .collection import Collection
-from .reflect import parse_args
-from .reflect.meta import Meta, MethodStub
 from .chain import Chain
+from .collection import Collection, Column
+from .collection.table import Schema
+from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
-from .scalar.ref import depends_on, form_of, get_ref, independent, Ref
-from .scalar.value import Nil
+from .reflect import parse_args
+from .reflect.meta import Meta, MethodStub
 from .scalar import Scalar
+from .scalar.number import U32
+from .scalar.ref import Ref, depends_on, form_of, get_ref, independent
+from .scalar.value import Nil
 from .state import Class, Instance, Object, State
 from .uri import URI
-from .context import to_json
 
 
+def class_name(object_):
+    """A snake case representation of the class name. You can pass a Class or object as
+    an argument.
+    """
+    if isinstance(object_, type):
+        name = object_.__name__
+    else:
+        name = object_.__class__.__name__
+
+    return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
+
+
+# fmt: off
 class Model(Object, metaclass=Meta):
+
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
@@ -78,6 +93,10 @@ class Model(Object, metaclass=Meta):
     def __ref__(self, name):
         return ModelRef(self, name)
 
+    @classmethod
+    def key(cls):
+        """A Column object which will be used as the key for a given model."""
+        return [Column(class_name(cls) + "_id", U32)]
 
 class _Header(object):
     pass

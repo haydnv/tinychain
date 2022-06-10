@@ -7,7 +7,7 @@ The test suite must be run from the main project directory in order to make the 
 Example usage:
 ```bash
 # python3 and pip3 may be python and pip on newer systems
-pip3 install -e tests
+pip3 install -r tests/requirements.txt
 python3 -m tests.tctest.client
 python3 -m tests.tctest.apps -k Library
 python3 -m tests.tctest # run all tests
