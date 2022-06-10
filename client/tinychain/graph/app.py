@@ -106,8 +106,8 @@ def graph_table(graph, schema, table_name):
         raise ValueError("Graph table key must be a single column of type U32, not", table_schema.key)
 
     [key_col] = table_schema.key
-    if key_col._method_name != U32:
-        raise ValueError("Graph table key must be type U32, not", key_col._method_name)
+    if key_col.dtype != U32:
+        raise ValueError("Graph table key must be type U32, not", key_col.dtype)
 
     def delete_row(edge, adjacent, row):
         delete_from = adjacent[row[edge.column]].write(False)

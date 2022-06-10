@@ -14,7 +14,7 @@ class Column(object):
         self.max_size = max_size
 
     def __eq__(self, other):
-        return self.name == other.name and self.dtype == other._method_name and self.max_size == other.max_size
+        return self.name == other.name and self.max_size == other.max_size and self.dtype is other.dtype
 
     def __json__(self):
         if self.max_size is None:

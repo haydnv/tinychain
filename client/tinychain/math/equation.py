@@ -70,6 +70,7 @@ class Function(op.Post):
         return Function(self.sig, graph, type(graph[-1]))
 
 
+# TODO: dedupe with op.Post
 class NativeFunction(Function):
     def __init__(self, form):
         self.sig = list(inspect.signature(form).parameters.items())
@@ -121,22 +122,13 @@ class NativeFunction(Function):
 
 
 class StateFunction(method.Post):
-    def __init__(self, header, form, name):
-        params = list(inspect.signature(form).parameters.items())
-
-        if not params or params[0][0] != "self":
-            raise ValueError(f"{form} is missing a self parameter")
-
-        i = 2 if params[1][0] in ["cxt", "txn"] else 1
-        if i == len(params):
-            raise ValueError(f"{form} is a constant, not a differentiable method")
-
-        for name, param in params[i:]:
-            dtype = resolve_class(form, param.annotation, State)
-            if not inspect.isclass(dtype) or not issubclass(dtype, Numeric):
-                raise TypeError(f"a differentiable method requires only numeric inputs, not {name}: {dtype}")
-
-        method.Post.__init__(self, header, form, name)
+    def __init__(self, header, degree, name, sig, graph, rtype):
+        self.header = header
+        self.degree = degree
+        self.name = name
+        self.sig = sig
+        self.graph = graph
+        self.rtype = rtype
 
     def __call__(self, *args, **kwargs):
         rtype = self.rtype
@@ -147,8 +139,59 @@ class StateFunction(method.Post):
             sig = self.sig[1:]
 
         params = method.parse_args(sig, *args, **kwargs)
-        return rtype(form=FunctionCall(self.subject(), params))
+        return rtype(form=FunctionCall(self, params))
+
+    def __form__(self):
+        return self.graph
 
 
+# TODO: dedupe with method.Post
 class NativeStateFunction(StateFunction):
-    pass
+    def __init__(self, header, form, name):
+        self.degree = 0
+        self.header = header
+        self.name = name
+        self.sig = list(inspect.signature(form).parameters.items())
+        self.form = form
+        self.rtype = get_rtype(form, State)
+
+        if not self.sig or self.sig[0][0] != "self":
+            raise ValueError(f"{form} is missing a self parameter")
+
+        i = 2 if self.sig[1][0] in ["cxt", "txn"] else 1
+        if i == len(self.sig):
+            raise ValueError(f"{form} is a constant, not a differentiable method")
+
+        for name, param in self.sig[i:]:
+            dtype = resolve_class(form, param.annotation, State)
+            if not inspect.isclass(dtype) or not issubclass(dtype, Numeric):
+                raise TypeError(f"a differentiable method requires only numeric inputs, not {name}: {dtype}")
+
+        if not inspect.isclass(self.rtype) or not issubclass(self.rtype, Numeric):
+            raise TypeError(f"a differentiable method must return a numeric type, not {self.rtype}")
+
+    def __form__(self):
+        cxt, args = method.first_params(self)
+
+        kwargs = {}
+        for name, param in self.sig[len(args):]:
+            dtype = State
+            if param.default is inspect.Parameter.empty:
+                if param.annotation:
+                    dtype = param.annotation
+            elif isinstance(param.default, State):
+                dtype = type(param.default)
+
+            dtype = resolve_class(self.form, dtype, State)
+            kwargs[name] = dtype(form=URI(name))
+
+        cxt._return = self.form(*args, **kwargs)
+
+        for name in kwargs.keys():
+            if name in cxt:
+                raise RuntimeError(f"namespace collision: {name} in {self.form}")
+
+        return cxt
+
+    def derivative(self):
+        raise NotImplementedError
