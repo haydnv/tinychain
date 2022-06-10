@@ -30,9 +30,6 @@ class Method(object):
     def __json__(self):
         return {str(URI(self)): to_json(ref.form_of(self))}
 
-    def _method_type_name(self):
-        return self.__class__.__name__
-
     def subject(self):
         if isinstance(self.header, State):
             return ref.MethodSubject(self.header, self.name)
@@ -63,7 +60,7 @@ class Get(Method):
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(form=URI(key_name)))
         else:
-            raise ValueError(f"{self._method_type_name()} takes 0-3 parameters: (self, cxt, key)")
+            raise ValueError(f"{self} should 0-3 parameters: (self, cxt, key)")
 
         if key_name in cxt:
             raise RuntimeError(f"namespace collision: {key_name} in {self.form}")
@@ -107,7 +104,7 @@ class Put(Method):
                 dtype = resolve_class(self.form, param.annotation, State)
                 args.append(dtype(form=URI(value_name)))
             else:
-                raise ValueError(f"{self._method_type_name()} with three parameters requires 'key' or 'value', not '{name}'")
+                raise ValueError(f"a PUT method with three parameters requires an explicit 'key' or 'value', not '{name}'")
         elif len(sig.parameters) - len(args) == 2:
             key_name, value_name = list(sig.parameters.keys())[-2:]
 
@@ -119,7 +116,7 @@ class Put(Method):
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(form=URI(value_name)))
         else:
-            raise ValueError(f"{self._method_type_name()} requires 0-4 parameters: (self, cxt, key, value)")
+            raise ValueError(f"a PUT method requires 0-4 parameters: (self, cxt, key, value)")
 
         cxt._return = self.form(*args)
 
@@ -142,9 +139,9 @@ class Post(Method):
         rtype = self.rtype
 
         if not sig:
-            raise TypeError(f"POST method signature for {self} is missing the 'self' parameter")
+            raise TypeError(f"the method signature for {self} is missing the 'self' parameter")
         elif sig[0][0] != "self":
-            raise TypeError(f"POST method signature must begin with 'self', not '{sig[0][0]}'")
+            raise TypeError(f"a method signature must begin with 'self', not '{sig[0][0]}'")
 
         if len(sig) > 1 and sig[1][0] in ["cxt", "txn"]:
             sig = sig[2:]
@@ -212,7 +209,7 @@ def first_params(method):
     sig = inspect.signature(method.form)
 
     if not sig.parameters:
-        raise ValueError(f"{method._method_type_name()} has at least one argument: (self, cxt, name1=val1, ...)")
+        raise ValueError(f"a method has at least one argument: (self, cxt, name1=val1, ...)")
 
     args = []
 
@@ -221,7 +218,7 @@ def first_params(method):
     if param_names[0] == "self":
         args.append(method.header)
     else:
-        raise ValueError(f"first argument to {method._method_type_name()} must be 'self', not {param_names[0]}")
+        raise ValueError(f"the first argument to a method must be 'self', not {param_names[0]}")
 
     cxt = Context()
 
