@@ -225,7 +225,7 @@ def validate(cxt, provided):
         if name in cxt:
             raise RuntimeError(f"namespace collision: {name} in {cxt}")
 
-    for name in cxt.form:
+    for name in cxt:
         def validate_ref(ref):
             if not hasattr(ref, "__uri__") and not isinstance(ref, URI):
                 return
@@ -234,7 +234,7 @@ def validate(cxt, provided):
             if ref.id() is not None and ref.id() not in defined:
                 logging.info(f"{cxt} depends on undefined state {ref.id()}--is it part of a Closure?")
 
-        form = cxt.form[name]
+        form = getattr(cxt, name)
         while hasattr(form, "__form__"):
             form = ref.form_of(form)
 
