@@ -458,6 +458,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
     def mul(self, other):
         if ref.same_as(other, 1):
             return self
+        elif ref.same_as(other, 0):
+            return other
 
         return Tensor(form=Mul(self, other))
 
@@ -517,6 +519,9 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return WritableView(Slice(self, bounds))
 
     def sub(self, other):
+        if ref.same_as(other, 0):
+            return self
+
         return Tensor(form=Sub(self, other))
 
     def sum(self, axis=None, keepdims=False):
@@ -700,6 +705,9 @@ class Dense(Tensor):
         return self._get("elements", bounds, Stream)
 
     def sub(self, other):
+        if ref.same_as(other, 0):
+            return self
+
         return Dense(form=Tensor.sub(self, other))
 
 
@@ -761,6 +769,8 @@ class Sparse(Tensor):
     def mul(self, other):
         if ref.same_as(other, 1):
             return self
+        elif ref.same_as(other, 0):
+            return other
 
         return Sparse(form=Tensor.mul(self, other))
 

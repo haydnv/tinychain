@@ -18,6 +18,12 @@ class NeuralNetTester(tc.app.Library):
         layer = tc.ml.nn.Linear.create(2, 1)
         return layer.eval(inputs)
 
+    @tc.post
+    def test_derivative(self, inputs: tc.tensor.Tensor) -> tc.F32:
+        layer = tc.ml.nn.Linear.create(2, 1)
+        outputs = layer.eval(inputs)
+        return tc.math.gradients(outputs, tc.tensor.Dense.ones_like(outputs), [layer.weights, layer.bias])
+
 
 class NeuralNetTests(unittest.TestCase):
     @classmethod
@@ -26,7 +32,11 @@ class NeuralNetTests(unittest.TestCase):
 
     def testLinear(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        print(self.host.post(tc.URI(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)}))
+        self.host.post(tc.URI(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
+
+    def testDerivative(self):
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        self.host.post(tc.URI(NeuralNetTester).append("test_derivative"), {"inputs": load_dense(inputs)})
 
     @classmethod
     def tearDownClass(cls) -> None:

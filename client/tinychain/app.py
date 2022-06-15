@@ -1,11 +1,11 @@
 """A hosted :class:`App` or :class:`Library`."""
+
 import inspect
 import logging
 import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .collection.table import Schema
 from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
@@ -97,6 +97,7 @@ class Model(Object, metaclass=Meta):
     def key(cls):
         """A Column object which will be used as the key for a given model."""
         return [Column(class_name(cls) + "_id", U32)]
+
 
 class _Header(object):
     pass
@@ -197,15 +198,27 @@ class ModelRef(Ref):
 
             if name.startswith('_'):
                 if isinstance(attr, State):
-                    logging.warning(f"referencing {instance} without referencing hidden State {name}")
+                    logging.warning(f"referencing {instance} without referencing protected State {name}")
 
                 setattr(self, name, attr)
             elif hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
+                continue  # make a second pass below after setting all the instance variables
+            else:
+                setattr(self, name, get_ref(attr, URI(self).append(name)))
+
+        for name, attr in inspect.getmembers(self.instance):
+            if name.startswith('__'):
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+            elif name.startswith('_'):
+                continue  # already handled above
+
+            if hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
                 stub = getattr(instance.__class__, name)
                 for method_name, method in stub.expand(self, name):
                     setattr(self, method_name, method)
-            else:
-                setattr(self, name, get_ref(attr, URI(self).append(name)))
 
     def __json__(self):
         return to_json(URI(self))

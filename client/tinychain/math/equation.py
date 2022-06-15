@@ -1,7 +1,6 @@
 import inspect
 
 from ..context import deanonymize, Context
-from ..generic import Map
 from ..reflect import method, op, get_rtype, resolve_class
 from ..scalar import ref
 from ..state import State, StateRef
@@ -157,9 +156,18 @@ class NativeFunction(Function):
 class StateFunction(method.Post):
     @classmethod
     def expand(cls, header, form, name):
-        yield name, NativeStateFunction(header, form, name)
+        function = NativeStateFunction(header, form, name)
+        yield name, function
 
-        raise NotImplementedError("expand StateFunction derivatives")
+        degree = 1
+        form = ref.form_of(function)
+
+        graph = Context()
+        graph._return = derivative_of(form[-1])
+
+        derivative = StateFunction(header, degree, name, function.sig, graph, type(graph[-1]))
+
+        yield f"d_{name}", derivative
 
     def __init__(self, header, degree, name, sig, graph, rtype):
         self.header = header
@@ -199,6 +207,14 @@ class StateFunction(method.Post):
                 return self.state.derivative()
 
         return StateFunctionRef(self, URI(name))
+
+    def derivative(self):
+        if self.degree == 0:
+            name = f"d_{self.name}"
+        else:
+            name = f"d{self.degree + 1}_{self.name}"
+
+        return getattr(self.header, name)
 
 
 # TODO: dedupe with method.Post
@@ -248,11 +264,3 @@ class NativeStateFunction(StateFunction):
                 raise RuntimeError(f"namespace collision: {name} in {self.form}")
 
         return cxt
-
-    def derivative(self):
-        form = ref.form_of(self)
-
-        graph = Context()
-        graph._return = derivative_of(form[-1])
-
-        return StateFunction(self.header, self.degree + 1, self.name, self.sig, graph, type(graph[-1]))
