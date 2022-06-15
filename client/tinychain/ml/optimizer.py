@@ -51,8 +51,9 @@ class _Optimizer(Optimizer, Dynamic):
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
+        grads = gradients(outputs, cxt.d_loss)
         grads = {
-            var_names[var]: simplify(grad) for var, grad in gradients(outputs, cxt.d_loss).items()
+            var_names[var]: simplify(grad) for var, grad in grads.items()
             if var in var_names}
 
         assert all(name in grads for name in trainable)

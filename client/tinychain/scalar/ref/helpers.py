@@ -53,15 +53,15 @@ def deref(state):
 
     from .base import FlowControl, Op as OpRef
 
-    if isinstance(state, (FlowControl, OpRef)) or callable(state) or inspect.isclass(state):
+    if isinstance(state, (FlowControl, OpRef)) or inspect.isclass(state):
         return state
 
-    if form_of(state) is not state:
-        return deref(form_of(state))
-    elif isinstance(state, Ref) and hasattr(state, "state"):
+    if isinstance(state, Ref) and hasattr(state, "state"):
         return deref(state.state)
     elif isinstance(state, MethodSubject):
         return deref(state.subject)
+    elif form_of(state) is not state:
+        return deref(form_of(state))
     else:
         return state
 

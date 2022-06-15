@@ -1,6 +1,7 @@
 import inspect
 
-from ..context import Context
+from ..context import deanonymize, Context
+from ..generic import Map
 from ..reflect import method, op, get_rtype, resolve_class
 from ..scalar import ref
 from ..state import State, StateRef
@@ -11,6 +12,18 @@ from .operator import derivative_of, gradients, Gradients, Operator
 
 
 class FunctionCall(Operator):
+    def __ns__(self, context, name_hint):
+        deanonymize(self.subject, context, name_hint + "_subject")
+        deanonymize(self.args, context, name_hint + "_args")
+
+        if not ref.is_ref(self.subject):
+            self.subject = ref.reference(context, self.subject, name_hint + "_subject")
+            assert isinstance(self.subject, StateRef)
+
+        for name in self.args:
+            if ref.is_op_ref(self.args[name]):
+                self.args[name] = ref.reference(context, self.args[name], f"{name_hint}_{name}")
+
     def __repr__(self):
         return f"call {self.subject} with inputs {self.args}"
 
@@ -22,13 +35,33 @@ class FunctionCall(Operator):
         return ref.Post(self.subject, self.args)
 
     def backward(self, variable=None):
-        return derivative_of(self.subject)(**self.args)
+        d = derivative_of(self.subject)
+
+        if isinstance(d, (Function, StateFunction)):
+            return derivative_of(self.subject)(**self.args)
+        else:
+            return d
 
     def gradients(self, loss):
         grads = Gradients()
 
         for arg in self.args.values():
             grads.update(gradients(arg, loss * self.backward(arg)))
+
+        subject = self.subject
+        while isinstance(subject, StateRef):
+            subject = subject.state
+
+        assert isinstance(subject, (Function, StateFunction))
+
+        if isinstance(subject, StateFunction):
+            for member_name in dir(subject.header):
+                if member_name.startswith('_'):
+                    continue
+
+                member = getattr(subject.header, member_name)
+                if isinstance(member, Numeric):
+                    grads.update(gradients(member, loss * self.backward(member)))
 
         return grads
 
@@ -122,6 +155,12 @@ class NativeFunction(Function):
 
 
 class StateFunction(method.Post):
+    @classmethod
+    def expand(cls, header, form, name):
+        yield name, NativeStateFunction(header, form, name)
+
+        raise NotImplementedError("expand StateFunction derivatives")
+
     def __init__(self, header, degree, name, sig, graph, rtype):
         self.header = header
         self.degree = degree
@@ -143,6 +182,23 @@ class StateFunction(method.Post):
 
     def __form__(self):
         return self.graph
+
+    # TODO: deduplicate with Post.__ref__
+    def __ref__(self, name):
+        if self.sig[1][0] in ["cxt", "txn"]:
+            sig = self.sig[2:]
+        else:
+            sig = self.sig[1:]
+
+        class StateFunctionRef(StateRef):
+            def __call__(self, *args, **kwargs):
+                params = op.parse_args(sig, *args, **kwargs)
+                return self.state.rtype(form=FunctionCall(self, params))
+
+            def derivative(self):
+                return self.state.derivative()
+
+        return StateFunctionRef(self, URI(name))
 
 
 # TODO: dedupe with method.Post
@@ -194,4 +250,9 @@ class NativeStateFunction(StateFunction):
         return cxt
 
     def derivative(self):
-        raise NotImplementedError
+        form = ref.form_of(self)
+
+        graph = Context()
+        graph._return = derivative_of(form[-1])
+
+        return StateFunction(self.header, self.degree + 1, self.name, self.sig, graph, type(graph[-1]))

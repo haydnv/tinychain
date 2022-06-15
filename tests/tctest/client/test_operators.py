@@ -28,9 +28,10 @@ class ChainRuleTests(unittest.TestCase):
         cxt.f_x = 6 * cxt.g_x + 3
         cxt.d_f_x = tc.math.derivative_of(cxt.f_x)
         cxt.f_x_grad = tc.math.gradients(cxt.f_x, ones_like_tc(cxt.f_x), cxt.x)
-        cxt.passed = (cxt.d_f_x == cxt.f_x_grad).all()
+        cxt.result = (cxt.f_x_grad == cxt.d_f_x).all()
 
-        self.assertTrue(HOST.post(ENDPOINT, cxt))
+        passed = HOST.post(ENDPOINT, cxt)
+        self.assertTrue(passed)
 
     def testExp_simple(self):
         cxt = tc.Context()
