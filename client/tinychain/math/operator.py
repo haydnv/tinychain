@@ -734,7 +734,15 @@ def derivative_of(state, variable=None, keepdims=False):
     if is_constant(state):
         return zeros_like(state, keepdims)
     elif operator(state):
-        return operator(state).backward(variable)
+        d = operator(state).backward(variable)
+
+        if keepdims:
+            if same_as(d, 0):
+                return zeros_like(state)
+            elif same_as(d, 1):
+                return ones_like(state)
+
+        return d
     else:
         raise ValueError(f"the derivative of {state} is not defined")
 
