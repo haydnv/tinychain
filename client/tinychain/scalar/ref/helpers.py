@@ -7,17 +7,13 @@ from ...context import to_json
 from .base import Case, If, MethodSubject, Ref
 
 
-def args(state_or_ref):
-    """
-    Return the immediate references needed to resolve the given `state_or_ref`.
+def args(ref):
+    """Return the arguments needed to reconstruct the given `ref`."""
 
-    This function is not recursive. Use `depends_on` to get all compile-time dependencies of `state_or_ref`.
-    """
+    if hasattr(ref, "__args__"):
+        return ref.__args__()
 
-    if form_of(state_or_ref) is not state_or_ref:
-        return args(form_of(state_or_ref))
-
-    return state_or_ref.__args__() if hasattr(state_or_ref, "__args__") else []
+    raise TypeError(f"not a reference: {ref}")
 
 
 def depends_on(state_or_ref):
@@ -118,7 +114,7 @@ def independent(state_or_ref):
     elif isinstance(state_or_ref, (list, tuple)):
         return all(independent(item) for item in state_or_ref)
     elif isinstance(state_or_ref, Ref):
-        return not args(state_or_ref)
+        return not is_op_ref(args(state_or_ref))
     else:
         return True
 

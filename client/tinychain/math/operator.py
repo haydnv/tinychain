@@ -39,6 +39,9 @@ class Operator(Op):
 
         Op.__init__(self, subject, args)
 
+    def __args__(self):
+        return self.subject, self.args
+
     def __json__(self):
         return to_json(self.forward())
 
@@ -109,6 +112,9 @@ class Unary(Operator):
             raise ValueError(f"Unary operator requires a Numeric subject, not {subject}")
 
         Operator.__init__(self, subject, None)
+
+    def __args__(self):
+        return self.subject,
 
     def __ns__(self, cxt, name_hint):
         assert self.args is None

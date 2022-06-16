@@ -52,10 +52,6 @@ class Get(Method):
     def __call__(self, key=None):
         return self.rtype(form=ref.Get(self.subject(), key))
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
         cxt, args = _first_params(self)
 
@@ -92,10 +88,6 @@ class Put(Method):
 
     def __call__(self, key, value):
         return ref.Put(self.subject(), key, value)
-
-    def __args__(self):
-        _, _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -164,10 +156,6 @@ class Post(Method):
         params = parse_args(sig, *args, **kwargs)
         return rtype(form=ref.Post(self.subject(), params))
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
         cxt, args = _first_params(self)
 
@@ -208,10 +196,6 @@ class Delete(Method):
 
     def __call__(self, key=None):
         return ref.Delete(self.subject(), key)
-
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
 
     def __form__(self):
         return Get.__form__(self)

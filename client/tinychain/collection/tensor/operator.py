@@ -140,6 +140,9 @@ class Reduce(Operator):
     def __init__(self, tensor, axis=None, keepdims=False):
         Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
 
+    def __args__(self):
+        return self.subject, self.args.get("axis"), self.args.get("keepdims")
+
     @property
     def shape(self):
         return Shape.reduce(self.subject.shape, **self.args)
@@ -154,6 +157,9 @@ class Norm(Operator):
             return f"norm({self.subject}[{self.args}])"
         else:
             return f"norm({self.subject})"
+
+    def __args__(self):
+        return self.subject, self.args.get("axis"), self.args.get("keepdims")
 
     @property
     def shape(self):
@@ -331,6 +337,9 @@ class Slice(Transform):
         class SliceGradient(Operator):
             def __init__(self, grad):
                 Operator.__init__(self, grad, None)
+
+            def __args__(self):
+                return self.subject,
 
             def __repr__(self):
                 return f"{self.subject}[{self.args}]"

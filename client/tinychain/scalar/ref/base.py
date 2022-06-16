@@ -45,7 +45,7 @@ class After(FlowControl):
         self.then = then
 
     def __args__(self):
-        return [self.when, self.then]
+        return self.when, self.then
 
     def __json__(self):
         return {str(URI(self)): to_json([self.when, self.then])}
@@ -89,7 +89,7 @@ class Case(FlowControl):
         self.case = case
 
     def __args__(self):
-        return [self.cond, self.switch, self.case]
+        return self.cond, self.switch, self.case
 
     def __json__(self):
         return {str(URI(self)): to_json([self.cond, self.switch, self.case])}
@@ -131,7 +131,7 @@ class If(FlowControl):
         self.or_else = or_else
 
     def __args__(self):
-        return [self.cond, self.then, self.or_else]
+        return self.cond, self.then, self.or_else
 
     def __json__(self):
         from .helpers import form_of
@@ -191,7 +191,7 @@ class While(FlowControl):
         self.state = state
 
     def __args__(self):
-        return [self.cond, self.op, self.state]
+        return self.cond, self.op, self.state
 
     def __json__(self):
         return {str(URI(self)): to_json([self.cond, self.op, self.state])}
@@ -233,7 +233,7 @@ class With(FlowControl):
             self.rtype = op.rtype
 
     def __args__(self):
-        return [self.capture, self.op]
+        return self.capture, self.op
 
     def __json__(self):
         return {str(URI(self)): to_json([self.capture, self.op])}
@@ -263,10 +263,7 @@ class Op(Ref):
         return self._debug_name if self._debug_name else f"{self.__class__.__name__} {self.subject}, {self.args}"
 
     def __args__(self):
-        from .helpers import is_op_ref
-
-        subject = [self.subject] if is_op_ref(self.subject, allow_literals=False) else []
-        return subject + [arg for arg in list(self.args) if is_op_ref(arg)]
+        return self.subject, self.args, self._debug_name
 
     def __json__(self):
         from .helpers import form_of
@@ -306,6 +303,10 @@ class Get(Op):
             raise ValueError("Get op ref subject cannot be None")
 
         Op.__init__(self, subject, (key,), debug_name)
+
+    def __args__(self):
+        key, = self.args
+        return self.subject, key, self._debug_name
 
     def __json__(self):
         from .helpers import is_ref
@@ -365,6 +366,10 @@ class Put(Op):
     def __init__(self, subject, key, value):
         Op.__init__(self, subject, (key, value))
 
+    def __args__(self):
+        (key, value) = self.args
+        return self.subject, key, value
+
     def __repr__(self):
         key, value = self.args
         return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
@@ -408,10 +413,7 @@ class Post(Op):
         Op.__init__(self, subject, args, debug_name)
 
     def __args__(self):
-        from .helpers import is_op_ref
-
-        args = [self.subject] if is_op_ref(self.subject) else []
-        return args + ([self.args.values()] if is_op_ref(self.args) else [])
+        return self.subject, self.args, self._debug_name
 
     def __repr__(self):
         if self._debug_name:
@@ -455,6 +457,9 @@ class Delete(Op):
     def __init__(self, subject, key=None):
         Op.__init__(self, subject, key)
 
+    def __args__(self):
+        return self.subject, self.args
+
     def __json__(self):
         return {str(URI(self)): to_json([self.subject, self.args])}
 
@@ -481,8 +486,7 @@ class MethodSubject(object):
         self.method_name = method_name
 
     def __args__(self):
-        from .helpers import is_op_ref
-        return [self.subject] if is_op_ref(self.subject) else []
+        return self.subject, self.method_name
 
     def __ns__(self, cxt, name_hint):
         from .helpers import same_as
