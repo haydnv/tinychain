@@ -10,35 +10,13 @@ from collections import OrderedDict
 class Context(object):
     """A transaction context."""
 
-    def __init__(self, context=None):
+    def __init__(self):
+        object.__setattr__(self, "_deps", OrderedDict())
         object.__setattr__(self, "_ns", OrderedDict())
-
-        if context:
-            if isinstance(context, self.__class__):
-                for name, value in context.items():
-                    setattr(self, name, value)
-            else:
-                for name, value in dict(context).items():
-                    setattr(self, name, value)
-
-    def __add__(self, other):
-        concat = Context(self)
-
-        if isinstance(other, self.__class__):
-            for name, value in other.items():
-                setattr(concat, name, value)
-        else:
-            for name, value in dict(other).items():
-                setattr(concat, name, value)
-
-        return concat
 
     def __contains__(self, name):
         name = str(name[1:]) if name.startswith('$') else str(name)
-        return name in self._ns
-
-    def __dbg__(self):
-        return [self._ns[next(reversed(self._ns))]] if self._ns else []
+        return name in self._ns or name in self._deps
 
     def __getattr__(self, name):
         from .scalar.ref import get_ref
@@ -48,13 +26,16 @@ class Context(object):
 
         if name in self._ns:
             value = self._ns[name]
-            if hasattr(value, "__ref__"):
-                return get_ref(value, name)
-            else:
-                logging.info(f"context attribute {value} has no __ref__ method")
-                return URI(name)
+        elif name in self._deps:
+            value = self._deps[name]
         else:
             raise AttributeError(f"Context has no such value: {name}")
+
+        if hasattr(value, "__ref__"):
+            return get_ref(value, name)
+        else:
+            logging.info(f"context attribute {value} has no __ref__ method")
+            return URI(name)
 
     def __getitem__(self, selector):
         keys = list(self._ns.keys())[selector]
@@ -67,7 +48,11 @@ class Context(object):
         return iter(self._ns)
 
     def __json__(self):
-        return to_json(list(self._ns.items()))
+        form = []
+        form.extend(self._deps.items())
+        form.extend(self._ns.items())
+
+        return to_json(form)
 
     def __len__(self):
         return len(self._ns)
@@ -88,6 +73,23 @@ class Context(object):
     def __repr__(self):
         data = list(self._ns.keys())
         return f"Op context with data {data}"
+
+    def assign(self, state, name_hint):
+        state = autobox(state)
+        name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
+
+        if name_hint not in self:
+            self._deps[name_hint] = state
+            return getattr(self, name_hint)
+
+        i = 1
+        while f"{name_hint}_{i}" in self:
+            i += 1
+
+        name_hint = f"{name_hint}_{i}"
+        self._deps[name_hint] = state
+
+        return getattr(self, name_hint)
 
     def items(self):
         yield from ((name, getattr(self, name)) for name in self._form)
@@ -112,9 +114,28 @@ def autobox(state):
     elif isinstance(state, str):
         from .scalar.value import String
         return String(state)
-    else:
-        logging.debug(f"cannot autobox {state}")
+
+    from .state import State
+    if isinstance(state, State):
         return state
+
+    logging.debug(f"cannot autobox {state}")
+    return state
+
+
+def hashable(state):
+    from .generic import Map, Tuple
+
+    if isinstance(state, dict):
+        return False
+    elif isinstance(state, Map) and hasattr(state, "__iter__"):
+        return False
+    elif isinstance(state, (list, tuple)):
+        return False
+    elif isinstance(state, Tuple) and hasattr(state, "__iter__"):
+        return False
+
+    return True
 
 
 def print_json(state_or_ref):
@@ -153,8 +174,12 @@ def to_json(state_or_ref):
 def deanonymize(state, context, name_hint):
     """Assign an auto-generated name based on the given `name_hint` to the given state within the given context."""
 
+    from .scalar.ref import is_literal
+
     if isinstance(state, Context):
         raise ValueError(f"cannot deanonymize an Op context itself")
+    elif is_literal(state):
+        return
 
     if inspect.isclass(state):
         return
@@ -162,7 +187,7 @@ def deanonymize(state, context, name_hint):
         state.__ns__(context, name_hint)
     elif isinstance(state, dict):
         for key in state:
-            deanonymize(state[key], context, name_hint + f"_{key}")
+            deanonymize(state[key], context, name_hint + f".{key}")
     elif isinstance(state, (list, tuple)):
         for i, item in enumerate(state):
-            deanonymize(item, context, name_hint + f"_{i}")
+            deanonymize(item, context, name_hint + f".{i}")
