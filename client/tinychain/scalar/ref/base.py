@@ -51,13 +51,13 @@ class After(FlowControl):
         return {str(URI(self)): to_json([self.when, self.then])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional, reference
+        from .helpers import is_conditional
 
         deanonymize(self.when, cxt, name_hint + "_when")
         deanonymize(self.then, cxt, name_hint + "_then")
 
         if is_conditional(self.when):
-            self.when = reference(cxt, self.when, name_hint + "_when")
+            self.when = cxt.assign(self.when, name_hint + "_when")
 
     def __repr__(self):
         return f"After({self.when}, {self.then})"
@@ -146,14 +146,14 @@ class If(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional, is_op_ref, reference
+        from .helpers import is_conditional, is_op_ref
 
         deanonymize(self.cond, cxt, name_hint + "_cond")
         deanonymize(self.then, cxt, name_hint + "_then")
         deanonymize(self.or_else, cxt, name_hint + "_or_else")
 
         if is_conditional(self.cond) or is_op_ref(self.cond):
-            self.cond = reference(cxt, self.cond, name_hint + "_cond")
+            self.cond = cxt.assign(self.cond, name_hint + "_cond")
 
     def __repr__(self):
         from .helpers import form_of
@@ -335,7 +335,7 @@ class Get(Op):
             return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref, reference
+        from .helpers import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -344,7 +344,7 @@ class Get(Op):
         if is_op_ref(self.args):
             (key,) = self.args
             _log_anonymous(key)
-            key = reference(cxt, key, name_hint + "_key")
+            key = cxt.assign(key, name_hint + "_key")
             self.args = (key,)
 
 
@@ -370,7 +370,7 @@ class Put(Op):
         return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref, reference
+        from .helpers import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -380,11 +380,11 @@ class Put(Op):
 
         if is_op_ref(key):
             _log_anonymous(key)
-            key = reference(cxt, key, name_hint + "key")
+            key = cxt.assign(key, name_hint + "key")
 
         if is_op_ref(value):
             _log_anonymous(value)
-            value = reference(cxt, value, name_hint + "_value")
+            value = cxt.assign(value, name_hint + "_value")
 
         self.args = (key, value)
 
@@ -420,7 +420,7 @@ class Post(Op):
             return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref, reference
+        from .helpers import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -433,7 +433,7 @@ class Post(Op):
 
             if is_op_ref(arg):
                 _log_anonymous(arg)
-                args[name] = reference(cxt, arg, name_hint + f"_{name}")
+                args[name] = cxt.assign(arg, name_hint + f"_{name}")
             else:
                 args[name] = arg
 
@@ -462,14 +462,14 @@ class Delete(Op):
         return f"DELETE {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref, reference
+        from .helpers import is_op_ref
 
         super().__ns__(cxt, name_hint)
         deanonymize(self.args, cxt, name_hint + "_key")
 
         if is_op_ref(self.args):
             _log_anonymous(self.args)
-            self.args = reference(cxt, self.args, name_hint + "_key")
+            self.args = cxt.assign(self.args, name_hint + "_key")
 
 
 class MethodSubject(object):

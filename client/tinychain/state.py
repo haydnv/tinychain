@@ -4,7 +4,7 @@ import inspect
 
 from .base import _Base
 from .interface import Functional
-from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
+from .scalar.ref import form_of, get_ref, is_ref, Ref
 from .uri import URI
 from .context import deanonymize, to_json
 
@@ -50,9 +50,6 @@ class State(_Base):
             return to_json(form)
         else:
             return {str(URI(self)): [to_json(form)]}
-
-    def __id__(self):
-        return hex_id(form_of(self))
 
     def __ns__(self, cxt, name_hint):
         form = form_of(self)
@@ -193,9 +190,6 @@ class StateRef(Ref):
 
     def __hash__(self):
         return hash(self.state)
-
-    def __id__(self):
-        return hex_id(self.state)
 
     def __json__(self):
         return to_json(URI(self))

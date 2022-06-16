@@ -5,7 +5,6 @@ import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .collection.table import Schema
 from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface

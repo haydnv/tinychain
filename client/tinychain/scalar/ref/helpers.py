@@ -102,26 +102,6 @@ def get_ref(state, name):
         return state
 
 
-def hex_id(state_or_ref):
-    """
-    Return a unique hexadecimal string identifying the given `state_or_ref` based on its memory address.
-
-    This is similar to Python's built-in `id` function but has the advantage that it will still produce the correct
-    unique ID even for wrapper types. For example:
-
-    ```python
-    x = 1
-    n = Number(x)
-    assert hex_id(n) == hex_id(x)  # this won't work with the built-in `id` function
-    ```
-    """
-
-    if hasattr(state_or_ref, "__id__"):
-        return state_or_ref.__id__()
-
-    return format(id(state_or_ref), 'x')
-
-
 def independent(state_or_ref):
     """Return `True` if the given `state_or_ref` does not depend on any unresolved references."""
 
@@ -144,6 +124,8 @@ def independent(state_or_ref):
 
 
 def is_literal(state):
+    """Return `True` if the given `state` is a Python literal (or a type expectation wrapping a Python literal)."""
+
     from ...generic import Map, Tuple
 
     if isinstance(state, (list, tuple)):
@@ -163,6 +145,8 @@ def is_literal(state):
 
 
 def is_conditional(state):
+    """Return `True` if the given `state` depends on a :class:`Case` or :class:`If` reference."""
+
     from ...state import State
 
     if isinstance(state, State):
@@ -176,12 +160,15 @@ def is_conditional(state):
 
 
 def is_none(state):
-    from ..value import Nil
+    """Return `True` if the given `state` is `None` or `Nil`."""
 
-    return state is None or state == Nil
+    from ..value import Nil
+    return state is None or type(state) is Nil
 
 
 def is_op(fn):
+    """Return `True` if the given `fn` is a reflected :class:`Op` or :class:`Method`."""
+
     from ...reflect.method import Method
     from ...reflect.op import Op
 
@@ -236,6 +223,8 @@ def is_write_op_ref(fn):
 
 
 def is_ref(state):
+    """Return `True` if `state` depends on an unresolved reference."""
+
     if isinstance(state, (Ref, URI, MethodSubject)):
         return True
     elif hasattr(state, "__form__"):
@@ -246,12 +235,6 @@ def is_ref(state):
         return any(is_ref(state[k]) for k in state)
     else:
         return False
-
-
-def reference(context, state, name_hint):
-    """Create a reference to `state` in `context` using its `hex_id`"""
-
-    return context.assign(state, name_hint)
 
 
 def same_as(a, b):
