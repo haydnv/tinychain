@@ -52,12 +52,7 @@ class State(_Base):
             return {str(URI(self)): [to_json(form)]}
 
     def __ns__(self, cxt, name_hint):
-        form = form_of(self)
-
-        deanonymize(form, cxt, name_hint)
-
-        if isinstance(self.__form__, URI):
-            self.__uri__ = self.__form__
+        deanonymize(form_of(self), cxt, name_hint)
 
     def __ref__(self, name):
         if hasattr(form_of(self), "__ref__"):
@@ -151,9 +146,9 @@ class Class(Object):
         if args and kwargs:
             raise ValueError("Class.__call__ accepts args or kwargs but not both")
 
-        from .scalar.ref import Get, MethodSubject
+        from .scalar.ref import Get
 
-        subject = MethodSubject(self)
+        subject = URI(self)
         if args:
             return Get(subject, args)
         else:

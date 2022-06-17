@@ -36,10 +36,7 @@ class Method(object):
         return self.__class__.__name__
 
     def subject(self):
-        if isinstance(self.header, State):
-            return ref.MethodSubject(self.header, self.name)
-        else:
-            return URI(self.header).append(self.name)
+        return URI(self.header).append(self.name)
 
 
 class Get(Method):

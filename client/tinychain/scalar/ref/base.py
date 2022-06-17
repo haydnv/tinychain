@@ -469,64 +469,6 @@ class Delete(Op):
             cxt.assign(self.args, name_hint + "_key")
 
 
-class MethodSubject(object):
-    def __init__(self, subject, method_name=""):
-        if URI(subject).startswith('$'):
-            self.__uri__ = URI(subject).append(method_name)
-
-        self.subject = subject
-        self.method_name = method_name
-
-    def __args__(self):
-        return self.subject, self.method_name
-
-    def __ns__(self, cxt, name_hint):
-        from .helpers import same_as
-
-        i = 0
-        name = name_hint
-        while name in cxt and not same_as(getattr(cxt, name), self.subject):
-            name = f"{name_hint}_{i}" if i > 0 else name_hint
-            i += 1
-
-        auto_uri = URI(name).append(self.method_name)
-
-        if hasattr(self, "__uri__"):
-            if URI(self) == auto_uri and name not in cxt:
-                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
-                setattr(cxt, name, self.subject)
-            else:
-                return
-
-        elif URI(self.subject).startswith("/state"):
-            self.__uri__ = auto_uri
-
-            if name not in cxt:
-                logging.debug(f"auto-assigning name {name} to {self.subject} in {cxt}")
-                setattr(cxt, name, self.subject)
-
-            deanonymize(self.subject, cxt, name_hint)
-
-        else:
-            deanonymize(self.subject, cxt, name_hint)
-            self.__uri__ = URI(self.subject).append(self.method_name)
-
-    def __json__(self):
-        if self.__uri__ is None:
-            raise ValueError(f"cannot call method {self.method_name} on an anonymous subject {self.subject}")
-
-        return to_json(URI(self))
-
-    def __str__(self):
-        if not hasattr(self, "__uri__"):
-            return str(URI(self.subject).append(self.method_name))
-        else:
-            return str(URI(self))
-
-    def __repr__(self):
-        return f"{repr(self.subject)}/{self.method_name}"
-
-
 def _log_anonymous(arg):
     from .helpers import is_op_ref, is_write_op_ref
 

@@ -4,7 +4,7 @@ import logging
 from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
-from ...scalar.ref import deref, is_literal, same_as, After, MethodSubject, Post
+from ...scalar.ref import deref, is_literal, same_as, After, Post
 from ...shape import Shape
 from ...uri import URI
 
@@ -357,7 +357,7 @@ class Slice(Transform):
             def backward(self, _variable=None):
                 return self.subject
 
-        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
+        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), URI(grad)))))
 
 
 class Tile(Transform):

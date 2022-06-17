@@ -4,7 +4,7 @@ import logging
 from ...uri import URI
 from ...context import to_json
 
-from .base import Case, If, MethodSubject, Ref
+from .base import Case, If, Ref
 
 
 def args(ref):
@@ -55,8 +55,6 @@ def deref(state):
         return deref(form_of(state))
     elif isinstance(state, Ref) and hasattr(state, "state"):
         return deref(state.state)
-    elif isinstance(state, MethodSubject):
-        return deref(state.subject)
     else:
         return state
 
@@ -110,9 +108,9 @@ def independent(state_or_ref):
         return True
 
     if isinstance(state_or_ref, dict):
-        return all(independent(value) for value in state_or_ref.values())
+        return all(independent(value) and not is_op_ref(value) for value in state_or_ref.values())
     elif isinstance(state_or_ref, (list, tuple)):
-        return all(independent(item) for item in state_or_ref)
+        return all(independent(item) and not is_op_ref(item) for item in state_or_ref)
     elif isinstance(state_or_ref, Ref):
         return not is_op_ref(args(state_or_ref))
     else:
@@ -136,6 +134,8 @@ def is_literal(state):
         return True
     elif isinstance(state, (Map, Tuple)):
         return is_literal(form_of(state))
+    elif inspect.isclass(state):
+        return True
 
     return False
 
@@ -221,7 +221,7 @@ def is_write_op_ref(fn):
 def is_ref(state):
     """Return `True` if `state` depends on an unresolved reference."""
 
-    if isinstance(state, (Ref, URI, MethodSubject)):
+    if isinstance(state, (Ref, URI)):
         return True
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))

@@ -4,6 +4,7 @@ import inspect
 import typing
 
 from .reflect import MethodStub
+from .uri import URI
 
 BUILTINS = set(["shape"])
 
@@ -23,33 +24,33 @@ class _Base(object):
                 setattr(self, name, method)
 
     def _get(self, name, key=None, rtype=None):
-        from .scalar.ref import Get, MethodSubject
+        from .scalar.ref import Get
 
-        subject = MethodSubject(self, name)
+        subject = URI(self, name)
         op_ref = Get(subject, key)
         rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
 
     def _put(self, name, key=None, value=None):
-        from .scalar.ref import MethodSubject, Put
+        from .scalar.ref import Put
         from .scalar.value import Nil
 
-        subject = MethodSubject(self, name)
+        subject = URI(self, name)
         return Nil(Put(subject, key, value))
 
     def _post(self, name, params, rtype):
-        from .scalar.ref import MethodSubject, Post
+        from .scalar.ref import Post
 
-        subject = MethodSubject(self, name)
+        subject = URI(self, name)
         op_ref = Post(subject, params)
         rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
 
     def _delete(self, name, key=None):
-        from .scalar.ref import Delete, MethodSubject
+        from .scalar.ref import Delete
         from .scalar.value import Nil
 
-        subject = MethodSubject(self, name)
+        subject = URI(self, name)
         return Nil(Delete(subject, key))
 
 

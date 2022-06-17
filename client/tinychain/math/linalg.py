@@ -6,7 +6,7 @@ from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.number import Number, Bool, F64, UInt, F32, Int
-from ..scalar.ref import After, Get, If, MethodSubject, While
+from ..scalar.ref import After, Get, If, While
 from ..scalar.value import Value
 from ..state import Stream
 from ..uri import URI
@@ -23,7 +23,7 @@ def diagonal(tensor):
     """Return the diagonal of the given `tensor` of matrices"""
 
     rtype = type(tensor) if isinstance(tensor, Tensor) else Tensor
-    op = Get(MethodSubject(tensor, "diagonal"))
+    op = Get(URI(tensor, "diagonal"))
     return rtype(form=op)
 
 

@@ -48,8 +48,9 @@ class Context(object):
         return iter(self._ns)
 
     def __json__(self):
-        from .scalar.ref import args, form_of, independent, same_as, Ref
+        from .scalar.ref import args, form_of, is_literal, same_as, Ref
         from .state import State, StateRef
+        from .uri import URI
 
         def dep_name(dep):
             for name in self._deps:
@@ -65,24 +66,40 @@ class Context(object):
                 return tuple(reference(item) for item in ref)
             elif isinstance(ref, StateRef):
                 return ref
-
-            deps = []
-            for arg in args(ref):
-                name = dep_name(arg)
+            elif isinstance(ref, URI):
+                name = dep_name(ref._subject)
                 if name:
-                    deps.append(getattr(self, name))
+                    return URI(name, *ref._path)
                 else:
-                    deps.append(arg)
+                    return ref
+            elif isinstance(ref, Ref):
+                deps = []
+                for arg in args(ref):
+                    name = dep_name(arg)
+                    if name:
+                        deps.append(getattr(self, name))
+                    else:
+                        deps.append(reference(arg))
 
-            return type(ref)(*deps)
+                return type(ref)(*deps)
+            else:
+                return state
 
         def reference(state):
-            if independent(state):
+            if is_literal(state):
                 return state
-            elif isinstance(state, Ref):
+            elif isinstance(state, (Ref, URI)):
                 return copy(state)
             elif isinstance(state, State):
                 return type(state)(form=copy(form_of(state)))
+            elif isinstance(state, dict):
+                return {key: reference(state[key]) for key in state}
+            elif isinstance(state, list):
+                return [reference(item) for item in state]
+            elif isinstance(state, tuple):
+                return tuple(reference(item) for item in state)
+            else:
+                return state
 
         form = []
 

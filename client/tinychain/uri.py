@@ -64,8 +64,17 @@ class URI(object):
     def __json__(self):
         return {str(self): []}
 
+    def __ns__(self, cxt, name_hint):
+        from .context import deanonymize
+        from .scalar.ref import is_op_ref
+
+        deanonymize(self._subject, cxt, name_hint)
+
+        if is_op_ref(self._subject):
+            cxt.assign(self._subject, name_hint)
+
     def __repr__(self):
-        return str(self)
+        return repr(self._subject) + '/' + '/'.join(self._path)
 
     def __str__(self):
         if isinstance(self._subject, str):
@@ -73,7 +82,7 @@ class URI(object):
         elif hasattr(self._subject, "__uri__"):
             root = str(self._subject.__uri__)
         else:
-            raise RuntimeError(f"{self._subject} is missing a __uri__ attribute")
+            raise RuntimeError(f"{self._subject} (type {type(self._subject)}) is missing a __uri__ attribute")
 
         if root.startswith('/') or root.startswith('$') or "://" in root:
             pass
@@ -81,7 +90,7 @@ class URI(object):
             root = f"${root}"
 
         if self._path:
-            path = "/".join(self._path)
+            path = '/'.join(self._path)
             return f"{root}/{path}"
         else:
             return root
