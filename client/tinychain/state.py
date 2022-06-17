@@ -174,6 +174,9 @@ class StateRef(Ref):
         self.state = state
         self.__uri__ = URI(name)
 
+    def __args__(self):
+        return self.state, self.__uri__
+
     def __repr__(self):
         is_auto_assigned = False
 

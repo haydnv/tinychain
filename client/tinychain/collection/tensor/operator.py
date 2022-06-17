@@ -15,9 +15,9 @@ class Concatenate(Operator):
         if not hasattr(tensors, "__len__"):
             logging.debug(f"Concatenate({tensors}) will not support automatic differentiation")
 
-        if axis:
+        if axis and is_literal(axis):
             for tensor in tensors:
-                if not is_literal(tensor.shape[axis]):
+                if not is_literal(tensor.shape[deref(axis)]):
                     logging.debug(f"tensor {tensor} to concatenate noes not have a literal shape at axis {axis}")
 
         Operator.__init__(self, tensors, axis)

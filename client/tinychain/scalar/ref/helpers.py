@@ -13,7 +13,7 @@ def args(ref):
     if hasattr(ref, "__args__"):
         return ref.__args__()
 
-    raise TypeError(f"not a reference: {ref}")
+    raise TypeError(f"not a reference: {ref} (type {type(ref)})")
 
 
 def depends_on(state_or_ref):

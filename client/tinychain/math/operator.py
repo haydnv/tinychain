@@ -50,10 +50,10 @@ class Operator(Op):
         deanonymize(self.args, cxt, name_hint + "_args")
 
         if is_op_ref(self.subject):
-            self.subject = cxt.assign(self.subject, name_hint + "_subject")
+            cxt.assign(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.args):
-            self.args = cxt.assign(self.args, name_hint + "_args")
+            cxt.assign(self.args, name_hint + "_args")
 
     def __repr__(self):
         raise NotImplementedError(f"human-readable string representation of {self.__class__.__name__}")
@@ -122,7 +122,7 @@ class Unary(Operator):
         deanonymize(self.subject, cxt, name_hint + "_subject")
 
         if is_op_ref(self.subject):
-            self.subject = cxt.assign(self.subject, name_hint + "_subject")
+            cxt.assign(self.subject, name_hint + "_subject")
 
 
 class Custom(Unary):

@@ -57,7 +57,7 @@ class After(FlowControl):
         deanonymize(self.then, cxt, name_hint + "_then")
 
         if is_conditional(self.when):
-            self.when = cxt.assign(self.when, name_hint + "_when")
+            cxt.assign(self.when, name_hint + "_when")
 
     def __repr__(self):
         return f"After({self.when}, {self.then})"
@@ -153,7 +153,7 @@ class If(FlowControl):
         deanonymize(self.or_else, cxt, name_hint + "_or_else")
 
         if is_conditional(self.cond) or is_op_ref(self.cond):
-            self.cond = cxt.assign(self.cond, name_hint + "_cond")
+            cxt.assign(self.cond, name_hint + "_cond")
 
     def __repr__(self):
         from .helpers import form_of
@@ -345,9 +345,7 @@ class Get(Op):
         if is_op_ref(self.args):
             (key,) = self.args
             _log_anonymous(key)
-            key = cxt.assign(key, name_hint + "_key")
-            self.args = (key,)
-
+            cxt.assign(key, name_hint + "_key")
 
 class Put(Op):
     """
@@ -385,13 +383,11 @@ class Put(Op):
 
         if is_op_ref(key):
             _log_anonymous(key)
-            key = cxt.assign(key, name_hint + "key")
+            cxt.assign(key, name_hint + "key")
 
         if is_op_ref(value):
             _log_anonymous(value)
-            value = cxt.assign(value, name_hint + "_value")
-
-        self.args = (key, value)
+            cxt.assign(value, name_hint + "_value")
 
 
 class Post(Op):
@@ -435,11 +431,7 @@ class Post(Op):
 
             if is_op_ref(arg):
                 _log_anonymous(arg)
-                args[name] = cxt.assign(arg, name_hint + f"_{name}")
-            else:
-                args[name] = arg
-
-        self.args = args
+                cxt.assign(arg, name_hint + f"_{name}")
 
 
 class Delete(Op):
@@ -474,7 +466,7 @@ class Delete(Op):
 
         if is_op_ref(self.args):
             _log_anonymous(self.args)
-            self.args = cxt.assign(self.args, name_hint + "_key")
+            cxt.assign(self.args, name_hint + "_key")
 
 
 class MethodSubject(object):

@@ -48,9 +48,51 @@ class Context(object):
         return iter(self._ns)
 
     def __json__(self):
+        from .scalar.ref import args, form_of, independent, same_as, Ref
+        from .state import State, StateRef
+
+        def dep_name(dep):
+            for name in self._deps:
+                if same_as(dep, self._deps[name]):
+                    return name
+
+        def copy(ref):
+            if isinstance(ref, dict):
+                return {k: reference(ref[k]) for k in ref}
+            elif isinstance(ref, list):
+                return [reference(item) for item in ref]
+            elif isinstance(ref, tuple):
+                return tuple(reference(item) for item in ref)
+            elif isinstance(ref, StateRef):
+                return ref
+
+            deps = []
+            for arg in args(ref):
+                name = dep_name(arg)
+                if name:
+                    deps.append(getattr(self, name))
+                else:
+                    deps.append(arg)
+
+            return type(ref)(*deps)
+
+        def reference(state):
+            if independent(state):
+                return state
+            elif isinstance(state, Ref):
+                return copy(state)
+            elif isinstance(state, State):
+                return type(state)(form=copy(form_of(state)))
+
         form = []
-        form.extend(self._deps.items())
-        form.extend(self._ns.items())
+
+        for name, state in self._deps.items():
+            state = reference(state)
+            form.append((name, state))
+
+        for name, state in self._ns.items():
+            state = reference(state)
+            form.append((name, state))
 
         return to_json(form)
 
@@ -119,7 +161,15 @@ def autobox(state):
     if isinstance(state, State):
         return state
 
-    logging.debug(f"cannot autobox {state}")
+    from .scalar.ref import Ref
+    if isinstance(state, Ref):
+        return State(form=state)
+
+    from .interface import Interface
+    if isinstance(state, Interface):
+        return state
+
+    logging.debug(f"cannot autobox {state} (type {type(state)})")
     return state
 
 
@@ -128,11 +178,11 @@ def hashable(state):
 
     if isinstance(state, dict):
         return False
-    elif isinstance(state, Map) and hasattr(state, "__iter__"):
+    elif isinstance(state, Map):
         return False
     elif isinstance(state, (list, tuple)):
         return False
-    elif isinstance(state, Tuple) and hasattr(state, "__iter__"):
+    elif isinstance(state, Tuple):
         return False
 
     return True

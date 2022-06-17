@@ -14,9 +14,6 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        if not subject:
-            raise ValueError(f"invalid URI root: {subject}")
-
         if isinstance(subject, URI):
             self._subject = subject._subject
             self._path = subject._path
