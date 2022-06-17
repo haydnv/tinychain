@@ -221,7 +221,7 @@ class With(FlowControl):
         self.capture = []
 
         for ref in capture:
-            id = URI(ref).id()
+            id = (ref if isinstance(ref, URI) else URI(ref)).id()
             if id is None:
                 raise ValueError(f"With can only capture states with an ID in the current context, not {ref}")
 
@@ -273,10 +273,11 @@ class Op(Ref):
         else:
             subject = self.subject
 
-        if URI(subject) is None:
+        if not isinstance(subject, URI) and not hasattr(subject, "__uri__"):
             raise ValueError(f"subject {self.subject} of {self} has no URI")
 
-        return {str(URI(subject)): to_json(self.args)}
+        subject = subject if isinstance(subject, URI) else URI(subject)
+        return {str(subject): to_json(self.args)}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.subject, cxt, name_hint + "_subject")
@@ -315,7 +316,7 @@ class Get(Op):
             subject = URI(self.subject)
             is_scalar = False
         elif isinstance(self.subject, URI) or hasattr(self.subject, "__uri__"):
-            subject = URI(self.subject)
+            subject = self.subject if isinstance(self.subject, URI) else URI(self.subject)
             if subject is None:
                 raise ValueError(f"subject of Get op ref {self.subject} ({type(self.subject)}) has no URI")
 

@@ -50,7 +50,7 @@ class NDArray(Interface):
 
     @property
     def size(self):
-        return U64(ref.Get(URI(self, "shape")))
+        return U64(ref.Get(URI(self, "size")))
 
     def all(self):
         """Return `True` if all elements in this :class:`NDArray` are nonzero."""

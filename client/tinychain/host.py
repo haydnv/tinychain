@@ -69,7 +69,7 @@ class Host(object):
         if hasattr(path, "__uri__"):
             path = URI(path)
         else:
-            path = URI(path)
+            path = path if isinstance(path, URI) else URI(path)
 
         return URI(self) + path
 

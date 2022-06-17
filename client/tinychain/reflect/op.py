@@ -63,7 +63,7 @@ class Get(Op):
             def __call__(self, key):
                 return rtype(form=ref.Get(self, key))
 
-        return GetRef(URI(name))
+        return GetRef(name if isinstance(name, URI) else URI(name))
 
     def __repr__(self):
         return f"GET Op with form {to_json(self)}"
@@ -119,7 +119,7 @@ class Put(Op):
             def __call__(self, key=None, value=None):
                 return Nil(ref.Put(key, value))
 
-        return PutRef(URI(name))
+        return PutRef(name if isinstance(name, URI) else URI(name))
 
     def __repr__(self):
         return f"PUT Op with form {self.form}"
@@ -160,7 +160,7 @@ class Post(Op):
                 params = parse_args(sig, *args, **kwargs)
                 return rtype(form=ref.Post(self, params))
 
-        return PostRef(URI(name))
+        return PostRef(name if isinstance(name, URI) else URI(name))
 
     def __repr__(self):
         return f"POST Op with form {self.form}"
@@ -177,7 +177,7 @@ class Delete(Op):
             def __call__(self, key=None):
                 return Nil(ref.Delete(self, key))
 
-        return DeleteRef(URI(name))
+        return DeleteRef(name if isinstance(name, URI) else URI(name))
 
     def __repr__(self):
         return f"DELETE Op with form {self.form}"
@@ -215,7 +215,7 @@ def validate(cxt, provided):
             if not hasattr(ref, "__uri__") and not isinstance(ref, URI):
                 return
 
-            ref = URI(ref)
+            ref = ref if isinstance(ref, URI) else URI(ref)
             if ref.id() is not None and ref.id() not in defined:
                 logging.info(f"{cxt} depends on undefined state {ref.id()}--is it part of a Closure?")
 

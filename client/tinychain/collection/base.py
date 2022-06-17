@@ -78,7 +78,7 @@ class Collection(State):
                 return schema
 
             def __ref__(self, name):
-                return cls(URI(name))
+                return cls(name if isinstance(name, URI) else URI(name))
 
         return Load(Put(cls, schema, data))
 

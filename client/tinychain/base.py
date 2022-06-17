@@ -7,11 +7,13 @@ from .reflect import MethodStub
 from .uri import URI
 
 BUILTINS = set(["shape"])
+INHERITED = set(dir(object))
 
 
 class _Base(object):
     def __init__(self):
-        attr_names = set(dir(self)) - set(dir(object)) - BUILTINS
+        attr_names = set(name for name in dir(self) if not name.startswith("__"))
+        attr_names = attr_names - INHERITED - BUILTINS
 
         for name in attr_names:
             if name.startswith('_'):

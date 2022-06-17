@@ -30,13 +30,13 @@ class Method(object):
         return False
 
     def __json__(self):
-        return {str(URI(self)): to_json(ref.form_of(self))}
+        return {str(self.__uri__): to_json(ref.form_of(self))}
 
     def dtype(self):
         return self.__class__.__name__
 
     def subject(self):
-        return URI(self.header).append(self.name)
+        return self.header.__uri__.append(self.name)
 
 
 class Get(Method):

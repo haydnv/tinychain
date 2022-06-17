@@ -76,7 +76,8 @@ def form_of(state):
 def get_ref(state, name):
     """Return a named reference to the given `state`."""
 
-    name = URI(name)
+    if not isinstance(name, URI):
+        name = URI(name)
 
     if inspect.isclass(state):
         def ctr(*args, **kwargs):
@@ -189,7 +190,7 @@ def is_op_ref(state_or_ref, allow_literals=True):
         return False
     elif isinstance(state_or_ref, (Op, After, If, Case)):
         return True
-    elif hasattr(state_or_ref, "__uri__") and hasattr(type(state_or_ref), "__uri__") and URI(state_or_ref) >= URI(type(state_or_ref)):
+    elif hasattr(state_or_ref, "__uri__") and hasattr(type(state_or_ref), "__uri__") and state_or_ref.__uri__.startswith(type(state_or_ref).__uri__):
         return True
     elif form_of(state_or_ref) is not state_or_ref:
         return is_op_ref(form_of(state_or_ref), allow_literals)

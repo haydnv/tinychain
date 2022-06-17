@@ -44,12 +44,12 @@ class State(_Base):
     def __json__(self):
         form = form_of(self)
 
-        if isinstance(form, URI) and form == URI(self):
+        if isinstance(form, URI) and form == self.__uri__:
             return to_json(form)
-        elif hasattr(form, "__uri__") and URI(form) == URI(self):
+        elif hasattr(form, "__uri__") and form.__uri__ == self.__uri__:
             return to_json(form)
         else:
-            return {str(URI(self)): [to_json(form)]}
+            return {str(self.__uri__): [to_json(form)]}
 
     def __ns__(self, cxt, name_hint):
         deanonymize(form_of(self), cxt, name_hint)
@@ -148,7 +148,7 @@ class Class(Object):
 
         from .scalar.ref import Get
 
-        subject = URI(self)
+        subject = self.__uri__
         if args:
             return Get(subject, args)
         else:
@@ -167,30 +167,19 @@ class Instance(Object):
 class StateRef(Ref):
     def __init__(self, state, name):
         self.state = state
-        self.__uri__ = URI(name)
+        self.__uri__ = name if isinstance(name, URI) else URI(name)
 
     def __args__(self):
         return self.state, self.__uri__
 
     def __repr__(self):
-        is_auto_assigned = False
-
-        address = str(URI(self)).split('_')[-1]
-        try:
-            is_auto_assigned = int(address, 16)
-        except ValueError:
-            pass
-
-        if is_auto_assigned:
-            return repr(self.state)
-        else:
-            return str(URI(self))
+        return str(self.__uri__)
 
     def __hash__(self):
         return hash(self.state)
 
     def __json__(self):
-        return to_json(URI(self))
+        return to_json(self.__uri__)
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.state, cxt, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))

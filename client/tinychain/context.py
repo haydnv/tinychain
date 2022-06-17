@@ -48,7 +48,9 @@ class Context(object):
         return iter(self._ns)
 
     def __json__(self):
-        from .scalar.ref import args, form_of, is_literal, same_as, Ref
+        from .app import Model
+        from .chain import Chain
+        from .scalar.ref import args, form_of, is_ref, same_as, Ref
         from .state import State, StateRef
         from .uri import URI
 
@@ -86,10 +88,12 @@ class Context(object):
                 return state
 
         def reference(state):
-            if is_literal(state):
+            if not is_ref(state):
                 return state
             elif isinstance(state, (Ref, URI)):
                 return copy(state)
+            elif isinstance(state, (Chain, Model)):
+                return state  # TODO
             elif isinstance(state, State):
                 return type(state)(form=copy(form_of(state)))
             elif isinstance(state, dict):
@@ -180,7 +184,7 @@ def autobox(state):
 
     from .scalar.ref import Ref
     if isinstance(state, Ref):
-        return State(form=state)
+        return state
 
     from .interface import Interface
     if isinstance(state, Interface):
@@ -226,7 +230,7 @@ def to_json(state_or_ref):
         if hasattr(type(state_or_ref), "__json__"):
             return type(state_or_ref).__json__(state_or_ref)
         elif hasattr(state_or_ref, "__uri__"):
-            return to_json({str(URI(state_or_ref)): {}})
+            return to_json({str(state_or_ref.__uri__): {}})
 
     if hasattr(state_or_ref, "__json__"):
         return state_or_ref.__json__()
@@ -241,16 +245,14 @@ def to_json(state_or_ref):
 def deanonymize(state, context, name_hint):
     """Assign an auto-generated name based on the given `name_hint` to the given state within the given context."""
 
-    from .scalar.ref import is_literal
+    from .scalar.ref import is_literal, same_as
 
     if isinstance(state, Context):
         raise ValueError(f"cannot deanonymize an Op context itself")
     elif is_literal(state):
         return
 
-    if inspect.isclass(state):
-        return
-    elif hasattr(state, "__ns__"):
+    if hasattr(state, "__ns__"):
         state.__ns__(context, name_hint)
     elif isinstance(state, dict):
         for key in state:

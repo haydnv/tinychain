@@ -91,10 +91,10 @@ class Map(State):
 
     def __getitem__(self, key):
         if hasattr(form_of(self), "__getitem__"):
-            if URI(self) == URI(self.__class__):
+            if self.__uri__ == type(self).__uri__:
                 return form_of(self)[key]
             else:
-                return get_ref(form_of(self)[key], URI(self).append(key))
+                return get_ref(form_of(self)[key], self.__uri__.append(key))
         elif isinstance(self.__spec__, dict):
             if key in self.__spec__:
                 rtype = self.__spec__[key]
@@ -246,10 +246,10 @@ class Tuple(State, Functional):
 
             if hasattr(form_of(self), "__getitem__"):
                 item = form_of(self)[i]
-                if URI(self) == URI(self.__class__):
+                if self.__uri__ == type(self).__uri__:
                     return item
                 else:
-                    return get_ref(item, URI(self).append(i))
+                    return get_ref(item, self.__uri__.append(i))
 
         return self._get("", i, rtype)
 
