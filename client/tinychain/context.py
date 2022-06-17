@@ -50,14 +50,11 @@ class Context(object):
     def __json__(self):
         from .app import Model
         from .chain import Chain
-        from .scalar.ref import args, form_of, is_ref, same_as, Ref
+        from .scalar.ref import args, form_of, is_ref, Ref
         from .state import State, StateRef
         from .uri import URI
 
-        def dep_name(dep):
-            for name in self._deps:
-                if same_as(dep, self._deps[name]):
-                    return name
+        dep_names = {dep: name for name, dep in self._deps.items()}
 
         def copy(ref):
             if isinstance(ref, dict):
@@ -69,17 +66,15 @@ class Context(object):
             elif isinstance(ref, StateRef):
                 return ref
             elif isinstance(ref, URI):
-                name = dep_name(ref._subject)
-                if name:
-                    return URI(name, *ref._path)
+                if not isinstance(ref._subject, (dict, list, tuple)) and ref._subject in dep_names:
+                    return URI(dep_names[ref._subject], *ref._path)
                 else:
                     return ref
             elif isinstance(ref, Ref):
                 deps = []
                 for arg in args(ref):
-                    name = dep_name(arg)
-                    if name:
-                        deps.append(getattr(self, name))
+                    if not isinstance(arg, (dict, list, tuple)) and arg in dep_names:
+                        deps.append(getattr(self, dep_names[arg]))
                     else:
                         deps.append(reference(arg))
 
@@ -93,7 +88,10 @@ class Context(object):
             elif isinstance(state, (Ref, URI)):
                 return copy(state)
             elif isinstance(state, (Chain, Model)):
-                return state  # TODO
+                if state in dep_names:
+                    return getattr(self, dep_names[state])
+                else:
+                    return state
             elif isinstance(state, State):
                 return type(state)(form=copy(form_of(state)))
             elif isinstance(state, dict):
@@ -140,6 +138,19 @@ class Context(object):
     def assign(self, state, name_hint):
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
+
+        from .state import hashable
+
+        if isinstance(state, dict):
+            for key in dict:
+                self.assign(state[key], f"{name_hint}.{key}")
+            return
+        elif isinstance(state, (list, tuple)):
+            for i in range(len(state)):
+                self.assign(state[i], f"{name_hint}.{i}")
+            return
+        elif not hashable(state):
+            raise ValueError(f"anonymous dependency {state} is not hashable")
 
         if name_hint not in self:
             self._deps[name_hint] = state
@@ -194,21 +205,6 @@ def autobox(state):
     return state
 
 
-def hashable(state):
-    from .generic import Map, Tuple
-
-    if isinstance(state, dict):
-        return False
-    elif isinstance(state, Map):
-        return False
-    elif isinstance(state, (list, tuple)):
-        return False
-    elif isinstance(state, Tuple):
-        return False
-
-    return True
-
-
 def print_json(state_or_ref):
     """Pretty-print the JSON representation of the given `state_or_ref` to stdout."""
 
@@ -217,8 +213,6 @@ def print_json(state_or_ref):
 
 def to_json(state_or_ref):
     """Return a JSON-encodable representation of the given state or reference."""
-
-    from .uri import URI
 
     if inspect.isgenerator(state_or_ref):
         raise ValueError(f"the Python generator {state_or_ref} is not JSON serializable")
@@ -245,11 +239,9 @@ def to_json(state_or_ref):
 def deanonymize(state, context, name_hint):
     """Assign an auto-generated name based on the given `name_hint` to the given state within the given context."""
 
-    from .scalar.ref import is_literal, same_as
-
     if isinstance(state, Context):
         raise ValueError(f"cannot deanonymize an Op context itself")
-    elif is_literal(state):
+    elif inspect.isclass(state):
         return
 
     if hasattr(state, "__ns__"):

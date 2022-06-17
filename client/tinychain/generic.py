@@ -4,7 +4,7 @@ from .interface import Functional
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
 from .scalar.value import Id
-from .state import State, StateRef
+from .state import hashable, State, StateRef
 from .uri import URI
 from .context import to_json
 
@@ -105,6 +105,9 @@ class Map(State):
 
         return self._get("", key, rtype)
 
+    def __hash__(self):
+        return State.__hash__(self)
+
     def __json__(self):
         return to_json(form_of(self))
 
@@ -201,13 +204,16 @@ class Tuple(State, Functional):
         while isinstance(form, Tuple):
             form = form_of(form)
 
-        return State.__init__(self, form)
+        return State.__init__(self, tuple(form) if isinstance(form, list) else form)
 
     def __add__(self, other):
         return self.concatenate(self, other)
 
     def __eq__(self, other):
         return self.eq(other)
+
+    def __hash__(self):
+        return State.__hash__(self)
 
     def __json__(self):
         return to_json(form_of(self))
