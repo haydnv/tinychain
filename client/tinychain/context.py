@@ -64,7 +64,7 @@ class Context(object):
             elif isinstance(ref, tuple):
                 return tuple(reference(item) for item in ref)
             elif isinstance(ref, StateRef):
-                return ref
+                return URI(ref)
             elif isinstance(ref, URI):
                 if not isinstance(ref._subject, (dict, list, tuple)) and ref._subject in dep_names:
                     return URI(dep_names[ref._subject], *ref._path)
@@ -91,7 +91,7 @@ class Context(object):
                 if state in dep_names:
                     return getattr(self, dep_names[state])
                 else:
-                    return state
+                    return URI(state)
             elif isinstance(state, State):
                 return type(state)(form=copy(form_of(state)))
             elif isinstance(state, dict):
@@ -106,12 +106,10 @@ class Context(object):
         form = []
 
         for name, state in self._deps.items():
-            state = reference(state)
-            form.append((name, state))
+            form.append((name, reference(state)))
 
         for name, state in self._ns.items():
-            state = reference(state)
-            form.append((name, state))
+            form.append((name, reference(state)))
 
         return to_json(form)
 
