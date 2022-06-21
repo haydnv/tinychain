@@ -39,17 +39,7 @@ class State(_Base):
         _Base.__init__(self)
 
     def __hash__(self):
-        form = form_of(self)
-
-        if hashable(form):
-            if isinstance(form, dict):
-                return hash((tuple(sorted(form.keys())), tuple(sorted(form.values()))))
-            elif isinstance(form, list):
-                return hash(tuple(form))
-            else:
-                return hash(form)
-        else:
-            return hash(id(self))
+        return hash_of(form_of(self))
 
     def __json__(self):
         form = form_of(self)
@@ -195,21 +185,10 @@ class StateRef(Ref):
         deanonymize(self.state, cxt, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))
 
 
-def hashable(state):
-    if isinstance(state, list):
-        return False
-    elif isinstance(state, tuple):
-        return all(hashable(item) for item in state)
+def hash_of(state):
+    if isinstance(state, (list, tuple)):
+        return hash(tuple(hash_of(item) for item in state))
     elif isinstance(state, dict):
-        return (all(hashable(key) and sortable(key) for key in state.keys()) and
-                all(hashable(value) and sortable(value) for value in state.values()))
+        return hash_of(sorted(tuple(state.items())))
     else:
-        return True
-
-
-def sortable(state):
-    if inspect.isclass(state):
-        return False
-
-    dtype = type(state)
-    return dtype.__lt__ is not object.__lt__ or dtype.__gt__ is not object.__gt__
+        return hash(state)

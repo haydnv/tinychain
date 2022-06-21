@@ -4,7 +4,7 @@ from .interface import Functional
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
 from .scalar.value import Id
-from .state import hashable, State, StateRef
+from .state import State, StateRef
 from .uri import URI
 from .context import to_json
 

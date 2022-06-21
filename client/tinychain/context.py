@@ -137,8 +137,6 @@ class Context(object):
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
 
-        from .state import hashable
-
         if isinstance(state, dict):
             for key in dict:
                 self.assign(state[key], f"{name_hint}.{key}")
@@ -147,8 +145,6 @@ class Context(object):
             for i in range(len(state)):
                 self.assign(state[i], f"{name_hint}.{i}")
             return
-        elif not hashable(state):
-            raise ValueError(f"anonymous dependency {state} is not hashable")
 
         if name_hint not in self:
             self._deps[name_hint] = state
