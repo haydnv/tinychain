@@ -5,7 +5,6 @@ import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .collection.table import Schema
 from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
@@ -13,7 +12,7 @@ from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .scalar import Scalar
 from .scalar.number import U32
-from .scalar.ref import Ref, depends_on, form_of, get_ref, independent
+from .scalar.ref import Ref, form_of, get_ref
 from .scalar.value import Nil
 from .state import Class, Instance, Object, State
 from .uri import URI
@@ -81,11 +80,11 @@ class Model(Object, metaclass=Meta):
         if isinstance(form, URI) or isinstance(form, Ref):
             return to_json(form)
 
-        elif URI(self).startswith("/state"):
+        elif self.__uri__.startswith("/state"):
             raise ValueError(f"{self} has no URI defined (consider overriding the __uri__ attribute)")
 
         else:
-            return {str(URI(self)): to_json(form)}
+            return {str(self.__uri__): to_json(form)}
 
     def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize model {self}")
@@ -122,10 +121,6 @@ class Dynamic(Instance):
 
             if isinstance(attr, MethodStub):
                 setattr(self, name, attr.method(self, name))
-            elif isinstance(attr, State):
-                if not independent(attr):
-                    classname = self.__class__.__name__
-                    raise ValueError(f"{attr} in {classname} depends on anonymous state {depends_on(attr)}")
 
     # TODO: deduplicate with Meta.__form__
     def __form__(self):
@@ -166,7 +161,7 @@ class Dynamic(Instance):
     def __json__(self):
         form = form_of(self)
         form = form if form else [None]
-        return {str(URI(self)): to_json(form)}
+        return {str(self.__uri__): to_json(form)}
 
     def __ns__(self, _context, _name_hint):
         logging.debug(f"will not deanonymize dynamic model {self}")
@@ -183,7 +178,7 @@ class ModelRef(Ref):
             raise RuntimeError(f"the attribute name 'instance' is reserved (use a different name in {instance})")
 
         self.instance = instance
-        self.__uri__ = URI(name)
+        self.__uri__ = name if isinstance(name, URI) else URI(name)
 
         # TODO: deduplicate with Meta.__form__
         for name, attr in inspect.getmembers(self.instance):
@@ -202,10 +197,10 @@ class ModelRef(Ref):
                 stub = getattr(instance.__class__, name)
                 setattr(self, name, stub.method(self, name))
             else:
-                setattr(self, name, get_ref(attr, URI(self).append(name)))
+                setattr(self, name, get_ref(attr, self.__uri__.append(name)))
 
     def __json__(self):
-        return to_json(URI(self))
+        return to_json(self.__uri__)
 
     def __ref__(self, name):
         return ModelRef(self.instance, name)
@@ -254,7 +249,7 @@ class Library(object):
                 setattr(self, name, attr.method(self, name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({URI(self)})"
+        return f"{self.__class__.__name__}({self.__uri__})"
 
     # TODO: deduplicate with Meta.__json__
     def __json__(self):
@@ -279,7 +274,7 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return {str(URI(self)): form}
+        return {str(self.__uri__): form}
 
 
 class App(Library):
@@ -288,7 +283,7 @@ class App(Library):
 
         for name, attr in inspect.getmembers(self, _is_mutable):
             if isinstance(attr, Chain):
-                attr.__uri__ = URI(self).append(name)
+                attr.__uri__ = self.__uri__.append(name)
             else:
                 raise RuntimeError(f"{attr} must be managed by a Chain")
 
@@ -343,7 +338,7 @@ class App(Library):
             else:
                 form[name] = to_json(attr)
 
-        return {str(URI(self)): form}
+        return {str(self.__uri__): form}
 
 
 def dependencies(lib_or_model):

@@ -12,7 +12,7 @@ TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_neural_net", tc.math.linalg.LinearAlgebra(), wait_time=2)
+        cls.host = start_host("test_neural_net", tc.math.linalg.LinearAlgebra(), wait_time=30)
 
     def testQR_1(self):
         self._check_qr(4, 3, 1e-5)

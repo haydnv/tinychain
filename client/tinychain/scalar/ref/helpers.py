@@ -4,20 +4,16 @@ import logging
 from ...uri import URI
 from ...context import to_json
 
-from .base import Case, If, MethodSubject, Ref
+from .base import Case, If, Ref
 
 
-def args(state_or_ref):
-    """
-    Return the immediate references needed to resolve the given `state_or_ref`.
+def args(ref):
+    """Return the arguments needed to reconstruct the given `ref`."""
 
-    This function is not recursive. Use `depends_on` to get all compile-time dependencies of `state_or_ref`.
-    """
+    if hasattr(ref, "__args__"):
+        return ref.__args__()
 
-    if form_of(state_or_ref) is not state_or_ref:
-        return args(form_of(state_or_ref))
-
-    return state_or_ref.__args__() if hasattr(state_or_ref, "__args__") else []
+    raise TypeError(f"not a reference: {ref} (type {type(ref)})")
 
 
 def depends_on(state_or_ref):
@@ -59,8 +55,6 @@ def deref(state):
         return deref(form_of(state))
     elif isinstance(state, Ref) and hasattr(state, "state"):
         return deref(state.state)
-    elif isinstance(state, MethodSubject):
-        return deref(state.subject)
     else:
         return state
 
@@ -82,7 +76,8 @@ def form_of(state):
 def get_ref(state, name):
     """Return a named reference to the given `state`."""
 
-    name = URI(name)
+    if not isinstance(name, URI):
+        name = URI(name)
 
     if inspect.isclass(state):
         def ctr(*args, **kwargs):
@@ -102,26 +97,6 @@ def get_ref(state, name):
         return state
 
 
-def hex_id(state_or_ref):
-    """
-    Return a unique hexadecimal string identifying the given `state_or_ref` based on its memory address.
-
-    This is similar to Python's built-in `id` function but has the advantage that it will still produce the correct
-    unique ID even for wrapper types. For example:
-
-    ```python
-    x = 1
-    n = Number(x)
-    assert hex_id(n) == hex_id(x)  # this won't work with the built-in `id` function
-    ```
-    """
-
-    if hasattr(state_or_ref, "__id__"):
-        return state_or_ref.__id__()
-
-    return format(id(state_or_ref), 'x')
-
-
 def independent(state_or_ref):
     """Return `True` if the given `state_or_ref` does not depend on any unresolved references."""
 
@@ -134,16 +109,18 @@ def independent(state_or_ref):
         return True
 
     if isinstance(state_or_ref, dict):
-        return all(independent(value) for value in state_or_ref.values())
+        return all(independent(value) and not is_op_ref(value) for value in state_or_ref.values())
     elif isinstance(state_or_ref, (list, tuple)):
-        return all(independent(item) for item in state_or_ref)
+        return all(independent(item) and not is_op_ref(item) for item in state_or_ref)
     elif isinstance(state_or_ref, Ref):
-        return not args(state_or_ref)
+        return not is_op_ref(args(state_or_ref))
     else:
         return True
 
 
 def is_literal(state):
+    """Return `True` if the given `state` is a Python literal (or a type expectation wrapping a Python literal)."""
+
     from ...generic import Map, Tuple
 
     if isinstance(state, (list, tuple)):
@@ -158,11 +135,15 @@ def is_literal(state):
         return True
     elif isinstance(state, (Map, Tuple)):
         return is_literal(form_of(state))
+    elif inspect.isclass(state):
+        return True
 
     return False
 
 
 def is_conditional(state):
+    """Return `True` if the given `state` depends on a :class:`Case` or :class:`If` reference."""
+
     from ...state import State
 
     if isinstance(state, State):
@@ -176,12 +157,15 @@ def is_conditional(state):
 
 
 def is_none(state):
-    from ..value import Nil
+    """Return `True` if the given `state` is `None` or `Nil`."""
 
-    return state is None or state == Nil
+    from ..value import Nil
+    return state is None or type(state) is Nil
 
 
 def is_op(fn):
+    """Return `True` if the given `fn` is a reflected :class:`Op` or :class:`Method`."""
+
     from ...reflect.method import Method
     from ...reflect.op import Op
 
@@ -206,7 +190,7 @@ def is_op_ref(state_or_ref, allow_literals=True):
         return False
     elif isinstance(state_or_ref, (Op, After, If, Case)):
         return True
-    elif hasattr(state_or_ref, "__uri__") and hasattr(type(state_or_ref), "__uri__") and URI(state_or_ref) >= URI(type(state_or_ref)):
+    elif hasattr(state_or_ref, "__uri__") and hasattr(type(state_or_ref), "__uri__") and state_or_ref.__uri__.startswith(type(state_or_ref).__uri__):
         return True
     elif form_of(state_or_ref) is not state_or_ref:
         return is_op_ref(form_of(state_or_ref), allow_literals)
@@ -236,7 +220,9 @@ def is_write_op_ref(fn):
 
 
 def is_ref(state):
-    if isinstance(state, (Ref, URI, MethodSubject)):
+    """Return `True` if `state` depends on an unresolved reference."""
+
+    if isinstance(state, (Ref, URI)):
         return True
     elif hasattr(state, "__form__"):
         return is_ref(form_of(state))
@@ -244,24 +230,10 @@ def is_ref(state):
         return any(is_ref(item) for item in state)
     elif isinstance(state, dict):
         return any(is_ref(state[k]) for k in state)
+    elif hasattr(state, "__uri__") and not URI(state).startswith("/state"):
+        return True
     else:
         return False
-
-
-def reference(context, state, name_hint):
-    """Create a reference to `state` in `context` using its `hex_id`"""
-
-    i = 0
-    name = name_hint
-    while name in context and not same_as(getattr(context, name), state):
-        name = f"{name_hint}_{i}"
-        i += 1
-
-    if name not in context:
-        logging.debug(f"assigned name {name} to {state} in {context}")
-        setattr(context, name, state)
-
-    return getattr(context, name)
 
 
 def same_as(a, b):

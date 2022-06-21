@@ -62,7 +62,7 @@ class TestLib(tc.app.Library):
         return cxt.baz.greet()
 
 
-class LibraryTests(unittest.TestCase):
+class InheritanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_inheritance", [TestLib()])

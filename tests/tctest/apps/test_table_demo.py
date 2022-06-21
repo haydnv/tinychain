@@ -17,6 +17,10 @@ class Database(tc.app.App):
 
         tc.app.App.__init__(self)
 
+    @tc.post
+    def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
+        return self.movies.insert([name], [year, description])
+
     @tc.get
     def has_movie(self, name: tc.String):
         return self.movies.contains([name])
@@ -39,7 +43,7 @@ class Web(tc.app.App):
     @tc.post
     def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
         return (
-            self.db.movies.insert([name], [year, description]),
+            self.db.add_movie(name, year, description),
             self.cache.insert([name, 0]))
 
     @tc.put
@@ -57,7 +61,7 @@ class TableDemoTests(unittest.TestCase):
         self.hosts = []
         for i in range(3):
             port = DEFAULT_PORT + i
-            host_uri = tc.URI(f"http://127.0.0.1:{port}") + tc.URI(Web).path()
+            host_uri = f"http://127.0.0.1:{port}" + tc.URI(Web).path()
             host = start_host("table_demo", web, True, host_uri, wait_time=2)
             self.hosts.append(host)
 

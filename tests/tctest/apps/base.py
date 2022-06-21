@@ -30,7 +30,7 @@ class PersistenceTest(object):
         for i in range(self.NUM_HOSTS):
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.URI(app).path()
-            host = start_host(f"test_{name}_{i}", [app], host_uri=tc.URI(host_uri), cache_size=self.CACHE_SIZE)
+            host = start_host(f"test_{name}_{i}", [app], host_uri=host_uri, cache_size=self.CACHE_SIZE)
             hosts.append(host)
 
         time.sleep(1)

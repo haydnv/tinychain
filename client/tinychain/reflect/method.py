@@ -30,16 +30,13 @@ class Method(object):
         return False
 
     def __json__(self):
-        return {str(URI(self)): to_json(ref.form_of(self))}
+        return {str(self.__uri__): to_json(ref.form_of(self))}
 
     def dtype(self):
         return self.__class__.__name__
 
     def subject(self):
-        if isinstance(self.header, State):
-            return ref.MethodSubject(self.header, self.name)
-        else:
-            return URI(self.header).append(self.name)
+        return self.header.__uri__.append(self.name)
 
 
 class Get(Method):
@@ -51,10 +48,6 @@ class Get(Method):
 
     def __call__(self, key=None):
         return self.rtype(form=ref.Get(self.subject(), key))
-
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -92,10 +85,6 @@ class Put(Method):
 
     def __call__(self, key, value):
         return ref.Put(self.subject(), key, value)
-
-    def __args__(self):
-        _, _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
 
     def __form__(self):
         cxt, args = _first_params(self)
@@ -164,10 +153,6 @@ class Post(Method):
         params = parse_args(sig, *args, **kwargs)
         return rtype(form=ref.Post(self.subject(), params))
 
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
-
     def __form__(self):
         cxt, args = _first_params(self)
 
@@ -208,10 +193,6 @@ class Delete(Method):
 
     def __call__(self, key=None):
         return ref.Delete(self.subject(), key)
-
-    def __args__(self):
-        _, cxt = ref.form_of(self)
-        return [self.subject(), cxt]
 
     def __form__(self):
         return Get.__form__(self)

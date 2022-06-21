@@ -74,7 +74,8 @@ class TensorTests(ClientTest):
         cxt.x = tc.tensor.Dense.truncated_normal([10, 20])
         cxt.result = cxt.x.mean(), cxt.x.std()
 
-        mean, std = self.host.post(ENDPOINT, cxt)
+        response = self.host.post(ENDPOINT, cxt)
+        mean, std = response
         self.assertTrue(abs(mean) < tolerance)
         self.assertTrue(abs(std - 1) < tolerance)
 

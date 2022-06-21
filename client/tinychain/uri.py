@@ -1,4 +1,4 @@
-
+# TODO: re-implement uri helper function
 
 class URI(object):
     """
@@ -14,14 +14,7 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        if not subject:
-            raise ValueError(f"invalid URI root: {subject}")
-
-        if isinstance(subject, URI):
-            self._subject = subject._subject
-            self._path = subject._path
-            self._path += path
-            return
+        assert not isinstance(subject, URI)
 
         if isinstance(subject, str):
             if subject.startswith("$$"):
@@ -32,13 +25,15 @@ class URI(object):
             self._subject = subject
 
         self._subject = subject
-        self._path = tuple(str(path_segment) for path_segment in path)
+        self._path = tuple(str(path_segment) for path_segment in path if path_segment)
 
     def __add__(self, other):
-        if other == "/":
+        if not other or other == "/":
             return self
         else:
-            return URI(str(self) + other)
+            path = list(self._path)
+            path.append(str(other)[1:] if other.startswith('/') else other)
+            return URI(self._subject, *path)
 
     def __radd__(self, other):
         return URI(other) + str(self)
@@ -67,24 +62,28 @@ class URI(object):
     def __json__(self):
         return {str(self): []}
 
-    def __repr__(self):
-        return str(self)
+    def __ns__(self, cxt, name_hint):
+        from .context import deanonymize
+        from .scalar.ref import is_op_ref
+
+        deanonymize(self._subject, cxt, name_hint)
+
+        if is_op_ref(self._subject):
+            cxt.assign(self._subject, name_hint)
 
     def __str__(self):
-        if isinstance(self._subject, str):
-            root = self._subject
-        elif hasattr(self._subject, "__uri__"):
+        if hasattr(self._subject, "__uri__"):
             root = str(self._subject.__uri__)
         else:
-            raise RuntimeError(f"{self._subject} is missing a __uri__ attribute")
+            root = str(self._subject)
 
         if root.startswith('/') or root.startswith('$') or "://" in root:
             pass
         else:
             root = f"${root}"
 
-        if self._path:
-            path = "/".join(self._path)
+        path = '/'.join(self._path)
+        if path:
             return f"{root}/{path}"
         else:
             return root

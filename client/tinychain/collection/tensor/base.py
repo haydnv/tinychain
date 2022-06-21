@@ -38,19 +38,19 @@ class NDArray(Interface):
 
     @property
     def dtype(self):
-        return Class(ref.Get(ref.MethodSubject(self, "dtype")))
+        return Class(ref.Get(URI(self, "dtype")))
 
     @property
     def ndim(self):
-        return U64(ref.Get(ref.MethodSubject(self, "ndim")))
+        return U64(ref.Get(URI(self, "ndim")))
 
     @property
     def shape(self):
-        return Shape(ref.Get(ref.MethodSubject(self, "shape")))
+        return Shape(ref.Get(URI(self, "shape")))
 
     @property
     def size(self):
-        return U64(ref.Get(ref.MethodSubject(self, "size")))
+        return U64(ref.Get(URI(self, "size")))
 
     def all(self):
         """Return `True` if all elements in this :class:`NDArray` are nonzero."""
@@ -69,12 +69,12 @@ class NDArray(Interface):
         If no `axis` is given, the total offset will be returned.
         """
 
-        return ref.Get(ref.MethodSubject(self, "argmax"), axis)
+        return ref.Get(URI(self, "argmax"), axis)
 
     def broadcast(self, shape):
         """Broadcast this :class:`NDArray` into the given `shape`."""
 
-        return ref.Get(ref.MethodSubject(self, "broadcast"), shape)
+        return ref.Get(URI(self, "broadcast"), shape)
 
     def cast(self, number_type):
         """Cast the data type of this :class:`NDArray` into the given `number_type`."""
@@ -89,7 +89,7 @@ class NDArray(Interface):
     def expand_dims(self, axis=-1):
         """Expand the given `axis` of this :class:`NDArray`, or append a new axis if no `axis` is given."""
 
-        return ref.Get(ref.MethodSubject(self, "expand_dims"), axis)
+        return ref.Get(URI(self, "expand_dims"), axis)
 
     def flip(self, axis):
         """Flip this :class:`NDArray` along the given `axis`"""
@@ -101,14 +101,14 @@ class NDArray(Interface):
         Find the maxima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
         """
 
-        return ref.Get(ref.MethodSubject(self, "max"), axis)
+        return ref.Get(URI(self, "max"), axis)
 
     def min(self, axis=None):
         """
         Find the minima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
         """
 
-        return ref.Get(ref.MethodSubject(self, "min"), axis)
+        return ref.Get(URI(self, "min"), axis)
 
     def mean(self, axis=None):
         """
@@ -145,7 +145,7 @@ class NDArray(Interface):
         it will be the vector norm along that `axis`.
         """
 
-        return ref.Post(ref.MethodSubject(self, "norm"), _reduce_args(axis, keepdims))
+        return ref.Post(URI(self, "norm"), _reduce_args(axis, keepdims))
 
     def product(self, axis=None):
         """
@@ -153,17 +153,17 @@ class NDArray(Interface):
         or the total product if no `axis` is given.
         """
 
-        return ref.Get(ref.MethodSubject(self, "product"), axis)
+        return ref.Get(URI(self, "product"), axis)
 
     def reshape(self, shape):
         """Reshape this :class:`NDArray` into the given `shape`."""
 
-        return ref.Get(ref.MethodSubject(self, "reshape"), shape)
+        return ref.Get(URI(self, "reshape"), shape)
 
     def slice(self, bounds):
         """Return the sub-array of this :class:`NDArray` within the given `bounds`."""
 
-        return ref.Get(ref.MethodSubject(self), handle_bounds(bounds))
+        return ref.Get(URI(self), handle_bounds(bounds))
 
     def std(self, axis=None):
         """
@@ -181,7 +181,7 @@ class NDArray(Interface):
     def sum(self, axis=None, keepdims=False):
         """Compute the sum of this :class:`NDArray` along the given `axis`, or the total sum if no `axis` is given."""
 
-        return ref.Post(ref.MethodSubject(self, "sum"), _reduce_args(axis, keepdims))
+        return ref.Post(URI(self, "sum"), _reduce_args(axis, keepdims))
 
     def transpose(self, permutation=None):
         """
@@ -190,7 +190,7 @@ class NDArray(Interface):
         If no `permutation` is given, this will reverse the order of the axes of this :class:`NDArray`.
         """
 
-        return ref.Get(ref.MethodSubject(self, "transpose"), permutation)
+        return ref.Get(URI(self, "transpose"), permutation)
 
     def write(self, value):
         """Overwrite this :class:`NDArray` with the given :class:`NDArray` or `Number`, broadcasting if needed."""
@@ -264,7 +264,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                 if hasattr(shape, "__len__"):
                     return len(shape)
                 else:
-                    return ref.Get(ref.MethodSubject(self, "ndim"))
+                    return ref.Get(URI(self, "ndim"))
 
             @property
             def schema(self):

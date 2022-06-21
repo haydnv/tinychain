@@ -42,7 +42,7 @@ class Chain(State):
 
         return ref.Put(URI(self), None, value)
 
-    # TODO: delete these overrides and make MethodSubject compatible with Chain
+    # TODO: delete these overrides
     def _get(self, name, key=None, rtype=State):
         op_ref = ref.Get(URI(self).append(name), key)
         rtype = Nil if rtype is None else rtype

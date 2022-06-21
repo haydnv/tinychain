@@ -73,15 +73,12 @@ class Collection(State):
             raise ValueError(f"cannot load data {data} (consider calling `copy_from` instead)")
 
         class Load(cls):
-            def __init__(self, put_op):
-                cls.__init__(self, put_op)
-
             @property
             def schema(self):
                 return schema
 
             def __ref__(self, name):
-                return cls(URI(name))
+                return cls(name if isinstance(name, URI) else URI(name))
 
         return Load(Put(cls, schema, data))
 
