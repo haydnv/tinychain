@@ -24,8 +24,13 @@ class NeuralNetTester(tc.app.Library):
         outputs = layer.eval(inputs)
         return tc.math.gradients(outputs, tc.tensor.Dense.ones_like(outputs), [layer.weights, layer.bias])
 
+    @tc.post
+    def test_sequential(self, inputs: tc.tensor.Tensor) -> tc.F32:
+        layer1 = tc.ml.nn.Linear.create(2, 2)
+        layer2 = tc.ml.nn.Linear.create(2, 1)
+        return tc.ml.nn.Sequential([layer1, layer2]).eval(inputs)
 
-@unittest.skip  # TODO: re-enable when differentiable methods support independent namespaces
+
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -33,11 +38,15 @@ class NeuralNetTests(unittest.TestCase):
 
     def testLinear(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        self.host.post(tc.URI(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
+        self.host.post(URI.append("test_linear"), {"inputs": load_dense(inputs)})
 
     def testDerivative(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        self.host.post(tc.URI(NeuralNetTester).append("test_derivative"), {"inputs": load_dense(inputs)})
+        self.host.post(URI.append("test_derivative"), {"inputs": load_dense(inputs)})
+
+    def testSequential(self):
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        self.host.post(URI.append("test_sequential"), {"inputs": load_dense(inputs)})
 
     @classmethod
     def tearDownClass(cls) -> None:
