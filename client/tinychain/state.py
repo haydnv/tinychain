@@ -1,6 +1,7 @@
 """A discrete :class:`State`."""
 
 import inspect
+import logging
 
 from .base import _Base
 from .interface import Functional

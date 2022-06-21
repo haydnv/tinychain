@@ -50,50 +50,36 @@ class Context(object):
     def __json__(self):
         from .app import Model
         from .chain import Chain
-        from .scalar.ref import args, form_of, is_ref, Ref
+        from .scalar.ref import args, form_of, is_literal, Ref
         from .state import State, StateRef
         from .uri import URI
 
         dep_names = {dep: name for name, dep in self._deps.items()}
 
-        def copy(ref):
-            if isinstance(ref, dict):
-                return {k: reference(ref[k]) for k in ref}
-            elif isinstance(ref, list):
-                return [reference(item) for item in ref]
-            elif isinstance(ref, tuple):
-                return tuple(reference(item) for item in ref)
-            elif isinstance(ref, StateRef):
-                return ref
-            elif isinstance(ref, URI):
-                if not isinstance(ref._subject, (dict, list, tuple)) and ref._subject in dep_names:
-                    return URI(dep_names[ref._subject], *ref._path)
-                else:
-                    return ref
-            elif isinstance(ref, Ref):
+        def reference(state):
+            if is_literal(state) or isinstance(state, StateRef):
+                return state
+            elif isinstance(state, Ref):
                 deps = []
-                for arg in args(ref):
+                for arg in args(state):
                     if not isinstance(arg, (dict, list, tuple)) and arg in dep_names:
                         deps.append(getattr(self, dep_names[arg]))
                     else:
                         deps.append(reference(arg))
 
-                return type(ref)(*deps)
-            else:
-                return state
-
-        def reference(state):
-            if not is_ref(state):
-                return state
-            elif isinstance(state, (Ref, URI)):
-                return copy(state)
+                return type(state)(*deps)
+            elif isinstance(state, URI):
+                if state._subject in dep_names:
+                    return URI(getattr(self, dep_names[state._subject]), *state._path)
+                else:
+                    return state
             elif isinstance(state, (Chain, Model)):
                 if state in dep_names:
                     return getattr(self, dep_names[state])
                 else:
                     return state
             elif isinstance(state, State):
-                return type(state)(form=copy(form_of(state)))
+                return type(state)(form=reference(form_of(state)))
             elif isinstance(state, dict):
                 return {key: reference(state[key]) for key in state}
             elif isinstance(state, list):
@@ -106,10 +92,12 @@ class Context(object):
         form = []
 
         for name, state in self._deps.items():
-            form.append((name, reference(state)))
+            state = reference(state)
+            form.append((name, state))
 
         for name, state in self._ns.items():
-            form.append((name, reference(state)))
+            state = reference(state)
+            form.append((name, state))
 
         return to_json(form)
 

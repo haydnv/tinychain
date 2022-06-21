@@ -71,6 +71,12 @@ class URI(object):
         if is_op_ref(self._subject):
             cxt.assign(self._subject, name_hint)
 
+    def __repr__(self):
+        if self._path:
+            return f"URI({self._subject}/{'/'.join(self._path)})"
+        else:
+            return f"URI({self._subject})"
+
     def __str__(self):
         if hasattr(self._subject, "__uri__"):
             root = str(self._subject.__uri__)

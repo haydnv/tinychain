@@ -273,8 +273,12 @@ class Op(Ref):
         else:
             subject = self.subject
 
-        if not isinstance(subject, URI) and not hasattr(subject, "__uri__"):
+        if isinstance(subject, URI):
+            pass
+        elif not hasattr(subject, "__uri__"):
             raise ValueError(f"subject {self.subject} of {self} has no URI")
+        elif URI(subject).startswith("/state") and URI(subject) == URI(type(subject)):
+            raise RuntimeError(f"{self.subject} was not assigned a URI")
 
         subject = subject if isinstance(subject, URI) else URI(subject)
         return {str(subject): to_json(self.args)}
@@ -426,7 +430,6 @@ class Post(Op):
         if not isinstance(self.args, dict):
             raise ValueError(f"POST arguments must be a Python dict, not {self.args}")
 
-        args = {}
         for name, arg in self.args.items():
             deanonymize(arg, cxt, name_hint + f"_{name}")
 

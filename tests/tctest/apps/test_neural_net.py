@@ -14,6 +14,11 @@ class NeuralNetTester(tc.app.Library):
     ml = tc.ml.service.ML()
 
     @tc.post
+    def test_convolution(self, inputs: tc.tensor.Tensor) -> tc.F32:
+        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
+        return layer.eval(inputs)
+
+    @tc.post
     def test_linear(self, inputs: tc.tensor.Tensor) -> tc.F32:
         layer = tc.ml.nn.Linear.create(2, 1)
         return layer.eval(inputs)
@@ -35,6 +40,10 @@ class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_neural_net", NeuralNetTester(), wait_time=2, request_ttl=60)
+
+    def testConvolution(self):
+        inputs = np.ones([BATCH_SIZE, 3, 5, 5])
+        self.host.post(URI.append("test_convolution"), {"inputs": load_dense(inputs)})
 
     def testLinear(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
