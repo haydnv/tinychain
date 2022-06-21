@@ -16,12 +16,12 @@ class FunctionCall(Operator):
         deanonymize(self.args, context, name_hint + "_args")
 
         if not ref.is_ref(self.subject):
-            self.subject = ref.reference(context, self.subject, name_hint + "_subject")
+            self.subject = context.assign(self.subject, name_hint + "_subject")
             assert isinstance(self.subject, StateRef)
 
         for name in self.args:
             if ref.is_op_ref(self.args[name]):
-                self.args[name] = ref.reference(context, self.args[name], f"{name_hint}_{name}")
+                self.args[name] = context.assign(self.args[name], f"{name_hint}_{name}")
 
     def __repr__(self):
         return f"call {self.subject} with inputs {self.args}"
@@ -91,7 +91,7 @@ class Function(op.Post):
             def derivative(self):
                 return self.state.derivative()
 
-        return FunctionRef(self, URI(name))
+        return FunctionRef(self, name if isinstance(name, URI) else URI(name))
 
     def __repr__(self):
         return f"differentiable POST Op with form {self.graph}"
@@ -131,7 +131,7 @@ class NativeFunction(Function):
 
             dtype = resolve_class(self.form, param.annotation, State)
             if inspect.isclass(dtype) and issubclass(dtype, Numeric):
-                placeholders.append(dtype(form=URI(name)))
+                placeholders.append(dtype(form=name if isinstance(name, URI) else URI(name)))
             else:
                 raise TypeError(f"a differentiable function requires only numeric inputs, not {name}: {dtype}")
 
@@ -206,7 +206,7 @@ class StateFunction(method.Post):
             def derivative(self):
                 return self.state.derivative()
 
-        return StateFunctionRef(self, URI(name))
+        return StateFunctionRef(self, name if isinstance(name, URI) else URI(name))
 
     def derivative(self):
         if self.degree == 0:
@@ -255,7 +255,7 @@ class NativeStateFunction(StateFunction):
                 dtype = type(param.default)
 
             dtype = resolve_class(self.form, dtype, State)
-            kwargs[name] = dtype(form=URI(name))
+            kwargs[name] = dtype(form=name if isinstance(name, URI) else URI(name))
 
         cxt._return = self.form(*args, **kwargs)
 

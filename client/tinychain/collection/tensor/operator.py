@@ -4,7 +4,7 @@ import logging
 from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
-from ...scalar.ref import deref, is_literal, same_as, After, MethodSubject, Post
+from ...scalar.ref import deref, is_literal, same_as, After, Post
 from ...shape import Shape
 from ...uri import URI
 
@@ -15,9 +15,9 @@ class Concatenate(Operator):
         if not hasattr(tensors, "__len__"):
             logging.debug(f"Concatenate({tensors}) will not support automatic differentiation")
 
-        if axis:
+        if axis and is_literal(axis):
             for tensor in tensors:
-                if not is_literal(tensor.shape[axis]):
+                if not is_literal(tensor.shape[deref(axis)]):
                     logging.debug(f"tensor {tensor} to concatenate noes not have a literal shape at axis {axis}")
 
         Operator.__init__(self, tensors, axis)
@@ -140,6 +140,9 @@ class Reduce(Operator):
     def __init__(self, tensor, axis=None, keepdims=False):
         Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
 
+    def __args__(self):
+        return self.subject, self.args.get("axis"), self.args.get("keepdims")
+
     @property
     def shape(self):
         return Shape.reduce(self.subject.shape, **self.args)
@@ -154,6 +157,9 @@ class Norm(Operator):
             return f"norm({self.subject}[{self.args}])"
         else:
             return f"norm({self.subject})"
+
+    def __args__(self):
+        return self.subject, self.args.get("axis"), self.args.get("keepdims")
 
     @property
     def shape(self):
@@ -332,6 +338,9 @@ class Slice(Transform):
             def __init__(self, grad):
                 Operator.__init__(self, grad, None)
 
+            def __args__(self):
+                return self.subject,
+
             def __repr__(self):
                 return f"{self.subject}[{self.args}]"
 
@@ -348,7 +357,7 @@ class Slice(Transform):
             def backward(self, _variable=None):
                 return self.subject
 
-        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), MethodSubject(grad)))))
+        return Dense(SliceGradient(Dense(After(grad[self.args].write(loss), URI(grad)))))
 
 
 class Tile(Transform):

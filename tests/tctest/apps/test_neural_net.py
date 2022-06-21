@@ -25,6 +25,7 @@ class NeuralNetTester(tc.app.Library):
         return tc.math.gradients(outputs, tc.tensor.Dense.ones_like(outputs), [layer.weights, layer.bias])
 
 
+@unittest.skip  # TODO: re-enable when differentiable methods support independent namespaces
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

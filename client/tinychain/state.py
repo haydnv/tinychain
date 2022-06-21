@@ -4,7 +4,7 @@ import inspect
 
 from .base import _Base
 from .interface import Functional
-from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
+from .scalar.ref import form_of, get_ref, is_ref, Ref
 from .uri import URI
 from .context import deanonymize, to_json
 
@@ -39,28 +39,30 @@ class State(_Base):
         _Base.__init__(self)
 
     def __hash__(self):
-        return hash(form_of(self))
+        form = form_of(self)
+
+        if hashable(form):
+            if isinstance(form, dict):
+                return hash((tuple(sorted(form.keys())), tuple(sorted(form.values()))))
+            elif isinstance(form, list):
+                return hash(tuple(form))
+            else:
+                return hash(form)
+        else:
+            return hash(id(self))
 
     def __json__(self):
         form = form_of(self)
 
-        if isinstance(form, URI) and form == URI(self):
+        if isinstance(form, URI) and form == self.__uri__:
             return to_json(form)
-        elif hasattr(form, "__uri__") and URI(form) == URI(self):
+        elif hasattr(form, "__uri__") and form.__uri__ == self.__uri__:
             return to_json(form)
         else:
-            return {str(URI(self)): [to_json(form)]}
-
-    def __id__(self):
-        return hex_id(form_of(self))
+            return {str(self.__uri__): [to_json(form)]}
 
     def __ns__(self, cxt, name_hint):
-        form = form_of(self)
-
-        deanonymize(form, cxt, name_hint)
-
-        if isinstance(self.__form__, URI):
-            self.__uri__ = self.__form__
+        deanonymize(form_of(self), cxt, name_hint)
 
     def __ref__(self, name):
         if hasattr(form_of(self), "__ref__"):
@@ -154,9 +156,9 @@ class Class(Object):
         if args and kwargs:
             raise ValueError("Class.__call__ accepts args or kwargs but not both")
 
-        from .scalar.ref import Get, MethodSubject
+        from .scalar.ref import Get
 
-        subject = MethodSubject(self)
+        subject = self.__uri__
         if args:
             return Get(subject, args)
         else:
@@ -175,30 +177,39 @@ class Instance(Object):
 class StateRef(Ref):
     def __init__(self, state, name):
         self.state = state
-        self.__uri__ = URI(name)
+        self.__uri__ = name if isinstance(name, URI) else URI(name)
+
+    def __args__(self):
+        return self.state, self.__uri__
 
     def __repr__(self):
-        is_auto_assigned = False
-
-        address = str(URI(self)).split('_')[-1]
-        try:
-            is_auto_assigned = int(address, 16)
-        except ValueError:
-            pass
-
-        if is_auto_assigned:
-            return repr(self.state)
-        else:
-            return str(URI(self))
+        return str(self.__uri__)
 
     def __hash__(self):
         return hash(self.state)
 
-    def __id__(self):
-        return hex_id(self.state)
-
     def __json__(self):
-        return to_json(URI(self))
+        return to_json(self.__uri__)
 
     def __ns__(self, cxt, name_hint):
         deanonymize(self.state, cxt, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))
+
+
+def hashable(state):
+    if isinstance(state, list):
+        return False
+    elif isinstance(state, tuple):
+        return all(hashable(item) for item in state)
+    elif isinstance(state, dict):
+        return (all(hashable(key) and sortable(key) for key in state.keys()) and
+                all(hashable(value) and sortable(value) for value in state.values()))
+    else:
+        return True
+
+
+def sortable(state):
+    if inspect.isclass(state):
+        return False
+
+    dtype = type(state)
+    return dtype.__lt__ is not object.__lt__ or dtype.__gt__ is not object.__gt__

@@ -2,7 +2,7 @@ import logging
 import typing
 
 from ..context import deanonymize, to_json
-from ..scalar.ref import deref, is_literal, same_as, is_op_ref, reference, Op
+from ..scalar.ref import deref, is_literal, same_as, is_op_ref, Op
 from ..scalar.value import Id
 
 from .base import is_numeric
@@ -39,18 +39,21 @@ class Operator(Op):
 
         Op.__init__(self, subject, args)
 
+    def __args__(self):
+        return self.subject, self.args
+
     def __json__(self):
         return to_json(self.forward())
 
-    def __ns__(self, context, name_hint):
-        deanonymize(self.subject, context, name_hint + "_subject")
-        deanonymize(self.args, context, name_hint + "_args")
+    def __ns__(self, cxt, name_hint):
+        deanonymize(self.subject, cxt, name_hint + "_subject")
+        deanonymize(self.args, cxt, name_hint + "_args")
 
         if is_op_ref(self.subject):
-            self.subject = reference(context, self.subject, name_hint + "_subject")
+            cxt.assign(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.args):
-            self.args = reference(context, self.args, name_hint + "_args")
+            cxt.assign(self.args, name_hint + "_args")
 
     def __repr__(self):
         raise NotImplementedError(f"human-readable string representation of {self.__class__.__name__}")
@@ -110,13 +113,16 @@ class Unary(Operator):
 
         Operator.__init__(self, subject, None)
 
-    def __ns__(self, context, name_hint):
+    def __args__(self):
+        return self.subject,
+
+    def __ns__(self, cxt, name_hint):
         assert self.args is None
 
-        deanonymize(self.subject, context, name_hint + "_subject")
+        deanonymize(self.subject, cxt, name_hint + "_subject")
 
         if is_op_ref(self.subject):
-            self.subject = reference(context, self.subject, name_hint + "_subject")
+            cxt.assign(self.subject, name_hint + "_subject")
 
 
 class Custom(Unary):
@@ -749,7 +755,15 @@ def derivative_of(state_or_function, variable=None, keepdims=False):
     if is_constant(state):
         return zeros_like(state, keepdims)
     elif operator(state):
-        return operator(state).backward(variable)
+        d = operator(state).backward(variable)
+
+        if keepdims:
+            if same_as(d, 0):
+                return zeros_like(state)
+            elif same_as(d, 1):
+                return ones_like(state)
+
+        return d
     else:
         raise ValueError(f"the derivative of {state} is not defined")
 

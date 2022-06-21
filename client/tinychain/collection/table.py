@@ -59,7 +59,8 @@ class Table(Collection):
         @closure(self)
         @get
         def group(cxt, key: Tuple) -> Tuple:
-            cxt.where = Tuple(columns).zip(key).cast(Map)
+            cxt.columns = columns
+            cxt.where = cxt.columns.zip(key).cast(Map)
             cxt.slice = self.where(cxt.where)
             return key, fn(cxt.slice)
 

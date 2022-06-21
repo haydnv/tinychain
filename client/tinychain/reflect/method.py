@@ -28,13 +28,10 @@ class Method(object):
         self.name = name
 
     def __json__(self):
-        return {str(URI(self)): to_json(ref.form_of(self))}
+        return {str(self.__uri__): to_json(ref.form_of(self))}
 
     def subject(self):
-        if isinstance(self.header, State):
-            return ref.MethodSubject(self.header, self.name)
-        else:
-            return URI(self.header).append(self.name)
+        return self.header.__uri__.append(self.name)
 
 
 class Get(Method):
