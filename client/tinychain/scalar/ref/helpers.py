@@ -230,8 +230,6 @@ def is_ref(state):
         return any(is_ref(item) for item in state)
     elif isinstance(state, dict):
         return any(is_ref(state[k]) for k in state)
-    elif hasattr(state, "__uri__") and not URI(state).startswith("/state"):
-        return True
     else:
         return False
 
