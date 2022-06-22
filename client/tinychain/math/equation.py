@@ -91,7 +91,7 @@ class Function(op.Post):
             def derivative(self):
                 return self.state.derivative()
 
-        return FunctionRef(self, name if isinstance(name, URI) else URI(name))
+        return FunctionRef(self, name)
 
     def __repr__(self):
         return f"differentiable POST Op with form {self.graph}"
@@ -206,7 +206,7 @@ class StateFunction(method.Post):
             def derivative(self):
                 return self.state.derivative()
 
-        return StateFunctionRef(self, name if isinstance(name, URI) else URI(name))
+        return StateFunctionRef(self, name)
 
     def derivative(self):
         if self.degree == 0:

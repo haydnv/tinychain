@@ -56,30 +56,26 @@ class Context(object):
 
         dep_names = {dep: name for name, dep in self._deps.items()}
 
-        def reference(state):
+        def reference(state, top_level=False):
             if is_literal(state) or isinstance(state, StateRef):
                 return state
-            elif isinstance(state, Ref):
-                deps = []
-                for arg in args(state):
-                    if not isinstance(arg, (dict, list, tuple)) and arg in dep_names:
-                        deps.append(getattr(self, dep_names[arg]))
-                    else:
-                        deps.append(reference(arg))
 
-                return type(state)(*deps)
+            # if this state already has a name assigned, just return that name
+            # unless its form is explicitly requested
+            if not isinstance(state, (dict, list, tuple)):
+                if not top_level:
+                    if state in dep_names:
+                        return getattr(self, dep_names[state])
+
+            if isinstance(state, Ref):
+                return type(state)(*[reference(arg) for arg in args(state)])
             elif isinstance(state, URI):
-                if state._subject in dep_names:
-                    return URI(getattr(self, dep_names[state._subject]), *state._path)
-                else:
-                    return state
+                # TODO: it shouldn't be necessary to reference private instance variables of URI here
+                return URI(reference(state._subject), *state._path)
             elif isinstance(state, (Chain, Model)):
-                if state in dep_names:
-                    return getattr(self, dep_names[state])
-                else:
-                    return state
+                return state
             elif isinstance(state, State):
-                return type(state)(form=reference(form_of(state)))
+                return type(state)(form=reference(form_of(state), top_level))
             elif isinstance(state, dict):
                 return {key: reference(state[key]) for key in state}
             elif isinstance(state, list):
@@ -92,11 +88,11 @@ class Context(object):
         form = []
 
         for name, state in self._deps.items():
-            state = reference(state)
+            state = reference(state, True)
             form.append((name, state))
 
         for name, state in self._ns.items():
-            state = reference(state)
+            state = reference(state, True)
             form.append((name, state))
 
         return to_json(form)
@@ -110,7 +106,7 @@ class Context(object):
 
         name = str(name[1:]) if name.startswith('$') else str(name)
 
-        if name in self._ns:
+        if name in self:
             raise ValueError(f"Context already has a value named {name} (contents are {self._ns}")
 
         state = autobox(state)
@@ -144,7 +140,6 @@ class Context(object):
 
         name_hint = f"{name_hint}_{i}"
         self._deps[name_hint] = state
-
         return getattr(self, name_hint)
 
     def items(self):

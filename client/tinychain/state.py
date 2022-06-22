@@ -1,7 +1,6 @@
 """A discrete :class:`State`."""
 
 import inspect
-import logging
 
 from .base import _Base
 from .interface import Functional
@@ -177,7 +176,7 @@ class StateRef(Ref):
         return str(self.__uri__)
 
     def __hash__(self):
-        return hash(self.state)
+        return hash_of(self.state)
 
     def __json__(self):
         return to_json(self.__uri__)

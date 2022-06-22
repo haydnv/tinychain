@@ -324,6 +324,7 @@ class DenseTests(HostTest):
         cxt.expanded = cxt.x.expand_dims(0).expand_dims(0).transpose(permutation)
         cxt.reshaped = cxt.x.reshape((1, 1) + input_shape).transpose(permutation)
         cxt.result = [cxt.reshaped, cxt.expanded]
+
         reshaped, expanded = self.host.post(ENDPOINT, cxt)
 
         expected = np.transpose(x.reshape((1, 1) + input_shape), permutation)

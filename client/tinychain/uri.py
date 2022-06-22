@@ -14,7 +14,11 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        assert not isinstance(subject, URI)
+        if isinstance(subject, URI):
+            self._subject = subject._subject
+            self._path = subject._path
+            self._path.extend(path)
+            return
 
         if isinstance(subject, str):
             if subject.startswith("$$"):

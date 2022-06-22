@@ -102,7 +102,7 @@ class Copy(Unary):
 
     def forward(self):
         from .base import Tensor
-        return Post(URI(Tensor) + "/copy_from", {"tensor": self.subject})
+        return Post(URI(Tensor, "copy_from"), {"tensor": self.subject})
 
     def backward(self, variable=None):
         from .base import NDArray
