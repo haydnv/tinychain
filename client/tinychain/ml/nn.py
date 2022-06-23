@@ -121,7 +121,7 @@ class ConvLayer(Layer, Dynamic):
         cxt.output = cxt.activation.reshape([out_c, h_out, w_out, batch_size]).transpose([3, 0, 1, 2])
         # shape is now [batch_size, out_c, h_out, w_out]
 
-        return self._activation(cxt.output) if self._activation else cxt.output
+        return self._activation(output) if self._activation else cxt.output
 
 
 class Linear(Layer, Dynamic):

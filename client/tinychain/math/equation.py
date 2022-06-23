@@ -257,7 +257,9 @@ class NativeStateFunction(StateFunction):
             dtype = resolve_class(self.form, dtype, State)
             kwargs[name] = dtype(form=name if isinstance(name, URI) else URI(name))
 
-        cxt._return = self.form(*args, **kwargs)
+        result = self.form(*args, **kwargs)
+        if not cxt or not ref.same_as(cxt[-1], result):
+            cxt._return = result
 
         for name in kwargs.keys():
             if name in cxt:

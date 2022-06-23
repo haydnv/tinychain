@@ -4,8 +4,6 @@ import inspect
 import json
 import operator
 
-from collections import OrderedDict
-
 
 class _HashTable(object):
     SIZE = 100
@@ -41,19 +39,16 @@ class _Bijection(object):
     def __init__(self, hash_fn, equivalence_fn):
         self._by_key = _HashTable()
         self._by_value = _HashTable(hash_fn, equivalence_fn)
-        self._order = []
 
     def __contains__(self, key):
         return key in self._by_key
 
     def __getitem__(self, key):
+        assert isinstance(key, str)
         if key in self._by_key:
             return self.value(key)
         else:
             raise KeyError(f"key {key} is not present in {self}")
-
-    def __iter__(self):
-        return iter(self._order)
 
     def __setitem__(self, key, value):
         assert key
@@ -65,11 +60,6 @@ class _Bijection(object):
 
         self._by_key[key] = value
         self._by_value[value] = key
-        self._order.append(key)
-
-    def items(self):
-        for key in self._order:
-            yield key, self[key]
 
     def key(self, value):
         if value in self._by_value:
@@ -84,15 +74,25 @@ class Context(object):
     """A transaction context."""
 
     def __init__(self):
-        # TODO: handle multiple identical literal values with different semantic significance
-        from .scalar.ref import same_as
+        from .scalar.ref import hex_id, is_literal, same_as
         from .state import hash_of
-        object.__setattr__(self, "_deps", _Bijection(hash_of, same_as))
-        object.__setattr__(self, "_ns", OrderedDict())
+
+        def hash_fn(state):
+            if is_literal(state):
+                return hex_id(state)
+            else:
+                return hash_of(state)
+
+        object.__setattr__(self, "_ns", _Bijection(hash_fn, same_as))
+        object.__setattr__(self, "_names", [])
+        object.__setattr__(self, "_deps", [])
+
+    def __bool__(self):
+        return bool(self._names)
 
     def __contains__(self, name):
         name = str(name[1:]) if name.startswith('$') else str(name)
-        return name in self._ns or name in self._deps
+        return name in self._ns
 
     def __getattr__(self, name):
         from .scalar.ref import get_ref
@@ -102,8 +102,6 @@ class Context(object):
 
         if name in self._ns:
             value = self._ns[name]
-        elif name in self._deps:
-            value = self._deps[name]
         else:
             raise AttributeError(f"Context has no such value: {name}")
 
@@ -113,14 +111,14 @@ class Context(object):
             return URI(name)
 
     def __getitem__(self, selector):
-        keys = list(self._ns.keys())[selector]
+        keys = list(self)[selector]
         if isinstance(keys, list):
             return [getattr(self, key) for key in keys]
         else:
             return getattr(self, keys)
 
     def __iter__(self):
-        return iter(self._ns)
+        return iter(self._names)
 
     def __json__(self):
         from .app import Model
@@ -134,10 +132,10 @@ class Context(object):
                 return state
 
             # if this state already has a name assigned, just return that name
-            if not isinstance(state, (dict, list, tuple)) and self._deps.key(state):
+            if not isinstance(state, (dict, list, tuple)) and self._ns.key(state):
                 # unless its form is explicitly requested
                 if not top_level:
-                    return getattr(self, self._deps.key(state))
+                    return getattr(self, self._ns.key(state))
 
             if isinstance(state, Ref):
                 deps = [reference(arg) for arg in args(state)]
@@ -164,13 +162,10 @@ class Context(object):
 
         form = []
 
-        for name, state in self._deps.items():
+        for name in self:
+            state = self._ns[name]
             state_ref = reference(state, True)
             form.append((name, state_ref))
-
-        for name, state in self._ns.items():
-            state = reference(state, True)
-            form.append((name, state))
 
         return to_json(form)
 
@@ -182,38 +177,31 @@ class Context(object):
             raise ValueError(f"cannot assign transaction Context to itself")
 
         name = str(name[1:]) if name.startswith('$') else str(name)
+        assert isinstance(name, str)
 
         if name in self:
             raise ValueError(f"Context already has a value named {name} (contents are {self._ns}")
+        elif self._ns.key(state):
+            raise ValueError(f"cannot rename {state} from {self._ns.key(state)} to {name}")
 
         state = autobox(state)
         deanonymize(state, self, name)
         self._ns[name] = state
+        self._names.append(name)
 
     def __repr__(self):
-        data = list(self._ns.keys())
+        data = list(self)
         return f"Op context with data {data}"
 
     def assign(self, state, name_hint):
-        from .scalar.ref import same_as
-        from .state import hash_of
-
-        # TODO: handle multiple identical literal values with different semantic significance
-        state_hash = hash_of(state)
-
-        for name, present in self._ns.items():
-            if state_hash == hash_of(present):
-                if same_as(state, present):
-                    return getattr(self, name)
-
-        if self._deps.key(state):
-            return getattr(self, self._deps.key(state))
+        if self._ns.key(state):
+            return getattr(self, self._ns.key(state))
 
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
 
         if isinstance(state, dict):
-            for key in dict:
+            for key in state:
                 self.assign(state[key], f"{name_hint}.{key}")
             return
         elif isinstance(state, (list, tuple)):
@@ -222,7 +210,7 @@ class Context(object):
             return
 
         if name_hint not in self:
-            self._deps[name_hint] = state
+            setattr(self, name_hint, state)
             return getattr(self, name_hint)
 
         i = 1
@@ -230,11 +218,11 @@ class Context(object):
             i += 1
 
         name_hint = f"{name_hint}_{i}"
-        self._deps[name_hint] = state
+        setattr(self, name_hint, state)
         return getattr(self, name_hint)
 
     def items(self):
-        yield from ((name, getattr(self, name)) for name in self._form)
+        yield from ((name, getattr(self, name)) for name in self)
 
 
 def autobox(state):

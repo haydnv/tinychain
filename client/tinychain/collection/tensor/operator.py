@@ -28,7 +28,7 @@ class Concatenate(Operator):
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
-            raise ValueError(f"the concatenation of {self.subject} does not have a literal shape")
+            raise ValueError(f"concatenation does not have a literal shape")
 
         return Shape.concatenate([t.shape for t in self.subject], self.args)
 
@@ -43,7 +43,7 @@ class Concatenate(Operator):
 
     def backward(self, variable=None):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the derivative of a tensor concatenation requires a literal list, not {self.subject}")
+            raise ValueError(f"the derivative of a tensor concatenation requires a literal list")
 
         from .base import Dense, NDArray
 
@@ -62,7 +62,7 @@ class Concatenate(Operator):
 
     def gradients(self, loss):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the gradients of a tensor concatenation requires a literal list, not {self.subject}")
+            raise ValueError(f"the gradients of a tensor concatenation requires a literal list")
 
         grads = Gradients()
 

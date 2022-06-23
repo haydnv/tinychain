@@ -1,7 +1,6 @@
 """An n-dimensional array of numbers."""
 
 import inspect
-import logging
 import math
 
 from ...decorators import post
@@ -246,7 +245,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                         if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
                             raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
                     except (RuntimeError, ValueError) as e:
-                        logging.debug(lambda: f"{form} does not have a literal shape: {e}")
+                        pass
 
                 Tensor.__init__(self, form)
 
@@ -336,7 +335,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
             try:
                 return operator(self).shape
             except (RuntimeError, ValueError):
-                logging.debug(f"{self} does not have a literal shape")
+                pass
 
         return self._get("shape", rtype=Shape)
 

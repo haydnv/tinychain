@@ -99,6 +99,15 @@ def get_ref(state, name):
         return state
 
 
+def hex_id(state):
+    """Return the memory address of the form of the given `state`"""
+
+    if hasattr(state, "__id__"):
+        return state.__id__()
+    else:
+        return id(state)
+
+
 def independent(state_or_ref):
     """Return `True` if the given `state_or_ref` does not depend on any unresolved references."""
 
