@@ -1,5 +1,4 @@
 import inspect
-import logging
 
 from ...interface import Interface
 from ...context import to_json
@@ -97,7 +96,6 @@ def get_ref(state, name):
         from ...state import State
         return type(f"{state.__class.__name__}State", (State, type(state)), {})(form=state)
     else:
-        logging.debug(f"{state} has no __ref__ method")
         return state
 
 

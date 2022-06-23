@@ -1,7 +1,5 @@
 """Reference types"""
 
-import logging
-
 from ...uri import URI
 from ...context import deanonymize, to_json
 
@@ -354,7 +352,6 @@ class Get(Op):
 
         if is_op_ref(self.args):
             (key,) = self.args
-            _log_anonymous(key)
             cxt.assign(key, name_hint + "_key")
 
 
@@ -393,11 +390,9 @@ class Put(Op):
         deanonymize(value, cxt, name_hint + "_value")
 
         if is_op_ref(key):
-            _log_anonymous(key)
             cxt.assign(key, name_hint + "key")
 
         if is_op_ref(value):
-            _log_anonymous(value)
             cxt.assign(value, name_hint + "_value")
 
 
@@ -440,7 +435,6 @@ class Post(Op):
             deanonymize(arg, cxt, name_hint + f"_{name}")
 
             if is_op_ref(arg):
-                _log_anonymous(arg)
                 cxt.assign(arg, name_hint + f"_{name}")
 
 
@@ -475,14 +469,4 @@ class Delete(Op):
         deanonymize(self.args, cxt, name_hint + "_key")
 
         if is_op_ref(self.args):
-            _log_anonymous(self.args)
             cxt.assign(self.args, name_hint + "_key")
-
-
-def _log_anonymous(arg):
-    from .helpers import is_op_ref, is_write_op_ref
-
-    if is_write_op_ref(arg):
-        logging.warning(f"assigning auto-generated name to the result of {arg}")
-    elif is_op_ref(arg):
-        logging.info(f"assigning auto-generated name to the result of {arg}")

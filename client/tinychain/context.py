@@ -2,16 +2,92 @@
 
 import inspect
 import json
-import logging
+import operator
 
 from collections import OrderedDict
+
+
+class _HashTable(object):
+    SIZE = 100
+
+    def __init__(self, hash_fn=hash, equivalence_fn=operator.eq):
+        self._hash_fn = hash_fn
+        self._equivalence_fn = equivalence_fn
+        self._buckets = [[]] * self.SIZE
+
+    def __contains__(self, key):
+        bucket = self._buckets[self._hash_fn(key) % self.SIZE]
+        for k, _ in bucket:
+            if self._equivalence_fn(k, key):
+                return True
+
+    def __getitem__(self, key):
+        bucket = self._buckets[self._hash_fn(key) % self.SIZE]
+        for k, v in bucket:
+            if self._equivalence_fn(k, key):
+                return v
+
+        raise KeyError(f"{key} is not present in {self}")
+
+    def __setitem__(self, key, value):
+        bucket = self._buckets[self._hash_fn(key) % self.SIZE]
+        if any(self._equivalence_fn(k, key) for k, _ in bucket):
+            raise KeyError(f"{key} is already present in {self}")
+
+        bucket.append((key, value))
+
+
+class _Bijection(object):
+    def __init__(self, hash_fn, equivalence_fn):
+        self._by_key = _HashTable()
+        self._by_value = _HashTable(hash_fn, equivalence_fn)
+        self._order = []
+
+    def __contains__(self, key):
+        return key in self._by_key
+
+    def __getitem__(self, key):
+        if key in self._by_key:
+            return self.value(key)
+        else:
+            raise KeyError(f"key {key} is not present in {self}")
+
+    def __iter__(self):
+        return iter(self._order)
+
+    def __setitem__(self, key, value):
+        assert key
+
+        if key in self._by_key:
+            raise KeyError(f"key {key} is already present in {self}")
+        elif value in self._by_value:
+            raise KeyError(f"value {value} is already present in {self}")
+
+        self._by_key[key] = value
+        self._by_value[value] = key
+        self._order.append(key)
+
+    def items(self):
+        for key in self._order:
+            yield key, self[key]
+
+    def key(self, value):
+        if value in self._by_value:
+            return self._by_value[value]
+
+    def value(self, key):
+        if key in self._by_key:
+            return self._by_key[key]
 
 
 class Context(object):
     """A transaction context."""
 
     def __init__(self):
-        object.__setattr__(self, "_deps", OrderedDict())
+        # TODO: handle multiple identical literal values with different semantic significance
+        from .scalar.ref import same_as
+        from .state import hash_of
+        object.__setattr__(self, "_deps", _Bijection(hash_of, same_as))
         object.__setattr__(self, "_ns", OrderedDict())
 
     def __contains__(self, name):
@@ -34,7 +110,6 @@ class Context(object):
         if hasattr(value, "__ref__"):
             return get_ref(value, name)
         else:
-            logging.info(f"context attribute {value} has no __ref__ method")
             return URI(name)
 
     def __getitem__(self, selector):
@@ -54,18 +129,15 @@ class Context(object):
         from .state import State
         from .uri import URI
 
-        # TODO: handle multiple identical literal values with different semantic significance
-        dep_names = {dep: name for name, dep in reversed(self._deps.items())}
-
         def reference(state, top_level=False):
             if hasattr(state, "__uri__") and state.__uri__.is_id():
                 return state
 
             # if this state already has a name assigned, just return that name
-            if not isinstance(state, (dict, list, tuple)) and state in dep_names:
+            if not isinstance(state, (dict, list, tuple)) and self._deps.key(state):
                 # unless its form is explicitly requested
                 if not top_level:
-                    return getattr(self, dep_names[state])
+                    return getattr(self, self._deps.key(state))
 
             if isinstance(state, Ref):
                 deps = [reference(arg) for arg in args(state)]
@@ -134,10 +206,8 @@ class Context(object):
                 if same_as(state, present):
                     return getattr(self, name)
 
-        for dep_name, dep in self._deps.items():
-            if state_hash == hash_of(dep):
-                if same_as(state, dep):
-                    return getattr(self, dep_name)
+        if self._deps.key(state):
+            return getattr(self, self._deps.key(state))
 
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
@@ -199,7 +269,6 @@ def autobox(state):
     if isinstance(state, Interface):
         return state
 
-    logging.debug(f"cannot autobox {state} (type {type(state)})")
     return state
 
 

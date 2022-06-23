@@ -3,11 +3,9 @@
 import logging
 
 from ..app import Dynamic, Model
-from ..collection.tensor import einsum, Dense, Tensor
-from ..context import deanonymize
+from ..collection.tensor import Dense, Tensor
 from ..decorators import differentiable
 from ..generic import Tuple
-from ..math.operator import derivative_of, gradients, operator, Dual
 from ..scalar.number import Float
 from ..scalar.ref import After
 
@@ -73,7 +71,7 @@ class ConvLayer(Layer, Dynamic):
         self._filter_shape = filter_shape
         self._stride = stride
         self._padding = padding
-        self._activation = activation
+        self._activation = activation  # TODO: require a differentiable Function, not a callable Python literal
 
         # run-time state
         self.weights = weights
@@ -141,9 +139,12 @@ class Linear(Layer, Dynamic):
         return cls(weights, bias, activation)
 
     def __init__(self, weights, bias, activation=None):
+        # compile-time constants
+        self._activation = activation  # TODO: require a differentiable Function, not a callable Python literal
+
+        # run-time state
         self.weights = weights
         self.bias = bias
-        self._activation = activation
 
         Dynamic.__init__(self)
 
