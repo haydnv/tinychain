@@ -82,7 +82,7 @@ class ConvLayer(Layer, Dynamic):
         Dynamic.__init__(self)
 
     @differentiable
-    def eval(self, inputs: Tensor) -> Tensor:
+    def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
         # TODO: this expectation should be set using a generic type
@@ -100,69 +100,30 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
-        class Convolution(Dual):
-            def __init__(self, weights, inputs):
-                Dual.__init__(self, weights, inputs)
+        pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
+        pad_matrix = Tensor(After(
+            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            pad_matrix))
 
-                pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
-                pad_matrix = Tensor(After(
-                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
-                    pad_matrix))
+        shape = [c_i * h_f * w_f, batch_size]
 
-                shape = [c_i * h_f * w_f, batch_size]
+        im2col_matrix = []
+        for i in range(h_out):
+            for j in range(w_out):
+                im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
+                im2col_matrix.append(im2col)
 
-                im2col_matrix = []
-                for i in range(h_out):
-                    for j in range(w_out):
-                        im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
-                        im2col_matrix.append(im2col)
+        assert im2col_matrix
 
-                assert im2col_matrix
+        shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
+        cxt.im2col_matrix = Dense.concatenate(im2col_matrix, 0).reshape(shape).transpose()
+        cxt.w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
 
-                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
-                shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
-                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
+        cxt.activation = (cxt.w_col @ cxt.im2col_matrix) + self.bias
+        cxt.output = cxt.activation.reshape([out_c, h_out, w_out, batch_size]).transpose([3, 0, 1, 2])
+        # shape is now [batch_size, out_c, h_out, w_out]
 
-            def __ns__(self, context, name_hint):
-                Dual.__ns__(self, context, name_hint)
-                deanonymize(self.im2col_matrix, context, name_hint + "_im2col_matrix")
-                deanonymize(self.w_col, context, name_hint + "_w_col")
-
-            def __repr__(self):
-                return f"Convolution({self.subject}, {self.args})"
-
-            def forward(self):
-                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
-
-            def backward(self, variable=None):
-                w_col = derivative_of(self.w_col, variable, keepdims=True)
-                im2col_matrix = derivative_of(self.im2col_matrix, variable, keepdims=True)
-                return (w_col @ self.im2col_matrix) + (self.w_col @ im2col_matrix)
-
-            def gradients(self, loss):
-                grads = gradients(self.w_col, loss @ self.im2col_matrix.transpose())
-
-                if operator(self.args):
-                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
-                    loss = (self.w_col.transpose() @ loss).reshape(shape)
-
-                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
-                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
-                    grad = Tensor(After(grad_slice.write(loss), grad))
-
-                    grads.update(operator(self.args).gradients(grad))
-
-                return grads
-
-        shape = [out_c, h_out, w_out, batch_size]
-        output = Tensor(Convolution(self.weights, inputs)) + self.bias
-        output = output.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
-
-        if self._activation:
-            return self._activation(output)
-        else:
-            return output
+        return self._activation(cxt.output) if self._activation else cxt.output
 
 
 class Linear(Layer, Dynamic):
@@ -187,17 +148,15 @@ class Linear(Layer, Dynamic):
         Dynamic.__init__(self)
 
     @differentiable
-    def eval(self, inputs: Tensor) -> Tensor:
+    def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
         # TODO: this expectation should be set using a generic type
         inputs = Tensor.expect([batch_size, self.weights.shape[0]], Float)(form=inputs)
 
-        x = (inputs @ self.weights) + self.bias
-        if self._activation is None:
-            return x
-        else:
-            return self._activation(x)
+        cxt.activation = inputs @ self.weights
+        cxt.with_bias = cxt.activation + self.bias
+        return self._activation(cxt.with_bias) if self._activation else cxt.with_bias
 
 
 class NeuralNet(Model, Differentiable):
