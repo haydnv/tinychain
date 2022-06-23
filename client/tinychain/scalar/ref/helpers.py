@@ -125,7 +125,7 @@ def independent(state_or_ref):
 def is_literal(state):
     """Return `True` if the given `state` is a Python literal (or a type expectation wrapping a Python literal)."""
 
-    from ...generic import Map, Tuple
+    from ...state import State
 
     if isinstance(state, (list, tuple)):
         return all(is_literal(item) for item in state)
@@ -137,10 +137,8 @@ def is_literal(state):
         return True
     elif state is None:
         return True
-    elif isinstance(state, (Map, Tuple)):
+    elif isinstance(state, State):
         return is_literal(form_of(state))
-    elif inspect.isclass(state):
-        return True
 
     return False
 

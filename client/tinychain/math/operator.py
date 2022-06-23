@@ -49,7 +49,7 @@ class Operator(Op):
         deanonymize(self.subject, cxt, name_hint + "_subject")
         deanonymize(self.args, cxt, name_hint + "_args")
 
-        if is_op_ref(self.subject):
+        if is_literal(self.subject) or is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.args):
@@ -898,32 +898,26 @@ def ones_like(state, keepdims=True):
     from ..collection.tensor import Dense
     from ..scalar.number import Number
 
-    if not keepdims:
+    if isinstance(state, Number):
+        return type(state)(form=1)
+    elif is_literal(state) or not keepdims:
         return Number(1)
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=1)
-        else:
-            return Number(1)
     else:
-        return Dense.ones_like(state)
+        cls = type(state) if hasattr(type(state), "ones_like") else Dense
+        return cls.ones_like(state)
 
 
 def zeros_like(state, keepdims=True):
     from ..collection.tensor import Sparse
     from ..scalar.number import Number
 
-    if not keepdims:
+    if isinstance(state, Number):
+        return type(state)(form=0)
+    elif is_literal(state) or not keepdims:
         return Number(0)
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=0)
-        else:
-            return Number(0)
     else:
-        return Sparse.zeros_like(state)
+        cls = type(state) if hasattr(type(state), "zeros_like") else Sparse
+        return cls.zeros_like(state)
 
 
 def debug_shape(numeric):

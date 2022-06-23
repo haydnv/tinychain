@@ -16,7 +16,7 @@ class URI(object):
     def __init__(self, subject, *path):
         if isinstance(subject, URI):
             self._subject = subject._subject
-            self._path = subject._path
+            self._path = list(subject._path)
             self._path.extend(path)
             return
 
@@ -68,12 +68,15 @@ class URI(object):
 
     def __ns__(self, cxt, name_hint):
         from .context import deanonymize
-        from .scalar.ref import is_op_ref
+        from .scalar.ref import is_literal, is_op_ref
+        from .state import State
 
-        deanonymize(self._subject, cxt, name_hint)
+        deanonymize(self._subject, cxt, name_hint + "_subject")
 
         if is_op_ref(self._subject):
-            cxt.assign(self._subject, name_hint)
+            cxt.assign(self._subject, name_hint + "_subject")
+        elif isinstance(self._subject, State) and is_literal(self._subject):
+            cxt.assign(self._subject, name_hint + "_subject")
 
     def __repr__(self):
         if self._path:

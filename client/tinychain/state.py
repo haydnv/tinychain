@@ -38,6 +38,8 @@ class State(_Base):
 
         _Base.__init__(self)
 
+        assert hasattr(self, "__form__")
+
     def __hash__(self):
         return hash_of(form_of(self))
 
@@ -61,10 +63,7 @@ class State(_Base):
             return self.__class__(form=StateRef(self, name))
 
     def __repr__(self):
-        if hasattr(self, "__form__") and self.__form__:
-            return f"{self.__class__.__name__}({form_of(self)})"
-        else:
-            return f"instance of {self.__class__.__name__}"
+        return f"{self.__class__.__name__}({form_of(self)})"
 
     def cast(self, dtype):
         """Attempt to cast this `State` into the given `dtype`."""

@@ -284,7 +284,12 @@ class Op(Ref):
         return {str(subject): to_json(self.args)}
 
     def __ns__(self, cxt, name_hint):
+        from .helpers import is_literal, is_op_ref
+
         deanonymize(self.subject, cxt, name_hint + "_subject")
+
+        if is_literal(self.subject) or is_op_ref(self.subject):
+            cxt.assign(self.subject, name_hint + "_subject")
 
     def __same__(self, other):
         from .helpers import same_as
@@ -351,6 +356,7 @@ class Get(Op):
             (key,) = self.args
             _log_anonymous(key)
             cxt.assign(key, name_hint + "_key")
+
 
 class Put(Op):
     """

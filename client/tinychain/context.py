@@ -50,36 +50,41 @@ class Context(object):
     def __json__(self):
         from .app import Model
         from .chain import Chain
-        from .scalar.ref import args, form_of, is_literal, Ref
-        from .state import State, StateRef
+        from .scalar.ref import args, form_of, Ref
+        from .state import State
         from .uri import URI
 
-        dep_names = {dep: name for name, dep in self._deps.items()}
+        # TODO: handle multiple identical literal values with different semantic significance
+        dep_names = {dep: name for name, dep in reversed(self._deps.items())}
 
         def reference(state, top_level=False):
-            if is_literal(state) or isinstance(state, StateRef):
+            if hasattr(state, "__uri__") and state.__uri__.is_id():
                 return state
 
             # if this state already has a name assigned, just return that name
-            # unless its form is explicitly requested
-            if not isinstance(state, (dict, list, tuple)):
+            if not isinstance(state, (dict, list, tuple)) and state in dep_names:
+                # unless its form is explicitly requested
                 if not top_level:
-                    if state in dep_names:
-                        return getattr(self, dep_names[state])
+                    return getattr(self, dep_names[state])
 
             if isinstance(state, Ref):
-                return type(state)(*[reference(arg) for arg in args(state)])
+                deps = [reference(arg) for arg in args(state)]
+                return type(state)(*deps)
             elif isinstance(state, URI):
                 # TODO: it shouldn't be necessary to reference private instance variables of URI here
                 return URI(reference(state._subject), *state._path)
             elif isinstance(state, (Chain, Model)):
                 return state
             elif isinstance(state, State):
-                return type(state)(form=reference(form_of(state), top_level))
+                form = reference(form_of(state), top_level)
+                ref = type(state)(form=form)
+                return ref
             elif isinstance(state, dict):
-                return {key: reference(state[key]) for key in state}
+                ref = {key: reference(state[key]) for key in state}
+                return ref
             elif isinstance(state, list):
-                return [reference(item) for item in state]
+                ref = [reference(item) for item in state]
+                return ref
             elif isinstance(state, tuple):
                 return tuple(reference(item) for item in state)
             else:
@@ -88,8 +93,8 @@ class Context(object):
         form = []
 
         for name, state in self._deps.items():
-            state = reference(state, True)
-            form.append((name, state))
+            state_ref = reference(state, True)
+            form.append((name, state_ref))
 
         for name, state in self._ns.items():
             state = reference(state, True)
@@ -118,6 +123,22 @@ class Context(object):
         return f"Op context with data {data}"
 
     def assign(self, state, name_hint):
+        from .scalar.ref import same_as
+        from .state import hash_of
+
+        # TODO: handle multiple identical literal values with different semantic significance
+        state_hash = hash_of(state)
+
+        for name, present in self._ns.items():
+            if state_hash == hash_of(present):
+                if same_as(state, present):
+                    return getattr(self, name)
+
+        for dep_name, dep in self._deps.items():
+            if state_hash == hash_of(dep):
+                if same_as(state, dep):
+                    return getattr(self, dep_name)
+
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
 
