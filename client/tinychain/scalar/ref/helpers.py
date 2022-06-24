@@ -1,7 +1,6 @@
 import inspect
 
 from ...interface import Interface
-from ...context import to_json
 from ...uri import URI
 
 from .base import Case, If, Ref
@@ -79,14 +78,7 @@ def get_ref(state, name):
     if not isinstance(name, URI):
         name = URI(name)
 
-    if inspect.isclass(state):
-        def ctr(*args, **kwargs):
-            return state(*args, **kwargs)
-
-        ctr.__uri__ = name
-        ctr.__json__ = lambda: to_json(URI(ctr))
-        return ctr
-    elif hasattr(state, "__ref__"):
+    if hasattr(state, "__ref__") and not inspect.isclass(state):
         return state.__ref__(name)
     elif isinstance(state, dict):
         return {k: get_ref(v, name.append(k)) for k, v in state.items()}

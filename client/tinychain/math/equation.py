@@ -16,12 +16,11 @@ class FunctionCall(Operator):
         deanonymize(self.args, context, name_hint + "_args")
 
         if not ref.is_ref(self.subject):
-            self.subject = context.assign(self.subject, name_hint + "_subject")
-            assert isinstance(self.subject, StateRef)
+            context.assign(self.subject, name_hint + "_subject")
 
         for name in self.args:
             if ref.is_op_ref(self.args[name]):
-                self.args[name] = context.assign(self.args[name], f"{name_hint}_{name}")
+                context.assign(self.args[name], f"{name_hint}_{name}")
 
     def __repr__(self):
         return f"call {self.subject} with inputs {self.args}"

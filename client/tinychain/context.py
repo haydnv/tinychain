@@ -132,7 +132,13 @@ class Context(object):
                 return state
 
             # if this state already has a name assigned, just return that name
-            if not isinstance(state, (dict, list, tuple)) and self._ns.key(state):
+            if isinstance(state, dict):
+                return {key: reference(state[key]) for key in state}
+            elif isinstance(state, list):
+                return [reference(item) for item in state]
+            elif isinstance(state, tuple):
+                return tuple(reference(item) for item in state)
+            elif self._ns.key(state):
                 # unless its form is explicitly requested
                 if not top_level:
                     return getattr(self, self._ns.key(state))
@@ -142,27 +148,19 @@ class Context(object):
                 return type(state)(*deps)
             elif isinstance(state, URI):
                 # TODO: it shouldn't be necessary to reference private instance variables of URI here
-                return URI(reference(state._subject), *state._path)
+                subject = reference(state._subject)
+                return URI(subject, *state._path)
             elif isinstance(state, (Chain, Model)):
                 return state
             elif isinstance(state, State):
                 form = reference(form_of(state), top_level)
-                ref = type(state)(form=form)
-                return ref
-            elif isinstance(state, dict):
-                ref = {key: reference(state[key]) for key in state}
-                return ref
-            elif isinstance(state, list):
-                ref = [reference(item) for item in state]
-                return ref
-            elif isinstance(state, tuple):
-                return tuple(reference(item) for item in state)
+                return type(state)(form=form)
             else:
                 return state
 
         form = []
 
-        for name in self:
+        for name in self._deps + self._names:
             state = self._ns[name]
             state_ref = reference(state, True)
             form.append((name, state_ref))
@@ -195,7 +193,7 @@ class Context(object):
 
     def assign(self, state, name_hint):
         if self._ns.key(state):
-            return getattr(self, self._ns.key(state))
+            return
 
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
@@ -210,16 +208,17 @@ class Context(object):
             return
 
         if name_hint not in self:
-            setattr(self, name_hint, state)
-            return getattr(self, name_hint)
+            self._ns[name_hint] = state
+            self._deps.append(name_hint)
+            return
 
         i = 1
         while f"{name_hint}_{i}" in self:
             i += 1
 
         name_hint = f"{name_hint}_{i}"
-        setattr(self, name_hint, state)
-        return getattr(self, name_hint)
+        self._ns[name_hint] = state
+        self._deps.append(name_hint)
 
     def items(self):
         yield from ((name, getattr(self, name)) for name in self)

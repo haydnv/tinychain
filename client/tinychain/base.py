@@ -28,7 +28,7 @@ class _Base(object):
     def _get(self, name, key=None, rtype=None):
         from .scalar.ref import Get
 
-        subject = URI(self, name)
+        subject = URI(self, name) if name else self
         op_ref = Get(subject, key)
         rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
@@ -37,13 +37,13 @@ class _Base(object):
         from .scalar.ref import Put
         from .scalar.value import Nil
 
-        subject = URI(self, name)
+        subject = URI(self, name) if name else self
         return Nil(Put(subject, key, value))
 
     def _post(self, name, params, rtype):
         from .scalar.ref import Post
 
-        subject = URI(self, name)
+        subject = URI(self, name) if name else self
         op_ref = Post(subject, params)
         rtype = _resolve_rtype(rtype)
         return rtype(form=op_ref)
@@ -52,7 +52,7 @@ class _Base(object):
         from .scalar.ref import Delete
         from .scalar.value import Nil
 
-        subject = URI(self, name)
+        subject = URI(self, name) if name else self
         return Nil(Delete(subject, key))
 
 
