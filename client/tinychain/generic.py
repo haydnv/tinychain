@@ -1,12 +1,12 @@
 import typing
 
 from .interface import Functional
+from .json import to_json
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
 from .scalar.value import Id
 from .state import State, StateRef
 from .uri import URI
-from .context import to_json
 
 
 # TODO: implement `Functional` for `Map`

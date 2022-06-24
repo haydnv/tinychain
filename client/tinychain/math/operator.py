@@ -1,7 +1,7 @@
 import logging
 import typing
 
-from ..context import deanonymize, to_json
+from ..json import to_json
 from ..scalar.ref import deref, is_literal, same_as, is_op_ref, Op
 from ..scalar.value import Id
 
@@ -46,8 +46,8 @@ class Operator(Op):
         return to_json(self.forward())
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.subject, cxt, name_hint + "_subject")
-        deanonymize(self.args, cxt, name_hint + "_args")
+        cxt.deanonymize(self.subject, name_hint + "_subject")
+        cxt.deanonymize(self.args, name_hint + "_args")
 
         if is_literal(self.subject) or is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
@@ -119,7 +119,7 @@ class Unary(Operator):
     def __ns__(self, cxt, name_hint):
         assert self.args is None
 
-        deanonymize(self.subject, cxt, name_hint + "_subject")
+        cxt.deanonymize(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
@@ -135,9 +135,9 @@ class Custom(Unary):
     def __json__(self):
         return to_json(self._op)
 
-    def __ns__(self, context, name_hint):
-        Unary.__ns__(self, context, name_hint)
-        deanonymize(self._op, context, name_hint + "_custom_op")
+    def __ns__(self, cxt, name_hint):
+        Unary.__ns__(self, cxt, name_hint)
+        cxt.deanonymize(self._op, name_hint + "_custom_op")
 
     @property
     def shape(self):

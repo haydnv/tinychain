@@ -67,11 +67,10 @@ class URI(object):
         return {str(self): []}
 
     def __ns__(self, cxt, name_hint):
-        from .context import deanonymize
         from .scalar.ref import is_literal, is_op_ref
         from .state import State
 
-        deanonymize(self._subject, cxt, name_hint + "_subject")
+        cxt.deanonymize(self._subject, name_hint + "_subject")
 
         if is_op_ref(self._subject):
             cxt.assign(self._subject, name_hint + "_subject")

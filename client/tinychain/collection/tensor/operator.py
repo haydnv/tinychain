@@ -1,7 +1,6 @@
 import itertools
 import logging
 
-from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, is_literal, same_as, After, Post
@@ -344,8 +343,8 @@ class Slice(Transform):
             def __repr__(self):
                 return f"{self.subject}[{self.args}]"
 
-            def __ns__(self, context, name_hint):
-                return deanonymize(self.subject, context, name_hint + "_subject")
+            def __ns__(self, cxt, name_hint):
+                return cxt.deanonymize(self.subject, name_hint + "_subject")
 
             @property
             def shape(self):

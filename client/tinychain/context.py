@@ -1,8 +1,19 @@
-"""Utility data structures and functions."""
+"""Namespacing utilities for :class:`Op`s and :class:`Model`s."""
 
 import inspect
-import json
 import operator
+
+from .app import Model
+from .chain import Chain
+from .generic import Map, Tuple
+from .interface import Interface
+from .json import to_json
+from .scalar.number import Bool, Float, Int
+from .scalar.ref import args, form_of, get_ref, hex_id, is_literal, same_as, Ref
+from .scalar.value import String
+from .state import hash_of
+from .state import State
+from .uri import URI
 
 
 class _HashTable(object):
@@ -74,9 +85,6 @@ class Context(object):
     """A transaction context."""
 
     def __init__(self):
-        from .scalar.ref import hex_id, is_literal, same_as
-        from .state import hash_of
-
         def hash_fn(state):
             if is_literal(state):
                 return hex_id(state)
@@ -95,9 +103,6 @@ class Context(object):
         return name in self._ns
 
     def __getattr__(self, name):
-        from .scalar.ref import get_ref
-        from .uri import URI
-
         name = str(name[1:]) if name.startswith('$') else str(name)
 
         if name in self._ns:
@@ -121,12 +126,6 @@ class Context(object):
         return iter(self._names)
 
     def __json__(self):
-        from .app import Model
-        from .chain import Chain
-        from .scalar.ref import args, form_of, Ref
-        from .state import State
-        from .uri import URI
-
         def reference(state, top_level=False):
             if hasattr(state, "__uri__") and state.__uri__.is_id():
                 return state
@@ -183,7 +182,7 @@ class Context(object):
             raise ValueError(f"cannot rename {state} from {self._ns.key(state)} to {name}")
 
         state = autobox(state)
-        deanonymize(state, self, name)
+        self.deanonymize(state, name)
         self._ns[name] = state
         self._names.append(name)
 
@@ -192,6 +191,12 @@ class Context(object):
         return f"Op context with data {data}"
 
     def assign(self, state, name_hint):
+        """
+        Auto-assign a name based on `name_hint` to the given `state`.
+
+        If `state` already has a name in this :class:`Context`, this is a no-op.
+        """
+
         if self._ns.key(state):
             return
 
@@ -220,89 +225,50 @@ class Context(object):
         self._ns[name_hint] = state
         self._deps.append(name_hint)
 
+    def deanonymize(self, state, name_hint):
+        """Assign auto-generated names based on the given `name_hint` to the dependencies of the given `state`."""
+
+        if isinstance(state, Context):
+            raise ValueError(f"cannot deanonymize an Op context itself")
+        elif inspect.isclass(state):
+            return
+
+        if hasattr(state, "__ns__"):
+            state.__ns__(self, name_hint)
+        elif isinstance(state, dict):
+            for key in state:
+                self.deanonymize(state[key], name_hint + f".{key}")
+        elif isinstance(state, (list, tuple)):
+            for i, item in enumerate(state):
+                self.deanonymize(item, name_hint + f".{i}")
+
     def items(self):
+        """Iterate over the named states in this :class:`Context`."""
+
         yield from ((name, getattr(self, name)) for name in self)
 
 
 def autobox(state):
     if isinstance(state, bool):
-        from .scalar.number import Bool
         return Bool(state)
     elif isinstance(state, float):
-        from .scalar.number import Float
         return Float(state)
     elif isinstance(state, int):
-        from .scalar.number import Int
         return Int(state)
     elif isinstance(state, dict):
-        from .generic import Map
         return Map(state)
     elif isinstance(state, (list, tuple)):
-        from .generic import Tuple
         return Tuple(state)
     elif isinstance(state, str):
-        from .scalar.value import String
         return String(state)
 
-    from .state import State
     if isinstance(state, State):
         return state
 
-    from .scalar.ref import Ref
     if isinstance(state, Ref):
         return state
 
-    from .interface import Interface
     if isinstance(state, Interface):
         return state
 
     return state
-
-
-def print_json(state_or_ref):
-    """Pretty-print the JSON representation of the given `state_or_ref` to stdout."""
-
-    print(json.dumps(to_json(state_or_ref), indent=4))
-
-
-def to_json(state_or_ref):
-    """Return a JSON-encodable representation of the given state or reference."""
-
-    if inspect.isgenerator(state_or_ref):
-        raise ValueError(f"the Python generator {state_or_ref} is not JSON serializable")
-
-    if callable(state_or_ref) and not hasattr(state_or_ref, "__json__"):
-        raise ValueError(f"Python callable {state_or_ref} is not JSON serializable; consider a decorator like @get")
-
-    if inspect.isclass(state_or_ref):
-        if hasattr(type(state_or_ref), "__json__"):
-            return type(state_or_ref).__json__(state_or_ref)
-        elif hasattr(state_or_ref, "__uri__"):
-            return to_json({str(state_or_ref.__uri__): {}})
-
-    if hasattr(state_or_ref, "__json__"):
-        return state_or_ref.__json__()
-    elif isinstance(state_or_ref, (list, tuple)):
-        return [to_json(i) for i in state_or_ref]
-    elif isinstance(state_or_ref, dict):
-        return {str(k): to_json(v) for k, v in state_or_ref.items()}
-    else:
-        return state_or_ref
-
-
-def deanonymize(state, context, name_hint):
-    """Assign an auto-generated name based on the given `name_hint` to the given state within the given context."""
-
-    if isinstance(state, Context):
-        raise ValueError(f"cannot deanonymize an Op context itself")
-    elif inspect.isclass(state):
-        return
-
-    if hasattr(state, "__ns__"):
-        state.__ns__(context, name_hint)
-    elif isinstance(state, dict):
-        for key in state:
-            deanonymize(state[key], context, name_hint + f".{key}")
-    elif isinstance(state, (list, tuple)):
-        for i, item in enumerate(state):
-            deanonymize(item, context, name_hint + f".{i}")

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Type
 
-from ..context import to_json
 from ..decorators import closure, delete, get
 from ..error import BadRequest
 from ..generic import Map, Tuple
+from ..json import to_json
 from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
 from ..scalar.ref import If, Ref, form_of

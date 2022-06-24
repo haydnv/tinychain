@@ -1,7 +1,7 @@
 """Reference types"""
 
+from ...json import to_json
 from ...uri import URI
-from ...context import deanonymize, to_json
 
 
 class Ref(object):
@@ -51,8 +51,8 @@ class After(FlowControl):
     def __ns__(self, cxt, name_hint):
         from .helpers import is_conditional
 
-        deanonymize(self.when, cxt, name_hint + "_when")
-        deanonymize(self.then, cxt, name_hint + "_then")
+        cxt.deanonymize(self.when, name_hint + "_when")
+        cxt.deanonymize(self.then, name_hint + "_then")
 
         if is_conditional(self.when):
             cxt.assign(self.when, name_hint + "_when")
@@ -93,9 +93,9 @@ class Case(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.switch, self.case])}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.switch, cxt, name_hint + "_switch")
-        deanonymize(self.case, cxt, name_hint + "_case")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.switch, name_hint + "_switch")
+        cxt.deanonymize(self.case, name_hint + "_case")
 
     def __repr__(self):
         return f"Cast({self.cond}, {self.switch}, {self.case})"
@@ -146,9 +146,9 @@ class If(FlowControl):
     def __ns__(self, cxt, name_hint):
         from .helpers import is_conditional, is_op_ref
 
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.then, cxt, name_hint + "_then")
-        deanonymize(self.or_else, cxt, name_hint + "_or_else")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.then, name_hint + "_then")
+        cxt.deanonymize(self.or_else, name_hint + "_or_else")
 
         if is_conditional(self.cond) or is_op_ref(self.cond):
             cxt.assign(self.cond, name_hint + "_cond")
@@ -195,9 +195,9 @@ class While(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.op, self.state])}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.op, cxt, name_hint + "_op")
-        deanonymize(self.state, cxt, name_hint + "_state")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.op, name_hint + "_op")
+        cxt.deanonymize(self.state, name_hint + "_state")
 
     def __repr__(self):
         return f"While({self.cond}, {self.op}, {self.state})"
@@ -284,7 +284,7 @@ class Op(Ref):
     def __ns__(self, cxt, name_hint):
         from .helpers import is_literal, is_op_ref
 
-        deanonymize(self.subject, cxt, name_hint + "_subject")
+        cxt.deanonymize(self.subject, name_hint + "_subject")
 
         if is_literal(self.subject) or is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
@@ -348,7 +348,7 @@ class Get(Op):
 
         super().__ns__(cxt, name_hint)
 
-        deanonymize(self.args, cxt, name_hint + "_key")
+        cxt.deanonymize(self.args, name_hint + "_key")
 
         if is_op_ref(self.args):
             (key,) = self.args
@@ -386,8 +386,8 @@ class Put(Op):
         super().__ns__(cxt, name_hint)
 
         key, value = self.args
-        deanonymize(key, cxt, name_hint + "_key")
-        deanonymize(value, cxt, name_hint + "_value")
+        cxt.deanonymize(key, name_hint + "_key")
+        cxt.deanonymize(value, name_hint + "_value")
 
         if is_op_ref(key):
             cxt.assign(key, name_hint + "key")
@@ -432,7 +432,7 @@ class Post(Op):
             raise ValueError(f"POST arguments must be a Python dict, not {self.args}")
 
         for name, arg in self.args.items():
-            deanonymize(arg, cxt, name_hint + f"_{name}")
+            cxt.deanonymize(arg, name_hint + f"_{name}")
 
             if is_op_ref(arg):
                 cxt.assign(arg, name_hint + f"_{name}")
@@ -466,7 +466,7 @@ class Delete(Op):
         from .helpers import is_op_ref
 
         super().__ns__(cxt, name_hint)
-        deanonymize(self.args, cxt, name_hint + "_key")
+        cxt.deanonymize(self.args, name_hint + "_key")
 
         if is_op_ref(self.args):
             cxt.assign(self.args, name_hint + "_key")

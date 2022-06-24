@@ -1,10 +1,10 @@
 import inspect
 
+from ..json import to_json
 from ..scalar import Value
 from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
-from ..context import to_json, Context
 
 from . import get_rtype, parse_args, resolve_class
 
@@ -194,6 +194,8 @@ class Delete(Method):
 
 
 def _check_context_param(parameter):
+    from ..context import Context
+
     _name, param = parameter
     if param.annotation == EMPTY or param.annotation == Context:
         pass
@@ -203,6 +205,8 @@ def _check_context_param(parameter):
 
 
 def first_params(method):
+    from ..context import Context
+
     sig = inspect.signature(method.form)
 
     if not sig.parameters:

@@ -1,11 +1,11 @@
 import inspect
 import logging
 
+from ..json import to_json
 from ..scalar.value import Nil, Value
 from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
-from ..context import to_json, Context
 
 from . import get_rtype, parse_args, resolve_class
 
@@ -184,6 +184,8 @@ class Delete(Op):
 
 
 def maybe_first_arg(form):
+    from ..context import Context
+
     sig = inspect.signature(form)
     param_names = list(sig.parameters.keys())
 

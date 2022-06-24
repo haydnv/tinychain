@@ -1,6 +1,5 @@
 import inspect
 
-from ..context import deanonymize, Context
 from ..reflect import method, op, get_rtype, resolve_class
 from ..scalar import ref
 from ..state import State, StateRef
@@ -11,16 +10,16 @@ from .operator import derivative_of, gradients, Gradients, Operator
 
 
 class FunctionCall(Operator):
-    def __ns__(self, context, name_hint):
-        deanonymize(self.subject, context, name_hint + "_subject")
-        deanonymize(self.args, context, name_hint + "_args")
+    def __ns__(self, cxt, name_hint):
+        cxt.deanonymize(self.subject, name_hint + "_subject")
+        cxt.deanonymize(self.args, name_hint + "_args")
 
         if not ref.is_ref(self.subject):
-            context.assign(self.subject, name_hint + "_subject")
+            cxt.assign(self.subject, name_hint + "_subject")
 
         for name in self.args:
             if ref.is_op_ref(self.args[name]):
-                context.assign(self.args[name], f"{name_hint}_{name}")
+                cxt.assign(self.args[name], f"{name_hint}_{name}")
 
     def __repr__(self):
         return f"call {self.subject} with inputs {self.args}"
@@ -96,6 +95,7 @@ class Function(op.Post):
         return f"differentiable POST Op with form {self.graph}"
 
     def derivative(self):
+        from ..context import Context
         graph = Context()
         graph._return = derivative_of(self.graph[-1])
         return Function(self.sig, graph, type(graph[-1]))
@@ -115,6 +115,8 @@ class NativeFunction(Function):
             raise TypeError(f"a differentiable function {form} must return a numeric type, not {self.rtype}")
 
     def __form__(self):
+        from ..context import Context
+
         first_param_name = self.sig[0][0]
 
         if first_param_name == "self":
@@ -144,6 +146,8 @@ class NativeFunction(Function):
         return f"differentiable POST Op with form {self.form}"
 
     def derivative(self):
+        from ..context import Context
+
         form = ref.form_of(self)
 
         graph = Context()
@@ -155,6 +159,8 @@ class NativeFunction(Function):
 class StateFunction(method.Post):
     @classmethod
     def expand(cls, header, form, name):
+        from ..context import Context
+
         function = NativeStateFunction(header, form, name)
         yield name, function
 

@@ -6,9 +6,9 @@ import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
+from .json import to_json
 from .reflect import parse_args
 from .reflect.meta import Meta, MethodStub
 from .scalar import Scalar
