@@ -84,18 +84,16 @@ class Graph(App):
     a table column which has an edge to itself is an `Edge`, otherwise it's a `ForeignKey`. `ForeignKey` relationships
     are automatically updated when a `Table` is updated, but `Edge` relationships require explicit management.
     """
-    schema = None
 
     # TODO: remove the `chain_type` parameter and generate the initial schema via reflection
     def __init__(self, models: list[Model] = None, schema: Schema = None, chain_type=Sync):
-        if isinstance(schema, Schema):
-            self.schema = schema
-        elif isinstance(models, list):
-            self._initalise_schema(models)
-        else:
+
+        if isinstance(models, list):
+            schema = self._initalise_schema(models)
+        elif schema is None:
             raise ValueError("One of `models` or `schema` is required as an argument.")
 
-        for (label, edge) in self.schema.edges.items():
+        for (label, edge) in schema.edges.items():
             if hasattr(self, label):
                 raise IndexError(f"{label} is already reserved in {self} by {getattr(self, label)}")
 
@@ -104,17 +102,17 @@ class Graph(App):
             else:
                 setattr(self, label, chain_type(ForeignKey(([DIM, DIM], Bool))))
 
-        for name in self.schema.tables:
+        for name in schema.tables:
             if hasattr(self, name):
                 raise ValueError(f"Graph already has an entry called {name}")
 
-            setattr(self, name, chain_type(graph_table(self, self.schema, name)))
+            setattr(self, name, chain_type(graph_table(self, schema, name)))
 
         App.__init__(self)
 
     def _initalise_schema(self, models: list[Model]):
         """Automatically build a Graph of all models that have been registerd using the registry."""
-        self.schema = create_schema([cts(m) for m in models])
+        return create_schema([cts(m) for m in models])
 
 
 def graph_table(graph, schema, table_name):

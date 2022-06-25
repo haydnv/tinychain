@@ -22,8 +22,7 @@ class User(tc.app.Model):
     first_name = tc.Column("first_name", tc.String, 100)
     last_name = tc.Column("last_name", tc.String, 100)
 
-    def __init__(self, user_id, first_name, last_name):
-        self.user_id = user_id
+    def __init__(self, first_name, last_name):
         self.first_name = first_name
         self.last_name = last_name
 
@@ -35,7 +34,7 @@ class Order(tc.app.Model):
     product_id = Product
     user_id = User
 
-    def __init__(self, order_id, quantity, user_id, product_id):
+    def __init__(self, quantity, user_id, product_id):
         self.quantity = quantity
         self.user_id = user_id
         self.product_id = product_id
