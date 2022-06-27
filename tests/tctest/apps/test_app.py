@@ -34,14 +34,11 @@ class UserTests(unittest.TestCase):
         cls.host = start_host("test_lib", [TestApp(models=[User])])
 
     def testCreateUser(self):
-        self.assertEqual(self.host.get(URI.append("user/count")), 0)
-
+        count = self.host.get(URI.append("user/count"))
         user_id = self.host.post(
             URI.append("create_user"), {"first_name": "First", "last_name": "Last"}
         )
-
-        self.assertEqual(user_id, 1)
-        self.assertEqual(self.host.get(URI.append("user/count")), 1)
+        self.assertEqual(self.host.get(URI.append("user/count")), count + 1)
         self.assertEqual(self.host.get(URI.append("user"), [user_id]), [1, "First", "Last"])
 
     @classmethod
