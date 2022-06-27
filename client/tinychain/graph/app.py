@@ -110,8 +110,13 @@ class Graph(App):
 
         App.__init__(self)
 
+    @classmethod
+    def autogenerate(cls, models: list[Model], chain_type=Sync):
+        return cls(schema=_initalise_schema(models), chain_type=chain_type)
+
+
     def _initalise_schema(self, models: list[Model]):
-        """Automatically build a Graph of all models that have been registerd using the registry."""
+        """Automatically build a Graph of all models."""
         return create_schema([cts(m) for m in models])
 
 
