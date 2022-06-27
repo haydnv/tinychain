@@ -1,5 +1,3 @@
-import logging
-import sys
 import unittest
 
 from .test_app import *
