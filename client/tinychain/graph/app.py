@@ -88,7 +88,7 @@ class Graph(App):
     # TODO: remove the `chain_type` parameter and generate the initial schema via reflection
     def __init__(self, models: list[Model] = None, schema: Schema = None, chain_type=Sync):
 
-        if isinstance(models, list):
+        if isinstance(models, (list, tuple)):
             schema = self._initalise_schema(models)
         elif schema is None:
             raise ValueError("One of `models` or `schema` is required as an argument.")
