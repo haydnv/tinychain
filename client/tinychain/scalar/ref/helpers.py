@@ -64,7 +64,7 @@ def form_of(state):
     if not hasattr(state, "__form__"):
         return state
 
-    if callable(state.__form__) and not inspect.isclass(state.__form__):
+    if callable(state.__form__) and not inspect.isclass(state.__form__) and not hasattr(state.__form__, "__form__"):
         form = state.__form__()
     else:
         form = state.__form__
@@ -226,6 +226,10 @@ def is_ref(state):
     if isinstance(state, (Ref, URI)):
         return True
     elif hasattr(state, "__form__"):
+        if callable(state.__form__) and not hasattr(state.__form__, "__form__"):
+            # special case: it's an Op and we don't want to call __form__
+            return False
+
         return is_ref(form_of(state))
     elif isinstance(state, (list, tuple)):
         return any(is_ref(item) for item in state)

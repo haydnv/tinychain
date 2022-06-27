@@ -176,7 +176,7 @@ class Dynamic(Instance):
 
 class ModelRef(Ref):
     def __init__(self, instance, name):
-        assert name
+        name = name if isinstance(name, URI) else URI(name)
 
         if hasattr(instance, "instance"):
             raise RuntimeError(f"the attribute name 'instance' is reserved (use a different name in {instance})")
@@ -191,30 +191,13 @@ class ModelRef(Ref):
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
-
-            if name.startswith('_'):
-                if isinstance(attr, State):
-                    logging.warning(f"referencing {instance} without referencing protected State {name}")
-
-                setattr(self, name, attr)
-            elif hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
-                continue  # make a second pass below after setting all the instance variables
-            else:
+            elif hasattr(self.__class__, name) and attr is getattr(self.__class__, name):
+                # it's a class attribute
+                pass
+            elif hasattr(attr, "__ref__"):
                 setattr(self, name, get_ref(attr, self.__uri__.append(name)))
-
-        for name, attr in inspect.getmembers(self.instance):
-            if name.startswith('__'):
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-            elif name.startswith('_'):
-                continue  # already handled above
-
-            if hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
-                stub = getattr(instance.__class__, name)
-                for method_name, method in stub.expand(self, name):
-                    setattr(self, method_name, method)
+            else:
+                setattr(self, name, attr)
 
     def __json__(self):
         return to_json(self.__uri__)
@@ -288,7 +271,7 @@ class Library(object):
                 # it's a @classmethod
                 continue
             elif _is_mutable(attr):
-                raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
+                raise RuntimeError(f"{self.__class__.__name__} is a Library and must not contain mutable state")
             else:
                 form[name] = to_json(attr)
 
@@ -314,11 +297,10 @@ class App(Library):
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
-            elif isinstance(attr, MethodStub):
-                for method_name, method in attr.expand(self, name):
-                    setattr(header, method_name, method)
-            else:
+            elif hasattr(attr, "__ref__"):
                 setattr(header, name, get_ref(attr, f"self/{name}"))
+            else:
+                setattr(header, name, attr)
 
         # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}

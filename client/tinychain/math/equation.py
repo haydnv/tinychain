@@ -19,7 +19,7 @@ class FunctionCall(Operator):
 
         for name in self.args:
             if ref.is_op_ref(self.args[name]):
-                cxt.assign(self.args[name], f"{name_hint}_{name}")
+                cxt.assign(self.args[name], f"{name_hint}_arg_{name}")
 
     def __repr__(self):
         return f"call {self.subject} with inputs {self.args}"

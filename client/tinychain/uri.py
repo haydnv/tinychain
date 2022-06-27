@@ -21,6 +21,8 @@ class URI(object):
             return
 
         if isinstance(subject, str):
+            assert subject
+
             if subject.startswith("$$"):
                 raise ValueError(f"invalid reference: {subject}")
             elif subject.startswith('$'):
@@ -32,15 +34,24 @@ class URI(object):
         self._path = tuple(str(path_segment) for path_segment in path if path_segment)
 
     def __add__(self, other):
+        assert str(other) == other
+        other = str(other)
+
+        if other.__contains__("://"):
+            raise ValueError(f"cannot append {other} to {self}")
+
         if not other or other == "/":
             return self
         else:
             path = list(self._path)
-            path.append(str(other)[1:] if other.startswith('/') else other)
+            path.append(other[1:] if other.startswith('/') or other.startswith('$') else other)
             return URI(self._subject, *path)
 
     def __radd__(self, other):
         return URI(other) + str(self)
+
+    def __bool__(self):
+        return True
 
     def __eq__(self, other):
         return str(self) == str(other)

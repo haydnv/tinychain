@@ -30,6 +30,9 @@ class Method(object):
     def __json__(self):
         return {str(self.__uri__): to_json(ref.form_of(self))}
 
+    def __ref__(self):
+        raise NotImplementedError
+
     def subject(self):
         return self.header.__uri__.append(self.name)
 
@@ -65,6 +68,9 @@ class Get(Method):
         cxt._return = self.form(*args)  # populate the Context
 
         return key_name, cxt
+
+    def __ref__(self, name):
+        return op.Get(URI(name))
 
 
 class Put(Method):
@@ -123,6 +129,9 @@ class Put(Method):
 
         return key_name, value_name, cxt
 
+    def __ref__(self, name):
+        return op.Put(URI(name))
+
 
 class Post(Method):
     __uri__ = URI(op.Post)
@@ -174,6 +183,9 @@ class Post(Method):
 
         return cxt
 
+    def __ref__(self, name):
+        return op.Post(URI(name))
+
 
 class Delete(Method):
     __uri__ = URI(op.Delete)
@@ -191,6 +203,9 @@ class Delete(Method):
 
     def __form__(self):
         return Get.__form__(self)
+
+    def __ref__(self, name):
+        return op.Delete(URI(name))
 
 
 def _check_context_param(parameter):

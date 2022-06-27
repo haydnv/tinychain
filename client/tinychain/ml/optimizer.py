@@ -84,7 +84,8 @@ class GradientDescent(_Optimizer):
 
     @post
     def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
-        grads = self.gradients(inputs)
+        # TODO: this type expectation should not be necessary
+        grads = Map.expect(typing.Dict[Id, _Gradient])(self.gradients(inputs=inputs))
 
         writes = []
         for name, var in namespace(self.ml_model, self._model_name).items():
@@ -131,7 +132,8 @@ class Adam(_Optimizer):
         assert set(self.m) == set(self.v)
 
         trainable = namespace(self.ml_model, self._model_name)
-        grads = self.gradients(inputs)
+        # TODO: this type expectation should not be necessary
+        grads = Map.expect(typing.Dict[Id, _Gradient])(self.gradients(inputs=inputs))
 
         update_m = {}
         for name in self.m:
