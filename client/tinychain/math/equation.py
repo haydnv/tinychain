@@ -35,7 +35,7 @@ class FunctionCall(Operator):
         d = derivative_of(self.subject)
 
         if isinstance(d, (Function, StateFunction)):
-            return derivative_of(self.subject)(**self.args)
+            return d(**self.args)
         else:
             return d
 
@@ -167,10 +167,11 @@ class StateFunction(method.Post):
         degree = 1
         form = ref.form_of(function)
 
-        graph = Context()
+        graph = Context(form)
         graph._return = derivative_of(form[-1])
 
-        derivative = StateFunction(header, degree, name, function.sig, graph, type(graph[-1]))
+        rtype = type(graph[-1]) if issubclass(type(graph[-1]), State) else State
+        derivative = StateFunction(header, degree, name, function.sig, graph, rtype)
 
         yield f"d_{name}", derivative
 

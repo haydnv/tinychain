@@ -22,13 +22,17 @@ class _HashTable(object):
     def __init__(self, hash_fn=hash, equivalence_fn=operator.eq):
         self._hash_fn = hash_fn
         self._equivalence_fn = equivalence_fn
-        self._buckets = [[]] * self.SIZE
+        self._buckets = [[] for _ in range(self.SIZE)]
 
     def __contains__(self, key):
         bucket = self._buckets[self._hash_fn(key) % self.SIZE]
         for k, _ in bucket:
             if self._equivalence_fn(k, key):
                 return True
+
+    def __delitem__(self, key):
+        i = self._hash_fn(key) % self.SIZE
+        self._buckets[i] = [(k, v) for (k, v) in self._buckets[i] if not self._equivalence_fn(k, key)]
 
     def __getitem__(self, key):
         bucket = self._buckets[self._hash_fn(key) % self.SIZE]
@@ -37,6 +41,18 @@ class _HashTable(object):
                 return v
 
         raise KeyError(f"{key} is not present in {self}")
+
+    def __iter__(self):
+        for bucket in self._buckets:
+            print(f"bucket: {bucket}")
+            for k, _v in bucket:
+                yield k
+
+    def __len__(self):
+        return sum(len(bucket) for bucket in self._buckets)
+
+    def __repr__(self):
+        return f"HashTable{tuple(self)}"
 
     def __setitem__(self, key, value):
         bucket = self._buckets[self._hash_fn(key) % self.SIZE]
@@ -54,12 +70,27 @@ class _Bijection(object):
     def __contains__(self, key):
         return key in self._by_key
 
+    def __delitem__(self, key):
+        assert isinstance(key, str)
+        if key in self._by_key:
+            value = self._by_key[key]
+            del self._by_key[key]
+            del self._by_value[value]
+
+        assert len(self._by_key) == len(self._by_value)
+
     def __getitem__(self, key):
         assert isinstance(key, str)
         if key in self._by_key:
             return self.value(key)
         else:
             raise KeyError(f"key {key} is not present in {self}")
+
+    def __len__(self):
+        return len(self._by_key)
+
+    def __repr__(self):
+        return f"Bijection({self._by_key})"
 
     def __setitem__(self, key, value):
         assert key
@@ -71,6 +102,8 @@ class _Bijection(object):
 
         self._by_key[key] = value
         self._by_value[value] = key
+
+        assert len(self._by_key) == len(self._by_value)
 
     def key(self, value):
         if value in self._by_value:
@@ -84,7 +117,7 @@ class _Bijection(object):
 class Context(object):
     """A transaction context."""
 
-    def __init__(self):
+    def __init__(self, copy_from=None):
         def hash_fn(state):
             if is_literal(state):
                 return hex_id(state)
@@ -94,6 +127,14 @@ class Context(object):
         object.__setattr__(self, "_ns", _Bijection(hash_fn, same_as))
         object.__setattr__(self, "_names", [])
         object.__setattr__(self, "_deps", [])
+
+        if copy_from:
+            assert isinstance(copy_from, Context)
+
+            # TODO: only copy states from the old Context which the new Context depends on
+            for name in copy_from._names[:-1]:
+                self._names.append(name)
+                self._ns[name] = copy_from._ns[name]
 
     def __bool__(self):
         return bool(self._names)
