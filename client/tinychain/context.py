@@ -44,7 +44,6 @@ class _HashTable(object):
 
     def __iter__(self):
         for bucket in self._buckets:
-            print(f"bucket: {bucket}")
             for k, _v in bucket:
                 yield k
 

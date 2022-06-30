@@ -304,8 +304,9 @@ class DenseTests(HostTest):
         cxt = tc.Context()
         cxt.x = load_dense(x)
         cxt.y = cxt.x.tanh()
-        cxt.z = tc.math.operator.derivative_of(cxt.x.tanh())
+        cxt.z = tc.math.operator.derivative_of(cxt.y)
         cxt.result = (cxt.y, cxt.z)
+
         actual_y, actual_z = self.host.post(ENDPOINT, cxt)
 
         expected_y = np.tanh(x)

@@ -40,25 +40,30 @@ class FunctionCall(Operator):
             return d
 
     def gradients(self, loss):
-        grads = Gradients()
-
-        for arg in self.args.values():
-            grads.update(gradients(arg, loss * self.backward(arg)))
-
         subject = self.subject
         while isinstance(subject, StateRef):
             subject = subject.state
 
-        assert isinstance(subject, (Function, StateFunction))
+        grads = Gradients()
 
         if isinstance(subject, StateFunction):
-            for member_name in dir(subject.header):
-                if member_name.startswith('_'):
-                    continue
+            from ..app import Model
+            from ..ml import Variable
 
-                member = getattr(subject.header, member_name)
-                if isinstance(member, Numeric):
-                    grads.update(gradients(member, loss * self.backward(member)))
+            for name, attr in inspect.getmembers(subject.header):
+                if name.startswith('_'):
+                    continue
+                elif isinstance(attr, Variable):
+                    # TODO: don't assume that every member Variable is referenced in every differentiable method
+                    grads[ref.deref(attr)] = loss * self.backward(attr)
+                elif isinstance(attr, Model):
+                    raise TypeError(f"cannot calculate gradients of {self} with respect to {attr}")
+        else:
+            # in this case there's no internal state to calculate gradients for
+            assert isinstance(subject, Function)
+
+        for arg in self.args.values():
+            grads.update(gradients(arg, loss * self.backward(arg)))
 
         return grads
 

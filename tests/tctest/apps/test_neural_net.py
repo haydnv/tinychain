@@ -19,15 +19,15 @@ class NeuralNetTester(tc.app.Library):
         return layer.eval(inputs)
 
     @tc.post
-    def test_linear(self, inputs: tc.tensor.Tensor) -> tc.F32:
-        layer = tc.ml.nn.Linear.create(2, 1)
-        return layer.eval(inputs)
+    def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
+        cxt.layer = tc.ml.nn.Linear.create(2, 1)
+        return cxt.layer.eval(inputs)
 
     @tc.post
-    def test_derivative(self, inputs: tc.tensor.Tensor) -> tc.F32:
-        layer = tc.ml.nn.Linear.create(2, 1)
-        outputs = layer.eval(inputs)
-        return tc.math.gradients(outputs, tc.tensor.Dense.ones_like(outputs), [layer.weights, layer.bias])
+    def test_derivative(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
+        cxt.layer = tc.ml.nn.Linear.create(2, 1)
+        cxt.outputs = cxt.layer.eval(inputs)
+        return tc.math.gradients(cxt.outputs, tc.tensor.Dense.ones_like(cxt.outputs), [cxt.layer.weights, cxt.layer.bias])
 
     @tc.post
     def test_sequential(self, inputs: tc.tensor.Tensor) -> tc.F32:

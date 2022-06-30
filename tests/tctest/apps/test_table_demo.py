@@ -43,15 +43,14 @@ class Web(tc.app.App):
     @tc.post
     def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
         return (
-            self.db.add_movie(name, year, description),
+            self.db.add_movie(name=name, year=year, description=description),
             self.cache.insert([name, 0]))
 
     @tc.put
-    def add_view(self, txn, key: tc.String):
-        txn.views = self.views(key)
-        return tc.After(
-            self.cache.delete(key),
-            self.cache.insert([key, txn.views + 1]))
+    def add_view(self, key: tc.String):
+        # TODO: this type expectation should not be necessary
+        views = tc.UInt(self.views(key)) + 1
+        return tc.After(self.cache.delete(key), self.cache.insert([key, views]))
 
 
 class TableDemoTests(unittest.TestCase):

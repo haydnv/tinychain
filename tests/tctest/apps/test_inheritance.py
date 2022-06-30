@@ -33,6 +33,7 @@ class Baz(Bar, tc.app.Dynamic):
     def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
         Bar.__init__(self, name)
         self.greetings = greetings
+        tc.app.Dynamic.__init__(self)
 
     @tc.get
     def greet(self):
