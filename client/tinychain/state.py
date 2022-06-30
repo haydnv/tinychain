@@ -194,6 +194,6 @@ def hash_of(state):
     if isinstance(state, (list, tuple)):
         return hash(tuple(hash_of(item) for item in state))
     elif isinstance(state, dict):
-        return hash_of(sorted(tuple(state.items())))
+        return hash(tuple(hash_of((k, state[k])) for k in state))
     else:
         return hash(state)

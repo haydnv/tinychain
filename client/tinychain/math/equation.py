@@ -32,7 +32,7 @@ class FunctionCall(Operator):
         return ref.Post(self.subject, self.args)
 
     def backward(self, variable=None):
-        d = derivative_of(self.subject)
+        d = derivative_of(self.subject, variable)
 
         if isinstance(d, (Function, StateFunction)):
             return d(**self.args)

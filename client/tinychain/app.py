@@ -15,7 +15,7 @@ from .scalar import Scalar
 from .scalar.number import U32
 from .scalar.ref import Ref, form_of, get_ref
 from .scalar.value import Nil
-from .state import Class, Instance, Object, State
+from .state import hash_of, Class, Instance, Object, State
 from .uri import URI
 
 
@@ -198,6 +198,9 @@ class ModelRef(Ref):
                 setattr(self, name, get_ref(attr, self.__uri__.append(name)))
             else:
                 setattr(self, name, attr)
+
+    def __hash__(self):
+        return hash_of(self.instance)
 
     def __json__(self):
         return to_json(self.__uri__)
