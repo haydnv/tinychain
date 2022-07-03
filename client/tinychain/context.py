@@ -40,7 +40,7 @@ class _HashTable(object):
             if self._equivalence_fn(k, key):
                 return v
 
-        raise KeyError(f"{key} is not present in {self}")
+        raise KeyError(f"{self} has no state named {key}")
 
     def __iter__(self):
         for bucket in self._buckets:

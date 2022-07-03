@@ -91,18 +91,18 @@ class Function(op.Post):
                 params = op.parse_args(sig, *args, **kwargs)
                 return self.state.rtype(form=FunctionCall(self, params))
 
-            def derivative(self):
-                return self.state.derivative()
+            def derivative(self, variable):
+                return self.state.derivative(variable)
 
         return FunctionRef(self, name)
 
     def __repr__(self):
         return f"differentiable POST Op with form {self.graph}"
 
-    def derivative(self):
+    def derivative(self, variable):
         from ..context import Context
         graph = Context()
-        graph._return = derivative_of(self.graph[-1])
+        graph._return = derivative_of(self.graph[-1], variable)
         return Function(self.sig, graph, type(graph[-1]))
 
 
@@ -150,13 +150,13 @@ class NativeFunction(Function):
     def __repr__(self):
         return f"differentiable POST Op with form {self.form}"
 
-    def derivative(self):
+    def derivative(self, variable):
         from ..context import Context
 
         form = ref.form_of(self)
 
         graph = Context()
-        graph._return = derivative_of(form[-1])
+        graph._return = derivative_of(form[-1], variable)
 
         return Function(self.sig, graph, type(graph[-1]))
 
@@ -168,17 +168,6 @@ class StateFunction(method.Post):
 
         function = NativeStateFunction(header, form, name)
         yield name, function
-
-        degree = 1
-        form = ref.form_of(function)
-
-        graph = Context(form)
-        graph._return = derivative_of(form[-1])
-
-        rtype = type(graph[-1]) if issubclass(type(graph[-1]), State) else State
-        derivative = StateFunction(header, degree, name, function.sig, graph, rtype)
-
-        yield f"d_{name}", derivative
 
     def __init__(self, header, degree, name, sig, graph, rtype):
         self.header = header
@@ -214,18 +203,21 @@ class StateFunction(method.Post):
                 params = op.parse_args(sig, *args, **kwargs)
                 return self.state.rtype(form=FunctionCall(self, params))
 
-            def derivative(self):
-                return self.state.derivative()
+            def derivative(self, variable):
+                return self.state.derivative(variable)
 
         return StateFunctionRef(self, name)
 
-    def derivative(self):
-        if self.degree == 0:
-            name = f"d_{self.name}"
-        else:
-            name = f"d{self.degree + 1}_{self.name}"
+    def derivative(self, variable):
+        from ..context import Context
 
-        return getattr(self.header, name)
+        form = ref.form_of(self)
+
+        graph = Context(form)
+        graph._return = derivative_of(form[-1], variable)
+
+        rtype = type(graph[-1]) if issubclass(type(graph[-1]), State) else State
+        return StateFunction(self.header, self.degree + 1, self.name, self.sig, graph, rtype)
 
 
 # TODO: dedupe with method.Post

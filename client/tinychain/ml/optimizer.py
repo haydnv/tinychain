@@ -1,29 +1,18 @@
 import inspect
 import logging
-import typing
 
 from .. import error
 from ..app import Dynamic, Model, ModelRef
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
-from ..math.interface import Numeric
-from ..math.operator import constant, derivative_of, gradients, is_constant, simplify
-from ..scalar.number import F32, F64, UInt
+from ..math.operator import constant, derivative_of, is_constant
+from ..ml.interface import Gradients
+from ..scalar.number import Float, F32, F64, UInt
 from ..scalar.ref import form_of, After, If
-from ..scalar.value import Id
-from ..state import State
 
 from .variable import Variable
 from . import LIB_URI
-
-
-# this helper class handles the case of both a Number and a Tensor as a gradient
-class _Gradient(State, Numeric):
-    pass
-
-
-_Gradients = typing.Dict[Id, _Gradient]
 
 
 class Optimizer(Model):
@@ -34,15 +23,21 @@ class Optimizer(Model):
         return error.NotImplemented(f"{self.__class__.__name__}.train")
 
 
-class _Optimizer(Optimizer, Dynamic):
+class GradientDescent(Optimizer, Dynamic):
+    """A simple gradient descent optimizer with a configurable learning rate."""
+
+    def __init__(self, ml_model, cost, learning_rate=0.001):
+        # compile-time constants
+        self._cost = cost
+        self._lr = learning_rate
+
+        # run-time state
+        self.ml_model = ml_model
+
+        Dynamic.__init__(self)
+
     @post
-    def gradients(self, cxt, inputs: Tensor) -> _Gradients:
-        logging.debug("Optimizer constructing gradient calculations...")
-
-        trainable = namespace(self.ml_model, self._model_name)
-        var_names = {var: name for name, var in trainable.items()}
-        logging.debug("discovered trainable variables...")
-
+    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
         outputs = self.ml_model.eval(inputs)
         logging.debug("constructed model evaluation")
 
@@ -51,51 +46,20 @@ class _Optimizer(Optimizer, Dynamic):
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
-        grads = {}
-        for var, grad in gradients(outputs, cxt.d_loss).items():
-            if var in var_names:
-                grads[var_names[var]] = simplify(grad)
-
-        assert all(name in grads for name in trainable)
-
-        logging.debug("constructed gradients")
-
-        if not grads:
-            raise ValueError(f"model output {outputs} has no gradients")
-
-        return {
-            name: If(grad.shape[1:] == trainable[name].shape, grad.sum(0), grad.sum())
-            for name, grad in grads.items()}
-
-
-class GradientDescent(_Optimizer):
-    """A simple gradient descent optimizer with a configurable learning rate."""
-
-    def __init__(self, ml_model, cost, learning_rate=0.001):
-        # compile-time constants
-        self._cost = cost
-        self._lr = learning_rate
-        self._model_name = ml_model.__class__.__name__
-
-        # run-time state
-        self.ml_model = ml_model
-
-        Dynamic.__init__(self)
-
-    @post
-    def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
-        # TODO: this type expectation should not be necessary
-        grads = Map.expect(typing.Dict[Id, _Gradient])(self.gradients(inputs=inputs))
+        # TODO: this type expectation & keywords should not be necessary
+        cxt.grads = Map.expect(Gradients)(self.ml_model.gradient(inputs=inputs, loss=cxt.d_loss))
 
         writes = []
-        for name, var in namespace(self.ml_model, self._model_name).items():
-            delta = grads[name]
+        for name, var in namespace(self.ml_model).items():
+            grad = cxt.grads[name]
+            # TODO: replace `shape.len()` with `ndim`
+            delta = Float(If(grad.shape.len() > 0, Tensor(grad).sum(), grad))
             writes.append(var.update(self._lr * delta))
 
         return writes
 
 
-class Adam(_Optimizer):
+class Adam(Optimizer, Dynamic):
     """
     Adam optimizer, an adaptive learning rate optimization algorithm designed to handle sparse gradients and noisy data.
 
@@ -105,7 +69,6 @@ class Adam(_Optimizer):
     def __init__(self, ml_model, cost, beta1=0.9, beta2=0.999, learning_rate=0.001, eps=1e-8):
         # compile-time constants
         self._cost = cost
-        self._model_name = ml_model.__class__.__name__
 
         # run-time state
         self.ml_model = ml_model
@@ -117,7 +80,7 @@ class Adam(_Optimizer):
         self.m = {}
         self.v = {}
 
-        for name, var in namespace(ml_model, self._model_name).items():
+        for name, var in namespace(ml_model).items():
             shape = form_of(var.shape)
             if not isinstance(shape, (list, tuple)):
                 raise ValueError(f"the shape of Variable {name} must be defined at compile time (found {shape})")
@@ -128,32 +91,45 @@ class Adam(_Optimizer):
         Dynamic.__init__(self)
 
     @post
-    def train(self, txn, i: UInt, inputs: Tensor) -> Tensor:
+    def train(self, cxt, i: UInt, inputs: Tensor) -> Tensor:
         assert set(self.m) == set(self.v)
 
-        trainable = namespace(self.ml_model, self._model_name)
-        # TODO: this type expectation should not be necessary
-        grads = Map.expect(typing.Dict[Id, _Gradient])(self.gradients(inputs=inputs))
+        trainable = namespace(self.ml_model)
+
+        outputs = self.ml_model.eval(inputs)
+        logging.debug("constructed model evaluation")
+
+        d_loss = derivative_of(self._cost(inputs, outputs))
+        logging.debug("constructed derivative of loss")
+        cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
+        assert is_constant(cxt.d_loss)
+
+        # TODO: this type expectation & keyword arguments should not be necessary
+        cxt.grads = Map.expect(Gradients)(self.ml_model.gradient(inputs=inputs, loss=cxt.d_loss))
 
         update_m = {}
         for name in self.m:
-            grad = grads[name]
+            grad = cxt.grads[name]
+            # TODO: replace `shape.len()` with `ndim`
+            grad = Float(If(grad.shape.len() > 0, Tensor(grad).sum(), grad))
             update_m[name] = self.m[name] * self.beta1 * grad * (1. - self.beta1)
+
+        cxt.update_m = update_m
 
         update_v = {}
         for name in self.v:
-            grad = grads[name]
+            grad = cxt.grads[name]
             update_v[name] = self.v[name] * self.beta2 + grad**2 * (1. - self.beta2)
 
-        update_v = {name: self.v[name] * self.beta2 + grads[name]**2 * (1. - self.beta2) for name in self.v}
+        cxt.update_v = {name: self.v[name] * self.beta2 + cxt.grads[name]**2 * (1. - self.beta2) for name in self.v}
 
-        a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
-        update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * a for name in self.m}
+        cxt.a = self.lr * (1. - self.beta2**i)**0.5 / (1 - self.beta1**i)
+        cxt.update_model = {name: self.m[name] / (self.v[name]**0.5 + self.eps) * cxt.a for name in self.m}
 
         updates = After([
-            [self.m[name].write(new_value) for name, new_value in update_m.items()],
-            [self.v[name].write(new_value) for name, new_value in update_v.items()],
-        ], [trainable[name].update(delta) for name, delta in update_model.items()])
+            [self.m[name].write(cxt.update_m[name]) for name in self.m],
+            [self.v[name].write(cxt.update_v[name]) for name in self.v],
+        ], [trainable[name].update(cxt.update_model[name]) for name in self.m])
 
         return updates
 
@@ -193,8 +169,15 @@ class _Queue(object):
         return self._queue.pop(0)
 
 
-def namespace(model, prefix):
+# TODO: merge with namespacing logic in Differentiable.gradient
+def namespace(model, prefix=None):
     """Traverse the attributes of the given `model` to create a namespace for its trainable :class:`Variable` s."""
+
+    def suffix(name):
+        if prefix:
+            return f"{prefix}.{name}"
+        else:
+            return str(name)
 
     if isinstance(model, Variable):
         return {prefix: model}
@@ -208,16 +191,16 @@ def namespace(model, prefix):
 
     if isinstance(model, (list, tuple)):
         for i, component in enumerate(model):
-            ns.update(namespace(component, f"{prefix}.{i}"))
+            ns.update(namespace(component, suffix(i)))
     elif isinstance(model, dict):
         for name, component in model.items():
-            ns.update(namespace(component, f"{prefix}.{name}"))
+            ns.update(namespace(component, suffix(name)))
     elif isinstance(model, Model):
         for name, component in inspect.getmembers(model):
             if name.startswith("__"):
                 continue
 
-            ns.update(namespace(component, f"{prefix}.{name}"))
+            ns.update(namespace(component, suffix(name)))
     else:
         logging.debug(f"ignoring non-trainable model attribute {model}")
 

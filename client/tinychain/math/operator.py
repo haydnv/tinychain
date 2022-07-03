@@ -728,11 +728,9 @@ def derivative_of(state_or_function, variable=None, keepdims=False):
     """
 
     if callable(state_or_function):
-        assert variable is None
-
         function = state_or_function
         if hasattr(function, "derivative"):
-            return function.derivative()
+            return function.derivative(variable)
         else:
             raise ValueError(f"not a differentiable function: {function}")
 

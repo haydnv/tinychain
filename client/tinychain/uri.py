@@ -122,11 +122,11 @@ class URI(object):
                 value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
         """
 
-        if not str(name):
+        if str(name) == "":
             return self
 
         path = list(self._path)
-        path.append(name)
+        path.append(str(name))
         return URI(self._subject, *path)
 
     def id(self):
