@@ -85,14 +85,8 @@ class Graph(App):
     are automatically updated when a `Table` is updated, but `Edge` relationships require explicit management.
     """
 
-    # TODO: remove the `chain_type` parameter and generate the initial schema via reflection
-    def __init__(self, models: list[Model] = None, schema: Schema = None, chain_type=Sync):
-
-        if isinstance(models, (list, tuple)):
-            schema = self._initalise_schema(models)
-        elif schema is None:
-            raise ValueError("One of `models` or `schema` is required as an argument.")
-
+    # TODO: remove the `chain_type` parameter.
+    def __init__(self, schema: Schema, chain_type=Sync):
         for (label, edge) in schema.edges.items():
             if hasattr(self, label):
                 raise IndexError(f"{label} is already reserved in {self} by {getattr(self, label)}")
@@ -112,12 +106,8 @@ class Graph(App):
 
     @classmethod
     def autogenerate(cls, models: list[Model], chain_type=Sync):
+        """Auto create the schema and initalise it using a list of models."""
         return cls(schema=_initalise_schema(models), chain_type=chain_type)
-
-
-    def _initalise_schema(self, models: list[Model]):
-        """Automatically build a Graph of all models."""
-        return create_schema([cts(m) for m in models])
 
 
 def graph_table(graph, schema, table_name):
@@ -233,6 +223,11 @@ def graph_table(graph, schema, table_name):
             return After(Table.upsert(self, key, values), updates)
 
     return GraphTable(table_schema)
+
+
+def _initalise_schema(models: list[Model]):
+    """Automatically build a Graph of all models."""
+    return create_schema([cts(m) for m in models])
 
 
 def create_schema(schemas: list[TableSchema]) -> Schema:
