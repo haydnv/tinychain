@@ -30,7 +30,6 @@ def class_name(object_):
     return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
 
 
-# fmt: off
 class Model(Object, metaclass=Meta):
 
     def __new__(cls, *args, **kwargs):
