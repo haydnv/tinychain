@@ -9,8 +9,9 @@ from .collection import Collection, Column
 from .generic import Map, Tuple
 from .interface import Interface
 from .json import to_json
-from .reflect import parse_args
-from .reflect.meta import Meta, MethodStub
+from .reflect.functions import parse_args
+from .reflect.meta import Meta
+from .reflect.stub import MethodStub
 from .scalar import Scalar
 from .scalar.number import U32
 from .scalar.ref import Ref, form_of, get_ref
@@ -115,7 +116,9 @@ class Dynamic(Instance):
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
-            elif hasattr(attr, "hidden") and attr.hidden:
+
+            if hasattr(attr, "hidden") and attr.hidden:
+                # TODO: remove this obsolete case
                 continue
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
@@ -151,6 +154,7 @@ class Dynamic(Instance):
                         logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
                         continue
 
+            # TODO: resolve these in alphabetical order
             if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
                 stub = getattr(self.__class__, name)
                 for method_name, method in stub.expand(header, name):

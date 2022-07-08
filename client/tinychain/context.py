@@ -54,6 +54,9 @@ class _HashTable(object):
         return f"HashTable{tuple(self)}"
 
     def __setitem__(self, key, value):
+        assert self._equivalence_fn(key, key)
+        assert self._equivalence_fn(value, value)
+
         bucket = self._buckets[self._hash_fn(key) % self.SIZE]
         if any(self._equivalence_fn(k, key) for k, _ in bucket):
             raise KeyError(f"{key} is already present in {self}")

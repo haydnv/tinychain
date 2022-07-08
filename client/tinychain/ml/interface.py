@@ -23,10 +23,12 @@ class Differentiable(Interface):
     def eval(self, inputs: Tensor) -> Tensor:
         """Evaluate this :class:`Differentiable` with respect to the given `inputs`."""
 
-        return error.NotImplemented(f"Differentiable.eval for {self.__class__.__name__}")
+        cls = self.instance.__class__ if hasattr(self, "instance") else self.__class__
+        return error.NotImplemented(f"Differentiable.eval for {cls.__name__}")
 
     @post
     def gradient(self, inputs: Tensor, loss: Tensor) -> Gradient:
         """Return a :class:`Map` of gradients per member :class:`Variable` of this :class:`Differentiable` state."""
 
-        return error.NotImplemented(f"Differentiable.gradient for {self.__class__.__name__}")
+        cls = self.instance.__class__ if hasattr(self, "instance") else self.__class__
+        return error.NotImplemented(f"Differentiable.gradient for {cls.__name__}")

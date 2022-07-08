@@ -1,17 +1,16 @@
-import inspect
 import logging
 
 from .. import error
-from ..app import Dynamic, Model, ModelRef
+from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..generic import Map, Tuple
 from ..math.operator import constant, derivative_of, is_constant
 from ..ml.interface import Gradients
+from ..ml.variable import namespace
 from ..scalar.number import Float, F32, F64, UInt
 from ..scalar.ref import form_of, After, If
 
-from .variable import Variable
 from . import LIB_URI
 
 
@@ -46,7 +45,7 @@ class GradientDescent(Optimizer, Dynamic):
         cxt.d_loss = constant(d_loss.copy() if isinstance(d_loss, Tensor) else d_loss)
         assert is_constant(cxt.d_loss)
 
-        # TODO: this type expectation & keywords should not be necessary
+        # TODO: this type expectation & keyword arguments should not be necessary
         cxt.grads = Map.expect(Gradients)(self.ml_model.gradient(inputs=inputs, loss=cxt.d_loss))
 
         writes = []
@@ -167,41 +166,3 @@ class _Queue(object):
 
     def shift(self):
         return self._queue.pop(0)
-
-
-# TODO: merge with namespacing logic in Differentiable.gradient
-def namespace(model, prefix=None):
-    """Traverse the attributes of the given `model` to create a namespace for its trainable :class:`Variable` s."""
-
-    def suffix(name):
-        if prefix:
-            return f"{prefix}.{name}"
-        else:
-            return str(name)
-
-    if isinstance(model, Variable):
-        return {prefix: model}
-    elif isinstance(model, ModelRef):
-        return namespace(model.instance, prefix)
-
-    if isinstance(model, (Map, Tuple)):
-        model = form_of(model)
-
-    ns = {}
-
-    if isinstance(model, (list, tuple)):
-        for i, component in enumerate(model):
-            ns.update(namespace(component, suffix(i)))
-    elif isinstance(model, dict):
-        for name, component in model.items():
-            ns.update(namespace(component, suffix(name)))
-    elif isinstance(model, Model):
-        for name, component in inspect.getmembers(model):
-            if name.startswith("__"):
-                continue
-
-            ns.update(namespace(component, suffix(name)))
-    else:
-        logging.debug(f"ignoring non-trainable model attribute {model}")
-
-    return ns

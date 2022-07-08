@@ -10,7 +10,7 @@ class Ref(object):
     __uri__ = URI("/state/scalar/ref")
 
     def __same__(self, other):
-        from .helpers import same_as
+        from .functions import same_as
         return same_as(self.__args__(), other.__args__())
 
 
@@ -34,7 +34,7 @@ class After(FlowControl):
     __uri__ = URI(Ref) + "/after"
 
     def __init__(self, when, then):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
         if is_conditional(then):
             raise ValueError(f"After does not support a conditional clause: {then}")
@@ -49,7 +49,7 @@ class After(FlowControl):
         return {str(URI(self)): to_json([self.when, self.then])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
         cxt.deanonymize(self.when, name_hint + "_when")
         cxt.deanonymize(self.then, name_hint + "_then")
@@ -119,7 +119,7 @@ class If(FlowControl):
     __uri__ = URI(Ref) + "/if"
 
     def __init__(self, cond, then, or_else=None):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
         if is_conditional(cond):
             raise ValueError(f"If does not support nested conditionals: {cond}")
@@ -132,7 +132,7 @@ class If(FlowControl):
         return self.cond, self.then, self.or_else
 
     def __json__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
         if isinstance(form_of(self.cond), bool):
@@ -144,7 +144,7 @@ class If(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional, is_op_ref
+        from .functions import is_conditional, is_op_ref
 
         cxt.deanonymize(self.cond, name_hint + "_cond")
         cxt.deanonymize(self.then, name_hint + "_then")
@@ -154,7 +154,7 @@ class If(FlowControl):
             cxt.assign(self.cond, name_hint + "_cond")
 
     def __repr__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
         if isinstance(form_of(self.cond), bool):
@@ -240,7 +240,7 @@ class With(FlowControl):
         pass
 
     def __ref__(self, name):
-        from .helpers import get_ref
+        from .functions import get_ref
         return get_ref(self.op, name)
 
     def __repr__(self):
@@ -264,7 +264,7 @@ class Op(Ref):
         return self.subject, self.args, self._debug_name
 
     def __json__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         if hasattr(self.subject, "__form__"):
             subject = form_of(self.subject)
@@ -282,7 +282,7 @@ class Op(Ref):
         return {str(subject): to_json(self.args)}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_literal, is_op_ref
+        from .functions import is_literal, is_op_ref
 
         cxt.deanonymize(self.subject, name_hint + "_subject")
 
@@ -290,7 +290,7 @@ class Op(Ref):
             cxt.assign(self.subject, name_hint + "_subject")
 
     def __same__(self, other):
-        from .helpers import same_as
+        from .functions import same_as
         return same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
 
@@ -317,7 +317,7 @@ class Get(Op):
         return self.subject, key, self._debug_name
 
     def __json__(self):
-        from .helpers import is_ref
+        from .functions import is_ref
 
         if isinstance(self.subject, Ref):
             subject = URI(self.subject)
@@ -344,7 +344,7 @@ class Get(Op):
             return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -381,7 +381,7 @@ class Put(Op):
         return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -424,7 +424,7 @@ class Post(Op):
             return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
@@ -463,7 +463,7 @@ class Delete(Op):
         return f"DELETE {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
         cxt.deanonymize(self.args, name_hint + "_key")

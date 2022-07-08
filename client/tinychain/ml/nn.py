@@ -5,28 +5,41 @@ import logging
 
 from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
-from ..decorators import differentiable, post
-from ..math.operator import derivative_of, gradients
+from ..context import Context
+from ..decorators import differentiable, reflect
+from ..math.operator import gradients
 from ..generic import Map, Tuple
+from ..reflect import method
+from ..reflect.functions import parse_args
 from ..scalar.number import Float
-from ..scalar.ref import get_ref, After
-from ..uri import URI
+from ..scalar.ref import deref, form_of, is_ref, After, Post
 
 from .constants import LIB_URI
-from .interface import Differentiable, Gradient, Gradients
-from .variable import Variable
+from .interface import Differentiable, Gradients
+from .variable import namespace, Variable
+
+
+# TODO: move into the reflect.method module and rename
+class ReflectedMethod(method.Post):
+    def __init__(self, header, name, graph, sig, rtype):
+        self.name = name
+        self.header = header
+        self.graph = graph
+        self.sig = sig
+        self.rtype = rtype
+
+    def __call__(self, *args, **kwargs):
+        params = parse_args(self.sig[1:], *args, **kwargs)
+        return self.rtype(form=Post(self.subject(), params))
+
+    def __form__(self):
+        return self.graph
 
 
 class Layer(Model, Differentiable):
     """A :class:`Layer` in a :class:`NeuralNet`"""
 
     __uri__ = LIB_URI + "/Layer"
-
-    @post
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradient:
-        var_names = {var: name for name, var in inspect.getmembers(self, lambda attr: isinstance(attr, Variable))}
-        grads = gradients(self.eval(inputs), loss, list(var_names))
-        return dict(zip(var_names.values(), grads))
 
 
 class ConvLayer(Layer, Dynamic):
@@ -168,6 +181,21 @@ class Linear(Layer, Dynamic):
         cxt.with_bias = cxt.activation + self.bias
         return self._activation(cxt.with_bias) if self._activation else cxt.with_bias
 
+    @reflect
+    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+        sig = list(inspect.signature(Linear.gradient).parameters.items())
+
+        if is_ref(self.eval):
+            form = deref(self.eval)
+        else:
+            form = form_of(self.eval)
+
+        var_names = {var: name for name, var in namespace(self).items()}
+
+        cxt = Context(form)
+        cxt.grads = {var_names[var]: grad for var, grad in gradients(form[-1], loss).items() if var in var_names}
+        return ReflectedMethod(self, "gradient", cxt, sig, Map.expect(Gradients))
+
 
 class NeuralNet(Model, Differentiable):
     """A neural network"""
@@ -190,47 +218,6 @@ class Sequential(NeuralNet, Dynamic):
             state = self.layers[i].eval(state)
 
         return state
-
-    @post
-    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Gradient:
-        var_names = {}
-        layer_inputs = [inputs]
-        layer_outputs = []
-        layer_derivatives = []
-
-        for i, layer in enumerate(self.layers):
-            layer = get_ref(layer, f"self/layers/{i}")
-            for name, var in inspect.getmembers(layer, lambda attr: isinstance(attr, Variable)):
-                var = get_ref(var, f"self/layers/{i}/{name}")
-                var_names[var] = f"layers.{i}.{name}"
-
-            layer_outputs.append(layer.eval(layer_inputs[-1]))
-            layer_inputs.append(layer_outputs[-1])
-            layer_derivatives.append(derivative_of(layer.eval))
-
-        cxt.layer_inputs = layer_inputs
-        cxt.layer_outputs = layer_outputs
-        cxt.layer_derivatives = layer_derivatives
-
-        layer_losses = []
-        for i in reversed(range(len(self.layers))):
-            d_layer = get_ref(cxt.layer_derivatives[i], URI(f"layer_derivatives/{i}"))
-            layer_losses.append(loss * d_layer(layer_inputs[i]))
-            loss = layer_losses[-1]
-
-        cxt.layer_losses = list(reversed(layer_losses))
-
-        grads = {}
-        for i in reversed(range(len(self.layers))):
-            layer = get_ref(self.layers[i], f"self/layers/{i}")
-            # TODO: this type expectation and the argument keywords should not be necessary
-            layer_gradient = Map.expect(Gradients)(layer.gradient(inputs=cxt.layer_inputs[i], loss=cxt.layer_losses[i]))
-
-            for name, var in inspect.getmembers(layer, lambda attr: isinstance(attr, Variable)):
-                var = get_ref(var, f"self/layers/{i}/{name}")
-                grads[var_names[var]] = layer_gradient[name]
-
-        return grads
 
 
 class DNN(Sequential):

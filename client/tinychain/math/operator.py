@@ -740,7 +740,8 @@ def derivative_of(state_or_function, variable=None, keepdims=False):
         # it's a partial derivative and this is the free variable
         return ones_like(state, keepdims)
 
-    from ..ml.optimizer import Variable
+    # TODO: it doesn't make sense to import from the ML package in the math package
+    from ..ml.variable import Variable
 
     if isinstance(state, Variable):
         if variable is None:

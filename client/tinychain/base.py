@@ -3,7 +3,7 @@
 import inspect
 import typing
 
-from .reflect import MethodStub
+from .reflect.stub import MethodStub
 from .uri import URI
 
 BUILTINS = set(["shape"])

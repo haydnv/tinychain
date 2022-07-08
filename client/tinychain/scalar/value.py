@@ -78,7 +78,7 @@ class Id(Value):
     __uri__ = URI(Value) + "/id"
 
     def __json__(self):
-        from .ref.helpers import form_of
+        from .ref.functions import form_of
 
         form = form_of(self)
         if isinstance(form, Ref):
@@ -87,7 +87,7 @@ class Id(Value):
             return {str(self): []}
 
     def __str__(self):
-        from .ref.helpers import form_of
+        from .ref.functions import form_of
         return str(form_of(self))
 
 

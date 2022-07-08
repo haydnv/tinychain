@@ -7,7 +7,7 @@ from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
 
-from . import get_rtype, parse_args, resolve_class
+from .functions import get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty

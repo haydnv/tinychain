@@ -1,6 +1,8 @@
 import inspect
 
-from ..reflect import method, op, get_rtype, resolve_class
+from ..generic import Map
+from ..reflect import method, op
+from ..reflect.functions import get_rtype, resolve_class
 from ..scalar import ref
 from ..state import State, StateRef
 from ..uri import URI
@@ -44,26 +46,18 @@ class FunctionCall(Operator):
         while isinstance(subject, StateRef):
             subject = subject.state
 
+        # TODO: it doesn't make sense to import from the ml package in the math package
+        from ..ml.variable import namespace
+
         grads = Gradients()
 
         if isinstance(subject, StateFunction):
-            from ..app import Model
-            from ..ml import Variable
-
-            for name, attr in inspect.getmembers(subject.header):
-                if name.startswith('_'):
-                    continue
-                elif isinstance(attr, Variable):
-                    # TODO: don't assume that every member Variable is referenced in every differentiable method
-                    grads[ref.deref(attr)] = loss * self.backward(attr)
-                elif isinstance(attr, Model):
-                    raise TypeError(f"cannot calculate gradients of {self} with respect to {attr}")
+            gradient = subject.header.gradient(self.args)
+            for name, var in namespace(subject.header).items():
+                grads[var] = gradient[name]
         else:
             # in this case there's no internal state to calculate gradients for
-            assert isinstance(subject, Function)
-
-        for arg in self.args.values():
-            grads.update(gradients(arg, loss * self.backward(arg)))
+            raise NotImplementedError
 
         return grads
 
@@ -162,13 +156,6 @@ class NativeFunction(Function):
 
 
 class StateFunction(method.Post):
-    @classmethod
-    def expand(cls, header, form, name):
-        from ..context import Context
-
-        function = NativeStateFunction(header, form, name)
-        yield name, function
-
     def __init__(self, header, degree, name, sig, graph, rtype):
         self.header = header
         self.degree = degree
@@ -222,6 +209,11 @@ class StateFunction(method.Post):
 
 # TODO: dedupe with method.Post
 class NativeStateFunction(StateFunction):
+    @classmethod
+    def expand(cls, header, form, name):
+        function = cls(header, form, name)
+        yield name, function
+
     def __init__(self, header, form, name):
         self.degree = 0
         self.header = header

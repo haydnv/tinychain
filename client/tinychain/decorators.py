@@ -1,7 +1,7 @@
 import inspect
 
 from .math.equation import NativeFunction, NativeStateFunction
-from .reflect.meta import MethodStub
+from .reflect.stub import ReflectionStub, StateFunctionStub
 from .reflect import method, op
 from .scalar.ref import With
 
@@ -34,31 +34,38 @@ def closure(*deps):
 def get(form):
     """Annotation for a callable function or method specifying that it is a GET :class:`Op`."""
 
-    return MethodStub(method.Get, form) if _is_method(form) else op.Get(form)
+    return StateFunctionStub(method.Get, form) if _is_method(form) else op.Get(form)
 
 
 def put(form):
     """Annotation for a callable function or method specifying that it is a PUT :class:`Op`."""
 
-    return MethodStub(method.Put, form) if _is_method(form) else op.Put(form)
+    return StateFunctionStub(method.Put, form) if _is_method(form) else op.Put(form)
 
 
 def post(form):
     """Annotation for a callable function or method specifying that it is a POST :class:`Op`."""
 
-    return MethodStub(method.Post, form) if _is_method(form) else op.Post(form)
+    return StateFunctionStub(method.Post, form) if _is_method(form) else op.Post(form)
 
 
 def delete(form):
     """Annotation for a callable function or method specifying that it is a DELETE :class:`Op`."""
 
-    return MethodStub(method.Delete, form) if _is_method(form) else op.Delete(form)
+    return StateFunctionStub(method.Delete, form) if _is_method(form) else op.Delete(form)
 
 
 def differentiable(form):
     """Annotation for a callable method specifying that it returns a type of differentiable :class:`Operator`."""
 
-    return MethodStub(NativeStateFunction, form) if _is_method(form) else NativeFunction(form)
+    return StateFunctionStub(NativeStateFunction, form) if _is_method(form) else NativeFunction(form)
+
+
+def reflect(form):
+    """Annotation for a method produced by reflection over its instance."""
+
+    assert _is_method(form)
+    return ReflectionStub(form)
 
 
 def _is_method(form):

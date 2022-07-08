@@ -4,6 +4,8 @@ import logging
 from ..json import to_json
 from ..uri import URI
 
+from .stub import MethodStub
+
 
 class Meta(type):
     """The metaclass of a :class:`Model` which provides support for `form_of` and `to_json`."""
@@ -59,6 +61,7 @@ class Meta(type):
 
                 form[name] = attr
             if isinstance(attr, MethodStub):
+                # TODO: resolve these in alphabetical order
                 for method_name, method in attr.expand(instance_header, name):
                     form[method_name] = to_json(method)
             else:
@@ -76,15 +79,3 @@ class Meta(type):
             return {str(URI(Class)): to_json(form_of(cls))}
         else:
             return {str(URI(parents[0])): to_json(form_of(cls))}
-
-
-class MethodStub(object):
-    def __init__(self, dtype, form):
-        self.dtype = dtype
-        self.form = form
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"cannot call the instance method {self.form} from a static context")
-
-    def expand(self, header, name):
-        return self.dtype.expand(header, self.form, name)
