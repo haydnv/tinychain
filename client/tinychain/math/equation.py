@@ -52,9 +52,10 @@ class FunctionCall(Operator):
         grads = Gradients()
 
         if isinstance(subject, StateFunction):
-            gradient = subject.header.gradient(self.args)
-            for name, var in namespace(subject.header).items():
-                grads[var] = gradient[name]
+            raise NotImplementedError
+            # grad, _grad_fn = subject.header.gradient(self.args)
+            # for name, var in namespace(subject.header).items():
+            #     grads[var] = grad[name]
         else:
             # in this case there's no internal state to calculate gradients for
             raise NotImplementedError

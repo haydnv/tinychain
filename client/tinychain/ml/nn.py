@@ -2,17 +2,19 @@
 
 import inspect
 import logging
+import typing
 
 from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..context import Context
-from ..decorators import differentiable, reflect
+from ..decorators import differentiable, post, reflect
 from ..math.operator import gradients
 from ..generic import Map, Tuple
 from ..reflect import method
 from ..reflect.functions import parse_args
 from ..scalar.number import Float
-from ..scalar.ref import deref, form_of, is_ref, After, Post
+from ..scalar.op import Post
+from ..scalar.ref import deref, form_of, is_ref, After
 
 from .constants import LIB_URI
 from .interface import Differentiable, Gradients
@@ -29,7 +31,9 @@ class ReflectedMethod(method.Post):
         self.rtype = rtype
 
     def __call__(self, *args, **kwargs):
+        from ..scalar.ref import Post
         params = parse_args(self.sig[1:], *args, **kwargs)
+        print("rtype", self.rtype)
         return self.rtype(form=Post(self.subject(), params))
 
     def __form__(self):
@@ -182,7 +186,7 @@ class Linear(Layer, Dynamic):
         return self._activation(cxt.with_bias) if self._activation else cxt.with_bias
 
     @reflect
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, inputs: Tensor, loss: Tensor) -> typing.Tuple[Gradients, Post]:
         sig = list(inspect.signature(Linear.gradient).parameters.items())
 
         if is_ref(self.eval):
@@ -191,10 +195,18 @@ class Linear(Layer, Dynamic):
             form = form_of(self.eval)
 
         var_names = {var: name for name, var in namespace(self).items()}
+        grads = gradients(form[-1], loss)
+
+        @post
+        def backward(inputs: Tensor) -> Tensor:
+            return Dense.zeros_like(inputs)  # TODO
 
         cxt = Context(form)
-        cxt.grads = {var_names[var]: grad for var, grad in gradients(form[-1], loss).items() if var in var_names}
-        return ReflectedMethod(self, "gradient", cxt, sig, Map.expect(Gradients))
+        cxt.grads = {var_names[var]: grad for var, grad in grads.items() if var in var_names}
+        cxt.backward = backward
+        cxt.result = cxt.grads, cxt.backward
+
+        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Post)))
 
 
 class NeuralNet(Model, Differentiable):

@@ -13,7 +13,7 @@ from .scalar.ref import args, form_of, get_ref, hex_id, is_literal, same_as, Ref
 from .scalar.value import String
 from .state import hash_of
 from .state import State
-from .uri import URI
+from .uri import validate, URI
 
 
 class _HashTable(object):
@@ -142,11 +142,10 @@ class Context(object):
         return bool(self._names)
 
     def __contains__(self, name):
-        name = str(name[1:]) if name.startswith('$') else str(name)
-        return name in self._ns
+        return validate(name) in self._ns
 
     def __getattr__(self, name):
-        name = str(name[1:]) if name.startswith('$') else str(name)
+        name = validate(name)
 
         if name in self._ns:
             value = self._ns[name]
@@ -183,7 +182,8 @@ class Context(object):
             elif self._ns.key(state):
                 # unless its form is explicitly requested
                 if not top_level:
-                    return getattr(self, self._ns.key(state))
+                    name = self._ns.key(state)
+                    return getattr(self, name)
 
             if isinstance(state, Ref):
                 deps = [reference(arg) for arg in args(state)]
@@ -216,8 +216,7 @@ class Context(object):
         if state is self:
             raise ValueError(f"cannot assign transaction Context to itself")
 
-        name = str(name[1:]) if name.startswith('$') else str(name)
-        assert isinstance(name, str)
+        name = validate(name, state)
 
         if name in self:
             raise ValueError(f"Context already has a value named {name} (contents are {self._ns}")
@@ -239,6 +238,8 @@ class Context(object):
 
         If `state` already has a name in this :class:`Context`, this is a no-op.
         """
+
+        name_hint = validate(name_hint)
 
         if self._ns.key(state):
             return
@@ -271,6 +272,8 @@ class Context(object):
     def deanonymize(self, state, name_hint):
         """Assign auto-generated names based on the given `name_hint` to the dependencies of the given `state`."""
 
+        name_hint = validate(name_hint)
+
         if isinstance(state, Context):
             raise ValueError(f"cannot deanonymize an Op context itself")
         elif inspect.isclass(state):
@@ -280,6 +283,9 @@ class Context(object):
             state.__ns__(self, name_hint)
         elif isinstance(state, dict):
             for key in state:
+                if not isinstance(key, str):
+                    raise KeyError(f"invalid key for autoboxed Map: {key}")
+
                 self.deanonymize(state[key], name_hint + f".{key}")
         elif isinstance(state, (list, tuple)):
             for i, item in enumerate(state):

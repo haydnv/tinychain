@@ -1,4 +1,15 @@
-# TODO: re-implement uri helper function
+
+
+def validate(name, state=None):
+    name = str(name[1:]) if name.startswith('$') else str(name)
+    if not name or '<' in name or '>' in name or ' ' in name or '$' in name:
+        if state:
+            raise KeyError(f"invalid ID for {state}: {name}")
+        else:
+            raise KeyError(f"invalid ID: {name}")
+
+    return name
+
 
 class URI(object):
     """
@@ -14,6 +25,9 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
+        for segment in path:
+            validate(segment)
+
         if isinstance(subject, URI):
             self._subject = subject._subject
             self._path = list(subject._path)
@@ -21,7 +35,7 @@ class URI(object):
             return
 
         if isinstance(subject, str):
-            assert subject
+            validate(subject)
 
             if subject.startswith("$$"):
                 raise ValueError(f"invalid reference: {subject}")

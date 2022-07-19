@@ -35,6 +35,7 @@ class Post(Op):
 
     __uri__ = URI(Op) + "/post"
 
+    # TODO: this should retain the return type, in the case of a reflected op
     def __call__(self, params=None, **kwargs):
         if params is None:
             params = kwargs

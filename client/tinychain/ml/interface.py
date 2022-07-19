@@ -5,6 +5,7 @@ from ..collection.tensor import Tensor
 from ..decorators import differentiable, post
 from ..interface import Interface
 from ..math.interface import Numeric
+from ..scalar.op import Post
 from ..scalar.value import Id
 from ..state import State
 
@@ -27,7 +28,7 @@ class Differentiable(Interface):
         return error.NotImplemented(f"Differentiable.eval for {cls.__name__}")
 
     @post
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradient:
+    def gradient(self, inputs: Tensor, loss: Tensor) -> typing.Tuple[Gradients, Post]:
         """Return a :class:`Map` of gradients per member :class:`Variable` of this :class:`Differentiable` state."""
 
         cls = self.instance.__class__ if hasattr(self, "instance") else self.__class__

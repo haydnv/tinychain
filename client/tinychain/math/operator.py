@@ -773,7 +773,7 @@ def gradients(numeric, loss, variables=None):
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
     If a list of variables is given, a corresponding list of gradients will be returned.
-    If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph.
+    If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph will be returned.
     """
 
     if operator(numeric):
