@@ -5,10 +5,10 @@ import logging
 import typing
 
 from ..app import Dynamic, Model
-from ..collection.tensor import Dense, Tensor
+from ..collection.tensor import einsum, Dense, Tensor
 from ..context import Context
 from ..decorators import differentiable, post, reflect
-from ..math.operator import gradients
+from ..math.operator import derivative_of, gradients, operator, Dual
 from ..generic import Map, Tuple
 from ..reflect import method
 from ..reflect.functions import parse_args
@@ -44,6 +44,33 @@ class Layer(Model, Differentiable):
     """A :class:`Layer` in a :class:`NeuralNet`"""
 
     __uri__ = LIB_URI + "/Layer"
+
+    @reflect
+    def gradient(self, inputs: Tensor, loss: Tensor) -> typing.Tuple[Gradients, Post]:
+        if self.eval is Layer.eval:
+            # if this is an abstract class, don't try to reflect over the eval method
+            return Differentiable.gradient(inputs, loss)
+
+        sig = list(inspect.signature(Linear.gradient).parameters.items())
+
+        if is_ref(self.eval):
+            form = deref(self.eval)
+        else:
+            form = form_of(self.eval)
+
+        var_names = {var: name for name, var in namespace(self).items()}
+        grads = gradients(form[-1], loss)
+
+        @post
+        def backward(inputs: Tensor) -> Tensor:
+            return Dense.zeros_like(inputs)  # TODO
+
+        cxt = Context(form)
+        cxt.grads = {var_names[var]: grad for var, grad in grads.items() if var in var_names}
+        cxt.backward = backward
+        cxt.result = cxt.grads, cxt.backward
+
+        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Post)))
 
 
 class ConvLayer(Layer, Dynamic):
@@ -139,15 +166,46 @@ class ConvLayer(Layer, Dynamic):
 
         assert im2col_matrix
 
+        im2col_matrix = Dense.concatenate(im2col_matrix, 0)
         shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-        cxt.im2col_matrix = Dense.concatenate(im2col_matrix, 0).reshape(shape).transpose()
+        cxt.im2col_matrix = im2col_matrix.reshape(shape).transpose()
         cxt.w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
 
-        cxt.activation = (cxt.w_col @ cxt.im2col_matrix) + self.bias
-        cxt.output = cxt.activation.reshape([out_c, h_out, w_out, batch_size]).transpose([3, 0, 1, 2])
-        # shape is now [batch_size, out_c, h_out, w_out]
+        class Convolution(Dual):
+            def __repr__(self):
+                return f"Convolution({self.subject}, {self.args})"
 
-        return self._activation(cxt.output) if self._activation else cxt.output
+            def forward(self):
+                return einsum("ij,jk->ik", [cxt.w_col, cxt.im2col_matrix])
+
+            def backward(self, variable=None):
+                w_col = derivative_of(cxt.w_col, variable, keepdims=True)
+                im2col_matrix = derivative_of(cxt.im2col_matrix, variable, keepdims=True)
+                return (w_col @ cxt.im2col_matrix) + (cxt.w_col @ im2col_matrix)
+
+            def gradients(self, loss):
+                grads = gradients(cxt.w_col, loss @ cxt.im2col_matrix.transpose())
+
+                if operator(self.args):
+                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
+                    loss = (cxt.w_col.transpose() @ loss).reshape(shape)
+
+                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
+                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                    grad = Tensor(After(grad_slice.write(loss), grad))
+
+                    grads.update(operator(self.args).gradients(grad))
+
+                return grads
+
+        shape = [out_c, h_out, w_out, batch_size]
+        cxt.activation = Tensor(Convolution(self.weights, inputs)) + self.bias
+        cxt.output = cxt.activation.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
+
+        if self._activation:
+            return self._activation(cxt.output)
+        else:
+            return cxt.output
 
 
 class Linear(Layer, Dynamic):
@@ -184,29 +242,6 @@ class Linear(Layer, Dynamic):
         cxt.activation = inputs @ self.weights
         cxt.with_bias = cxt.activation + self.bias
         return self._activation(cxt.with_bias) if self._activation else cxt.with_bias
-
-    @reflect
-    def gradient(self, inputs: Tensor, loss: Tensor) -> typing.Tuple[Gradients, Post]:
-        sig = list(inspect.signature(Linear.gradient).parameters.items())
-
-        if is_ref(self.eval):
-            form = deref(self.eval)
-        else:
-            form = form_of(self.eval)
-
-        var_names = {var: name for name, var in namespace(self).items()}
-        grads = gradients(form[-1], loss)
-
-        @post
-        def backward(inputs: Tensor) -> Tensor:
-            return Dense.zeros_like(inputs)  # TODO
-
-        cxt = Context(form)
-        cxt.grads = {var_names[var]: grad for var, grad in grads.items() if var in var_names}
-        cxt.backward = backward
-        cxt.result = cxt.grads, cxt.backward
-
-        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Post)))
 
 
 class NeuralNet(Model, Differentiable):
