@@ -96,11 +96,11 @@ class OperatorTests(unittest.TestCase):
         self.w2_torch = torch.tensor(w2, dtype=torch.float, requires_grad=True)
         b2 = np.random.rand(2, 2)
         self.b2_torch = torch.tensor(b2, dtype=torch.float, requires_grad=True)
-        self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32, name="x")
-        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32, name="w1")
-        self.w2_tc = tc.ml.optimizer.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32, name="w2")
-        self.b1_tc = tc.ml.optimizer.Variable.load(b1.shape, b1.flatten().tolist(), tc.F32, name="b1")
-        self.b2_tc = tc.ml.optimizer.Variable.load(b2.shape, b2.flatten().tolist(), tc.F32, name="b2")
+        self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
+        self.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        self.w2_tc = tc.ml.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
+        self.b1_tc = tc.ml.Variable.load(b1.shape, b1.flatten().tolist(), tc.F32)
+        self.b2_tc = tc.ml.Variable.load(b2.shape, b2.flatten().tolist(), tc.F32)
 
     def testAdd(self):
         y_torch = self.x_torch + self.w1_torch + self.b1_torch
@@ -188,8 +188,8 @@ class OperatorTests(unittest.TestCase):
         y2_torch = y_torch / w2_torch + self.b2_torch
         w1_torch_grad = grad_torch(y2_torch, w1_torch, grad_outputs=ones_like_torch(y2_torch))
 
-        w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
-        w2_tc = tc.ml.optimizer.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
+        w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        w2_tc = tc.ml.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc / w1_tc + self.b1_tc
@@ -214,7 +214,7 @@ class OperatorTests(unittest.TestCase):
                               grad_outputs=ones_like_torch(dy_dw1_torch))[0]
 
         cxt = tc.Context()
-        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        self.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         y_tc = self.x_tc/self.w1_tc + self.b1_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
@@ -721,7 +721,7 @@ class OperatorTests(unittest.TestCase):
         w1_torch_grad = grad_torch(y_torch, w1_torch, grad_outputs=torch.ones_like(y_torch))
 
         cxt = tc.Context()
-        cxt.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        cxt.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         cxt.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
         cxt.y_tc = (cxt.x_tc * cxt.w1_tc).acosh()
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), cxt.w1_tc)
@@ -746,7 +746,7 @@ class OperatorTests(unittest.TestCase):
                               grad_outputs=ones_like_torch(dy_dw1_torch))[0]
 
         cxt = tc.Context()
-        self.w1_tc = tc.ml.optimizer.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
+        self.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
         y_tc = (self.x_tc*self.w1_tc).acosh()
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
@@ -993,12 +993,12 @@ class OperatorTests(unittest.TestCase):
 
         cxt = tc.Context()
         cxt.y_tc = tc.tensor.Dense.concatenate([self.w1_tc, self.b1_tc])
-        cxt.result = tc.math.operator.operator(cxt.y_tc).gradients(ones_like_tc(cxt.y_tc))
+        cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), [self.w1_tc, self.b1_tc])
 
         tc_grad = HOST.post(ENDPOINT, cxt)
 
         self.assertEqual(len(torch_grad), len(tc_grad))
-        for (expected, actual) in zip(torch_grad, tc_grad.values()):
+        for (expected, actual) in zip(torch_grad, tc_grad):
             self.assertAllClose(expected, actual)
 
     def testSum_derivative(self):
@@ -1011,8 +1011,8 @@ class OperatorTests(unittest.TestCase):
         x = np.arange(n).reshape([n])
 
         cxt = tc.Context()
-        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3], name="mu")
-        cxt.x = tc.tensor.Dense.arange([n], 0, n, name="x")
+        cxt.mu = tc.ml.Variable.load(shape=[1], data=[3])
+        cxt.x = tc.tensor.Dense.arange([n], 0, n)
         cxt.f_x = ((cxt.x - cxt.mu)**2).sum()
         cxt.d_f_x = derivative_of(cxt.f_x)
         cxt.d2_f_x = derivative_of(cxt.d_f_x)
