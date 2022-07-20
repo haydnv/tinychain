@@ -207,7 +207,7 @@ class Tuple(State, Functional):
         return State.__init__(self, tuple(form) if isinstance(form, list) else form)
 
     def __add__(self, other):
-        return self.concatenate(self, other)
+        return Tuple.concatenate(self, other)
 
     def __eq__(self, other):
         return self.eq(other)

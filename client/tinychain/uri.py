@@ -1,7 +1,9 @@
 
 
 def validate(name, state=None):
-    name = str(name[1:]) if name.startswith('$') else str(name)
+    name = str(name)
+    name = str(name[1:]) if name.startswith('$') else name
+
     if not name or '<' in name or '>' in name or ' ' in name or '$' in name:
         if state:
             raise KeyError(f"invalid ID for {state}: {name}")
@@ -25,8 +27,7 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        for segment in path:
-            validate(segment)
+        path = [validate(segment) for segment in path]
 
         if isinstance(subject, URI):
             self._subject = subject._subject
@@ -45,7 +46,7 @@ class URI(object):
             self._subject = subject
 
         self._subject = subject
-        self._path = tuple(str(path_segment) for path_segment in path if path_segment)
+        self._path = path
 
     def __add__(self, other):
         assert str(other) == other

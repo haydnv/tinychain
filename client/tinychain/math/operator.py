@@ -776,7 +776,9 @@ def gradients(numeric, loss, variables=None):
     If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph will be returned.
     """
 
-    if operator(numeric):
+    if is_literal(numeric):
+        grads = Gradients()
+    elif operator(numeric):
         grads = operator(numeric).gradients(loss)
     elif is_constant(numeric):
         grads = Gradients({numeric: loss})

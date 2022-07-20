@@ -39,6 +39,7 @@ class FunctionCall(Operator):
         if isinstance(d, (Function, StateFunction)):
             return d(**self.args)
         else:
+            assert not callable(d)
             return d
 
     def gradients(self, loss):
