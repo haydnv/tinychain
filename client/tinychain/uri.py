@@ -137,11 +137,17 @@ class URI(object):
                 value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
         """
 
-        if str(name) == "":
+        if str(name) in ["", "/"]:
             return self
 
+        name = validate(name)
+
+        if "://" in name:
+            raise ValueError(f"cannot append {name} to {self}")
+
         path = list(self._path)
-        path.append(str(name))
+        path.append(name)
+
         return URI(self._subject, *path)
 
     def id(self):
@@ -182,7 +188,7 @@ class URI(object):
             return uri[start:]
 
     def path(self):
-        """Return the path segment of this `URI`."""
+        """Return the path segment of this `URI`, if present."""
 
         uri = str(self)
 

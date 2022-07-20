@@ -17,7 +17,7 @@ class Variable(tensor.Dense):
 
 
 def namespace(model, prefix=None):
-    """Traverse the attributes of the given `model` to create a namespace for its trainable :class:`Variable` s."""
+    """Traverse the attributes of the given `model` to describe the namespace of its trainable :class:`Variable` s."""
 
     def suffix(name):
         if prefix:

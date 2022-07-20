@@ -1,6 +1,5 @@
 import inspect
 
-from ..generic import Map
 from ..reflect import method, op
 from ..reflect.functions import get_rtype, resolve_class
 from ..scalar import ref
@@ -8,7 +7,7 @@ from ..state import State, StateRef
 from ..uri import URI
 
 from .interface import Numeric
-from .operator import derivative_of, gradients, Gradients, Operator
+from .operator import derivative_of, Gradients, Operator
 
 
 class FunctionCall(Operator):
@@ -43,25 +42,7 @@ class FunctionCall(Operator):
             return d
 
     def gradients(self, loss):
-        subject = self.subject
-        while isinstance(subject, StateRef):
-            subject = subject.state
-
-        # TODO: it doesn't make sense to import from the ml package in the math package
-        from ..ml.variable import namespace
-
-        grads = Gradients()
-
-        if isinstance(subject, StateFunction):
-            raise NotImplementedError
-            # grad, _grad_fn = subject.header.gradient(self.args)
-            # for name, var in namespace(subject.header).items():
-            #     grads[var] = grad[name]
-        else:
-            # in this case there's no internal state to calculate gradients for
-            raise NotImplementedError
-
-        return grads
+        raise NotImplementedError(f"gradients of {self}--consider the Differentiable.gradient method instead")
 
 
 class Function(op.Post):

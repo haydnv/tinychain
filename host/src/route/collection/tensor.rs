@@ -893,7 +893,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let shape = key.try_into()?;
-                let shape = cast_shape(shape, self.tensor.size())?;
+                let shape = cast_shape(self.tensor.shape(), shape)?;
                 self.tensor
                     .reshape(shape.into())
                     .map(Tensor::from)
@@ -2096,7 +2096,7 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
     }
 }
 
-fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
+fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<Vec<u64>> {
     if value.is_empty() {
         return Err(TCError::bad_request("invalid tensor shape", value));
     }
@@ -2126,6 +2126,7 @@ fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
         }
     }
 
+    let size = source_shape.size();
     if let Some(unknown) = unknown {
         let known: u64 = shape.iter().product();
         if size % known == 0 {
@@ -2142,8 +2143,8 @@ fn cast_shape(value: Tuple<Value>, size: u64) -> TCResult<Vec<u64>> {
         Ok(shape)
     } else {
         Err(TCError::unsupported(format!(
-            "cannot reshape Tensor with size {} into shape {}",
-            size, value
+            "cannot reshape Tensor with shape {} into shape {}",
+            source_shape, value
         )))
     }
 }

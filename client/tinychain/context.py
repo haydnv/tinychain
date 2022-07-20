@@ -1,4 +1,4 @@
-"""Namespacing utilities for :class:`Op`s and :class:`Model`s."""
+"""Namespace utilities for :class:`Op` and :class:`Model` execution contexts."""
 
 import inspect
 import operator
