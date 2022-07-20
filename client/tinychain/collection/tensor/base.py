@@ -482,7 +482,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if not ref.is_literal(copy):
             raise ValueError(f"reshape requires a literal boolean for copy, not {copy}")
 
-        reshaped = Tensor(form=Reshape(self, shape))
+        reshaped = Tensor(form=Reshape(self, Shape(shape)))
 
         if copy:
             return reshaped.copy()

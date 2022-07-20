@@ -182,11 +182,19 @@ class ConvLayer(Layer, Dynamic):
                 return (w_col @ cxt.im2col_matrix_T) + (cxt.w_col @ im2col_matrix)
 
             def gradients(self, loss):
-                # TODO: should there be only one class called Gradients?
+                # TODO: can there be only one class called Gradients?
                 from ..math.operator import Gradients
                 grads = Gradients()
+
                 grads[self.subject] = (loss @ cxt.im2col_matrix).reshape(self.subject.shape)
-                grads[self.args] = cxt.w_col.transpose() @ loss
+
+                loss = (cxt.w_col.transpose() @ loss)
+                # TODO: there should not be any loss of precision in this step
+                loss = loss.reshape([batch_size, c_i, None]).sum(-1).expand_dims().expand_dims()
+                grads[self.args] = Dense.zeros([batch_size, c_i, h_i, w_i])
+                grad_slice = grads[self.args][:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                grads[self.args] = Tensor(After(grad_slice.write(loss), grads[self.args]))
+
                 return grads
 
         shape = [out_c, h_out, w_out, batch_size]
