@@ -1,20 +1,22 @@
 """A hosted :class:`App` or :class:`Library`."""
+
 import inspect
 import logging
 import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .context import to_json
 from .generic import Map, Tuple
 from .interface import Interface
-from .reflect import parse_args
-from .reflect.meta import Meta, MethodStub
+from .json import to_json
+from .reflect.functions import parse_args
+from .reflect.meta import Meta
+from .reflect.stub import MethodStub
 from .scalar import Scalar
 from .scalar.number import U32
 from .scalar.ref import Ref, form_of, get_ref
 from .scalar.value import Nil
-from .state import Class, Instance, Object, State
+from .state import hash_of, Class, Instance, Object, State
 from .uri import URI
 
 
@@ -96,6 +98,7 @@ class Model(Object, metaclass=Meta):
         """A Column object which will be used as the key for a given model."""
         return [Column(class_name(cls) + "_id", U32)]
 
+
 class _Header(object):
     pass
 
@@ -112,14 +115,17 @@ class Dynamic(Instance):
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
-            elif hasattr(attr, "hidden") and attr.hidden:
+
+            if hasattr(attr, "hidden") and attr.hidden:
+                # TODO: remove this obsolete case
                 continue
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(self, name, attr.method(self, name))
+                for method_name, method in attr.expand(self, name):
+                    setattr(self, method_name, method)
 
     # TODO: deduplicate with Meta.__form__
     def __form__(self):
@@ -147,9 +153,11 @@ class Dynamic(Instance):
                         logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
                         continue
 
+            # TODO: resolve these in alphabetical order
             if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
                 stub = getattr(self.__class__, name)
-                form[name] = stub.method(header, name)
+                for method_name, method in stub.expand(header, name):
+                    form[method_name] = method
             elif isinstance(attr, ModelRef):
                 form[name] = attr.instance
             else:
@@ -171,7 +179,7 @@ class Dynamic(Instance):
 
 class ModelRef(Ref):
     def __init__(self, instance, name):
-        assert name
+        name = name if isinstance(name, URI) else URI(name)
 
         if hasattr(instance, "instance"):
             raise RuntimeError(f"the attribute name 'instance' is reserved (use a different name in {instance})")
@@ -186,17 +194,16 @@ class ModelRef(Ref):
             elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
-
-            if name.startswith('_'):
-                if isinstance(attr, State):
-                    logging.warning(f"referencing {instance} without referencing hidden State {name}")
-
-                setattr(self, name, attr)
-            elif hasattr(instance.__class__, name) and isinstance(getattr(instance.__class__, name), MethodStub):
-                stub = getattr(instance.__class__, name)
-                setattr(self, name, stub.method(self, name))
-            else:
+            elif hasattr(self.__class__, name) and attr is getattr(self.__class__, name):
+                # it's a class attribute
+                pass
+            elif hasattr(attr, "__ref__"):
                 setattr(self, name, get_ref(attr, self.__uri__.append(name)))
+            else:
+                setattr(self, name, attr)
+
+    def __hash__(self):
+        return hash_of(self.instance)
 
     def __json__(self):
         return to_json(self.__uri__)
@@ -245,7 +252,8 @@ class Library(object):
 
             if isinstance(attr, MethodStub):
                 self._methods[name] = attr
-                setattr(self, name, attr.method(self, name))
+                for method_name, method in attr.expand(self, name):
+                    setattr(self, method_name, method)
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.__uri__})"
@@ -269,7 +277,7 @@ class Library(object):
                 # it's a @classmethod
                 continue
             elif _is_mutable(attr):
-                raise RuntimeError(f"{self.__class__.__name__} may not contain mutable state")
+                raise RuntimeError(f"{self.__class__.__name__} is a Library and must not contain mutable state")
             else:
                 form[name] = to_json(attr)
 
@@ -295,10 +303,10 @@ class App(Library):
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
                 continue
-            elif isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(self, name))
-            else:
+            elif hasattr(attr, "__ref__"):
                 setattr(header, name, get_ref(attr, f"self/{name}"))
+            else:
+                setattr(header, name, attr)
 
         # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}
@@ -319,7 +327,8 @@ class App(Library):
                 continue
 
             elif name in self._methods:
-                form[name] = to_json(self._methods[name].method(header, name))
+                for method_name, method in self._methods[name].expand(header, name):
+                    form[method_name] = to_json(method)
 
             elif _is_mutable(attr):
                 assert isinstance(attr, Chain)

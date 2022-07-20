@@ -1,8 +1,8 @@
 """Generic error types."""
 
+from .json import to_json
 from .scalar.value import String
 from .uri import URI
-from .context import deanonymize, to_json
 
 
 class TinyChainError(Exception):
@@ -21,7 +21,12 @@ class TinyChainError(Exception):
         return {str(URI(self)): [to_json(self.message)]}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.message, cxt, name_hint + "_message")
+        from .scalar.ref import is_op_ref
+
+        cxt.deanonymize(self.message, name_hint + "_message")
+
+        if is_op_ref(self.message):
+            cxt.assign(self.message, name_hint + "_message")
 
 
 class BadRequest(TinyChainError):

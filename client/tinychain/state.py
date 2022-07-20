@@ -4,9 +4,9 @@ import inspect
 
 from .base import _Base
 from .interface import Functional
-from .scalar.ref import form_of, get_ref, is_ref, Ref
+from .json import to_json
+from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
 from .uri import URI
-from .context import deanonymize, to_json
 
 
 class State(_Base):
@@ -38,8 +38,13 @@ class State(_Base):
 
         _Base.__init__(self)
 
+        assert hasattr(self, "__form__")
+
     def __hash__(self):
         return hash_of(form_of(self))
+
+    def __id__(self):
+        return hex_id(form_of(self))
 
     def __json__(self):
         form = form_of(self)
@@ -52,7 +57,7 @@ class State(_Base):
             return {str(self.__uri__): [to_json(form)]}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(form_of(self), cxt, name_hint)
+        cxt.deanonymize(form_of(self), name_hint)
 
     def __ref__(self, name):
         if hasattr(form_of(self), "__ref__"):
@@ -61,10 +66,7 @@ class State(_Base):
             return self.__class__(form=StateRef(self, name))
 
     def __repr__(self):
-        if hasattr(self, "__form__") and self.__form__:
-            return f"{self.__class__.__name__}({form_of(self)})"
-        else:
-            return f"instance of {self.__class__.__name__}"
+        return f"{self.__class__.__name__}({form_of(self)})"
 
     def cast(self, dtype):
         """Attempt to cast this `State` into the given `dtype`."""
@@ -172,23 +174,26 @@ class StateRef(Ref):
     def __args__(self):
         return self.state, self.__uri__
 
-    def __repr__(self):
-        return str(self.__uri__)
+    def __id__(self):
+        return hex_id(self.state)
 
     def __hash__(self):
-        return hash(self.state)
+        return hash_of(self.state)
 
     def __json__(self):
         return to_json(self.__uri__)
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.state, cxt, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))
+        cxt.deanonymize(self.state, name_hint + '_' + str(URI(self))[1:].replace('/', '_'))
+
+    def __repr__(self):
+        return str(self.__uri__)
 
 
 def hash_of(state):
     if isinstance(state, (list, tuple)):
         return hash(tuple(hash_of(item) for item in state))
     elif isinstance(state, dict):
-        return hash_of(sorted(tuple(state.items())))
+        return hash(tuple(hash_of((k, state[k])) for k in state))
     else:
         return hash(state)

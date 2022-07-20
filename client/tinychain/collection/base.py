@@ -1,8 +1,8 @@
 from ..generic import Tuple
+from ..json import to_json
 from ..scalar.ref import form_of, is_ref, Post, Put
 from ..state import State
 from ..uri import URI
-from ..context import to_json
 
 
 class Column(object):
@@ -14,7 +14,7 @@ class Column(object):
         self.max_size = max_size
 
     def __eq__(self, other):
-        return self.name == other.name and self.dtype == other.dtype and self.max_size == other.max_size
+        return self.name == other.name and self.max_size == other.max_size and self.dtype is other.dtype
 
     def __json__(self):
         if self.max_size is None:

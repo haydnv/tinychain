@@ -1,7 +1,6 @@
 import itertools
 import logging
 
-from ...context import deanonymize
 from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, is_literal, same_as, After, Post
@@ -28,7 +27,7 @@ class Concatenate(Operator):
     @property
     def shape(self):
         if not hasattr(self.subject, "__len__"):
-            raise ValueError(f"the concatenation of {self.subject} does not have a literal shape")
+            raise ValueError(f"concatenation does not have a literal shape")
 
         return Shape.concatenate([t.shape for t in self.subject], self.args)
 
@@ -43,7 +42,7 @@ class Concatenate(Operator):
 
     def backward(self, variable=None):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the derivative of a tensor concatenation requires a literal list, not {self.subject}")
+            raise ValueError(f"the derivative of a tensor concatenation requires a literal list")
 
         from .base import Dense, NDArray
 
@@ -62,7 +61,7 @@ class Concatenate(Operator):
 
     def gradients(self, loss):
         if not isinstance(deref(self.subject), (list, tuple)):
-            raise ValueError(f"the gradients of a tensor concatenation requires a literal list, not {self.subject}")
+            raise ValueError(f"the gradients of a tensor concatenation requires a literal list")
 
         grads = Gradients()
 
@@ -102,7 +101,7 @@ class Copy(Unary):
 
     def forward(self):
         from .base import Tensor
-        return Post(URI(Tensor) + "/copy_from", {"tensor": self.subject})
+        return Post(URI(Tensor, "copy_from"), {"tensor": self.subject})
 
     def backward(self, variable=None):
         from .base import NDArray
@@ -344,8 +343,8 @@ class Slice(Transform):
             def __repr__(self):
                 return f"{self.subject}[{self.args}]"
 
-            def __ns__(self, context, name_hint):
-                return deanonymize(self.subject, context, name_hint + "_subject")
+            def __ns__(self, cxt, name_hint):
+                return cxt.deanonymize(self.subject, name_hint + "_subject")
 
             @property
             def shape(self):

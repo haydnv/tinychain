@@ -68,7 +68,8 @@ class BTreeTests(HostTest):
         self.assertEqual(result, expected(keys[29:32]))
 
     def testDeleteAll(self):
-        keys = [(i, num2words(i)) for i in range(100)]
+        n = 100
+        keys = [(i, num2words(i)) for i in range(n)]
 
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)

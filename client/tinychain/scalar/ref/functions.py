@@ -1,8 +1,7 @@
 import inspect
-import logging
 
+from ...interface import Interface
 from ...uri import URI
-from ...context import to_json
 
 from .base import Case, If, Ref
 
@@ -48,13 +47,13 @@ def deref(state):
 
     from .base import FlowControl, Op as OpRef
 
-    if isinstance(state, (FlowControl, OpRef)) or callable(state) or inspect.isclass(state):
+    if isinstance(state, (FlowControl, OpRef)) or inspect.isclass(state):
         return state
 
-    if form_of(state) is not state:
-        return deref(form_of(state))
-    elif isinstance(state, Ref) and hasattr(state, "state"):
+    if isinstance(state, Ref) and hasattr(state, "state"):
         return deref(state.state)
+    elif form_of(state) is not state:
+        return deref(form_of(state))
     else:
         return state
 
@@ -65,7 +64,7 @@ def form_of(state):
     if not hasattr(state, "__form__"):
         return state
 
-    if callable(state.__form__) and not inspect.isclass(state.__form__):
+    if callable(state.__form__) and not inspect.isclass(state.__form__) and not hasattr(state.__form__, "__form__"):
         form = state.__form__()
     else:
         form = state.__form__
@@ -79,22 +78,26 @@ def get_ref(state, name):
     if not isinstance(name, URI):
         name = URI(name)
 
-    if inspect.isclass(state):
-        def ctr(*args, **kwargs):
-            return state(*args, **kwargs)
-
-        ctr.__uri__ = name
-        ctr.__json__ = lambda: to_json(URI(ctr))
-        return ctr
-    elif hasattr(state, "__ref__"):
+    if hasattr(state, "__ref__") and not inspect.isclass(state):
         return state.__ref__(name)
     elif isinstance(state, dict):
         return {k: get_ref(v, name.append(k)) for k, v in state.items()}
     elif isinstance(state, (list, tuple)):
         return tuple(get_ref(item, name.append(i)) for i, item in enumerate(state))
+    elif isinstance(state, Interface):
+        from ...state import State
+        return type(f"{state.__class.__name__}State", (State, type(state)), {})(form=state)
     else:
-        logging.debug(f"{state} has no __ref__ method")
         return state
+
+
+def hex_id(state):
+    """Return the memory address of the form of the given `state`"""
+
+    if hasattr(state, "__id__"):
+        return state.__id__()
+    else:
+        return id(state)
 
 
 def independent(state_or_ref):
@@ -121,7 +124,7 @@ def independent(state_or_ref):
 def is_literal(state):
     """Return `True` if the given `state` is a Python literal (or a type expectation wrapping a Python literal)."""
 
-    from ...generic import Map, Tuple
+    from ...state import State
 
     if isinstance(state, (list, tuple)):
         return all(is_literal(item) for item in state)
@@ -133,10 +136,8 @@ def is_literal(state):
         return True
     elif state is None:
         return True
-    elif isinstance(state, (Map, Tuple)):
+    elif isinstance(state, State):
         return is_literal(form_of(state))
-    elif inspect.isclass(state):
-        return True
 
     return False
 
@@ -225,6 +226,10 @@ def is_ref(state):
     if isinstance(state, (Ref, URI)):
         return True
     elif hasattr(state, "__form__"):
+        if callable(state.__form__) and not hasattr(state.__form__, "__form__"):
+            # special case: it's an Op and we don't want to call __form__
+            return False
+
         return is_ref(form_of(state))
     elif isinstance(state, (list, tuple)):
         return any(is_ref(item) for item in state)

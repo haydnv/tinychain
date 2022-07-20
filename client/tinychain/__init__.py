@@ -5,12 +5,14 @@ import tinychain.ml
 import tinychain.ml.service
 import tinychain.scalar
 from tinychain.collection import Column, btree, table, tensor
-from tinychain.context import Context, print_json, to_json
+from tinychain.context import Context
 from tinychain.decorators import closure, delete, differentiable, get, post, put
 from tinychain.generic import Map, Tuple
 from tinychain.graph import Edge, Graph
 from tinychain.interface import Equality, Interface, Order
+from tinychain.json import print_json, to_json
 from tinychain.math import linalg
+from tinychain.math.interface import Numeric
 from tinychain.reflect import Meta
 from tinychain.scalar.number import (
     C32,

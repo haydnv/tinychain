@@ -1,7 +1,6 @@
 """An n-dimensional array of numbers."""
 
 import inspect
-import logging
 import math
 
 from ...decorators import post
@@ -246,7 +245,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                         if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
                             raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
                     except (RuntimeError, ValueError) as e:
-                        logging.debug(lambda: f"{form} does not have a literal shape: {e}")
+                        pass
 
                 Tensor.__init__(self, form)
 
@@ -283,11 +282,9 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return cls.expect(shape, dtype).create()
 
     @classmethod
-    def load(cls, shape, data, dtype=F32, name=None):
+    def load(cls, shape, data, dtype=F32):
         """
         Load a `Tensor` from an existing data set.
-
-        The `name` parameter is useful in the string representation of an operator graph.
 
         Example:
             .. highlight:: python
@@ -299,10 +296,8 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
                 dense = tc.tensor.Dense.load([2, 3, 4], values, tc.I32)
         """
 
-        name = name if name else f"load {shape}"
-
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/load", ((shape, dtype), data), name)
+        op_ref = ref.Get(URI(cls) + "/load", ((shape, dtype), data))
         return cls(op_ref)
 
     def __repr__(self):
@@ -336,7 +331,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
             try:
                 return operator(self).shape
             except (RuntimeError, ValueError):
-                logging.debug(f"{self} does not have a literal shape")
+                pass
 
         return self._get("shape", rtype=Shape)
 
@@ -487,7 +482,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         if not ref.is_literal(copy):
             raise ValueError(f"reshape requires a literal boolean for copy, not {copy}")
 
-        reshaped = Tensor(form=Reshape(self, shape))
+        reshaped = Tensor(form=Reshape(self, Shape(shape)))
 
         if copy:
             return reshaped.copy()
@@ -517,6 +512,9 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return WritableView(Slice(self, bounds))
 
     def sub(self, other):
+        if ref.same_as(other, 0):
+            return self
+
         return Tensor(form=Sub(self, other))
 
     def sum(self, axis=None, keepdims=False):
@@ -547,18 +545,15 @@ class Dense(Tensor):
     __uri__ = URI(Tensor) + "/dense"
 
     @classmethod
-    def arange(cls, shape, start, stop, name=None):
+    def arange(cls, shape, start, stop):
         """
         Return a `Dense` tensor with the given shape containing a range of numbers evenly distributed
         between `start` and `stop`.
-
-        The `name` parameter is used only in the string representation of an operator graph.
         """
 
-        name = name if name else f"arange({start}, {stop})x{shape}"
         dtype = type(start) if isinstance(start, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/range", (shape, start, stop), name)
+        op_ref = ref.Get(URI(cls) + "/range", (shape, start, stop))
         return cls(op_ref)
 
     @classmethod
@@ -568,17 +563,12 @@ class Dense(Tensor):
         return Dense(form=Concatenate(tensors, axis))
 
     @classmethod
-    def constant(cls, shape, value, name=None):
-        """
-        Return a `Dense` tensor filled with the given `value`.
+    def constant(cls, shape, value):
+        """Return a `Dense` tensor filled with the given `value`."""
 
-        The `name` parameter is used only in the string representation of an operator graph.
-        """
-
-        name = name if name else f"{value}x{shape}"
         dtype = type(value) if isinstance(value, Number) else Number
         cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/constant", (shape, value), name)
+        op_ref = ref.Get(URI(cls) + "/constant", (shape, value))
 
         if ref.same_as(value, 1):
             return cls(op_ref)
@@ -612,17 +602,12 @@ class Dense(Tensor):
         return cls.zeros(tensor.shape)
 
     @classmethod
-    def random_normal(cls, shape, mean=0.0, std=1.0, name=None):
-        """
-        Return a `Dense` tensor filled with a random normal distribution of `F64` s.
+    def random_normal(cls, shape, mean=0.0, std=1.0):
+        """Return a `Dense` tensor filled with a random normal distribution of `F64` s."""
 
-        The `name` parameter is used only in the string representation of an operator graph.
-        """
-
-        name = name if name else f"random {shape}"
         cls = cls.expect(shape, F64)
         args = {"shape": shape, "mean": mean, "std": std}
-        op_ref = ref.Post(URI(cls) + "/random/normal", args, name)
+        op_ref = ref.Post(URI(cls) + "/random/normal", args)
         return cls(op_ref)
 
     @classmethod
@@ -700,6 +685,9 @@ class Dense(Tensor):
         return self._get("elements", bounds, Stream)
 
     def sub(self, other):
+        if ref.same_as(other, 0):
+            return self
+
         return Dense(form=Tensor.sub(self, other))
 
 
@@ -718,18 +706,15 @@ class Sparse(Tensor):
     __uri__ = URI(Tensor) + "/sparse"
 
     @classmethod
-    def zeros(cls, shape, dtype=F32, name=None):
+    def zeros(cls, shape, dtype=F32):
         """
         Return a `Sparse` tensor with the given shape and data type.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
-
-        The `name` parameter is used only in the string representation of an operator graph.
         """
 
         cls = cls.expect(shape, dtype)
-        name = name if name else f"sparse 0x{shape}"
-        return cls(ref.Get(cls, (shape, dtype), name))
+        return cls(ref.Get(cls, (shape, dtype)))
 
     @classmethod
     def zeros_like(cls, tensor):

@@ -1,6 +1,5 @@
 from ...scalar.number import Bool
 from ...scalar.ref import deref, is_literal, Post
-from ...state import State
 from ...uri import URI
 
 from .base import NDArray, Tensor
@@ -35,7 +34,7 @@ def einsum(format, tensors):
 
     rtype = _gcs(*tensors)
     rtype = rtype if issubclass(rtype, Tensor) else Tensor
-    return rtype(form=Post(URI(Tensor) + "/einsum", {"format": format, "tensors": tensors}))
+    return rtype(form=Post(URI(Tensor, "einsum"), {"format": format, "tensors": tensors}))
 
 
 def split(tensor, num_or_size_splits, axis=0):

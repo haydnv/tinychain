@@ -1,25 +1,73 @@
 """:class:`NeuralNet` and :class:`Layer` :class:`Model` definitions with common implementations"""
 
+import inspect
 import logging
+import typing
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
-from ..context import deanonymize
-from ..decorators import differentiable
-from ..generic import Tuple
-from ..math.operator import derivative_of, gradients, operator, Dual
+from ..context import Context
+from ..decorators import differentiable, post, reflect
+from ..error import NotImplemented
+from ..math.operator import derivative_of, gradients, Dual
+from ..generic import Map, Tuple
+from ..reflect import method
+from ..reflect.functions import parse_args
 from ..scalar.number import Float
-from ..scalar.ref import After
+from ..scalar.ref import deref, form_of, get_ref, is_ref, After
+from ..uri import URI
 
 from .constants import LIB_URI
-from .interface import Differentiable
-from .variable import Variable
+from .interface import Differentiable, Gradients
+from .variable import namespace, Variable
+
+
+# TODO: move into the reflect.method module and rename
+class ReflectedMethod(method.Post):
+    def __init__(self, header, name, graph, sig, rtype):
+        self.name = name
+        self.header = header
+        self.graph = graph
+        self.sig = sig
+        self.rtype = rtype
+
+    def __call__(self, *args, **kwargs):
+        from ..scalar.ref import Post
+        params = parse_args(self.sig[1:], *args, **kwargs)
+        return self.rtype(form=Post(self.subject(), params))
+
+    def __form__(self):
+        return self.graph
 
 
 class Layer(Model, Differentiable):
     """A :class:`Layer` in a :class:`NeuralNet`"""
 
     __uri__ = LIB_URI + "/Layer"
+
+    @reflect
+    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+        if self.eval is Layer.eval:
+            # if this is an abstract class, don't try to reflect over the eval method
+            return NotImplemented("Layer.gradient")
+
+        sig = list(inspect.signature(Linear.gradient).parameters.items())
+
+        if is_ref(self.eval):
+            form = deref(self.eval)
+        else:
+            form = form_of(self.eval)
+
+        var_names = {var: name for name, var in namespace(self).items()}
+        grads = gradients(form[-1], loss)
+        [loss] = [grad for var, grad in grads.items() if var not in var_names]
+        grads = {var_names[var]: grad for var, grad in grads.items() if var in var_names}
+        grads["inputs"] = loss
+
+        cxt = Context(form)
+        cxt.gradient = grads
+
+        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Tensor)))
 
 
 class ConvLayer(Layer, Dynamic):
@@ -73,7 +121,7 @@ class ConvLayer(Layer, Dynamic):
         self._filter_shape = filter_shape
         self._stride = stride
         self._padding = padding
-        self._activation = activation
+        self._activation = activation  # TODO: require a differentiable Function, not a callable Python literal
 
         # run-time state
         self.weights = weights
@@ -82,7 +130,7 @@ class ConvLayer(Layer, Dynamic):
         Dynamic.__init__(self)
 
     @differentiable
-    def eval(self, inputs: Tensor) -> Tensor:
+    def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
         # TODO: this expectation should be set using a generic type
@@ -100,69 +148,63 @@ class ConvLayer(Layer, Dynamic):
         assert h_out
         assert w_out
 
+        pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
+        pad_matrix = Tensor(After(
+            pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(inputs),
+            pad_matrix))
+
+        shape = [c_i * h_f * w_f, batch_size]
+
+        im2col_matrix = []
+        for i in range(h_out):
+            for j in range(w_out):
+                im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
+                im2col_matrix.append(im2col)
+
+        assert im2col_matrix
+
+        im2col_matrix = Dense.concatenate(im2col_matrix, 0)
+        cxt.im2col_matrix = im2col_matrix.reshape([batch_size * h_out * w_out, c_i * h_f * w_f])
+        cxt.im2col_matrix_T = cxt.im2col_matrix.transpose()
+
+        cxt.w_col = self.weights.reshape([out_c, c_i * h_f * w_f])
+
         class Convolution(Dual):
-            def __init__(self, weights, inputs):
-                Dual.__init__(self, weights, inputs)
-
-                pad_matrix = Dense.zeros([batch_size, c_i, h_i + padding * 2, w_i + padding * 2])
-                pad_matrix = Tensor(After(
-                    pad_matrix[:, :, padding:(padding + h_i), padding:(padding + w_i)].write(self.args),
-                    pad_matrix))
-
-                shape = [c_i * h_f * w_f, batch_size]
-
-                im2col_matrix = []
-                for i in range(h_out):
-                    for j in range(w_out):
-                        im2col = pad_matrix[:, :, i:i + h_f, j:j + w_f].reshape(shape)
-                        im2col_matrix.append(im2col)
-
-                assert im2col_matrix
-
-                im2col_matrix = Dense.concatenate(im2col_matrix, 0)
-                shape = [batch_size * h_out * w_out, c_i * h_f * w_f]
-                self.im2col_matrix = im2col_matrix.reshape(shape).transpose()
-                self.w_col = self.subject.reshape([out_c, c_i * h_f * w_f])
-
-            def __ns__(self, context, name_hint):
-                Dual.__ns__(self, context, name_hint)
-                deanonymize(self.im2col_matrix, context, name_hint + "_im2col_matrix")
-                deanonymize(self.w_col, context, name_hint + "_w_col")
-
             def __repr__(self):
                 return f"Convolution({self.subject}, {self.args})"
 
             def forward(self):
-                return einsum("ij,jk->ik", [self.w_col, self.im2col_matrix])
+                return einsum("ij,jk->ik", [cxt.w_col, cxt.im2col_matrix_T])
 
             def backward(self, variable=None):
-                w_col = derivative_of(self.w_col, variable, keepdims=True)
-                im2col_matrix = derivative_of(self.im2col_matrix, variable, keepdims=True)
-                return (w_col @ self.im2col_matrix) + (self.w_col @ im2col_matrix)
+                w_col = derivative_of(cxt.w_col, variable, keepdims=True)
+                im2col_matrix = derivative_of(cxt.im2col_matrix_T, variable, keepdims=True)
+                return (w_col @ cxt.im2col_matrix_T) + (cxt.w_col @ im2col_matrix)
 
             def gradients(self, loss):
-                grads = gradients(self.w_col, loss @ self.im2col_matrix.transpose())
+                # TODO: can there be only one class called Gradients?
+                from ..math.operator import Gradients
+                grads = Gradients()
 
-                if operator(self.args):
-                    shape = [batch_size, c_i, h_i - padding, w_i - padding]
-                    loss = (self.w_col.transpose() @ loss).reshape(shape)
+                grads[self.subject] = (loss @ cxt.im2col_matrix).reshape(self.subject.shape)
 
-                    grad = Dense.zeros([batch_size, c_i, h_i, w_i])
-                    grad_slice = grad[:, :, padding:(h_i - padding), padding:(w_i - padding)]
-                    grad = Tensor(After(grad_slice.write(loss), grad))
-
-                    grads.update(operator(self.args).gradients(grad))
+                loss = (cxt.w_col.transpose() @ loss)
+                # TODO: there should not be any loss of precision in this step
+                loss = loss.reshape([batch_size, c_i, None]).sum(-1).expand_dims().expand_dims()
+                grads[self.args] = Dense.zeros([batch_size, c_i, h_i, w_i])
+                grad_slice = grads[self.args][:, :, padding:(h_i - padding), padding:(w_i - padding)]
+                grads[self.args] = Tensor(After(grad_slice.write(loss), grads[self.args]))
 
                 return grads
 
         shape = [out_c, h_out, w_out, batch_size]
-        output = Tensor(Convolution(self.weights, inputs)) + self.bias
-        output = output.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
+        cxt.activation = Tensor(Convolution(self.weights, inputs)) + self.bias
+        cxt.output = cxt.activation.reshape(shape).transpose([3, 0, 1, 2])  # shape = [batch_size, out_c, h_out, w_out]
 
         if self._activation:
-            return self._activation(output)
+            return self._activation(cxt.output)
         else:
-            return output
+            return cxt.output
 
 
 class Linear(Layer, Dynamic):
@@ -180,24 +222,25 @@ class Linear(Layer, Dynamic):
         return cls(weights, bias, activation)
 
     def __init__(self, weights, bias, activation=None):
+        # compile-time constants
+        self._activation = activation  # TODO: require a differentiable Function, not a callable Python literal
+
+        # run-time state
         self.weights = weights
         self.bias = bias
-        self._activation = activation
 
         Dynamic.__init__(self)
 
     @differentiable
-    def eval(self, inputs: Tensor) -> Tensor:
+    def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
         # TODO: this expectation should be set using a generic type
         inputs = Tensor.expect([batch_size, self.weights.shape[0]], Float)(form=inputs)
 
-        x = (inputs @ self.weights) + self.bias
-        if self._activation is None:
-            return x
-        else:
-            return self._activation(x)
+        cxt.activation = inputs @ self.weights
+        cxt.with_bias = cxt.activation + self.bias
+        return self._activation(cxt.with_bias) if self._activation else cxt.with_bias
 
 
 class NeuralNet(Model, Differentiable):
@@ -221,6 +264,35 @@ class Sequential(NeuralNet, Dynamic):
             state = self.layers[i].eval(state)
 
         return state
+
+    @post
+    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Gradients:
+        layer_inputs = [inputs]
+
+        for layer in self.layers[:-1]:
+            layer_inputs.append(layer.eval(layer_inputs[-1]))
+
+        cxt.layer_inputs = layer_inputs
+
+        layer_grads = []
+        for i, (inputs, layer) in reversed(list(enumerate(zip(cxt.layer_inputs, self.layers)))):
+            # TODO: this call to get_ref should not be necessary
+            layer = get_ref(layer, URI(self, "layers", i))
+            # TODO: this type expectation and parameter names should not be necessary
+            layer_grad = Map.expect(Gradients)(layer.gradient(inputs=inputs, loss=loss))
+            layer_grads.append(layer_grad)
+            loss = layer_grad["inputs"]  # TODO: should this handle other layer eval signatures automatically?
+
+        cxt.layer_grads = list(reversed(layer_grads))
+
+        grads = {}
+        for i, layer_grad in enumerate(cxt.layer_grads):
+            for name in namespace(self.layers[i]):
+                grads[f"layers.{i}.{name}"] = layer_grad[name]
+
+        grads["inputs"] = loss
+
+        return grads
 
 
 class DNN(Sequential):

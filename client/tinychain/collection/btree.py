@@ -1,12 +1,12 @@
 """A `BTree` with a schema of named, :class:`Value`-typed :class:`Column` s."""
 
 from ..generic import Map, Tuple
+from ..json import to_json
 from ..scalar.bound import Range
 from ..scalar.number import UInt
 from ..scalar.ref import form_of, Ref
 from ..state import State, Stream
 from ..uri import URI
-from ..context import to_json
 
 from .base import Collection
 

@@ -1,13 +1,13 @@
 import inspect
 import logging
 
+from ..json import to_json
 from ..scalar.value import Nil, Value
 from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
-from ..context import to_json, Context
 
-from . import _get_rtype, parse_args, resolve_class
+from .functions import get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -36,11 +36,11 @@ class Get(Op):
     __uri__ = URI(op.Get)
 
     def __init__(self, form):
-        self.rtype = _get_rtype(form, State)
+        self.rtype = get_rtype(form, State)
         Op.__init__(self, form)
 
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -76,7 +76,7 @@ class Put(Op):
         return ref.Put(self, key, value)
 
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -129,11 +129,11 @@ class Post(Op):
     __uri__ = URI(op.Post)
 
     def __init__(self, form):
-        self.rtype = _get_rtype(form, State)
+        self.rtype = get_rtype(form, State)
         Op.__init__(self, form)
 
     def __form__(self):
-        cxt, args = _maybe_first_arg(self)
+        cxt, args = maybe_first_arg(self.form)
 
         sig = inspect.signature(self.form)
         kwargs = {}
@@ -183,8 +183,10 @@ class Delete(Op):
         return f"DELETE Op with form {self.form}"
 
 
-def _maybe_first_arg(op):
-    sig = inspect.signature(op.form)
+def maybe_first_arg(form):
+    from ..context import Context
+
+    sig = inspect.signature(form)
     param_names = list(sig.parameters.keys())
 
     cxt = Context()

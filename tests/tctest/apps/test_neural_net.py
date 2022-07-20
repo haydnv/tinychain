@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-import time
 import tinychain as tc
 
 from ..process import start_host
@@ -15,70 +14,50 @@ class NeuralNetTester(tc.app.Library):
     ml = tc.ml.service.ML()
 
     @tc.post
-    def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        labels = tc.tensor.Dense.constant([2, 3, 3], 2)
+    def test_convolution(self, inputs: tc.tensor.Tensor) -> tc.F32:
         layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
-        cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
-        return cxt.optimizer.train(1, inputs, BATCH_SIZE / 2)
-
-    @tc.post
-    def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        layers = [
-            tc.ml.nn.ConvLayer.create([3, 5, 5], [2, 1, 1], activation=tc.ml.sigmoid),
-            tc.ml.nn.ConvLayer.create([2, 3, 3], [5, 2, 2], activation=tc.ml.sigmoid),
-        ]
-
-        cnn = tc.ml.nn.Sequential(layers)
-        outputs = cnn.eval(inputs)
-        cxt.optimizer = tc.ml.optimizer.Adam(cnn, lambda _, o: (o - 2)**2)
-        return cxt.optimizer.train(1, inputs, BATCH_SIZE / 10)
+        return layer.eval(inputs)
 
     @tc.post
     def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        def cost(i, o):
-            labels = tc.math.constant(i[:, 0].logical_or(i[:, 1]).expand_dims())
-            return (o - labels)**2
-
-        layer = tc.ml.nn.Linear.create(2, 1)
-        cxt.optimizer = tc.ml.optimizer.GradientDescent(layer, cost)
-        return cxt.optimizer.train(1, inputs)
+        cxt.layer = tc.ml.nn.Linear.create(2, 1)
+        return cxt.layer.eval(inputs)
 
     @tc.post
-    def test_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
-        def cost(i, o):
-            labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
-            return (o - labels)**2
+    def test_gradients(self, cxt, inputs: tc.tensor.Tensor) -> tc.State:
+        cxt.layer = tc.ml.nn.Linear.create(2, 1)
+        cxt.outputs = cxt.layer.eval(inputs)
+        grads = cxt.layer.gradient(inputs=inputs, loss=tc.tensor.Dense.ones_like(cxt.outputs))
+        grads = tc.Tuple.expect((tc.Map, tc.scalar.op.Post))(grads)
+        return grads["weights"], grads["bias"]
 
-        schema = [
-            (2, 3, tc.ml.sigmoid),
-            (3, 5),
-            (5, 1, tc.ml.sigmoid)]
-
-        dnn = tc.ml.nn.DNN.create(schema)
-        cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
-        return cxt.optimizer.train(1, inputs)
+    @tc.post
+    def test_sequential(self, inputs: tc.tensor.Tensor) -> tc.F32:
+        layer1 = tc.ml.nn.Linear.create(2, 2)
+        layer2 = tc.ml.nn.Linear.create(2, 1)
+        return tc.ml.nn.Sequential([layer1, layer2]).eval(inputs)
 
 
-@unittest.skip  # TODO: re-enable when differentiable methods support independent namespaces
 class NeuralNetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_neural_net", NeuralNetTester(), wait_time=2, request_ttl=60)
 
-    def testCNN(self):
+    def testConvolution(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
-        self.host.post(tc.URI(NeuralNetTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
-        self.host.post(tc.URI(NeuralNetTester).append("test_cnn"), {"inputs": load_dense(inputs)})
+        self.host.post(URI.append("test_convolution"), {"inputs": load_dense(inputs)})
 
-    def testDNN(self):
+    def testLinear(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        self.host.post(URI.append("test_linear"), {"inputs": load_dense(inputs)})
 
-        self.host.post(tc.URI(NeuralNetTester).append("test_linear"), {"inputs": load_dense(inputs)})
+    def testGradients(self):
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        response = self.host.post(URI.append("test_gradients"), {"inputs": load_dense(inputs)})
 
-        start = time.time()
-        self.host.post(tc.URI(NeuralNetTester).append("test_dnn"), {"inputs": load_dense(inputs)})
-        elapsed = time.time() - start
-        print(f"trained a deep neural net in {elapsed:.2}s")
+    def testSequential(self):
+        inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
+        self.host.post(URI.append("test_sequential"), {"inputs": load_dense(inputs)})
 
     @classmethod
     def tearDownClass(cls) -> None:

@@ -1,12 +1,12 @@
 import inspect
 
+from ..json import to_json
 from ..scalar import Value
 from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
-from ..context import to_json, Context
 
-from . import _get_rtype, parse_args, resolve_class
+from .functions import get_rtype, parse_args, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -14,6 +14,10 @@ EMPTY = inspect.Parameter.empty
 
 class Method(object):
     __uri__ = URI(op.Op)
+
+    @classmethod
+    def expand(cls, header, form, name):
+        yield name, cls(header, form, name)
 
     def __init__(self, header, form, name):
         if not inspect.isfunction(form):
@@ -23,17 +27,11 @@ class Method(object):
         self.form = form
         self.name = name
 
-    def __eq__(self, other):
-        if isinstance(other, Method):
-            return self.form == other.form
-
-        return False
-
     def __json__(self):
         return {str(self.__uri__): to_json(ref.form_of(self))}
 
-    def dtype(self):
-        return self.__class__.__name__
+    def __ref__(self):
+        raise NotImplementedError
 
     def subject(self):
         return self.header.__uri__.append(self.name)
@@ -44,13 +42,13 @@ class Get(Method):
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
-        self.rtype = _get_rtype(self.form, State)
+        self.rtype = get_rtype(self.form, State)
 
     def __call__(self, key=None):
         return self.rtype(form=ref.Get(self.subject(), key))
 
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
         key_name = "key"
@@ -62,7 +60,7 @@ class Get(Method):
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(form=URI(key_name)))
         else:
-            raise ValueError(f"{self.dtype()} takes 0-3 parameters: (self, cxt, key)")
+            raise ValueError(f"{self} should 0-3 parameters: (self, cxt, key)")
 
         if key_name in cxt:
             raise RuntimeError(f"namespace collision: {key_name} in {self.form}")
@@ -71,12 +69,15 @@ class Get(Method):
 
         return key_name, cxt
 
+    def __ref__(self, name):
+        return op.Get(URI(name))
+
 
 class Put(Method):
     __uri__ = URI(op.Put)
 
     def __init__(self, header, form, name):
-        rtype = _get_rtype(form, None)
+        rtype = get_rtype(form, None)
 
         if not ref.is_none(rtype):
             raise ValueError(f"PUT method must return None, not f{rtype}")
@@ -87,7 +88,7 @@ class Put(Method):
         return ref.Put(self.subject(), key, value)
 
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
 
@@ -106,7 +107,7 @@ class Put(Method):
                 dtype = resolve_class(self.form, param.annotation, State)
                 args.append(dtype(form=URI(value_name)))
             else:
-                raise ValueError(f"{self.dtype()} with three parameters requires 'key' or 'value', not '{name}'")
+                raise ValueError(f"a PUT method with three parameters requires an explicit 'key' or 'value', not '{name}'")
         elif len(sig.parameters) - len(args) == 2:
             key_name, value_name = list(sig.parameters.keys())[-2:]
 
@@ -118,7 +119,7 @@ class Put(Method):
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(form=URI(value_name)))
         else:
-            raise ValueError(f"{self.dtype()} requires 0-4 parameters: (self, cxt, key, value)")
+            raise ValueError(f"a PUT method requires 0-4 parameters: (self, cxt, key, value)")
 
         cxt._return = self.form(*args)
 
@@ -128,22 +129,25 @@ class Put(Method):
 
         return key_name, value_name, cxt
 
+    def __ref__(self, name):
+        return op.Put(URI(name))
+
 
 class Post(Method):
     __uri__ = URI(op.Post)
 
     def __init__(self, header, form, name):
         Method.__init__(self, header, form, name)
-        self.rtype = _get_rtype(self.form, State)
+        self.rtype = get_rtype(self.form, State)
 
     def __call__(self, *args, **kwargs):
         sig = list(inspect.signature(self.form).parameters.items())
         rtype = self.rtype
 
         if not sig:
-            raise TypeError(f"POST method signature for {self} is missing the 'self' parameter")
+            raise TypeError(f"the method signature for {self} is missing the 'self' parameter")
         elif sig[0][0] != "self":
-            raise TypeError(f"POST method signature must begin with 'self', not '{sig[0][0]}'")
+            raise TypeError(f"a method signature must begin with 'self', not '{sig[0][0]}'")
 
         if len(sig) > 1 and sig[1][0] in ["cxt", "txn"]:
             sig = sig[2:]
@@ -154,7 +158,7 @@ class Post(Method):
         return rtype(form=ref.Post(self.subject(), params))
 
     def __form__(self):
-        cxt, args = _first_params(self)
+        cxt, args = first_params(self)
 
         sig = inspect.signature(self.form)
         kwargs = {}
@@ -179,12 +183,15 @@ class Post(Method):
 
         return cxt
 
+    def __ref__(self, name):
+        return op.Post(URI(name))
+
 
 class Delete(Method):
     __uri__ = URI(op.Delete)
 
     def __init__(self, header, form, name):
-        rtype = _get_rtype(form, None)
+        rtype = get_rtype(form, None)
 
         if not ref.is_none(rtype):
             raise ValueError(f"DELETE method must return None, not f{rtype}")
@@ -197,18 +204,13 @@ class Delete(Method):
     def __form__(self):
         return Get.__form__(self)
 
-
-class Operator(Post):
-    def __call__(self, *args, **kwargs):
-        result = self.form(self.header, *args, **kwargs)
-
-        if self.rtype:
-            return self.rtype(form=result)
-        else:
-            return result
+    def __ref__(self, name):
+        return op.Delete(URI(name))
 
 
 def _check_context_param(parameter):
+    from ..context import Context
+
     _name, param = parameter
     if param.annotation == EMPTY or param.annotation == Context:
         pass
@@ -217,11 +219,13 @@ def _check_context_param(parameter):
             f"a method definition takes a transaction context as its second parameter, not {param.annotation}")
 
 
-def _first_params(method):
+def first_params(method):
+    from ..context import Context
+
     sig = inspect.signature(method.form)
 
     if not sig.parameters:
-        raise ValueError(f"{method.dtype()} has at least one argument: (self, cxt, name1=val1, ...)")
+        raise ValueError(f"a method has at least one argument: (self, cxt, name1=val1, ...)")
 
     args = []
 
@@ -230,7 +234,7 @@ def _first_params(method):
     if param_names[0] == "self":
         args.append(method.header)
     else:
-        raise ValueError(f"first argument to {method.dtype()} must be 'self', not {param_names[0]}")
+        raise ValueError(f"the first argument to a method must be 'self', not {param_names[0]}")
 
     cxt = Context()
 

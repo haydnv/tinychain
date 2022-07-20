@@ -304,8 +304,9 @@ class DenseTests(HostTest):
         cxt = tc.Context()
         cxt.x = load_dense(x)
         cxt.y = cxt.x.tanh()
-        cxt.z = tc.math.operator.derivative_of(cxt.x.tanh())
+        cxt.z = tc.math.operator.derivative_of(cxt.y)
         cxt.result = (cxt.y, cxt.z)
+
         actual_y, actual_z = self.host.post(ENDPOINT, cxt)
 
         expected_y = np.tanh(x)
@@ -324,6 +325,7 @@ class DenseTests(HostTest):
         cxt.expanded = cxt.x.expand_dims(0).expand_dims(0).transpose(permutation)
         cxt.reshaped = cxt.x.reshape((1, 1) + input_shape).transpose(permutation)
         cxt.result = [cxt.reshaped, cxt.expanded]
+
         reshaped, expanded = self.host.post(ENDPOINT, cxt)
 
         expected = np.transpose(x.reshape((1, 1) + input_shape), permutation)

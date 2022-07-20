@@ -1,9 +1,7 @@
 """Reference types"""
 
-import logging
-
+from ...json import to_json
 from ...uri import URI
-from ...context import deanonymize, to_json
 
 
 class Ref(object):
@@ -12,7 +10,7 @@ class Ref(object):
     __uri__ = URI("/state/scalar/ref")
 
     def __same__(self, other):
-        from .helpers import same_as
+        from .functions import same_as
         return same_as(self.__args__(), other.__args__())
 
 
@@ -36,7 +34,7 @@ class After(FlowControl):
     __uri__ = URI(Ref) + "/after"
 
     def __init__(self, when, then):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
         if is_conditional(then):
             raise ValueError(f"After does not support a conditional clause: {then}")
@@ -51,10 +49,10 @@ class After(FlowControl):
         return {str(URI(self)): to_json([self.when, self.then])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
-        deanonymize(self.when, cxt, name_hint + "_when")
-        deanonymize(self.then, cxt, name_hint + "_then")
+        cxt.deanonymize(self.when, name_hint + "_when")
+        cxt.deanonymize(self.then, name_hint + "_then")
 
         if is_conditional(self.when):
             cxt.assign(self.when, name_hint + "_when")
@@ -95,9 +93,9 @@ class Case(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.switch, self.case])}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.switch, cxt, name_hint + "_switch")
-        deanonymize(self.case, cxt, name_hint + "_case")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.switch, name_hint + "_switch")
+        cxt.deanonymize(self.case, name_hint + "_case")
 
     def __repr__(self):
         return f"Cast({self.cond}, {self.switch}, {self.case})"
@@ -121,7 +119,7 @@ class If(FlowControl):
     __uri__ = URI(Ref) + "/if"
 
     def __init__(self, cond, then, or_else=None):
-        from .helpers import is_conditional
+        from .functions import is_conditional
 
         if is_conditional(cond):
             raise ValueError(f"If does not support nested conditionals: {cond}")
@@ -134,7 +132,7 @@ class If(FlowControl):
         return self.cond, self.then, self.or_else
 
     def __json__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
         if isinstance(form_of(self.cond), bool):
@@ -146,17 +144,17 @@ class If(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.then, self.or_else])}
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_conditional, is_op_ref
+        from .functions import is_conditional, is_op_ref
 
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.then, cxt, name_hint + "_then")
-        deanonymize(self.or_else, cxt, name_hint + "_or_else")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.then, name_hint + "_then")
+        cxt.deanonymize(self.or_else, name_hint + "_or_else")
 
         if is_conditional(self.cond) or is_op_ref(self.cond):
             cxt.assign(self.cond, name_hint + "_cond")
 
     def __repr__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         # TODO: move this short-circuit condition into a helper function called `cond` that returns a typed `If`
         if isinstance(form_of(self.cond), bool):
@@ -197,9 +195,9 @@ class While(FlowControl):
         return {str(URI(self)): to_json([self.cond, self.op, self.state])}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.cond, cxt, name_hint + "_cond")
-        deanonymize(self.op, cxt, name_hint + "_op")
-        deanonymize(self.state, cxt, name_hint + "_state")
+        cxt.deanonymize(self.cond, name_hint + "_cond")
+        cxt.deanonymize(self.op, name_hint + "_op")
+        cxt.deanonymize(self.state, name_hint + "_state")
 
     def __repr__(self):
         return f"While({self.cond}, {self.op}, {self.state})"
@@ -242,7 +240,7 @@ class With(FlowControl):
         pass
 
     def __ref__(self, name):
-        from .helpers import get_ref
+        from .functions import get_ref
         return get_ref(self.op, name)
 
     def __repr__(self):
@@ -266,24 +264,33 @@ class Op(Ref):
         return self.subject, self.args, self._debug_name
 
     def __json__(self):
-        from .helpers import form_of
+        from .functions import form_of
 
         if hasattr(self.subject, "__form__"):
             subject = form_of(self.subject)
         else:
             subject = self.subject
 
-        if not isinstance(subject, URI) and not hasattr(subject, "__uri__"):
+        if isinstance(subject, URI):
+            pass
+        elif not hasattr(subject, "__uri__"):
             raise ValueError(f"subject {self.subject} of {self} has no URI")
+        elif URI(subject).startswith("/state") and URI(subject) == URI(type(subject)):
+            raise RuntimeError(f"{self.subject} was not assigned a URI")
 
         subject = subject if isinstance(subject, URI) else URI(subject)
         return {str(subject): to_json(self.args)}
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.subject, cxt, name_hint + "_subject")
+        from .functions import is_literal, is_op_ref
+
+        cxt.deanonymize(self.subject, name_hint + "_subject")
+
+        if is_literal(self.subject) or is_op_ref(self.subject):
+            cxt.assign(self.subject, name_hint + "_subject")
 
     def __same__(self, other):
-        from .helpers import same_as
+        from .functions import same_as
         return same_as(self.subject, other.subject) and same_as(self.args, other.args)
 
 
@@ -310,7 +317,7 @@ class Get(Op):
         return self.subject, key, self._debug_name
 
     def __json__(self):
-        from .helpers import is_ref
+        from .functions import is_ref
 
         if isinstance(self.subject, Ref):
             subject = URI(self.subject)
@@ -337,16 +344,16 @@ class Get(Op):
             return f"GET {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
-        deanonymize(self.args, cxt, name_hint + "_key")
+        cxt.deanonymize(self.args, name_hint + "_key")
 
         if is_op_ref(self.args):
             (key,) = self.args
-            _log_anonymous(key)
             cxt.assign(key, name_hint + "_key")
+
 
 class Put(Op):
     """
@@ -374,20 +381,18 @@ class Put(Op):
         return f"PUT {repr(self.subject)}: {repr(key)} <- {repr(value)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
         key, value = self.args
-        deanonymize(key, cxt, name_hint + "_key")
-        deanonymize(value, cxt, name_hint + "_value")
+        cxt.deanonymize(key, name_hint + "_key")
+        cxt.deanonymize(value, name_hint + "_value")
 
         if is_op_ref(key):
-            _log_anonymous(key)
             cxt.assign(key, name_hint + "key")
 
         if is_op_ref(value):
-            _log_anonymous(value)
             cxt.assign(value, name_hint + "_value")
 
 
@@ -419,19 +424,17 @@ class Post(Op):
             return f"POST {repr(self.subject)}: {self.args}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
 
         if not isinstance(self.args, dict):
             raise ValueError(f"POST arguments must be a Python dict, not {self.args}")
 
-        args = {}
         for name, arg in self.args.items():
-            deanonymize(arg, cxt, name_hint + f"_{name}")
+            cxt.deanonymize(arg, name_hint + f"_{name}")
 
             if is_op_ref(arg):
-                _log_anonymous(arg)
                 cxt.assign(arg, name_hint + f"_{name}")
 
 
@@ -460,20 +463,10 @@ class Delete(Op):
         return f"DELETE {repr(self.subject)}: {repr(self.args)}"
 
     def __ns__(self, cxt, name_hint):
-        from .helpers import is_op_ref
+        from .functions import is_op_ref
 
         super().__ns__(cxt, name_hint)
-        deanonymize(self.args, cxt, name_hint + "_key")
+        cxt.deanonymize(self.args, name_hint + "_key")
 
         if is_op_ref(self.args):
-            _log_anonymous(self.args)
             cxt.assign(self.args, name_hint + "_key")
-
-
-def _log_anonymous(arg):
-    from .helpers import is_op_ref, is_write_op_ref
-
-    if is_write_op_ref(arg):
-        logging.warning(f"assigning auto-generated name to the result of {arg}")
-    elif is_op_ref(arg):
-        logging.info(f"assigning auto-generated name to the result of {arg}")

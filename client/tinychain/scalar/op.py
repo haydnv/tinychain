@@ -35,9 +35,14 @@ class Post(Op):
 
     __uri__ = URI(Op) + "/post"
 
+    # TODO: this should retain the return type, in the case of a reflected op
     def __call__(self, params=None, **kwargs):
-        if kwargs and params is not None:
-            raise ValueError("Post takes a Map or kwargs, not both:", params, kwargs)
+        if params is None:
+            params = kwargs
+        elif not isinstance(params, dict):
+            raise TypeError(f"to call a POST op requires named parameters, not {params}")
+        elif kwargs:
+            raise ValueError("POST call takes a Map or kwargs, not both:", params, kwargs)
 
         params = params if params else kwargs
         return ref.Post(self, params)

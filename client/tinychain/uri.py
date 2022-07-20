@@ -1,4 +1,17 @@
-# TODO: re-implement uri helper function
+
+
+def validate(name, state=None):
+    name = str(name)
+    name = str(name[1:]) if name.startswith('$') else name
+
+    if not name or '<' in name or '>' in name or ' ' in name or '$' in name:
+        if state:
+            raise KeyError(f"invalid ID for {state}: {name}")
+        else:
+            raise KeyError(f"invalid ID: {name}")
+
+    return name
+
 
 class URI(object):
     """
@@ -14,9 +27,17 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        assert not isinstance(subject, URI)
+        path = [validate(segment) for segment in path]
+
+        if isinstance(subject, URI):
+            self._subject = subject._subject
+            self._path = list(subject._path)
+            self._path.extend(path)
+            return
 
         if isinstance(subject, str):
+            validate(subject)
+
             if subject.startswith("$$"):
                 raise ValueError(f"invalid reference: {subject}")
             elif subject.startswith('$'):
@@ -25,18 +46,27 @@ class URI(object):
             self._subject = subject
 
         self._subject = subject
-        self._path = tuple(str(path_segment) for path_segment in path if path_segment)
+        self._path = path
 
     def __add__(self, other):
+        assert str(other) == other
+        other = str(other)
+
+        if other.__contains__("://"):
+            raise ValueError(f"cannot append {other} to {self}")
+
         if not other or other == "/":
             return self
         else:
             path = list(self._path)
-            path.append(str(other)[1:] if other.startswith('/') else other)
+            path.append(other[1:] if other.startswith('/') or other.startswith('$') else other)
             return URI(self._subject, *path)
 
     def __radd__(self, other):
         return URI(other) + str(self)
+
+    def __bool__(self):
+        return True
 
     def __eq__(self, other):
         return str(self) == str(other)
@@ -63,13 +93,21 @@ class URI(object):
         return {str(self): []}
 
     def __ns__(self, cxt, name_hint):
-        from .context import deanonymize
-        from .scalar.ref import is_op_ref
+        from .scalar.ref import is_literal, is_op_ref
+        from .state import State
 
-        deanonymize(self._subject, cxt, name_hint)
+        cxt.deanonymize(self._subject, name_hint + "_subject")
 
         if is_op_ref(self._subject):
-            cxt.assign(self._subject, name_hint)
+            cxt.assign(self._subject, name_hint + "_subject")
+        elif isinstance(self._subject, State) and is_literal(self._subject):
+            cxt.assign(self._subject, name_hint + "_subject")
+
+    def __repr__(self):
+        if self._path:
+            return f"URI({self._subject}/{'/'.join(self._path)})"
+        else:
+            return f"URI({self._subject})"
 
     def __str__(self):
         if hasattr(self._subject, "__uri__"):
@@ -99,11 +137,17 @@ class URI(object):
                 value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
         """
 
-        if not str(name):
+        if str(name) in ["", "/"]:
             return self
+
+        name = validate(name)
+
+        if "://" in name:
+            raise ValueError(f"cannot append {name} to {self}")
 
         path = list(self._path)
         path.append(name)
+
         return URI(self._subject, *path)
 
     def id(self):
@@ -144,7 +188,7 @@ class URI(object):
             return uri[start:]
 
     def path(self):
-        """Return the path segment of this `URI`."""
+        """Return the path segment of this `URI`, if present."""
 
         uri = str(self)
 

@@ -1,7 +1,7 @@
 import logging
 import typing
 
-from ..context import deanonymize, to_json
+from ..json import to_json
 from ..scalar.ref import deref, is_literal, same_as, is_op_ref, Op
 from ..scalar.value import Id
 
@@ -46,10 +46,10 @@ class Operator(Op):
         return to_json(self.forward())
 
     def __ns__(self, cxt, name_hint):
-        deanonymize(self.subject, cxt, name_hint + "_subject")
-        deanonymize(self.args, cxt, name_hint + "_args")
+        cxt.deanonymize(self.subject, name_hint + "_subject")
+        cxt.deanonymize(self.args, name_hint + "_args")
 
-        if is_op_ref(self.subject):
+        if is_literal(self.subject) or is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.args):
@@ -119,7 +119,7 @@ class Unary(Operator):
     def __ns__(self, cxt, name_hint):
         assert self.args is None
 
-        deanonymize(self.subject, cxt, name_hint + "_subject")
+        cxt.deanonymize(self.subject, name_hint + "_subject")
 
         if is_op_ref(self.subject):
             cxt.assign(self.subject, name_hint + "_subject")
@@ -135,9 +135,9 @@ class Custom(Unary):
     def __json__(self):
         return to_json(self._op)
 
-    def __ns__(self, context, name_hint):
-        Unary.__ns__(self, context, name_hint)
-        deanonymize(self._op, context, name_hint + "_custom_op")
+    def __ns__(self, cxt, name_hint):
+        Unary.__ns__(self, cxt, name_hint)
+        cxt.deanonymize(self._op, name_hint + "_custom_op")
 
     @property
     def shape(self):
@@ -715,19 +715,33 @@ def constant(numeric):
     return numeric
 
 
-def derivative_of(state, variable=None, keepdims=False):
+def derivative_of(state_or_function, variable=None, keepdims=False):
     """
-    Find the derivative of the given `state`.
+    Find the derivative of the given `state_or_function`.
 
-    If a `variable` is specified, this will be the partial derivative with respect to `variable`.
-    If the given `state` is not differentiable, this will raise a `TypeError`.
+    If a differentiable state is given, this will construct a new op to calculate it derivative, which can be
+    a partial derivative if a `variable` is specified.
+
+    If a differentiable function is given, a new callable function will be returned which computes its derivative.
+
+    If `state_or_function` is not differentiable, a `TypeError` will be raised.
     """
+
+    if callable(state_or_function):
+        function = state_or_function
+        if hasattr(function, "derivative"):
+            return function.derivative(variable)
+        else:
+            raise ValueError(f"not a differentiable function: {function}")
+
+    state = state_or_function
 
     if same_as(state, variable):
         # it's a partial derivative and this is the free variable
         return ones_like(state, keepdims)
 
-    from ..ml.optimizer import Variable
+    # TODO: it doesn't make sense to import from the ML package in the math package
+    from ..ml.variable import Variable
 
     if isinstance(state, Variable):
         if variable is None:
@@ -759,10 +773,12 @@ def gradients(numeric, loss, variables=None):
 
     If one variable is given, one gradient will be returned, or a `KeyError` will be raised if not present in the graph.
     If a list of variables is given, a corresponding list of gradients will be returned.
-    If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph.
+    If no variables are given, a :class:`Gradients` object whose keys are the inputs of the graph will be returned.
     """
 
-    if operator(numeric):
+    if is_literal(numeric):
+        grads = Gradients()
+    elif operator(numeric):
         grads = operator(numeric).gradients(loss)
     elif is_constant(numeric):
         grads = Gradients({numeric: loss})
@@ -883,32 +899,26 @@ def ones_like(state, keepdims=True):
     from ..collection.tensor import Dense
     from ..scalar.number import Number
 
-    if not keepdims:
+    if isinstance(state, Number):
+        return type(state)(form=1)
+    elif is_literal(state) or not keepdims:
         return Number(1)
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=1)
-        else:
-            return Number(1)
     else:
-        return Dense.ones_like(state)
+        cls = type(state) if hasattr(type(state), "ones_like") else Dense
+        return cls.ones_like(state)
 
 
 def zeros_like(state, keepdims=True):
     from ..collection.tensor import Sparse
     from ..scalar.number import Number
 
-    if not keepdims:
+    if isinstance(state, Number):
+        return type(state)(form=0)
+    elif is_literal(state) or not keepdims:
         return Number(0)
-
-    if is_literal(state) or same_as(state.shape.ndim(), 0):
-        if isinstance(state, Numeric):
-            return type(state)(form=0)
-        else:
-            return Number(0)
     else:
-        return Sparse.zeros_like(state)
+        cls = type(state) if hasattr(type(state), "zeros_like") else Sparse
+        return cls.zeros_like(state)
 
 
 def debug_shape(numeric):
