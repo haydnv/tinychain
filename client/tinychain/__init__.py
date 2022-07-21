@@ -2,6 +2,9 @@ import tinychain.app
 import tinychain.error
 import tinychain.graph
 import tinychain.host
+import tinychain.math
+import tinychain.math.interface
+import tinychain.math.linalg
 import tinychain.ml
 import tinychain.ml.service
 import tinychain.scalar
@@ -13,8 +16,6 @@ from tinychain.generic import Map, Tuple
 from tinychain.graph import Edge, Graph
 from tinychain.interface import Equality, Interface, Order
 from tinychain.json import print_json, to_json
-from tinychain.math import linalg
-from tinychain.math.interface import Numeric
 from tinychain.reflect import Meta
 from tinychain.scalar.number import (
     C32,

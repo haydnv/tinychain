@@ -46,7 +46,11 @@ class Map(State, typing.Generic[T]):
                 return get_ref(form_of(self)[key], self.__uri__.append(key))
 
         if hasattr(self, "__orig_class__"):
-            rtype = resolve_class(self.__orig_class__.__args__[0])
+            spec = self.__orig_class__.__args__[0]
+            if typing.get_origin(spec) is dict:
+                _id_type, rtype = typing.get_args(spec)
+            else:
+                rtype = resolve_class(spec)
         else:
             rtype = State
 
@@ -90,40 +94,27 @@ class MapRef(StateRef):
         return self.state[key]
 
 
-class Tuple(State, Functional):
+class Tuple(State, Functional, typing.Generic[T]):
     """A tuple of :class:`State` s."""
 
     __uri__ = URI(State) + "/tuple"
-    __spec__ = (State, ...)  # TODO: delete
+
+    def __new__(cls, form):
+        if hasattr(form, "__iter__"):
+            class _Tuple(cls):
+                def __iter__(self):
+                    return (self[i] for i in range(len(self)))
+
+                def __len__(self):
+                    return len(form)
+
+            return State.__new__(_Tuple)
+        else:
+            return State.__new__(cls)
 
     @classmethod
     def cast_from(cls, items):
         return cls(Get(cls, items))
-
-    @classmethod
-    def expect(cls, spec):  # TODO: delete
-        if typing.get_args(spec):
-            spec = typing.get_args(spec)
-
-        if len(spec) == 2 and spec[1] is Ellipsis:
-            class _Tuple(cls):
-                __spec__ = spec
-
-            return _Tuple
-        else:
-            class _Tuple(cls):
-                __spec__ = spec
-
-                def __len__(self):
-                    return len(self.__spec__)
-
-                def __iter__(self):
-                    return (self[i] for i in range(len(self)))
-
-                def __reversed__(self):
-                    return cls(tuple(self[i] for i in reversed(range(len(self)))))
-
-            return _Tuple
 
     @classmethod
     def concatenate(cls, l, r):
@@ -138,20 +129,11 @@ class Tuple(State, Functional):
         """
 
         from .scalar.number import Number
-        return cls.expect(typing.Tuple[Number, ...])(Get(URI(cls) + "/range", range))
-
-    def __new__(cls, form):
-        if hasattr(form, "__iter__"):
-            spec = tuple(type(s) if isinstance(s, State) else State for s in form)
-            return State.__new__(cls.expect(spec))
-        else:
-            return State.__new__(cls)
+        return Tuple[Number](form=Get(URI(cls) + "/range", range))
 
     def __init__(self, form):
-        while isinstance(form, Tuple):
-            form = form_of(form)
-
-        return State.__init__(self, tuple(form) if isinstance(form, list) else form)
+        form = tuple(form) if hasattr(form, "__iter__") else form
+        return State.__init__(self, form)
 
     def __add__(self, other):
         return Tuple.concatenate(self, other)
@@ -169,8 +151,8 @@ class Tuple(State, Functional):
         if i is None:
             raise ValueError(f"invalid tuple index: {i}")
 
-        spec = typing.get_args(self.__spec__) if typing.get_args(self.__spec__) else self.__spec__
-        rtype = spec[0] if len(spec) == 2 and spec[1] is Ellipsis else State
+        if isinstance(i, Range):
+            i = i.to_slice()
 
         if isinstance(i, slice):
             if i.step is not None:
@@ -179,30 +161,40 @@ class Tuple(State, Functional):
             start = deref(i.start)
             stop = deref(i.stop)
 
-            if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents may be literal, so compute the slice now if possible
-                if hasattr(form_of(self), "__getitem__"):
-                    if is_literal(start) and is_literal(stop):
-                        start = _index_of(start, len(self), 0)
-                        stop = _index_of(stop, len(self), len(self))
-                        return self.__class__([self[i] for i in range(start, stop)])
-
-            return self._get("", Range.from_slice(i), self.__class__.expect(typing.Tuple[rtype, ...]))
-
-        if isinstance(i, int):
-            if len(spec) == 2 and spec[1] is Ellipsis:
-                rtype = spec[0]
-            elif i >= len(spec):
-                raise IndexError(f"index {i} is out of bounds for {self}")
-            else:
-                rtype = spec[i]
-
+            # the contents may be literal, so compute the slice now if possible
             if hasattr(form_of(self), "__getitem__"):
-                item = form_of(self)[i]
+                if is_literal(start) and is_literal(stop):
+                    length = len(deref(self))
+                    start = _index_of(start, length, 0)
+                    stop = _index_of(stop, length, length)
+                    return Tuple([self[i] for i in range(start, stop)])
+
+            return self._get("", Range.from_slice(i), Tuple)
+
+        if isinstance(deref(i), int):
+            if hasattr(form_of(self), "__getitem__"):
+                item = form_of(self)[deref(i)]
                 if self.__uri__ == type(self).__uri__:
                     return item
                 else:
                     return get_ref(item, self.__uri__.append(i))
+
+        if hasattr(self, "__orig_class__"):
+            spec = self.__orig_class__.__args__[0]
+            if typing.get_origin(spec) is tuple:
+                spec = typing.get_args(spec)
+                if len(spec) == 2 and spec[1] is Ellipsis:
+                    rtype = spec[0]
+                elif isinstance(i, slice):
+                    rtype = typing.Tuple[spec[i]]
+                elif isinstance(deref(i), int):
+                    rtype = spec[deref(i)]
+                else:
+                    rtype = gcs([resolve_class(t) for t in spec])
+            else:
+                rtype = resolve_class(spec)
+        else:
+            rtype = State
 
         return self._get("", i, rtype)
 
@@ -279,10 +271,6 @@ def resolve_class(type_hint):
 
     if type_hint is typing.Any:
         return State
-    elif typing.get_origin(type_hint) is tuple:
-        return Tuple.expect(type_hint)
-    elif typing.get_origin(type_hint) is dict:
-        return Map[type_hint]
     else:
         raise NotImplementedError(f"resolve type hint {type_hint}")
 

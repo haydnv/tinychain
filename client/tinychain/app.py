@@ -66,8 +66,6 @@ class Model(Object, metaclass=Meta):
                     setattr(self, name, cls(form=URI("self").append(name)))
                 else:
                     raise TypeError(f"Model does not support attributes of type {attr}")
-            elif typing.get_origin(attr) is tuple:
-                setattr(self, name, Tuple.expect(attr)(URI("self").append(name)))
             else:
                 pass  # self.name is already set to attr, just leave it alone
 

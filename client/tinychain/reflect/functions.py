@@ -40,11 +40,9 @@ def resolve_class(subject, annotation, default):
         return default
     elif typing.get_origin(annotation) is tuple:
         from ..generic import Tuple
-
-        return Tuple.expect(annotation)
+        return Tuple[annotation]
     elif typing.get_origin(annotation) is dict:
         from ..generic import Map
-
         return Map[annotation]
     elif inspect.isclass(annotation):
         from ..generic import resolve_interface

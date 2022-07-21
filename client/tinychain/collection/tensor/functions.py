@@ -56,7 +56,7 @@ def split(tensor, num_or_size_splits, axis=0):
         raise RuntimeError(f"to split {tensor} requires a constant dimension to split, not {tensor.shape[axis]}")
 
     if isinstance(num_or_size_splits, (list, tuple)):
-        if sum(num_or_size_splits) != dim:
+        if sum([deref(dim) for dim in num_or_size_splits]) != dim:
             raise ValueError(f"{num_or_size_splits} does not match the dimension {dim} of axis {axis}")
 
     elif int(num_or_size_splits) == num_or_size_splits:
