@@ -1,9 +1,11 @@
 import tinychain.app
 import tinychain.error
 import tinychain.graph
+import tinychain.host
 import tinychain.ml
 import tinychain.ml.service
 import tinychain.scalar
+
 from tinychain.collection import Column, btree, table, tensor
 from tinychain.context import Context
 from tinychain.decorators import closure, delete, differentiable, get, post, put
@@ -51,5 +53,3 @@ from tinychain.scalar.ref import (
 from tinychain.scalar.value import EmailAddress, Id, String, Value
 from tinychain.state import Class, Instance, State, Stream
 from tinychain.uri import URI
-
-import tinychain.host

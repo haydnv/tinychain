@@ -31,7 +31,7 @@ class TestApp(tc.graph.Graph):
 class UserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_lib", [TestApp(models=[User])])
+        cls.host = start_host("test_lib", [TestApp.autogenerate([User])])
 
     def testCreateUser(self):
         count = self.host.get(URI.append("user/count"))

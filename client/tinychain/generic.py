@@ -1,89 +1,38 @@
+import inspect
 import typing
 
-from .interface import Functional
+from .interface import Functional, Interface
 from .json import to_json
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
-from .scalar.value import Id
 from .state import State, StateRef
 from .uri import URI
 
+T = typing.TypeVar("T", bound=State)
+
 
 # TODO: implement `Functional` for `Map`
-class Map(State):
-    """A key-value map whose keys are `Id`s and whose values are `State` s."""
+class Map(State, typing.Generic[T]):
+    """A key-value map whose keys are :class:`Id` s and whose values are :class: `State` s."""
 
     __uri__ = URI(State) + "/map"
-    __spec__ = typing.Dict[Id, State]
-
-    @staticmethod
-    def _parse_args(args, kwargs):
-        form = None
-        spec = None
-
-        if args and "form" in kwargs:
-            raise ValueError(f"Map got duplicate arguments for 'form': {args[0]}, {kwargs['form']}")
-
-        if len(args) > 2:
-            raise ValueError(f"Map.__init__ got unexpected arguments {args} {kwargs}")
-
-        if "form" in kwargs:
-            form = kwargs["form"]
-            del kwargs["form"]
-        elif len(args) >= 1:
-            form = args[0]
-
-        if len(args) > 1:
-            spec = args[1]
-
-        if not form:
-            form = kwargs
-
-        while isinstance(form, Map):
-            form = form_of(form)
-
-        if not spec:
-            if hasattr(form, "__spec__"):
-                spec = form.__spec__
-
-            if form and isinstance(form, dict) and any(issubclass(type(v), State) for v in form.values()):
-                spec = {k: type(v) if issubclass(type(v), State) else State for k, v in form.items()}
-
-        return form, spec
-
-    @classmethod
-    def expect(cls, spec):
-        if isinstance(spec, dict):
-            class _Map(cls):
-                __spec__ = spec
-
-                def __contains__(self, key):
-                    return key in spec
-
-                def __len__(self):
-                    return len(spec)
-
-                def __iter__(self):
-                    return iter(spec)
-        else:
-            class _Map(cls):
-                __spec__ = spec
-
-        return _Map
-
-    def __new__(*args, **kwargs):
-        cls = args[0]
-        form, spec = Map._parse_args(args[1:], kwargs)
-
-        if isinstance(form, Map):
-            return State.__new__(cls)
-        elif spec:
-            return State.__new__(cls.expect(spec))
-        else:
-            return State.__new__(cls)
 
     def __init__(self, *args, **kwargs):
-        form, spec = Map._parse_args(args, kwargs)
+        if args and kwargs:
+            raise RuntimeError(f"Map takes a form or kwargs, not both (got {args} and {kwargs}")
+        elif kwargs:
+            if "form" in kwargs:
+                if len(kwargs) > 1:
+                    raise KeyError(f"the name 'form' is reserved (Map got kwargs {kwargs})")
+
+                form = kwargs["form"]
+            else:
+                form = kwargs
+        elif len(args) == 1:
+            [form] = args
+        else:
+            raise RuntimeError(f"cannot construct a Map without a form")
+
         State.__init__(self, form)
 
     def __eq__(self, other):
@@ -95,13 +44,11 @@ class Map(State):
                 return form_of(self)[key]
             else:
                 return get_ref(form_of(self)[key], self.__uri__.append(key))
-        elif isinstance(self.__spec__, dict):
-            if key in self.__spec__:
-                rtype = self.__spec__[key]
-            else:
-                raise KeyError(f"{self} does not contain any entry for {key}")
+
+        if hasattr(self, "__orig_class__"):
+            rtype = resolve_class(self.__orig_class__.__args__[0])
         else:
-            rtype = typing.get_args(self.__spec__)[1]
+            rtype = State
 
         return self._get("", key, rtype)
 
@@ -144,17 +91,17 @@ class MapRef(StateRef):
 
 
 class Tuple(State, Functional):
-    """A tuple of `State` s."""
+    """A tuple of :class:`State` s."""
 
     __uri__ = URI(State) + "/tuple"
-    __spec__ = (State, ...)
+    __spec__ = (State, ...)  # TODO: delete
 
     @classmethod
     def cast_from(cls, items):
         return cls(Get(cls, items))
 
     @classmethod
-    def expect(cls, spec):
+    def expect(cls, spec):  # TODO: delete
         if typing.get_args(spec):
             spec = typing.get_args(spec)
 
@@ -266,11 +213,14 @@ class Tuple(State, Functional):
         return self.__class__(form=TupleRef(self, name))
 
     def contains(self, item):
+        """Return a :class:`Bool` indicating whether the given `item` is present in this :class:`Tuple`."""
         from .scalar.number import Bool
         return self._get("contains", item, Bool)
 
     def eq(self, other):
-        """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
+        """
+        Return a :class:`Bool` indicating whether all elements in this :class:`Tuple` equal those in the given `other`.
+        """
 
         if same_as(self, other):
             return True
@@ -279,18 +229,24 @@ class Tuple(State, Functional):
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
-        """Return a `Bool` indicating whether the elements in this `Tuple` do not equal those in the given `other`."""
+        """
+        Return a :class:`Bool` indicating whether the elements in this :class:`Tuple` do not equal those in `other`.
+
+        This is implemented as `self.eq(other).logical_not()`.
+        """
 
         return self.eq(other).logical_not()
 
     def len(self):
-        """Return the number of elements in this `Tuple`."""
+        """Return the number of elements in this :class:`Tuple`."""
 
         from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
     def unpack(self, length):
-        """A Python convenience method which yields an iterator over the first `length` elements in this `Tuple`."""
+        """
+        A Python convenience method which yields an iterator over the first `length` elements in this :class:`Tuple`.
+        """
 
         yield from (self[i] for i in range(length))
 
@@ -303,6 +259,41 @@ class Tuple(State, Functional):
 class TupleRef(StateRef):
     def __getitem__(self, i):
         return self.state[i]
+
+
+def gcs(*types):
+    """Get the greatest common superclass of a list of types"""
+
+    classes = [t.mro() for t in types]
+    for x in classes[0]:
+        if all(x in mro for mro in classes):
+            return x
+
+
+def resolve_class(type_hint):
+    if inspect.isclass(type_hint):
+        if issubclass(type_hint, State):
+            return type_hint
+        elif issubclass(type_hint, Interface):
+            return resolve_interface(type_hint)
+
+    if type_hint is typing.Any:
+        return State
+    elif typing.get_origin(type_hint) is tuple:
+        return Tuple.expect(type_hint)
+    elif typing.get_origin(type_hint) is dict:
+        return Map[type_hint]
+    else:
+        raise NotImplementedError(f"resolve type hint {type_hint}")
+
+
+def resolve_interface(cls):
+    assert inspect.isclass(cls)
+
+    if issubclass(cls, Interface) and not issubclass(cls, State):
+        return type(f"{cls.__name__}State", (State, cls), {})
+    else:
+        return cls
 
 
 def _index_of(i, length, default):

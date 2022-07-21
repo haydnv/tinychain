@@ -1,18 +1,10 @@
+from ...generic import gcs
 from ...scalar.number import Bool
 from ...scalar.ref import deref, is_literal, Post
 from ...uri import URI
 
 from .base import NDArray, Tensor
 from .operator import Tile
-
-
-def _gcs(*instances):
-    """Get the greatest common superclass of a list of instances"""
-
-    classes = [type(x).mro() for x in instances]
-    for x in classes[0]:
-        if all(x in mro for mro in classes):
-            return x
 
 
 def einsum(format, tensors):
@@ -32,7 +24,7 @@ def einsum(format, tensors):
         if not isinstance(tensor, NDArray):
             raise TypeError(f"einsum requires a tensor, not: {tensor}")
 
-    rtype = _gcs(*tensors)
+    rtype = gcs(*[type(t) for t in tensors])
     rtype = rtype if issubclass(rtype, Tensor) else Tensor
     return rtype(form=Post(URI(Tensor, "einsum"), {"format": format, "tensors": tensors}))
 

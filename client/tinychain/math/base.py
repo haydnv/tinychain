@@ -1,4 +1,4 @@
-from ..state import State
+from ..generic import resolve_interface
 
 from .interface import Numeric
 
@@ -17,7 +17,7 @@ def product(functional) -> Numeric:
     from ..generic import Map
 
     p = functional.fold('n', Map(p=1), post(lambda n, p: Map(p=Numeric.mul(n, p))))['p']
-    return type("Product", (State, Numeric), {})(p)
+    return resolve_interface(Numeric)(form=p)
 
 
 # TODO: add a generic type to `Functional` and return an instance of that type
@@ -28,4 +28,4 @@ def sum(functional) -> Numeric:
     from ..generic import Map
 
     s = functional.fold('n', Map(s=0), post(lambda n, s: Map(s=Numeric.add(n, s))))['s']
-    return type("Sum", (State, Numeric), {})(s)
+    return resolve_interface(Numeric)(form=s)

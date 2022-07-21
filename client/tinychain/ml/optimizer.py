@@ -4,7 +4,7 @@ from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..generic import Map
 from ..math.operator import constant, derivative_of, is_constant
-from ..ml.interface import Gradients
+from ..ml.interface import Gradient
 from ..ml.variable import namespace
 from ..scalar.number import Float, F32, F64, UInt
 from ..scalar.ref import form_of, After, If
@@ -42,7 +42,7 @@ class GradientDescent(Optimizer, Dynamic):
 
         # TODO: these type expectations & keyword arguments should not be necessary
         grads = self.ml_model.gradient(inputs=inputs, loss=cxt.d_loss)
-        cxt.grads = Map.expect(Gradients)(grads)
+        cxt.grads = Map[Gradient](grads)
 
         writes = []
         for name, var in namespace(self.ml_model).items():
@@ -99,7 +99,7 @@ class Adam(Optimizer, Dynamic):
 
         # TODO: these type expectations & keyword arguments should not be necessary
         grads = self.ml_model.gradient(inputs=inputs, loss=cxt.d_loss)
-        grads = Map.expect(Gradients)(grads)
+        grads = Map[Gradient](grads)
 
         cxt.grads = {
             name: Float(If(grads[name].shape.len() > 0, Tensor(grads[name]).sum(), grads[name]))

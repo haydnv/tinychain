@@ -45,30 +45,22 @@ def resolve_class(subject, annotation, default):
     elif typing.get_origin(annotation) is dict:
         from ..generic import Map
 
-        return Map.expect(annotation)
+        return Map[annotation]
     elif inspect.isclass(annotation):
-        return _resolve_interface(annotation)
+        from ..generic import resolve_interface
+        return resolve_interface(annotation)
+    elif callable(annotation):
+        # assume that this is a generic alias which will construct an instance when called
+        return annotation
 
     classpath = f"{subject.__module__}.{annotation}"
     resolved = locate(classpath)
 
     if inspect.isclass(resolved):
-        return _resolve_interface(resolved)
+        from ..generic import resolve_interface
+        return resolve_interface(resolved)
     else:
         raise ValueError(f"unable to resolve class {classpath}")
-
-
-# TODO: move to the Interface module to dedupe logic in Context.__getattr__
-def _resolve_interface(cls):
-    assert inspect.isclass(cls)
-
-    from ..interface import Interface
-    from ..state import State
-
-    if issubclass(cls, Interface) and not issubclass(cls, State):
-        return type(f"{cls.__name__}State", (State, cls), {})
-    else:
-        return cls
 
 
 def get_rtype(fn, default_rtype):

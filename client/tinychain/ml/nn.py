@@ -2,14 +2,13 @@
 
 import inspect
 import logging
-import typing
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..context import Context
 from ..decorators import differentiable, post, reflect
 from ..error import NotImplemented
-from ..math.operator import derivative_of, gradients, Dual
+from ..math.operator import derivative_of, gradients, Dual, Gradients
 from ..generic import Map, Tuple
 from ..reflect import method
 from ..reflect.functions import parse_args
@@ -18,7 +17,7 @@ from ..scalar.ref import deref, form_of, get_ref, is_ref, After
 from ..uri import URI
 
 from .constants import LIB_URI
-from .interface import Differentiable, Gradients
+from .interface import Differentiable, Gradient
 from .variable import namespace, Variable
 
 
@@ -46,7 +45,7 @@ class Layer(Model, Differentiable):
     __uri__ = LIB_URI + "/Layer"
 
     @reflect
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
         if self.eval is Layer.eval:
             # if this is an abstract class, don't try to reflect over the eval method
             return NotImplemented("Layer.gradient")
@@ -67,7 +66,7 @@ class Layer(Model, Differentiable):
         cxt = Context(form)
         cxt.gradient = grads
 
-        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Tensor)))
+        return ReflectedMethod(self, "gradient", cxt, sig, Map[Gradient])
 
 
 class ConvLayer(Layer, Dynamic):
@@ -182,8 +181,6 @@ class ConvLayer(Layer, Dynamic):
                 return (w_col @ cxt.im2col_matrix_T) + (cxt.w_col @ im2col_matrix)
 
             def gradients(self, loss):
-                # TODO: can there be only one class called Gradients?
-                from ..math.operator import Gradients
                 grads = Gradients()
 
                 grads[self.subject] = (loss @ cxt.im2col_matrix).reshape(self.subject.shape)
@@ -266,7 +263,7 @@ class Sequential(NeuralNet, Dynamic):
         return state
 
     @post
-    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
         layer_inputs = [inputs]
 
         for layer in self.layers[:-1]:
@@ -279,7 +276,7 @@ class Sequential(NeuralNet, Dynamic):
             # TODO: this call to get_ref should not be necessary
             layer = get_ref(layer, URI(self, "layers", i))
             # TODO: this type expectation and parameter names should not be necessary
-            layer_grad = Map.expect(Gradients)(layer.gradient(inputs=inputs, loss=loss))
+            layer_grad = Map[Gradient](layer.gradient(inputs=inputs, loss=loss))
             layer_grads.append(layer_grad)
             loss = layer_grad["inputs"]  # TODO: should this handle other layer eval signatures automatically?
 

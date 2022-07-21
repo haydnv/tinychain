@@ -5,7 +5,7 @@ import operator
 
 from .app import Model
 from .chain import Chain
-from .generic import Map, Tuple
+from .generic import resolve_interface, Map, Tuple
 from .interface import Interface
 from .json import to_json
 from .scalar.number import Bool, Float, Int
@@ -298,6 +298,9 @@ class Context(object):
 
 
 def autobox(state):
+    if isinstance(state, State):
+        return state
+
     if isinstance(state, bool):
         return Bool(state)
     elif isinstance(state, float):
@@ -311,13 +314,10 @@ def autobox(state):
     elif isinstance(state, str):
         return String(state)
 
-    if isinstance(state, State):
-        return state
-
     if isinstance(state, Ref):
-        return state
+        return State(form=state)
 
     if isinstance(state, Interface):
-        return state
+        return resolve_interface(type(state))(form=state)
 
     return state
