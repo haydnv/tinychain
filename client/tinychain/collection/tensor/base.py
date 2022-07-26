@@ -2,9 +2,10 @@
 
 import inspect
 import math
+import typing
 
 from ...decorators import post
-from ...generic import Map, Tuple
+from ...generic import autobox, gcs, resolve_class, Map
 from ...interface import Compare, Interface
 from ...math.interface import Boolean, Numeric, Trigonometric
 from ...math.operator import deref, is_one, is_zero, operator
@@ -21,7 +22,10 @@ from ...uri import URI
 
 from ..base import Collection
 
-from .operator import Broadcast, Concatenate, Copy, Expand, Flip, Norm, Read, Reshape, Slice, Sum, Transpose
+from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Flip, Norm, Read, Reshape, Slice, Sum, Transpose
+
+
+DType = typing.TypeVar("DType", bound=type[Number])
 
 
 class NDArray(Interface):
@@ -197,108 +201,16 @@ class NDArray(Interface):
         return self._put("", None, value)
 
 
-class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
+class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typing.Generic[DType]):
     """An n-dimensional array of numbers."""
 
     __uri__ = URI(Collection) + "/tensor"
-    __spec__ = (Shape, Number)
 
     def __init__(self, form):
         if isinstance(form, Number) or isinstance(deref(form), (bool, float, int)):
             raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
 
         Collection.__init__(self, form)
-
-    @classmethod
-    def trig_rtype(cls):
-        shape, dtype = cls.__spec__
-        return cls.expect(shape, dtype.trig_rtype())
-
-    @classmethod
-    def expect(cls, shape, dtype):
-        """
-        Define a new subclass of `cls` which captures the given shape and datatype.
-
-        It would be better to implement this feature using generic type parameters (i.e. `class Tensor[Shape, DType]:`)
-        but this is not supported on Python <= 3.8.
-        """
-
-        if inspect.isclass(shape):
-            if shape is not Tuple and shape is not Shape:
-                raise ValueError(f"invalid type for tensor shape: {shape}")
-
-        elif not isinstance(shape, (list, tuple, Tuple)):
-            raise ValueError(f"invalid tensor shape: {shape}")
-
-        spec = (shape, dtype)
-
-        if not isinstance(shape, Shape):
-            shape = Shape(shape)
-
-        class _Tensor(cls):
-            __spec__ = spec
-
-            def __init__(self, form):
-                if ref.is_literal(shape) and operator(form):
-                    try:
-                        actual_shape = operator(form).shape
-                        if len(shape) != len(actual_shape) or not all(e == a for e, a in zip(shape, actual_shape)):
-                            raise ValueError(f"wrong shape for {self}: {actual_shape} (expected {shape})")
-                    except (RuntimeError, ValueError) as e:
-                        pass
-
-                Tensor.__init__(self, form)
-
-            @classmethod
-            def create(cls):
-                op_ref = ref.Get(cls, (shape, dtype))
-                return cls(op_ref)
-
-            @property
-            def dtype(self):
-                return dtype
-
-            @property
-            def ndim(self):
-                if hasattr(shape, "__len__"):
-                    return len(shape)
-                else:
-                    return ref.Get(URI(self, "ndim"))
-
-            @property
-            def schema(self):
-                return shape, dtype
-
-            @property
-            def shape(self):
-                return shape
-
-        return _Tensor
-
-    @classmethod
-    def create(cls, shape, dtype=F32):
-        """Create a new, empty `Tensor`. Call this method to initialize a persistent `Tensor` in a `Chain`."""
-
-        return cls.expect(shape, dtype).create()
-
-    @classmethod
-    def load(cls, shape, data, dtype=F32):
-        """
-        Load a `Tensor` from an existing data set.
-
-        Example:
-            .. highlight:: python
-            .. code-block:: python
-
-                coords = [[0, 0, 1], [0, 1, 0]]
-                values = [1, 2]
-                sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
-                dense = tc.tensor.Dense.load([2, 3, 4], values, tc.I32)
-        """
-
-        cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/load", ((shape, dtype), data))
-        return cls(op_ref)
 
     def __repr__(self):
         if operator(self):
@@ -314,26 +226,71 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
 
         return Tensor(form=MatMul(self, other))
 
+    @classmethod
+    def trig_rtype(cls):
+        rtype = Number
+
+        if hasattr(cls, "__orig_class__"):
+            dtype = resolve_class(typing.get_args(cls.__orig_class__)[0])
+            rtype = dtype.trig_rtype() if inspect.isclass(dtype) and issubclass(dtype, Number) else Number
+
+        return Tensor[rtype]
+
+    @classmethod
+    def with_shape(cls, shape):
+        if not hasattr(shape, "__len__"):
+            return cls
+
+        class TensorWithExpectedShape(cls):
+            @property
+            def ndim(self):
+                return len(shape)
+
+            @property
+            def shape(self):
+                default = self._get("shape", rtype=Shape)
+                return Shape([shape[x] if ref.is_literal(shape[x]) else default[x] for x in range(len(shape))])
+
+        return TensorWithExpectedShape
+
+    @property
+    def dtype(self):
+        if hasattr(self, "__orig_class__"):
+            _shape, dtype = typing.get_args(self.__orig_class__)
+            dtype = resolve_class(dtype)
+            if inspect.isclass(dtype) and issubclass(dtype, Number):
+                return dtype
+
+        # TODO: update with a generic type parameter
+        return Class(ref.Get(URI(self, "dtype")))
+
     @property
     def ndim(self):
         """Return the number of dimensions of this `Tensor`."""
 
-        if hasattr(self.shape, "__len__"):
-            return len(self.shape)
+        shape = self.shape
+
+        if hasattr(shape, "__len__"):
+            return len(shape)
         else:
             return self._get("ndim", rtype=U64)
+
+    @property
+    def schema(self):
+        return self.shape, self.dtype
 
     @property
     def shape(self):
         """Return the shape of this `Tensor`."""
 
-        if operator(self):
-            try:
-                return operator(self).shape
-            except (RuntimeError, ValueError):
-                pass
+        default = self._get("shape", rtype=Shape)
 
-        return self._get("shape", rtype=Shape)
+        try:
+            return getattr(ref.deref(self), "shape", default)
+        except (RuntimeError, ValueError):
+            pass
+
+        return default
 
     def abs(self):
         return Tensor(form=Abs(self))
@@ -351,7 +308,10 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Broadcast(self, shape))
 
     def cast(self, dtype):
-        return Tensor(form=NDArray.cast(self, dtype))
+        if not inspect.isclass(dtype) or not issubclass(dtype, Number):
+            raise TypeError(f"to cast a Tensor requires a literal data type, not {dtype}")
+
+        return Tensor[dtype](form=Cast(self, dtype))
 
     def copy(self):
         return Tensor(form=Copy(self))
@@ -533,7 +493,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare):
         return Tensor(form=Transpose(self, permutation))
 
 
-class Dense(Tensor):
+class Dense(Tensor, typing.Generic[DType]):
     """
     An n-dimensional array of numbers stored as sequential blocks.
 
@@ -551,37 +511,50 @@ class Dense(Tensor):
         between `start` and `stop`.
         """
 
-        dtype = type(start) if isinstance(start, Number) else Number
-        cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/range", (shape, start, stop))
-        return cls(op_ref)
+        return cls.with_shape(shape)(form=ref.Get(URI(cls, "range"), (shape, start, stop)))
 
     @classmethod
     def concatenate(cls, tensors, axis=0):
         """Create a new `Dense` tensor by concatenating the given `tensors` along the given `axis`."""
 
-        return Dense(form=Concatenate(tensors, axis))
+        return cls(form=Concatenate(tensors, axis))
+
+    @classmethod
+    def create(cls, shape, dtype=F32):  # TODO: remove dtype parameter
+        """
+        Create a new, empty :class:`Dense` tensor.
+
+        Call this method to initialize a persistent `Tensor` in a `Chain`.
+        """
+
+        return cls.with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
+
+    @classmethod
+    def load(cls, shape, data, dtype=F32):  # TODO: remove dtype parameter
+        """
+        Load a :class:`Dense` tensor from an existing data set.
+
+        Example:
+            .. highlight:: python
+            .. code-block:: python
+
+                values = [0, 1, 2]
+                dense = tc.tensor.Dense.load([1, 3], values, tc.I32)
+        """
+
+        return cls.with_shape(shape)(form=ref.Get(URI(cls, "load"), ((shape, dtype), data)))
 
     @classmethod
     def constant(cls, shape, value):
-        """Return a `Dense` tensor filled with the given `value`."""
+        """Return a `Dense` tensor of the given `shape` filled with the given `value`."""
 
-        dtype = type(value) if isinstance(value, Number) else Number
-        cls = cls.expect(shape, dtype)
-        op_ref = ref.Get(URI(cls) + "/constant", (shape, value))
-
-        if ref.same_as(value, 1):
-            return cls(op_ref)
-        if ref.same_as(value, 0):
-            return cls(op_ref)
-        else:
-            return cls(op_ref)
+        return cls.with_shape(shape)(form=ref.Get(URI(cls, "constant"), (shape, value)))
 
     @classmethod
     def ones(cls, shape):
         """Construct a `Dense` tensor with dtype :class:`F64` filled with ones."""
 
-        return cls.expect(shape, F64).constant(shape, 1.)
+        return cls.constant(shape, 1.)
 
     @classmethod
     def ones_like(cls, tensor):
@@ -593,7 +566,7 @@ class Dense(Tensor):
     def zeros(cls, shape):
         """Construct a `Dense` tensor with dtype :class:`F64` filled with ones."""
 
-        return cls.expect(shape, F64).constant(shape, 0.)
+        return cls.constant(shape, 0.)
 
     @classmethod
     def zeros_like(cls, tensor):
@@ -605,14 +578,27 @@ class Dense(Tensor):
     def random_normal(cls, shape, mean=0.0, std=1.0):
         """Return a `Dense` tensor filled with a random normal distribution of `F64` s."""
 
-        cls = cls.expect(shape, F64)
+        # TODO: assert dtype of cls
+
+        class RandomNormal(cls):
+            @property
+            def shape(self):
+                default = self._get("shape", rtype=Shape)
+
+                if hasattr(shape, "__len__"):
+                    return Shape([shape[x] if ref.is_literal(shape[x]) else default[x] for x in range(len(shape))])
+                else:
+                    return default
+
         args = {"shape": shape, "mean": mean, "std": std}
-        op_ref = ref.Post(URI(cls) + "/random/normal", args)
-        return cls(op_ref)
+        op_ref = ref.Post(URI(cls, "random/normal"), args)
+        return RandomNormal(form=op_ref)
 
     @classmethod
     def random_uniform(cls, shape, minval=0, maxval=1):
         """Return a `Dense` tensor filled with a uniform random distribution of `F64` s."""
+
+        # TODO: assert dtype of cls
 
         if not ref.is_literal(minval) or not ref.is_literal(maxval):
             raise ValueError(f"Dense.random_uniform requires a literal range, not [{minval}, {maxval})")
@@ -622,7 +608,8 @@ class Dense(Tensor):
 
         assert maxval > minval
 
-        random = cls(ref.Get(URI(cls) + "/random/uniform", shape))
+        random = cls.with_shape(shape)(form=ref.Get(URI(cls, "random", "uniform"), shape))
+
         if (minval, maxval) == (0, 1):
             return random
         else:
@@ -639,6 +626,8 @@ class Dense(Tensor):
 
         `minval` and `maxval` default to two standard deviations.
         """
+
+        # TODO: assert dtype of cls
 
         if not std:
             return cls.constant(shape, mean)
@@ -660,7 +649,7 @@ class Dense(Tensor):
             return Map(tensor=cxt.new_tensor.copy())
 
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
-        return cls(truncated)
+        return cls(form=truncated)
 
     def add(self, other):
         if ref.same_as(other, 0):
@@ -691,7 +680,7 @@ class Dense(Tensor):
         return Dense(form=Tensor.sub(self, other))
 
 
-class Sparse(Tensor):
+class Sparse(Tensor, typing.Generic[DType]):
     """
     An n-dimensional array of numbers stored as a :class:`Table` of coordinates and values.
 
@@ -706,15 +695,49 @@ class Sparse(Tensor):
     __uri__ = URI(Tensor) + "/sparse"
 
     @classmethod
-    def zeros(cls, shape, dtype=F32):
+    def create(cls, shape, dtype=F32):  # TODO: remove dtype parameter
+        """
+        Create a new, empty :class:`Sparse` tensor.
+
+        Call this method to initialize a persistent :class:`Tensor` in a :class:`Chain`.
+        """
+
+        if not inspect.isclass(dtype) or not issubclass(dtype, Number):
+            raise TypeError(f"to create a Sparse tensor requires a literal data type, not {dtype}")
+
+        return cls.with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
+
+    @classmethod
+    def load(cls, shape, data, dtype=F32):  # TODO: remove dtype parameter
+        """
+        Load a :class:`Sparse` tensor from an existing data set.
+
+        Example:
+            .. highlight:: python
+            .. code-block:: python
+
+                coords = [[0, 0, 1], [0, 1, 0]]
+                values = [1, 2]
+                sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
+        """
+
+        if not inspect.isclass(dtype) or not issubclass(dtype, Number):
+            raise TypeError(f"to create a sparse tensor requires a literal data type, not {dtype}")
+
+        return cls.with_shape(shape)(form=ref.Get(URI(cls, "load"), ((shape, dtype), data)))
+
+    @classmethod
+    def zeros(cls, shape, dtype=F32):  # TODO: remove dtype parameter
         """
         Return a `Sparse` tensor with the given shape and data type.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        cls = cls.expect(shape, dtype)
-        return cls(ref.Get(cls, (shape, dtype)))
+        if not inspect.isclass(dtype) or not issubclass(dtype, Number):
+            raise TypeError(f"to create a sparse tensor requires a literal data type, not {dtype}")
+
+        return cls.with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
 
     @classmethod
     def zeros_like(cls, tensor):

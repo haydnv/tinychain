@@ -139,6 +139,7 @@ class Object(State):
     __uri__ = URI(State) + "/object"
 
 
+# TODO: add a generic type parameter
 class Class(Object):
     """A TinyChain class (possibly a user-defined class)."""
 

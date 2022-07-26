@@ -132,8 +132,7 @@ class ConvLayer(Layer, Dynamic):
     def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
-        # TODO: this expectation should be set using a generic type
-        inputs = Tensor.expect([batch_size] + self._inputs_shape, Float)(form=inputs)
+        inputs = Tensor[Float].with_shape([batch_size] + self._inputs_shape)(form=inputs)
 
         padding = self._padding
         stride = self._stride
@@ -232,8 +231,7 @@ class Linear(Layer, Dynamic):
     def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
-        # TODO: this expectation should be set using a generic type
-        inputs = Tensor.expect([batch_size, self.weights.shape[0]], Float)(form=inputs)
+        inputs = Tensor[Float].with_shape([batch_size, self.weights.shape[0]])(form=inputs)
 
         cxt.activation = inputs @ self.weights
         cxt.with_bias = cxt.activation + self.bias

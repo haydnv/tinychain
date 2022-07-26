@@ -27,7 +27,7 @@ class URI(object):
     """
 
     def __init__(self, subject, *path):
-        path = [validate(segment) for segment in path]
+        path = [validate(segment) for segment in path if str(segment)]
 
         if isinstance(subject, URI):
             self._subject = subject._subject

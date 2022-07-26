@@ -108,6 +108,9 @@ class Tuple(State, Functional, typing.Generic[T]):
                 def __len__(self):
                     return len(form)
 
+                def __reversed__(self):
+                    return (self[i] for i in reversed(range(len(self))))
+
             return State.__new__(_Tuple)
         else:
             return State.__new__(cls)
@@ -251,6 +254,37 @@ class Tuple(State, Functional, typing.Generic[T]):
 class TupleRef(StateRef):
     def __getitem__(self, i):
         return self.state[i]
+
+
+def autobox(state):
+    if isinstance(state, State):
+        return state
+
+    if isinstance(state, bool):
+        from .scalar.number import Bool
+        return Bool(state)
+    elif isinstance(state, float):
+        from .scalar.number import Float
+        return Float(state)
+    elif isinstance(state, int):
+        from .scalar.number import Int
+        return Int(state)
+    elif isinstance(state, dict):
+        return Map(state)
+    elif isinstance(state, (list, tuple)):
+        return Tuple(state)
+    elif isinstance(state, str):
+        from .scalar.value import String
+        return String(state)
+
+    from .scalar.ref import Ref
+    if isinstance(state, Ref):
+        return State(form=state)
+
+    if isinstance(state, Interface):
+        return resolve_interface(type(state))(form=state)
+
+    return state
 
 
 def gcs(*types):

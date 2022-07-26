@@ -5,12 +5,9 @@ import operator
 
 from .app import Model
 from .chain import Chain
-from .generic import resolve_interface, Map, Tuple
-from .interface import Interface
+from .generic import autobox
 from .json import to_json
-from .scalar.number import Bool, Float, Int
 from .scalar.ref import args, form_of, get_ref, hex_id, is_literal, same_as, Ref
-from .scalar.value import String
 from .state import hash_of
 from .state import State
 from .uri import validate, URI
@@ -295,29 +292,3 @@ class Context(object):
         """Iterate over the named states in this :class:`Context`."""
 
         yield from ((name, getattr(self, name)) for name in self)
-
-
-def autobox(state):
-    if isinstance(state, State):
-        return state
-
-    if isinstance(state, bool):
-        return Bool(state)
-    elif isinstance(state, float):
-        return Float(state)
-    elif isinstance(state, int):
-        return Int(state)
-    elif isinstance(state, dict):
-        return Map(state)
-    elif isinstance(state, (list, tuple)):
-        return Tuple(state)
-    elif isinstance(state, str):
-        return String(state)
-
-    if isinstance(state, Ref):
-        return State(form=state)
-
-    if isinstance(state, Interface):
-        return resolve_interface(type(state))(form=state)
-
-    return state

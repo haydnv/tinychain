@@ -1,13 +1,18 @@
 import inspect
+import typing
 
 from ..app import Model, ModelRef
 from ..collection import tensor
 from ..generic import Map, Tuple
+from ..scalar.number import Number
 from ..scalar.ref import form_of
 
 
+DType = typing.TypeVar("DType", bound=type[Number])
+
+
 # TODO: support Sparse and Number variable types
-class Variable(tensor.Dense):
+class Variable(tensor.Dense, typing.Generic[DType]):
     """A trainable variable in a machine learning model."""
 
     def update(self, delta):

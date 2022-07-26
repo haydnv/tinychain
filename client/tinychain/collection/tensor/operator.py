@@ -8,6 +8,25 @@ from ...shape import Shape
 from ...uri import URI
 
 
+class Cast(Operator):
+    def __init__(self, source, dtype):
+        Operator.__init__(self, source, dtype)
+
+    @property
+    def shape(self):
+        return self.subject.shape
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.cast(self.subject, self.args)
+
+    def backward(self, variable=None):
+        return Cast(derivative_of(self.subject, variable), self.args)
+
+    def gradients(self, loss):
+        return gradients(self.subject, loss)
+
+
 # TODO: support concatenating Sparse tensors
 class Concatenate(Operator):
     def __init__(self, tensors, axis=None):
@@ -326,7 +345,8 @@ class Slice(Transform):
         return NDArray.slice(self.subject, self.args)
 
     def invert(self, loss):
-        assert is_literal(self.subject.shape)
+        if not is_literal(self.subject.shape):
+            raise RuntimeError(f"the gradients of a Slice require a literal source shape, not {self.subject.shape}")
 
         from .base import Dense
 
