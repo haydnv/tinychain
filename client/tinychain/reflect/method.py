@@ -74,7 +74,15 @@ class Get(Method):
         return key_name, cxt
 
     def __ref__(self, name):
-        return op.Get(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 3
+
+        if len(sig) == 3 or (len(sig) == 2 and sig[1][0] not in ["cxt", "txn"]):
+            ktype = resolve_class(self.form, sig[-1][1].annotation, Value)
+        else:
+            ktype = Value
+
+        return op.Get[ktype, self.rtype](URI(name))
 
 
 class Put(Method):
@@ -121,7 +129,8 @@ class Put(Method):
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(form=URI(value_name)))
         else:
-            raise ValueError(f"a PUT method requires 0-4 parameters: (self, cxt, key, value)")
+            raise ValueError("a PUT method requires 0-4 parameters: (self, cxt, key, value), " +
+                             f"not {tuple(self.sig.parameters.items())}")
 
         cxt._return = self.form(*args)
 
@@ -132,7 +141,32 @@ class Put(Method):
         return key_name, value_name, cxt
 
     def __ref__(self, name):
-        return op.Put(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 4
+
+        if len(sig) >= 2 and sig[1][0] in ["cxt", "txn"]:
+            sig = sig[2:]
+        else:
+            sig = sig[1:]
+
+        if len(sig) == 1 and sig[0][0] == "key":
+            ktype = resolve_class(self.form, sig[0][1].annotation, Value)
+            vtype = State
+        elif len(sig) == 1 and sig[0][0] == "value":
+            ktype = Value
+            vtype = resolve_class(self.form, sig[0][1].annotation, State)
+        elif len(sig) == 2:
+            (k, v) = sig
+            ktype = resolve_class(self.form, k.annotation)
+            vtype = resolve_class(self.form, v.annotation)
+        elif not sig:
+            ktype = Value
+            vtype = State
+        else:
+            raise ValueError("a PUT method requires 0-4 parameters: (self, cxt, key, value), " +
+                             f"not {tuple(self.sig.parameters.items())}")
+
+        return op.Put[ktype, vtype](URI(name))
 
 
 class Post(Method):
@@ -216,7 +250,15 @@ class Delete(Method):
         return Get.__form__(self)
 
     def __ref__(self, name):
-        return op.Delete(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 3
+
+        if len(sig) == 3 or (len(sig) == 2 and sig[1][0] not in ["cxt", "txn"]):
+            ktype = resolve_class(self.form, sig[-1][1].annotation, Value)
+        else:
+            ktype = Value
+
+        return op.Delete[ktype](URI(name))
 
 
 def _check_context_param(parameter):
