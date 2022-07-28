@@ -16,7 +16,7 @@ class LinearAlgebraTests(ClientTest):
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
-        cxt.diag = tc.linalg.diagonal(cxt.x)
+        cxt.diag = tc.math.linalg.diagonal(cxt.x)
 
         expected = np.diag(x)
         actual = self.host.post(ENDPOINT, cxt)
@@ -31,7 +31,7 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
         cxt.diag = tc.tensor.Dense.load([size], diag, tc.I32)
-        cxt.result = tc.After(tc.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
+        cxt.result = tc.After(tc.math.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
 
         x[range(size), range(size)] = diag
         actual = self.host.post(ENDPOINT, cxt)

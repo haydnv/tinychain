@@ -19,7 +19,7 @@ class OptimizerTester(tc.app.Library):
         labels = tc.tensor.Dense.constant([2, 3, 3], 2)
         layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
         cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
-        return cxt.optimizer.train(i=1, inputs=inputs)
+        return cxt.optimizer.train(1, inputs)
 
 
     @tc.post
@@ -32,7 +32,7 @@ class OptimizerTester(tc.app.Library):
         cnn = tc.ml.nn.Sequential(layers)
         outputs = cnn.eval(inputs)
         cxt.optimizer = tc.ml.optimizer.Adam(cnn, lambda _, o: (o - 2)**2)
-        return cxt.optimizer.train(i=1, inputs=inputs)
+        return cxt.optimizer.train(1, inputs)
 
     @tc.post
     def test_linear(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
@@ -42,7 +42,7 @@ class OptimizerTester(tc.app.Library):
 
         layer = tc.ml.nn.Linear.create(2, 1)
         cxt.optimizer = tc.ml.optimizer.GradientDescent(layer, cost)
-        return cxt.optimizer.train(i=1, inputs=inputs)
+        return cxt.optimizer.train(1, inputs)
 
     @tc.post
     def test_dnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
@@ -57,7 +57,7 @@ class OptimizerTester(tc.app.Library):
 
         dnn = tc.ml.nn.Sequential(layers)
         cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
-        return cxt.optimizer.train(i=1, inputs=inputs)
+        return cxt.optimizer.train(1, inputs)
 
 
 class OptimizerTests(unittest.TestCase):

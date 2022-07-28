@@ -9,7 +9,7 @@ from ..collection.tensor import einsum, Dense, Tensor
 from ..context import Context
 from ..decorators import differentiable, post, reflect
 from ..error import NotImplemented
-from ..math.operator import derivative_of, gradients, Dual
+from ..math.operator import derivative_of, gradients, Dual, Gradients
 from ..generic import Map, Tuple
 from ..reflect import method
 from ..reflect.functions import parse_args
@@ -18,13 +18,16 @@ from ..scalar.ref import deref, form_of, get_ref, is_ref, After
 from ..uri import URI
 
 from .constants import LIB_URI
-from .interface import Differentiable, Gradients
+from .interface import Differentiable, Gradient
 from .variable import namespace, Variable
 
 
 # TODO: move into the reflect.method module and rename
 class ReflectedMethod(method.Post):
     def __init__(self, header, name, graph, sig, rtype):
+        if tuple(sig.parameters)[0] != "self":
+            raise TypeError(f"not a method signature: {tuple(sig.parameters.items())}")
+
         self.name = name
         self.header = header
         self.graph = graph
@@ -46,12 +49,12 @@ class Layer(Model, Differentiable):
     __uri__ = LIB_URI + "/Layer"
 
     @reflect
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
         if self.eval is Layer.eval:
             # if this is an abstract class, don't try to reflect over the eval method
             return NotImplemented("Layer.gradient")
 
-        sig = list(inspect.signature(Linear.gradient).parameters.items())
+        sig = inspect.signature(Linear.gradient.form)
 
         if is_ref(self.eval):
             form = deref(self.eval)
@@ -67,7 +70,7 @@ class Layer(Model, Differentiable):
         cxt = Context(form)
         cxt.gradient = grads
 
-        return ReflectedMethod(self, "gradient", cxt, sig, Tuple.expect((Map.expect(Gradients), Tensor)))
+        return ReflectedMethod(self, "gradient", cxt, sig, Map[Gradient])
 
 
 class ConvLayer(Layer, Dynamic):
@@ -133,8 +136,7 @@ class ConvLayer(Layer, Dynamic):
     def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
-        # TODO: this expectation should be set using a generic type
-        inputs = Tensor.expect([batch_size] + self._inputs_shape, Float)(form=inputs)
+        inputs = Tensor[Float].with_shape([batch_size] + self._inputs_shape)(form=inputs)
 
         padding = self._padding
         stride = self._stride
@@ -182,8 +184,6 @@ class ConvLayer(Layer, Dynamic):
                 return (w_col @ cxt.im2col_matrix_T) + (cxt.w_col @ im2col_matrix)
 
             def gradients(self, loss):
-                # TODO: can there be only one class called Gradients?
-                from ..math.operator import Gradients
                 grads = Gradients()
 
                 grads[self.subject] = (loss @ cxt.im2col_matrix).reshape(self.subject.shape)
@@ -235,8 +235,7 @@ class Linear(Layer, Dynamic):
     def eval(self, cxt, inputs: Tensor) -> Tensor:
         batch_size = inputs.shape[0]
 
-        # TODO: this expectation should be set using a generic type
-        inputs = Tensor.expect([batch_size, self.weights.shape[0]], Float)(form=inputs)
+        inputs = Tensor[Float].with_shape([batch_size, self.weights.shape[0]])(form=inputs)
 
         cxt.activation = inputs @ self.weights
         cxt.with_bias = cxt.activation + self.bias
@@ -266,7 +265,7 @@ class Sequential(NeuralNet, Dynamic):
         return state
 
     @post
-    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, cxt, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
         layer_inputs = [inputs]
 
         for layer in self.layers[:-1]:
@@ -278,8 +277,7 @@ class Sequential(NeuralNet, Dynamic):
         for i, (inputs, layer) in reversed(list(enumerate(zip(cxt.layer_inputs, self.layers)))):
             # TODO: this call to get_ref should not be necessary
             layer = get_ref(layer, URI(self, "layers", i))
-            # TODO: this type expectation and parameter names should not be necessary
-            layer_grad = Map.expect(Gradients)(layer.gradient(inputs=inputs, loss=loss))
+            layer_grad = layer.gradient(inputs, loss)
             layer_grads.append(layer_grad)
             loss = layer_grad["inputs"]  # TODO: should this handle other layer eval signatures automatically?
 

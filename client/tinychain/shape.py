@@ -10,16 +10,7 @@ from .state import State
 from .uri import URI
 
 
-class Shape(Tuple):
-    __spec__ = typing.Tuple[U64, ...]
-
-    def __new__(cls, form):
-        if hasattr(form, "__iter__"):
-            spec = tuple(U64 for _ in form)
-            return State.__new__(cls.expect(spec))
-        else:
-            return State.__new__(cls)
-
+class Shape(Tuple[U64]):
     def __add__(self, other):
         if hasattr(self, "__len__") and hasattr(other, "__len__"):
             return Shape(tuple(deref(self)) + tuple(deref(other)))
@@ -30,45 +21,14 @@ class Shape(Tuple):
         return Shape(other) + self
 
     def __getitem__(self, x):
-        if x is None:
-            raise ValueError(f"invalid axis: {x}")
+        if isinstance(x, (slice, Range)):
+            return Shape(Tuple.__getitem__(self, x))
 
-        spec = typing.get_args(self.__spec__) if typing.get_args(self.__spec__) else self.__spec__
-
-        if isinstance(x, Range):
-            x = x.to_slice()
-
-        if isinstance(x, slice):
-            start = deref(x.start)
-            stop = deref(x.stop)
-
-            if x.step is not None:
-                raise NotImplementedError(f"slice with step: {x}")
-
-            if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents may be literal, so compute the slice now if possible
-                if hasattr(deref(self), "__getitem__"):
-                    if is_literal(start) and is_literal(stop):
-                        start = _index_of(start, len(self), 0)
-                        stop = _index_of(stop, len(self), len(self))
-                        return Shape([self[i] for i in range(start, stop)])
-
-            return self._get("", Range.from_slice(x), Shape)
-
-        if is_literal(x):
-            x = deref(x)
-            if hasattr(deref(self), "__getitem__"):
-                try:
-                    item = deref(self)[x]
-                except IndexError as e:
-                    raise IndexError(f"{self} has no axis {x}: {e}")
-
-                if URI(self) == URI(self.__class__):
-                    return item
-                else:
-                    return get_ref(item, URI(self).append(x))
-
-        return self._get("", x, U64)
+        dim = Tuple.__getitem__(self, x)
+        if is_literal(dim):
+            return dim
+        else:
+            return U64(dim)
 
     def __repr__(self):
         if hasattr(self, "__len__"):
@@ -113,15 +73,16 @@ class Shape(Tuple):
             for shape in shapes:
                 if concatenated[x] is None:
                     concatenated[x] = shape[x]
-                elif concatenated[x] != shape[x]:
-                    raise ValueError(f"cannot concatenate {shapes} due to inconsistent dimension at axis {x}")
+                elif is_literal((concatenated[x], shape[x])) and deref(concatenated[x]) != deref(shape[x]):
+                    raise ValueError(f"cannot concatenate {shapes} due to inconsistent dimension at axis {x}: " +
+                                     "{concatenated[x]} vs {shape[x]}")
 
             if concatenated[x] is None:
                 raise ValueError(f"shape of concatenated tensor is not kown at axis {x}")
 
         return Shape(concatenated)
 
-    def ndim(self, require_literal=False, op_name="this operation"):
+    def ndim(self, require_literal=False, op_name="perform this operation on"):
         if require_literal and not hasattr(self, "__len__"):
             raise RuntimeError(f"to {op_name} {self} requires a literal number of dimensions")
 

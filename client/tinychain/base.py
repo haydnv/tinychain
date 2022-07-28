@@ -63,10 +63,10 @@ def _resolve_rtype(rtype, default=None):
 
     if typing.get_origin(rtype) is tuple:
         from .generic import Tuple
-        return Tuple.expect(rtype)
+        return Tuple[rtype]
     elif typing.get_origin(rtype) is dict:
         from .generic import Map
-        return Map.expect(rtype)
+        return Map[rtype]
     elif inspect.isclass(rtype) and issubclass(rtype, State):
         return rtype
     else:

@@ -1,13 +1,13 @@
 import inspect
 
 from ..reflect import method, op
-from ..reflect.functions import get_rtype, resolve_class
+from ..reflect.functions import get_rtype, parse_args, resolve_class
 from ..scalar import ref
 from ..state import State, StateRef
 from ..uri import URI
 
 from .interface import Numeric
-from .operator import derivative_of, Gradients, Operator
+from .operator import derivative_of, Operator
 
 
 class FunctionCall(Operator):
@@ -53,7 +53,7 @@ class Function(op.Post):
 
     def __call__(self, *args, **kwargs):
         sig = self.sig[1:] if self.sig[0][0] in ["cxt", "txn"] else self.sig
-        params = op.parse_args(sig, *args, **kwargs)
+        params = parse_args(sig, *args, **kwargs)
         return self.rtype(form=FunctionCall(self, params))
 
     def __form__(self):
@@ -65,7 +65,7 @@ class Function(op.Post):
 
         class FunctionRef(StateRef):
             def __call__(self, *args, **kwargs):
-                params = op.parse_args(sig, *args, **kwargs)
+                params = parse_args(sig, *args, **kwargs)
                 return self.state.rtype(form=FunctionCall(self, params))
 
             def derivative(self, variable):
@@ -170,7 +170,7 @@ class StateFunction(method.Post):
 
         class StateFunctionRef(StateRef):
             def __call__(self, *args, **kwargs):
-                params = op.parse_args(sig, *args, **kwargs)
+                params = parse_args(sig, *args, **kwargs)
                 return self.state.rtype(form=FunctionCall(self, params))
 
             def derivative(self, variable):

@@ -27,8 +27,7 @@ class NeuralNetTester(tc.app.Library):
     def test_gradients(self, cxt, inputs: tc.tensor.Tensor) -> tc.State:
         cxt.layer = tc.ml.nn.Linear.create(2, 1)
         cxt.outputs = cxt.layer.eval(inputs)
-        grads = cxt.layer.gradient(inputs=inputs, loss=tc.tensor.Dense.ones_like(cxt.outputs))
-        grads = tc.Tuple.expect((tc.Map, tc.scalar.op.Post))(grads)
+        grads = cxt.layer.gradient(inputs, tc.tensor.Dense.ones_like(cxt.outputs))
         return grads["weights"], grads["bias"]
 
     @tc.post

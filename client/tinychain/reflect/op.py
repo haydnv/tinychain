@@ -1,13 +1,14 @@
+import dataclasses
 import inspect
 import logging
 
 from ..json import to_json
-from ..scalar.value import Nil, Value
+from ..scalar.value import Value
 from ..scalar import op, ref
 from ..state import State
 from ..uri import URI
 
-from .functions import get_rtype, parse_args, resolve_class
+from .functions import get_rtype, resolve_class
 
 
 EMPTY = inspect.Parameter.empty
@@ -21,6 +22,7 @@ class Op(object):
             raise ValueError(f"reflection requires a Python callable, not {form}")
 
         self.form = form
+        self.sig = inspect.signature(self.form)
 
     def __json__(self):
         return {str(URI(self)): to_json(ref.form_of(self))}
@@ -42,28 +44,33 @@ class Get(Op):
     def __form__(self):
         cxt, args = maybe_first_arg(self.form)
 
-        sig = inspect.signature(self.form)
         key_name = "key"
-        if len(sig.parameters) > len(args):
-            key_name = list(sig.parameters.keys())[len(args)]
-            param = sig.parameters[key_name]
-            dtype = resolve_class(self.form, param.annotation, Value)
-            args.append(dtype(form=URI(key_name)))
+        if len(self.sig.parameters) > len(args):
+            key_name = list(self.sig.parameters.keys())[len(args)]
+            param = self.sig.parameters[key_name]
+            ktype = resolve_class(self.form, param.annotation, Value)
+            args.append(ktype(form=URI(key_name)))
 
         cxt._return = self.form(*args)  # populate the Context
 
-        validate(cxt, sig.parameters)
+        validate(cxt, self.sig.parameters)
 
         return key_name, cxt
 
     def __ref__(self, name):
-        rtype = self.rtype
+        sig = tuple(self.sig.parameters.items())
+        assert len(sig) <= 2
 
-        class GetRef(op.Get):
-            def __call__(self, key):
-                return rtype(form=ref.Get(self, key))
+        if sig and sig[0][0] in ["cxt", "txn"]:
+            sig = sig[1:]
 
-        return GetRef(name if isinstance(name, URI) else URI(name))
+        if len(sig) == 1:
+            ktype = resolve_class(self.form, sig[0][1].annotation, Value)
+        else:
+            assert not sig
+            ktype = Value
+
+        return op.Get[ktype, self.rtype](form=URI(name))
 
     def __repr__(self):
         return f"GET Op with form {to_json(self)}"
@@ -78,48 +85,65 @@ class Put(Op):
     def __form__(self):
         cxt, args = maybe_first_arg(self.form)
 
-        sig = inspect.signature(self.form)
         key_name = "key"
         value_name = "value"
 
-        if len(sig.parameters) == len(args):
+        if len(self.sig.parameters) == len(args):
             pass
-        elif len(sig.parameters) - len(args) == 1:
-            param_name = list(sig.parameters.keys())[-1]
-            param = sig.parameters[param_name]
+        elif len(self.sig.parameters) - len(args) == 1:
+            param_name = list(self.sig.parameters.keys())[-1]
+            param = self.sig.parameters[param_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             if param_name in set(["key", "value"]):
                 args.append(dtype(form=URI(param_name)))
             else:
                 raise ValueError(f"{self.dtype()} argument {param_name} is ambiguous--use 'key' or 'value' instead")
-        elif len(sig.parameters) - len(args) == 2:
-            param_names = list(sig.parameters.keys())
+        elif len(self.sig.parameters) - len(args) == 2:
+            param_names = list(self.sig.parameters.keys())
             key_name = param_names[-2]
-            param = sig.parameters[key_name]
+            param = self.sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(form=URI(key_name)))
 
             value_name = param_names[-1]
-            param = sig.parameters[value_name]
+            param = self.sig.parameters[value_name]
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(URI(value_name)))
         else:
-            param_names = list(sig.parameters.keys())
+            param_names = list(self.sig.parameters.keys())
             raise ValueError(
                 f"{self.dtype()} accepts a maximum of three arguments: (cxt, key, value) (found {param_names})")
 
         cxt._return = self.form(*args)
 
-        validate(cxt, sig.parameters)
+        validate(cxt, self.sig.parameters)
 
         return key_name, value_name, cxt
 
     def __ref__(self, name):
-        class PutRef(op.Put):
-            def __call__(self, key=None, value=None):
-                return Nil(ref.Put(key, value))
+        sig = tuple(self.sig.parameters.items())
+        assert len(sig) < 3
 
-        return PutRef(name if isinstance(name, URI) else URI(name))
+        if sig and sig[0][0] in ["cxt", "txn"]:
+            sig = sig[1:]
+
+        if len(sig) == 2:
+            (_kn, k), (_vn, v) = sig
+            ktype = resolve_class(self.form, k.annotation, Value)
+            vtype = resolve_class(self.form, v.annotation, State)
+        elif len(sig) == 1 and sig[0][0] == "key":
+            ktype = resolve_class(self.form, sig[0][1].annotation, Value)
+            vtype = State
+        elif len(sig) == 1 and sig[0][0] == "value":
+            ktype = Value
+            vtype = resolve_class(self.form, sig[0][1].annotation, State)
+        elif not sig:
+            ktype = Value
+            vtype = State
+        else:
+            raise ValueError(f"invalid signature for PUT Op: {tuple(self.sig.parameters.items())}")
+
+        return op.Put[ktype, vtype](form=URI(name))
 
     def __repr__(self):
         return f"PUT Op with form {self.form}"
@@ -135,32 +159,33 @@ class Post(Op):
     def __form__(self):
         cxt, args = maybe_first_arg(self.form)
 
-        sig = inspect.signature(self.form)
         kwargs = {}
-        for name, param in list(sig.parameters.items())[len(args):]:
+        for name, param in tuple(self.sig.parameters.items())[len(args):]:
             dtype = resolve_class(self.form, param.annotation, State)
             kwargs[name] = dtype(form=URI(name))
 
         cxt._return = self.form(*args, **kwargs)
 
-        validate(cxt, sig.parameters)
+        validate(cxt, self.sig.parameters)
 
         return cxt
 
     def __ref__(self, name):
-        sig = list(inspect.signature(self.form).parameters.items())
-        rtype = self.rtype
+        sig = list(self.sig.parameters.items())
 
-        if sig:
-            if sig[0][0] in ["cxt", "txn"]:
-                sig = sig[1:]
+        if sig and sig[0][0] in ["cxt", "txn"]:
+            sig = sig[1:]
 
-        class PostRef(op.Post):
-            def __call__(self, *args, **kwargs):
-                params = parse_args(sig, *args, **kwargs)
-                return rtype(form=ref.Post(self, params))
+        fields = []
+        for param_name, param in sig:
+            dtype = resolve_class(self.form, param.annotation, State)
+            if param.default is inspect.Parameter.empty:
+                fields.append((param_name, dtype))
+            else:
+                fields.append((param_name, dtype, dataclasses.field(default=param.default)))
 
-        return PostRef(name if isinstance(name, URI) else URI(name))
+        sig = dataclasses.make_dataclass("Args", fields)
+        return op.Post[sig, self.rtype](form=URI(name))
 
     def __repr__(self):
         return f"POST Op with form {self.form}"
@@ -173,11 +198,18 @@ class Delete(Op):
         return Get.__form__(self)
 
     def __ref__(self, name):
-        class DeleteRef(op.Delete):
-            def __call__(self, key=None):
-                return Nil(ref.Delete(self, key))
+        sig = tuple(self.sig.parameters.items())
+        assert len(sig) <= 2
 
-        return DeleteRef(name if isinstance(name, URI) else URI(name))
+        if sig and sig[0][0] in ["cxt", "txn"]:
+            sig = sig[1:]
+
+        if sig:
+            ktype = resolve_class(self.form, sig[0][1].annotation, Value)
+        else:
+            ktype = Value
+
+        return op.Delete[ktype](form=URI(name))
 
     def __repr__(self):
         return f"DELETE Op with form {self.form}"

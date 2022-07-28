@@ -1,19 +1,14 @@
-import typing
-
 from .. import error
 from ..collection.tensor import Tensor
 from ..decorators import differentiable, post
+from ..generic import Map
 from ..interface import Interface
 from ..math.interface import Numeric
-from ..scalar.value import Id
 from ..state import State
 
 
 class Gradient(State, Numeric):
     """Helper class to handle the case of either a :class:`Number` or :class:`Tensor` as a gradient"""
-
-
-Gradients = typing.Dict[Id, Gradient]
 
 
 class Differentiable(Interface):
@@ -27,7 +22,7 @@ class Differentiable(Interface):
         return error.NotImplemented(f"Differentiable.eval for {cls.__name__}")
 
     @post
-    def gradient(self, inputs: Tensor, loss: Tensor) -> Gradients:
+    def gradient(self, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
         """Return a :class:`Map` of gradients per member :class:`Variable` of this :class:`Differentiable` state."""
 
         cls = self.instance.__class__ if hasattr(self, "instance") else self.__class__

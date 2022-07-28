@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 
 from ..json import to_json
@@ -26,6 +27,10 @@ class Method(object):
         self.header = header
         self.form = form
         self.name = name
+        self.sig = inspect.signature(self.form)
+
+        if tuple(self.sig.parameters)[0] != "self":
+            raise TypeError(f"method signature must begin with 'self' (found {tuple(self.sig.parameters.items())})")
 
     def __json__(self):
         return {str(self.__uri__): to_json(ref.form_of(self))}
@@ -50,13 +55,12 @@ class Get(Method):
     def __form__(self):
         cxt, args = first_params(self)
 
-        sig = inspect.signature(self.form)
         key_name = "key"
-        if len(sig.parameters) == len(args):
+        if len(self.sig.parameters) == len(args):
             pass
-        elif len(sig.parameters) - len(args) == 1:
-            key_name = list(sig.parameters.keys())[-1]
-            param = sig.parameters[key_name]
+        elif len(self.sig.parameters) - len(args) == 1:
+            key_name = tuple(self.sig.parameters.keys())[-1]
+            param = self.sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(form=URI(key_name)))
         else:
@@ -70,7 +74,15 @@ class Get(Method):
         return key_name, cxt
 
     def __ref__(self, name):
-        return op.Get(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 3
+
+        if len(sig) == 3 or (len(sig) == 2 and sig[1][0] not in ["cxt", "txn"]):
+            ktype = resolve_class(self.form, sig[-1][1].annotation, Value)
+        else:
+            ktype = Value
+
+        return op.Get[ktype, self.rtype](URI(name))
 
 
 class Put(Method):
@@ -90,16 +102,14 @@ class Put(Method):
     def __form__(self):
         cxt, args = first_params(self)
 
-        sig = inspect.signature(self.form)
-
         key_name = "key"
         value_name = "value"
 
-        if len(sig.parameters) == len(args):
+        if len(self.sig.parameters) == len(args):
             pass
-        elif len(sig.parameters) - len(args) == 1:
-            name = list(sig.parameters.keys())[-1]
-            param = sig.parameters[name]
+        elif len(self.sig.parameters) - len(args) == 1:
+            name = tuple(self.sig.parameters.keys())[-1]
+            param = self.sig.parameters[name]
             if name == key_name:
                 dtype = resolve_class(self.form, param.annotation, Value)
                 args.append(dtype(form=URI(key_name)))
@@ -108,18 +118,19 @@ class Put(Method):
                 args.append(dtype(form=URI(value_name)))
             else:
                 raise ValueError(f"a PUT method with three parameters requires an explicit 'key' or 'value', not '{name}'")
-        elif len(sig.parameters) - len(args) == 2:
-            key_name, value_name = list(sig.parameters.keys())[-2:]
+        elif len(self.sig.parameters) - len(args) == 2:
+            key_name, value_name = tuple(self.sig.parameters.keys())[-2:]
 
-            param = sig.parameters[key_name]
+            param = self.sig.parameters[key_name]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(form=URI(key_name)))
 
-            param = sig.parameters[value_name]
+            param = self.sig.parameters[value_name]
             dtype = resolve_class(self.form, param.annotation, State)
             args.append(dtype(form=URI(value_name)))
         else:
-            raise ValueError(f"a PUT method requires 0-4 parameters: (self, cxt, key, value)")
+            raise ValueError("a PUT method requires 0-4 parameters: (self, cxt, key, value), " +
+                             f"not {tuple(self.sig.parameters.items())}")
 
         cxt._return = self.form(*args)
 
@@ -130,7 +141,32 @@ class Put(Method):
         return key_name, value_name, cxt
 
     def __ref__(self, name):
-        return op.Put(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 4
+
+        if len(sig) >= 2 and sig[1][0] in ["cxt", "txn"]:
+            sig = sig[2:]
+        else:
+            sig = sig[1:]
+
+        if len(sig) == 1 and sig[0][0] == "key":
+            ktype = resolve_class(self.form, sig[0][1].annotation, Value)
+            vtype = State
+        elif len(sig) == 1 and sig[0][0] == "value":
+            ktype = Value
+            vtype = resolve_class(self.form, sig[0][1].annotation, State)
+        elif len(sig) == 2:
+            (k, v) = sig
+            ktype = resolve_class(self.form, k.annotation)
+            vtype = resolve_class(self.form, v.annotation)
+        elif not sig:
+            ktype = Value
+            vtype = State
+        else:
+            raise ValueError("a PUT method requires 0-4 parameters: (self, cxt, key, value), " +
+                             f"not {tuple(self.sig.parameters.items())}")
+
+        return op.Put[ktype, vtype](URI(name))
 
 
 class Post(Method):
@@ -141,7 +177,7 @@ class Post(Method):
         self.rtype = get_rtype(self.form, State)
 
     def __call__(self, *args, **kwargs):
-        sig = list(inspect.signature(self.form).parameters.items())
+        sig = tuple(self.sig.parameters.items())
         rtype = self.rtype
 
         if not sig:
@@ -160,11 +196,8 @@ class Post(Method):
     def __form__(self):
         cxt, args = first_params(self)
 
-        sig = inspect.signature(self.form)
         kwargs = {}
-        for name in list(sig.parameters.keys())[len(args):]:
-            param = sig.parameters[name]
-
+        for name, param in tuple(self.sig.parameters.items())[len(args):]:
             dtype = State
             if param.default is inspect.Parameter.empty:
                 if param.annotation:
@@ -184,7 +217,19 @@ class Post(Method):
         return cxt
 
     def __ref__(self, name):
-        return op.Post(URI(name))
+        fields = []
+
+        sig = tuple(self.sig.parameters.items())
+        sig = sig[2:] if len(sig) > 1 and sig[1][0] in ["cxt", "txn"] else sig[1:]
+        for param_name, param in sig:
+            dtype = resolve_class(self.subject(), param.annotation, State)
+            if param.default is inspect.Parameter.empty:
+                fields.append((param_name, dtype))
+            else:
+                fields.append((param_name, dtype, dataclasses.field(default=param.default)))
+
+        sig = dataclasses.make_dataclass("Args", fields)
+        return op.Post[sig, self.rtype](URI(name))
 
 
 class Delete(Method):
@@ -205,7 +250,15 @@ class Delete(Method):
         return Get.__form__(self)
 
     def __ref__(self, name):
-        return op.Delete(URI(name))
+        sig = tuple(self.sig.parameters.items())
+        assert 0 < len(sig) <= 3
+
+        if len(sig) == 3 or (len(sig) == 2 and sig[1][0] not in ["cxt", "txn"]):
+            ktype = resolve_class(self.form, sig[-1][1].annotation, Value)
+        else:
+            ktype = Value
+
+        return op.Delete[ktype](URI(name))
 
 
 def _check_context_param(parameter):
@@ -229,7 +282,7 @@ def first_params(method):
 
     args = []
 
-    param_names = list(sig.parameters.keys())
+    param_names = tuple(sig.parameters.keys())
 
     if param_names[0] == "self":
         args.append(method.header)

@@ -328,8 +328,9 @@ impl<'a> Handler<'a> for ConstantHandler {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let (shape, value): (Vec<u64>, Number) =
-                    key.try_cast_into(|v| TCError::bad_request("invalid Tensor schema", v))?;
+                let (shape, value): (Vec<u64>, Number) = key.try_cast_into(|v| {
+                    TCError::bad_request("invalid schema for constant tensor", v)
+                })?;
 
                 let shape = Shape::from(shape);
                 constant(&txn, shape, value)

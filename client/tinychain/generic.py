@@ -1,89 +1,38 @@
+import inspect
 import typing
 
-from .interface import Functional
+from .interface import Functional, Interface
 from .json import to_json
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
-from .scalar.value import Id
-from .state import State, StateRef
+from .state import Class, State, StateRef
 from .uri import URI
+
+T = typing.TypeVar("T", bound=State)
 
 
 # TODO: implement `Functional` for `Map`
-class Map(State):
-    """A key-value map whose keys are `Id`s and whose values are `State` s."""
+class Map(State, typing.Generic[T]):
+    """A key-value map whose keys are :class:`Id` s and whose values are :class: `State` s."""
 
     __uri__ = URI(State) + "/map"
-    __spec__ = typing.Dict[Id, State]
-
-    @staticmethod
-    def _parse_args(args, kwargs):
-        form = None
-        spec = None
-
-        if args and "form" in kwargs:
-            raise ValueError(f"Map got duplicate arguments for 'form': {args[0]}, {kwargs['form']}")
-
-        if len(args) > 2:
-            raise ValueError(f"Map.__init__ got unexpected arguments {args} {kwargs}")
-
-        if "form" in kwargs:
-            form = kwargs["form"]
-            del kwargs["form"]
-        elif len(args) >= 1:
-            form = args[0]
-
-        if len(args) > 1:
-            spec = args[1]
-
-        if not form:
-            form = kwargs
-
-        while isinstance(form, Map):
-            form = form_of(form)
-
-        if not spec:
-            if hasattr(form, "__spec__"):
-                spec = form.__spec__
-
-            if form and isinstance(form, dict) and any(issubclass(type(v), State) for v in form.values()):
-                spec = {k: type(v) if issubclass(type(v), State) else State for k, v in form.items()}
-
-        return form, spec
-
-    @classmethod
-    def expect(cls, spec):
-        if isinstance(spec, dict):
-            class _Map(cls):
-                __spec__ = spec
-
-                def __contains__(self, key):
-                    return key in spec
-
-                def __len__(self):
-                    return len(spec)
-
-                def __iter__(self):
-                    return iter(spec)
-        else:
-            class _Map(cls):
-                __spec__ = spec
-
-        return _Map
-
-    def __new__(*args, **kwargs):
-        cls = args[0]
-        form, spec = Map._parse_args(args[1:], kwargs)
-
-        if isinstance(form, Map):
-            return State.__new__(cls)
-        elif spec:
-            return State.__new__(cls.expect(spec))
-        else:
-            return State.__new__(cls)
 
     def __init__(self, *args, **kwargs):
-        form, spec = Map._parse_args(args, kwargs)
+        if args and kwargs:
+            raise RuntimeError(f"Map takes a form or kwargs, not both (got {args} and {kwargs}")
+        elif kwargs:
+            if "form" in kwargs:
+                if len(kwargs) > 1:
+                    raise KeyError(f"the name 'form' is reserved (Map got kwargs {kwargs})")
+
+                form = kwargs["form"]
+            else:
+                form = kwargs
+        elif len(args) == 1:
+            [form] = args
+        else:
+            raise RuntimeError(f"cannot construct a Map without a form")
+
         State.__init__(self, form)
 
     def __eq__(self, other):
@@ -95,13 +44,15 @@ class Map(State):
                 return form_of(self)[key]
             else:
                 return get_ref(form_of(self)[key], self.__uri__.append(key))
-        elif isinstance(self.__spec__, dict):
-            if key in self.__spec__:
-                rtype = self.__spec__[key]
+
+        if hasattr(self, "__orig_class__"):
+            spec = self.__orig_class__.__args__[0]
+            if typing.get_origin(spec) is dict:
+                _id_type, rtype = typing.get_args(spec)
             else:
-                raise KeyError(f"{self} does not contain any entry for {key}")
+                rtype = resolve_class(spec)
         else:
-            rtype = typing.get_args(self.__spec__)[1]
+            rtype = State
 
         return self._get("", key, rtype)
 
@@ -143,40 +94,30 @@ class MapRef(StateRef):
         return self.state[key]
 
 
-class Tuple(State, Functional):
-    """A tuple of `State` s."""
+class Tuple(State, Functional, typing.Generic[T]):
+    """A tuple of :class:`State` s."""
 
     __uri__ = URI(State) + "/tuple"
-    __spec__ = (State, ...)
+
+    def __new__(cls, form):
+        if hasattr(form, "__iter__"):
+            class _Tuple(cls):
+                def __iter__(self):
+                    return (self[i] for i in range(len(self)))
+
+                def __len__(self):
+                    return len(form)
+
+                def __reversed__(self):
+                    return (self[i] for i in reversed(range(len(self))))
+
+            return State.__new__(_Tuple)
+        else:
+            return State.__new__(cls)
 
     @classmethod
     def cast_from(cls, items):
         return cls(Get(cls, items))
-
-    @classmethod
-    def expect(cls, spec):
-        if typing.get_args(spec):
-            spec = typing.get_args(spec)
-
-        if len(spec) == 2 and spec[1] is Ellipsis:
-            class _Tuple(cls):
-                __spec__ = spec
-
-            return _Tuple
-        else:
-            class _Tuple(cls):
-                __spec__ = spec
-
-                def __len__(self):
-                    return len(self.__spec__)
-
-                def __iter__(self):
-                    return (self[i] for i in range(len(self)))
-
-                def __reversed__(self):
-                    return cls(tuple(self[i] for i in reversed(range(len(self)))))
-
-            return _Tuple
 
     @classmethod
     def concatenate(cls, l, r):
@@ -191,20 +132,11 @@ class Tuple(State, Functional):
         """
 
         from .scalar.number import Number
-        return cls.expect(typing.Tuple[Number, ...])(Get(URI(cls) + "/range", range))
-
-    def __new__(cls, form):
-        if hasattr(form, "__iter__"):
-            spec = tuple(type(s) if isinstance(s, State) else State for s in form)
-            return State.__new__(cls.expect(spec))
-        else:
-            return State.__new__(cls)
+        return Tuple[Number](form=Get(URI(cls) + "/range", range))
 
     def __init__(self, form):
-        while isinstance(form, Tuple):
-            form = form_of(form)
-
-        return State.__init__(self, tuple(form) if isinstance(form, list) else form)
+        form = tuple(form) if hasattr(form, "__iter__") else form
+        return State.__init__(self, form)
 
     def __add__(self, other):
         return Tuple.concatenate(self, other)
@@ -222,8 +154,8 @@ class Tuple(State, Functional):
         if i is None:
             raise ValueError(f"invalid tuple index: {i}")
 
-        spec = typing.get_args(self.__spec__) if typing.get_args(self.__spec__) else self.__spec__
-        rtype = spec[0] if len(spec) == 2 and spec[1] is Ellipsis else State
+        if isinstance(i, Range):
+            i = i.to_slice()
 
         if isinstance(i, slice):
             if i.step is not None:
@@ -232,30 +164,40 @@ class Tuple(State, Functional):
             start = deref(i.start)
             stop = deref(i.stop)
 
-            if len(spec) != 2 or (len(spec) == 2 and spec[1] is not Ellipsis):
-                # the contents may be literal, so compute the slice now if possible
-                if hasattr(form_of(self), "__getitem__"):
-                    if is_literal(start) and is_literal(stop):
-                        start = _index_of(start, len(self), 0)
-                        stop = _index_of(stop, len(self), len(self))
-                        return self.__class__([self[i] for i in range(start, stop)])
-
-            return self._get("", Range.from_slice(i), self.__class__.expect(typing.Tuple[rtype, ...]))
-
-        if isinstance(i, int):
-            if len(spec) == 2 and spec[1] is Ellipsis:
-                rtype = spec[0]
-            elif i >= len(spec):
-                raise IndexError(f"index {i} is out of bounds for {self}")
-            else:
-                rtype = spec[i]
-
+            # the contents may be literal, so compute the slice now if possible
             if hasattr(form_of(self), "__getitem__"):
-                item = form_of(self)[i]
+                if is_literal(start) and is_literal(stop):
+                    length = len(deref(self))
+                    start = _index_of(start, length, 0)
+                    stop = _index_of(stop, length, length)
+                    return Tuple([self[i] for i in range(start, stop)])
+
+            return self._get("", Range.from_slice(i), Tuple)
+
+        if isinstance(deref(i), int):
+            if hasattr(form_of(self), "__getitem__"):
+                item = form_of(self)[deref(i)]
                 if self.__uri__ == type(self).__uri__:
                     return item
                 else:
                     return get_ref(item, self.__uri__.append(i))
+
+        if hasattr(self, "__orig_class__"):
+            (spec,) = typing.get_args(self.__orig_class__)
+            if typing.get_origin(spec) is tuple:
+                spec = typing.get_args(spec)
+                if len(spec) == 2 and spec[1] is Ellipsis:
+                    rtype = spec[0]
+                elif isinstance(i, slice):
+                    rtype = typing.Tuple[spec[i]]
+                elif isinstance(deref(i), int):
+                    rtype = spec[deref(i)]
+                else:
+                    rtype = gcs([resolve_class(t) for t in spec])
+            else:
+                rtype = resolve_class(spec)
+        else:
+            rtype = State
 
         return self._get("", i, rtype)
 
@@ -266,11 +208,14 @@ class Tuple(State, Functional):
         return self.__class__(form=TupleRef(self, name))
 
     def contains(self, item):
+        """Return a :class:`Bool` indicating whether the given `item` is present in this :class:`Tuple`."""
         from .scalar.number import Bool
         return self._get("contains", item, Bool)
 
     def eq(self, other):
-        """Return a `Bool` indicating whether all elements in this `Tuple` equal those in the given `other`."""
+        """
+        Return a :class:`Bool` indicating whether all elements in this :class:`Tuple` equal those in the given `other`.
+        """
 
         if same_as(self, other):
             return True
@@ -279,18 +224,24 @@ class Tuple(State, Functional):
         return self._post("eq", {"eq": other}, Bool)
 
     def ne(self, other):
-        """Return a `Bool` indicating whether the elements in this `Tuple` do not equal those in the given `other`."""
+        """
+        Return a :class:`Bool` indicating whether the elements in this :class:`Tuple` do not equal those in `other`.
+
+        This is implemented as `self.eq(other).logical_not()`.
+        """
 
         return self.eq(other).logical_not()
 
     def len(self):
-        """Return the number of elements in this `Tuple`."""
+        """Return the number of elements in this :class:`Tuple`."""
 
         from .scalar.number import UInt
         return self._get("len", rtype=UInt)
 
     def unpack(self, length):
-        """A Python convenience method which yields an iterator over the first `length` elements in this `Tuple`."""
+        """
+        A Python convenience method which yields an iterator over the first `length` elements in this :class:`Tuple`.
+        """
 
         yield from (self[i] for i in range(length))
 
@@ -303,6 +254,91 @@ class Tuple(State, Functional):
 class TupleRef(StateRef):
     def __getitem__(self, i):
         return self.state[i]
+
+
+def autobox(state):
+    """
+    Given a Python literal, box it in the appropriate type of `State`.
+
+    For example, `autobox(1)` will return `Int(1)`, `autobox({'a': 3.14})` will return a `Map[Float]`, etc.
+    """
+
+    if isinstance(state, State) or (inspect.isclass(state) and issubclass(state, State)):
+        return state
+
+    if isinstance(state, bool):
+        from .scalar.number import Bool
+        return Bool(state)
+    elif isinstance(state, float):
+        from .scalar.number import Float
+        return Float(state)
+    elif isinstance(state, int):
+        from .scalar.number import Int
+        return Int(state)
+    elif isinstance(state, dict):
+        state = {k: autobox(v) for k, v in state.items()}
+        vtype = gcs(*[type(v) for v in state.values()]) if all(isinstance(v, State) for v in state.values()) else State
+        return Map[vtype](state)
+    elif isinstance(state, (list, tuple)):
+        state = tuple(autobox(item) for item in state)
+        dtype = gcs(*[type(item) for item in state]) if all(isinstance(item, State) for item in state) else State
+        return Tuple[dtype](state)
+    elif isinstance(state, str):
+        from .scalar.value import String
+        return String(state)
+
+    from .scalar.ref import Ref
+    if isinstance(state, Ref):
+        return State(form=state)
+
+    if isinstance(state, Interface):
+        return resolve_interface(type(state))(form=state)
+
+    return state
+
+
+def gcs(*types):
+    """Get the greatest common superclass of a list of types"""
+
+    assert all(isinstance(t, type) for t in types)
+    assert not any(t is type for t in types)
+
+    if not types:
+        return State
+
+    classes = [t.mro() for t in types]
+    for x in classes[0]:
+        if all(x in mro for mro in classes):
+            return x
+
+
+def resolve_class(type_hint):
+    """Given a generic type hint, attempt to resolve it to a callable class constructor."""
+
+    if inspect.isclass(type_hint):
+        if issubclass(type_hint, State):
+            return type_hint
+        elif issubclass(type_hint, Interface):
+            return resolve_interface(type_hint)
+    elif callable(type_hint):
+        # assume this is a generic type alias which will return an instance of the correct type when called
+        return type_hint
+
+    if type_hint is typing.Any:
+        return State
+    else:
+        raise NotImplementedError(f"resolve type hint {type_hint}")
+
+
+def resolve_interface(cls):
+    """Construct a subclass of :class:`State` which implements the given :class:`Interface`."""
+
+    assert inspect.isclass(cls)
+
+    if issubclass(cls, Interface) and not issubclass(cls, State):
+        return type(f"{cls.__name__}State", (State, cls), {})
+    else:
+        return cls
 
 
 def _index_of(i, length, default):
