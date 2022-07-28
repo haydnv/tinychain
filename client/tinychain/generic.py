@@ -5,7 +5,7 @@ from .interface import Functional, Interface
 from .json import to_json
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
-from .state import State, StateRef
+from .state import Class, State, StateRef
 from .uri import URI
 
 T = typing.TypeVar("T", bound=State)
@@ -257,7 +257,13 @@ class TupleRef(StateRef):
 
 
 def autobox(state):
-    if isinstance(state, State):
+    """
+    Given a Python literal, box it in the appropriate type of `State`.
+
+    For example, `autobox(1)` will return `Int(1)`, `autobox({'a': 3.14})` will return a `Map[Float]`, etc.
+    """
+
+    if isinstance(state, State) or (inspect.isclass(state) and issubclass(state, State)):
         return state
 
     if isinstance(state, bool):
@@ -270,9 +276,13 @@ def autobox(state):
         from .scalar.number import Int
         return Int(state)
     elif isinstance(state, dict):
-        return Map(state)
+        state = {k: autobox(v) for k, v in state.items()}
+        vtype = gcs(*[type(v) for v in state.values()]) if all(isinstance(v, State) for v in state.values()) else State
+        return Map[vtype](state)
     elif isinstance(state, (list, tuple)):
-        return Tuple(state)
+        state = tuple(autobox(item) for item in state)
+        dtype = gcs(*[type(item) for item in state]) if all(isinstance(item, State) for item in state) else State
+        return Tuple[dtype](state)
     elif isinstance(state, str):
         from .scalar.value import String
         return String(state)
@@ -290,6 +300,12 @@ def autobox(state):
 def gcs(*types):
     """Get the greatest common superclass of a list of types"""
 
+    assert all(isinstance(t, type) for t in types)
+    assert not any(t is type for t in types)
+
+    if not types:
+        return State
+
     classes = [t.mro() for t in types]
     for x in classes[0]:
         if all(x in mro for mro in classes):
@@ -297,6 +313,8 @@ def gcs(*types):
 
 
 def resolve_class(type_hint):
+    """Given a generic type hint, attempt to resolve it to a callable class constructor."""
+
     if inspect.isclass(type_hint):
         if issubclass(type_hint, State):
             return type_hint
@@ -313,6 +331,8 @@ def resolve_class(type_hint):
 
 
 def resolve_interface(cls):
+    """Construct a subclass of :class:`State` which implements the given :class:`Interface`."""
+
     assert inspect.isclass(cls)
 
     if issubclass(cls, Interface) and not issubclass(cls, State):
