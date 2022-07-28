@@ -39,10 +39,9 @@ from tinychain.scalar.number import (
 from tinychain.scalar.ref import (
     after,
     cond,
-    Case,
-    While,
     form_of,
     get_ref,
+    while_loop,
     is_conditional,
     is_literal,
     is_none,
@@ -50,6 +49,7 @@ from tinychain.scalar.ref import (
     is_op_ref,
     is_ref,
     same_as,
+    Case,
 )  # TODO: replace with helper methods
 from tinychain.scalar.value import EmailAddress, Id, String, Value
 from tinychain.state import Class, Instance, State, Stream

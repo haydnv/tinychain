@@ -5,8 +5,8 @@ from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
 from ..generic import Map, Tuple
-from ..scalar.number import Number, Bool, F64, UInt, F32, Int
-from ..scalar.ref import after, cond, Get, While
+from ..scalar.number import Number, Bool, UInt, F32, Int
+from ..scalar.ref import after, cond, while_loop, Get
 from ..scalar.value import Value
 from ..state import Stream
 from ..uri import URI
@@ -179,7 +179,7 @@ class LinearAlgebra(Library):
                 cxt.valid_x_k_k = x[k, k].abs() < 1e-3
                 return cxt.valid_k.logical_and(cxt.valid_x_k_k)
 
-            return While(while_cond, step, {
+            return while_loop(while_cond, step, {
                 'p': p.copy(),
                 'x': x.copy(),
                 'k': start_from
@@ -206,7 +206,7 @@ class LinearAlgebra(Library):
         def factor_cond(u: Tensor, i: UInt):
             return i < UInt(u.shape[0]) - 1
 
-        txn.factorization = While(factor_cond, step, {
+        txn.factorization = while_loop(factor_cond, step, {
             'p': identity(x.shape[0], F32).as_dense().copy(),
             'l': identity(x.shape[0], F32).as_dense().copy(),
             'u': x.copy(),
@@ -320,12 +320,12 @@ class LinearAlgebra(Library):
             return (F32(err).abs() > epsilon).logical_and(i < max_iter)
 
         cxt.cond = while_cond
-        result_loop = Map(While(cxt.cond, cxt.step, Map(
+        result_loop = while_loop(cxt.cond, cxt.step, Map(
             i=UInt(0),
             Q_prev=Tensor(Q).copy(),
             Q=Tensor(Q).copy(),
             R=Tensor(R),
-            err=F32(1.0))))
+            err=F32(1.0)))
 
         Q, R = Tensor(result_loop['Q']), Tensor(result_loop['R'])
 

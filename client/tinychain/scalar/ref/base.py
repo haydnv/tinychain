@@ -1,4 +1,5 @@
 """Reference types"""
+import typing
 
 from ...json import to_json
 from ...uri import URI
@@ -236,6 +237,17 @@ class While(FlowControl):
 
     def __repr__(self):
         return f"While({self.cond}, {self.op}, {self.state})"
+
+
+def while_loop(cond, op, state: None):
+    """Call `op` with `state` while `cond` is `True`."""
+
+    from ...generic import autobox, Map
+    from ...state import State
+
+    state = autobox(state)
+    rtype = type(state) if isinstance(state, Map) else Map[State]
+    return rtype(form=While(cond, op, state))
 
 
 class With(FlowControl):
