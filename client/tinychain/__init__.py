@@ -38,8 +38,8 @@ from tinychain.scalar.number import (
 )
 from tinychain.scalar.ref import (
     after,
+    cond,
     Case,
-    If,
     While,
     form_of,
     get_ref,

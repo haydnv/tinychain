@@ -156,9 +156,9 @@ class Put(Method):
             ktype = Value
             vtype = resolve_class(self.form, sig[0][1].annotation, State)
         elif len(sig) == 2:
-            (k, v) = sig
-            ktype = resolve_class(self.form, k.annotation)
-            vtype = resolve_class(self.form, v.annotation)
+            ((_, k), (_, v)) = sig
+            ktype = resolve_class(self.form, k.annotation, Value)
+            vtype = resolve_class(self.form, v.annotation, State)
         elif not sig:
             ktype = Value
             vtype = State

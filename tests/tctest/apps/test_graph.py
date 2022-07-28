@@ -33,7 +33,7 @@ class TestGraph(tc.graph.Graph):
         txn.vector = tc.graph.Vector.create()
         txn.user_ids = tc.after(txn.vector[user_id].write(True), txn.vector)
 
-        txn.friend_ids = tc.If(
+        txn.friend_ids = tc.cond(
             user_id.is_some(),
             self.friend.match(txn.user_ids, 2),
             tc.error.BadRequest("invalid user ID: {{user_id}}", user_id=user_id))

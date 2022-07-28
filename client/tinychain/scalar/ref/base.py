@@ -180,6 +180,30 @@ class If(FlowControl):
             return f"If({self.cond}, {self.then})"
 
 
+def cond(cond, then, or_else=None):
+    """Resolve either `then` or `or_else` conditionally based on the resolved value of `cond`."""
+
+    from ...error import TinyChainError
+    from ...generic import autobox, gcs
+    from ...state import State
+
+    then = autobox(then)
+    or_else = autobox(or_else)
+
+    if or_else is None:
+        rtype = type(then) if isinstance(then, State) else State
+    elif isinstance(then, TinyChainError):
+        rtype = type(or_else) if isinstance(or_else, State) else State
+    elif isinstance(or_else, TinyChainError):
+        rtype = type(then) if isinstance(then, State) else State
+    elif isinstance(then, State) and isinstance(or_else, State):
+        rtype = gcs(type(then), type(or_else))
+    else:
+        rtype = State
+
+    return rtype(form=If(cond, then, or_else))
+
+
 class While(FlowControl):
     """
     A flow control operator to execute a closure repeatedly until a condition is met.
