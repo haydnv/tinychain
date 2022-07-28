@@ -113,6 +113,25 @@ class Case(FlowControl):
         return f"Cast({self.cond}, {self.switch}, {self.case})"
 
 
+def switch_case(cond, switch, case):
+    """
+    Resolve the `case` at the first index of `switch` which resolves to `True`,
+    or the last `case` if no `switch` is `True`.
+    """
+
+    from ...generic import autobox, gcs
+    from ...state import State
+
+    case = autobox(case)
+    if hasattr(case, "__iter__"):
+        rtype = gcs(*[type(c) for c in case])
+        rtype = rtype if issubclass(rtype, State) else State
+    else:
+        rtype = State
+
+    return rtype(form=Case(cond, switch, case))
+
+
 class If(FlowControl):
     """
     A flow control used to branch execution conditionally.

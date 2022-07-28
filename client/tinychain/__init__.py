@@ -41,7 +41,6 @@ from tinychain.scalar.ref import (
     cond,
     form_of,
     get_ref,
-    while_loop,
     is_conditional,
     is_literal,
     is_none,
@@ -49,7 +48,8 @@ from tinychain.scalar.ref import (
     is_op_ref,
     is_ref,
     same_as,
-    Case,
+    switch_case,
+    while_loop,
 )  # TODO: replace with helper methods
 from tinychain.scalar.value import EmailAddress, Id, String, Value
 from tinychain.state import Class, Instance, State, Stream
