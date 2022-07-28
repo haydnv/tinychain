@@ -26,12 +26,12 @@ class TestGraph(tc.graph.Graph):
     def place_order(self, user_id: tc.U32, sku: tc.U32, quantity: tc.U32):
         order_id = self.order.max_id() + 1
         insert = self.order.insert([order_id], [user_id, sku, quantity])
-        return tc.After(insert, order_id)
+        return tc.after(insert, order_id)
 
     @tc.get
     def recommend(self, txn, user_id: tc.U32):
         txn.vector = tc.graph.Vector.create()
-        txn.user_ids = tc.After(txn.vector[user_id].write(True), txn.vector)
+        txn.user_ids = tc.after(txn.vector[user_id].write(True), txn.vector)
 
         txn.friend_ids = tc.If(
             user_id.is_some(),

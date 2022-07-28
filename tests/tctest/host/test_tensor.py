@@ -18,7 +18,7 @@ class DenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
-        cxt.result = tc.After(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
+        cxt.result = tc.after(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
         expected = expect_dense(tc.F64, shape, [0] + [c] * (np.product(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
@@ -45,7 +45,7 @@ class DenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Dense.arange(shape, 1, 91)
-        cxt.result = tc.After(cxt.tensor[:, :, 1:-1, 1:-1].write(1), cxt.tensor)
+        cxt.result = tc.after(cxt.tensor[:, :, 1:-1, 1:-1].write(1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.arange(1, 91).reshape([2, 5, 3, 3])
@@ -57,7 +57,7 @@ class DenseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Dense.zeros([2, 2, 5])
         cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
-        cxt.result = tc.After(cxt.big[1, :2].write(cxt.small[0]), cxt.big)
+        cxt.result = tc.after(cxt.big[1, :2].write(cxt.small[0]), cxt.big)
 
         actual = self.host.post(ENDPOINT, cxt)
 
@@ -430,7 +430,7 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.tensor[coord].write(value), cxt.tensor)
+        cxt.result = tc.after(cxt.tensor[coord].write(value), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.I32, shape, [[coord, value]])
@@ -441,7 +441,7 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
-        cxt.result = tc.After(cxt.tensor[:, 2:-1].write(1), cxt.tensor)
+        cxt.result = tc.after(cxt.tensor[:, 2:-1].write(1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = expect_sparse(tc.F32, shape, [[[0, 2], 1], [[0, 3], 1], [[1, 2], 1], [[1, 3], 1]])
@@ -453,7 +453,7 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
-        cxt.result = tc.After([
+        cxt.result = tc.after([
             cxt.big[1].write(1),
             cxt.small[1].write(2),
         ], cxt.big + cxt.small)
@@ -475,7 +475,7 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([1, 1])
-        cxt.result = tc.After([
+        cxt.result = tc.after([
             cxt.big[:2].write(1),
             cxt.small[0].write(-2),
         ], cxt.big / cxt.small)
@@ -497,7 +497,7 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([5, 2])
-        cxt.result = tc.After([
+        cxt.result = tc.after([
             cxt.big[:, 1:-2].write(2),
             cxt.small[1].write(3),
         ], cxt.big * cxt.small)
@@ -519,7 +519,7 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I16)
         cxt.small = tc.tensor.Sparse.zeros([5, 2], tc.U32)
-        cxt.result = tc.After([
+        cxt.result = tc.after([
             cxt.big[:, 1:-2].write(2),
             cxt.small[1].write(3),
         ], cxt.small - cxt.big)
@@ -541,7 +541,7 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.big[0, 1:3].write(2), cxt.big.sum(axis))
+        cxt.result = tc.after(cxt.big[0, 1:3].write(2), cxt.big.sum(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros(shape, dtype=np.int32)
@@ -556,7 +556,7 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.After(cxt.big[0, 1:3].write(2), cxt.big.product(axis))
+        cxt.result = tc.after(cxt.big[0, 1:3].write(2), cxt.big.product(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
 
@@ -650,7 +650,7 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
         cxt.sparse = tc.tensor.Sparse.zeros([5, 2], tc.I32)
-        cxt.result = tc.After(cxt.sparse[1].write(3), cxt.dense + cxt.sparse)
+        cxt.result = tc.after(cxt.sparse[1].write(3), cxt.dense + cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(0, 30).reshape([3, 5, 2])
@@ -664,7 +664,7 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
-        cxt.result = tc.After(cxt.sparse[1].write(2), cxt.sparse / cxt.dense)
+        cxt.result = tc.after(cxt.sparse[1].write(2), cxt.sparse / cxt.dense)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
@@ -677,7 +677,7 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
-        cxt.result = tc.After(cxt.sparse[0, 1:3].write(2), cxt.dense * cxt.sparse)
+        cxt.result = tc.after(cxt.sparse[0, 1:3].write(2), cxt.dense * cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros([2, 3])

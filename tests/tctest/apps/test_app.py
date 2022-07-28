@@ -25,7 +25,7 @@ class TestApp(tc.graph.Graph):
     def create_user(self, first_name: tc.String, last_name: tc.String):
         # TODO: change method signature to (self, new_user: User) on completion of #175
         user_id = self.user.max_id() + 1
-        return tc.After(self.user.insert([user_id], [first_name, last_name]), user_id)
+        return tc.after(self.user.insert([user_id], [first_name, last_name]), user_id)
 
 
 class UserTests(unittest.TestCase):

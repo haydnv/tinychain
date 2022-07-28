@@ -61,6 +61,17 @@ class After(FlowControl):
         return f"After({self.when}, {self.then})"
 
 
+def after(when, then):
+    """Delay execution of `then` until `when` is resolved."""
+
+    from ...generic import autobox
+    from ...state import State
+
+    then = autobox(then)
+    rtype = type(then) if isinstance(then, State) else State
+    return rtype(form=After(when, then))
+
+
 class Case(FlowControl):
     """
     A flow control used to branch execution conditionally.

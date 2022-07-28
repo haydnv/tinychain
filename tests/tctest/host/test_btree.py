@@ -13,7 +13,7 @@ class BTreeTests(HostTest):
     def testCreate(self):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
-        cxt.result = tc.After(cxt.tree.insert((1, "one")), cxt.tree.count())
+        cxt.result = tc.after(cxt.tree.insert((1, "one")), cxt.tree.count())
 
         count = self.host.post(ENDPOINT, cxt)
         self.assertEqual(count, 1)
@@ -29,7 +29,7 @@ class BTreeTests(HostTest):
                 cxt.tree.insert((i, num2words(i)))
                 for i in keys]
 
-            cxt.result = tc.After(cxt.inserts, cxt.tree.count())
+            cxt.result = tc.after(cxt.inserts, cxt.tree.count())
 
             result = self.host.post(ENDPOINT, cxt)
             self.assertEqual(result, x)
@@ -40,7 +40,7 @@ class BTreeTests(HostTest):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.result = tc.After(cxt.inserts, cxt.tree[(1,)])
+        cxt.result = tc.after(cxt.inserts, cxt.tree[(1,)])
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected([keys[1]]))
@@ -51,7 +51,7 @@ class BTreeTests(HostTest):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.result = tc.After(cxt.inserts, cxt.tree.reverse())
+        cxt.result = tc.after(cxt.inserts, cxt.tree.reverse())
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(list(reversed(keys))))
@@ -62,7 +62,7 @@ class BTreeTests(HostTest):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.result = tc.After(cxt.inserts, cxt.tree[29:32])
+        cxt.result = tc.after(cxt.inserts, cxt.tree[29:32])
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(keys[29:32]))
@@ -74,8 +74,8 @@ class BTreeTests(HostTest):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
-        cxt.delete = tc.After(cxt.inserts, cxt.tree.delete())
-        cxt.result = tc.After(cxt.delete, cxt.tree)
+        cxt.delete = tc.after(cxt.inserts, cxt.tree.delete())
+        cxt.result = tc.after(cxt.delete, cxt.tree)
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected([]))
@@ -89,7 +89,7 @@ class BTreeTests(HostTest):
         cxt = tc.Context()
         cxt.tree = tc.btree.BTree.load(SCHEMA, ordered)
         cxt.delete = cxt.tree.delete([slice(25, 35)])
-        cxt.result = tc.After(cxt.delete, cxt.tree)
+        cxt.result = tc.after(cxt.delete, cxt.tree)
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expected(ordered))
@@ -101,4 +101,3 @@ def expected(rows):
 
 if __name__ == "__main__":
     unittest.main()
-

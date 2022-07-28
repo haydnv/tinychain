@@ -6,7 +6,7 @@ import typing
 from .base import _Base
 from .interface import Functional
 from .json import to_json
-from .scalar.ref import form_of, get_ref, hex_id, is_ref, Ref
+from .scalar import ref
 from .uri import URI
 
 
@@ -25,30 +25,30 @@ class State(_Base):
                 raise ValueError(f"instance of {self.__class__.__name__} has no form")
         else:
             while isinstance(form, State):
-                form = form_of(form)
+                form = ref.form_of(form)
 
             # make sure to capture the URI of the given form
             if isinstance(form, URI):
                 self.__uri__ = form
-            elif is_ref(form) and hasattr(form, "__uri__"):
+            elif ref.is_ref(form) and hasattr(form, "__uri__"):
                 self.__uri__ = URI(form)
 
             self.__form__ = form
 
-        assert not isinstance(form_of(self), State)
+        assert not isinstance(ref.form_of(self), State)
 
         _Base.__init__(self)
 
         assert hasattr(self, "__form__")
 
     def __hash__(self):
-        return hash_of(form_of(self))
+        return hash_of(ref.form_of(self))
 
     def __id__(self):
-        return hex_id(form_of(self))
+        return ref.hex_id(ref.form_of(self))
 
     def __json__(self):
-        form = form_of(self)
+        form = ref.form_of(self)
 
         if isinstance(form, URI) and form == self.__uri__:
             return to_json(form)
@@ -58,16 +58,16 @@ class State(_Base):
             return {str(self.__uri__): [to_json(form)]}
 
     def __ns__(self, cxt, name_hint):
-        cxt.deanonymize(form_of(self), name_hint)
+        cxt.deanonymize(ref.form_of(self), name_hint)
 
     def __ref__(self, name):
-        if hasattr(form_of(self), "__ref__"):
-            return self.__class__(form=get_ref(form_of(self), name))
+        if hasattr(ref.form_of(self), "__ref__"):
+            return self.__class__(form=ref.get_ref(ref.form_of(self), name))
         else:
             return self.__class__(form=StateRef(self, name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({form_of(self)})"
+        return f"{self.__class__.__name__}({ref.form_of(self)})"
 
     def cast(self, dtype):
         """Attempt to cast this `State` into the given `dtype`."""
@@ -174,7 +174,7 @@ class Instance(Object):
         raise NotImplementedError("abstract method")
 
 
-class StateRef(Ref):
+class StateRef(ref.Ref):
     def __init__(self, state, name):
         self.state = state
         self.__uri__ = name if isinstance(name, URI) else URI(name)
@@ -183,7 +183,7 @@ class StateRef(Ref):
         return self.state, self.__uri__
 
     def __id__(self):
-        return hex_id(self.state)
+        return ref.hex_id(self.state)
 
     def __hash__(self):
         return hash_of(self.state)

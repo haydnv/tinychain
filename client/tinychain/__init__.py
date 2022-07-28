@@ -37,7 +37,7 @@ from tinychain.scalar.number import (
     UInt,
 )
 from tinychain.scalar.ref import (
-    After,
+    after,
     Case,
     If,
     While,

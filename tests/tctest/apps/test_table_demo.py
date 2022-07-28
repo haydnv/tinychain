@@ -50,7 +50,7 @@ class Web(tc.app.App):
     def add_view(self, key: tc.String):
         # TODO: this type expectation should not be necessary
         views = tc.UInt(self.views(key)) + 1
-        return tc.After(self.cache.delete(key), self.cache.insert([key, views]))
+        return tc.after(self.cache.delete(key), self.cache.insert([key, views]))
 
 
 class TableDemoTests(unittest.TestCase):

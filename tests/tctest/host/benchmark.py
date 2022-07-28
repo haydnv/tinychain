@@ -66,7 +66,7 @@ class DataStructures(tc.app.App):
         dnn = tc.ml.nn.Sequential(layers)
         cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
 
-        return tc.After(
+        return tc.after(
             cxt.optimizer.train(1, cxt.inputs),
             (abs(cxt.labels - cxt.optimizer.ml_model.eval(cxt.inputs)) >= 0.5).cast(tc.U8).sum())
 
