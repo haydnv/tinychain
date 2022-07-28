@@ -1,4 +1,5 @@
 """Reference types"""
+import typing
 
 from ...json import to_json
 from ...uri import URI
@@ -61,6 +62,17 @@ class After(FlowControl):
         return f"After({self.when}, {self.then})"
 
 
+def after(when, then):
+    """Delay execution of `then` until `when` is resolved."""
+
+    from ...generic import autobox
+    from ...state import State
+
+    then = autobox(then)
+    rtype = type(then) if isinstance(then, State) else State
+    return rtype(form=After(when, then))
+
+
 class Case(FlowControl):
     """
     A flow control used to branch execution conditionally.
@@ -99,6 +111,25 @@ class Case(FlowControl):
 
     def __repr__(self):
         return f"Cast({self.cond}, {self.switch}, {self.case})"
+
+
+def switch_case(cond, switch, case):
+    """
+    Resolve the `case` at the first index of `switch` which resolves to `True`,
+    or the last `case` if no `switch` is `True`.
+    """
+
+    from ...generic import autobox, gcs
+    from ...state import State
+
+    case = autobox(case)
+    if hasattr(case, "__iter__"):
+        rtype = gcs(*[type(c) for c in case])
+        rtype = rtype if issubclass(rtype, State) else State
+    else:
+        rtype = State
+
+    return rtype(form=Case(cond, switch, case))
 
 
 class If(FlowControl):
@@ -169,6 +200,30 @@ class If(FlowControl):
             return f"If({self.cond}, {self.then})"
 
 
+def cond(cond, then, or_else=None):
+    """Resolve either `then` or `or_else` conditionally based on the resolved value of `cond`."""
+
+    from ...error import TinyChainError
+    from ...generic import autobox, gcs
+    from ...state import State
+
+    then = autobox(then)
+    or_else = autobox(or_else)
+
+    if or_else is None:
+        rtype = type(then) if isinstance(then, State) else State
+    elif isinstance(then, TinyChainError):
+        rtype = type(or_else) if isinstance(or_else, State) else State
+    elif isinstance(or_else, TinyChainError):
+        rtype = type(then) if isinstance(then, State) else State
+    elif isinstance(then, State) and isinstance(or_else, State):
+        rtype = gcs(type(then), type(or_else))
+    else:
+        rtype = State
+
+    return rtype(form=If(cond, then, or_else))
+
+
 class While(FlowControl):
     """
     A flow control operator to execute a closure repeatedly until a condition is met.
@@ -201,6 +256,17 @@ class While(FlowControl):
 
     def __repr__(self):
         return f"While({self.cond}, {self.op}, {self.state})"
+
+
+def while_loop(cond, op, state: None):
+    """Call `op` with `state` while `cond` is `True`."""
+
+    from ...generic import autobox, Map
+    from ...state import State
+
+    state = autobox(state)
+    rtype = type(state) if isinstance(state, Map) else Map[State]
+    return rtype(form=While(cond, op, state))
 
 
 class With(FlowControl):

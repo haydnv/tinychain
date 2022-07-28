@@ -31,8 +31,8 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.delete = tc.After(cxt.inserts, cxt.table.delete(tc.Map(views=slice(40))))
-        cxt.result = tc.After(cxt.delete, cxt.table)
+        cxt.delete = tc.after(cxt.inserts, cxt.table.delete(tc.Map(views=slice(40))))
+        cxt.result = tc.after(cxt.delete, cxt.table)
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, remaining))
@@ -45,7 +45,7 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
         cxt.update = cxt.table.update({"views": 0}, {"views": slice(10)})
-        cxt.result = tc.After(cxt.update, cxt.table.where({"views": slice(1)}).count())
+        cxt.result = tc.after(cxt.update, cxt.table.where({"views": slice(1)}).count())
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, 10)
@@ -58,7 +58,7 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.result = tc.After(cxt.inserts, cxt.table.group_by(["views"]))
+        cxt.result = tc.after(cxt.inserts, cxt.table.group_by(["views"]))
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [[0], [1]])
@@ -72,7 +72,7 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.result = tc.After(cxt.inserts, cxt.table.order_by(["views"], True))
+        cxt.result = tc.after(cxt.inserts, cxt.table.order_by(["views"], True))
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, rows))
@@ -85,7 +85,7 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.result = tc.After(cxt.inserts, cxt.table.where({"name": "one"}))
+        cxt.result = tc.after(cxt.inserts, cxt.table.where({"name": "one"}))
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, [["one", 1]]))
@@ -98,7 +98,7 @@ class TableTests(ClientTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.result = tc.After(cxt.inserts, cxt.table.where({"views": slice(10, 20)}))
+        cxt.result = tc.after(cxt.inserts, cxt.table.where({"views": slice(10, 20)}))
 
         result = self.host.post(ENDPOINT, cxt)
         self.assertEqual(result, expected(SCHEMA, list([[num2words(i), i] for i in range(10, 20)])))

@@ -5,8 +5,8 @@ from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
 from ..generic import Map, Tuple
-from ..scalar.number import Number, Bool, F64, UInt, F32, Int
-from ..scalar.ref import After, Get, If, While
+from ..scalar.number import Number, Bool, UInt, F32, Int
+from ..scalar.ref import after, cond, while_loop, Get
 from ..scalar.value import Value
 from ..state import Stream
 from ..uri import URI
@@ -82,13 +82,13 @@ class LinearAlgebra(Library):
         """Compute the Householder vector of the given column vector `a`."""
 
         cxt.alpha = x[0]
-        cxt.s = F32(If(Int(x.shape[0]) > 1, (x[1:]**2).sum(), 0.0))
+        cxt.s = cond(x.shape[0] > 1, (x[1:]**2).sum(), 0.0)
         cxt.t = (cxt.alpha**2 + cxt.s)**0.5
 
         cxt.v = x.copy()
-        cxt.v_zero = F64(If(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t)))
-        tau = If(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero**2))
-        v = Tensor(If(Int(x.shape[0]) > 1, After(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero), cxt.v))
+        cxt.v_zero = cond(cxt.alpha <= 0, cxt.alpha - cxt.t, -cxt.s / (cxt.alpha + cxt.t))
+        tau = cond(cxt.s.abs() < EPS, 0, 2 * cxt.v_zero**2 / (cxt.s + cxt.v_zero**2))
+        v = cond(Int(x.shape[0]) > 1, after(cxt.v[0].write(cxt.v_zero), cxt.v / cxt.v_zero), cxt.v)
 
         return v, tau
 
@@ -103,12 +103,11 @@ class LinearAlgebra(Library):
         txn.q_init = Dense.zeros([txn.n, txn.n])
         txn.u_init = Dense.zeros([txn.n, txn.n])
 
-        txn.u = Tensor(After(txn.u_init[:, 0].write(a[:, 0]), txn.u_init)).copy()
-        txn.q = Tensor(
-            After(
-                After(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / norm(txn.u_init[:, 0]))),
+        txn.u = after(txn.u_init[:, 0].write(a[:, 0]), txn.u_init).copy()
+        txn.q = after(
+                after(txn.u, txn.q_init[:, 0].write(txn.u_init[:, 0] / norm(txn.u_init[:, 0]))),
                 txn.q_init
-            )).copy()
+            ).copy()
 
         @closure(a, txn.q, txn.u)
         @get_op
@@ -117,17 +116,17 @@ class LinearAlgebra(Library):
             @get_op
             def u_step(j: UInt) -> Map:
                 col = txn.u[:, i].copy() - (txn.q[:, j] * (a[:, i] * txn.q[:, j]).sum())
-                return After(txn.u[:, i].write(col), {})
+                return after(txn.u[:, i].write(col), {})
 
-            cxt.update_u = After(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
-            cxt.update_q = After(
+            cxt.update_u = after(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
+            cxt.update_q = after(
                 cxt.update_u,
                 txn.q[:, i].write(txn.u[:, i] / norm(txn.u[:, i])))
 
-            return After(cxt.update_q, {})
+            return after(cxt.update_q, {})
 
         txn.update_q = Stream.range((1, UInt(txn.n))).for_each(q_step)
-        txn._q = Tensor(After(txn.update_q, txn.q))
+        txn._q = Tensor(after(txn.update_q, txn.q))
         txn._r = Dense.zeros([txn.n, txn.m])
 
         @closure(txn._r, a, txn._q, txn.m)
@@ -140,7 +139,7 @@ class LinearAlgebra(Library):
 
             return Stream.range((i, txn.m)).for_each(r_step_inner)
 
-        return After(Stream.range(txn.n).for_each(r_step), (txn._q, txn._r))
+        return after(Stream.range(txn.n).for_each(r_step), (txn._q, txn._r))
 
     @post
     def plu(self, txn, x: Tensor) -> PLUFactorization:
@@ -164,7 +163,7 @@ class LinearAlgebra(Library):
                 p_k, p_kp1 = p[start_from].copy(), p[k + 1].copy()
                 x_k, x_kp1 = x[start_from].copy(), x[k + 1].copy()
 
-                return After(
+                return after(
                     [
                         p[start_from].write(p_kp1),
                         p[k + 1].write(p_k),
@@ -175,12 +174,12 @@ class LinearAlgebra(Library):
                 )
 
             @post
-            def cond(cxt, x: Tensor, k: UInt):
+            def while_cond(cxt, x: Tensor, k: UInt):
                 cxt.valid_k = k < (x.shape[0] - 1)
                 cxt.valid_x_k_k = x[k, k].abs() < 1e-3
                 return cxt.valid_k.logical_and(cxt.valid_x_k_k)
 
-            return While(cond, step, {
+            return while_loop(while_cond, step, {
                 'p': p.copy(),
                 'x': x.copy(),
                 'k': start_from
@@ -196,7 +195,7 @@ class LinearAlgebra(Library):
             p = Tensor(pu['p'])
             n = UInt(pu['k']) - i
             factor = Tensor(u[i + 1:, i] / u[i, i])
-            return After(
+            return after(
                 when=[
                     l[i + 1:, i].write(factor),
                     u[i + 1:].write(u[i + 1:] - factor.expand_dims() * u[i]),
@@ -204,10 +203,10 @@ class LinearAlgebra(Library):
                 then=Map(p=p, l=l, u=u, i=i + 1, num_permutations=num_permutations + n))
 
         @post
-        def cond(u: Tensor, i: UInt):
+        def factor_cond(u: Tensor, i: UInt):
             return i < UInt(u.shape[0]) - 1
 
-        txn.factorization = While(cond, step, {
+        txn.factorization = while_loop(factor_cond, step, {
             'p': identity(x.shape[0], F32).as_dense().copy(),
             'l': identity(x.shape[0], F32).as_dense().copy(),
             'u': x.copy(),
@@ -215,7 +214,7 @@ class LinearAlgebra(Library):
             "num_permutations": 0,
         })
 
-        return If(
+        return cond(
             _is_square(x),
             txn.factorization,
             BadRequest("PLU decomposition requires a square matrix, not {{x}}", x=x))
@@ -235,7 +234,7 @@ class LinearAlgebra(Library):
         sign = Int(-1).pow(plu_result.num_permutations)
         determinant = diagonal(plu_result.u).product() * sign
 
-        return If(
+        return cond(
             _is_square(x),
             determinant,
             BadRequest("determinant requires a square matrix, not {{x}}", x=x))
@@ -267,19 +266,20 @@ class LinearAlgebra(Library):
         def step(i: UInt):
             d = self.det(x=cxt.copy[i])
             logdet = F32(d.abs().log())
-            sign = Int(If(d > 0, 1, -1)) * 1
+            sign = cond(d > 0, 1, -1) * 1
             return [
                 cxt.sign_result[i].write(sign),
                 cxt.logdet_result[i].write(logdet),
             ]
 
-        result = After(Stream.range((0, cxt.batch_size)).for_each(step), [cxt.sign_result, cxt.logdet_result])
-        sign, determinants = Tuple(result).unpack(2)
+        sign, determinants = after(
+            Stream.range((0, cxt.batch_size)).for_each(step),
+            [cxt.sign_result, cxt.logdet_result])
 
         return Tensor(sign).reshape(cxt.batch_shape), Tensor(determinants).reshape(cxt.batch_shape)
 
     @post
-    def svd_matrix(self, cxt, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    def svd_matrix(self, cxt, A: Tensor, l: UInt = 0, epsilon: F32 = 1e-5, max_iter: UInt = 30) -> typing.Tuple[Tensor, Tensor, Tensor]:
         """
         Compute the singular value decomposition of the given matrix `A`
 
@@ -289,17 +289,17 @@ class LinearAlgebra(Library):
 
         cxt.shape = A.shape
         cxt.n_orig, cxt.m_orig = cxt.shape.unpack(2)
-        k = Int(If(l == UInt(0), Value.min(cxt.n_orig, cxt.m_orig), l))
+        k = cond(l == 0, Value.min(cxt.n_orig, cxt.m_orig), l)
         cxt.A_orig = A.copy()
-        cxt.A1, n, m = Tuple(If(
-            UInt(cxt.n_orig) > UInt(cxt.m_orig),
+        cxt.A1, n, m = cond(
+            cxt.n_orig > cxt.m_orig,
             [A.transpose() @ A, Tensor(A).shape[1], Tensor(A).shape[1]],
-            If(
+            cond(
                 cxt.n_orig < cxt.m_orig,
                 [A @ Tensor(A).transpose(), A.shape[0], A.shape[0]],
                 [A, cxt.n_orig, cxt.m_orig]
             ),
-        )).unpack(3)
+        ).unpack(3)  # TODO: this call to `unpack` should not be necessary
 
         Q, R = self.qr(a=Dense.random_uniform([n, k]).abs())
 
@@ -316,16 +316,16 @@ class LinearAlgebra(Library):
 
         @closure(epsilon, max_iter)
         @post
-        def cond(i: UInt, err: F32):
+        def while_cond(i: UInt, err: F32):
             return (F32(err).abs() > epsilon).logical_and(i < max_iter)
 
-        cxt.cond = cond
-        result_loop = Map(While(cxt.cond, cxt.step, Map(
+        cxt.cond = while_cond
+        result_loop = while_loop(cxt.cond, cxt.step, Map(
             i=UInt(0),
             Q_prev=Tensor(Q).copy(),
             Q=Tensor(Q).copy(),
             R=Tensor(R),
-            err=F32(1.0))))
+            err=F32(1.0)))
 
         Q, R = Tensor(result_loop['Q']), Tensor(result_loop['R'])
 
@@ -334,27 +334,27 @@ class LinearAlgebra(Library):
         cxt.inv_matrix = (cxt.eye * singular_values.pow(-1))
         cxt.Q_T = Q.transpose()
 
-        cxt.vec_sing_values_upd = Map(If(
+        cxt.vec_sing_values_upd = cond(
             cxt.n_orig == cxt.m_orig,
             Map(left_vecs=cxt.Q_T, right_vecs=cxt.Q_T, singular_values=singular_values.pow(2)),
             Map(
                 left_vecs=einsum('ij,jk->ik', [einsum('ij,jk->ik', [cxt.A_orig, Q]), cxt.inv_matrix]),
                 right_vecs=cxt.Q_T,
-                singular_values=singular_values)))
+                singular_values=singular_values))
 
-        vec_sing_values = Map(If(
+        vec_sing_values = cond(
             cxt.n_orig < cxt.m_orig,
             Map(
                 left_vecs=cxt.Q_T,
                 right_vecs=einsum('ij,jk->ik', [einsum('ij,jk->ik', [cxt.inv_matrix, Q]), cxt.A_orig]),
                 singular_values=singular_values),
-            cxt.vec_sing_values_upd))
+            cxt.vec_sing_values_upd)
 
         return vec_sing_values['left_vecs'], vec_sing_values['singular_values'], vec_sing_values['right_vecs']
 
     # TODO: update to support `Tensor` (not just `Dense`) after `Sparse.concatenate` is implemented
     @post
-    def svd_parallel(self, txn, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    def svd_parallel(self, txn, A: Tensor, l: UInt = 0, epsilon: F32 = 1e-5, max_iter: UInt = 30) -> typing.Tuple[Tensor, Tensor, Tensor]:
         """
         Given a `Tensor` of `matrices`, return the singular value decomposition `(s, u, v)` of each matrix.
 
@@ -404,7 +404,7 @@ class LinearAlgebra(Library):
          `A[...]` ~= `u[...] * (identity([P, P]) * s[...]) * v[...]`, where `P = min(N, M)`.
         """
 
-        return If(
+        return cond(
             A.ndim == 2,
             self.svd_matrix(A=A, l=l, epsilon=epsilon, max_iter=max_iter),
             self.svd_parallel(A=A, l=l, epsilon=epsilon, max_iter=max_iter))

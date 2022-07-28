@@ -31,7 +31,7 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
         cxt.diag = tc.tensor.Dense.load([size], diag, tc.I32)
-        cxt.result = tc.After(tc.math.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
+        cxt.result = tc.after(tc.math.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
 
         x[range(size), range(size)] = diag
         actual = self.host.post(ENDPOINT, cxt)
