@@ -2,6 +2,7 @@
 
 import inspect
 import logging
+import typing
 
 from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
@@ -24,6 +25,9 @@ from .variable import namespace, Variable
 # TODO: move into the reflect.method module and rename
 class ReflectedMethod(method.Post):
     def __init__(self, header, name, graph, sig, rtype):
+        if tuple(sig.parameters)[0] != "self":
+            raise TypeError(f"not a method signature: {tuple(sig.parameters.items())}")
+
         self.name = name
         self.header = header
         self.graph = graph
@@ -50,7 +54,7 @@ class Layer(Model, Differentiable):
             # if this is an abstract class, don't try to reflect over the eval method
             return NotImplemented("Layer.gradient")
 
-        sig = list(inspect.signature(Linear.gradient).parameters.items())
+        sig = inspect.signature(Linear.gradient.form)
 
         if is_ref(self.eval):
             form = deref(self.eval)
@@ -273,8 +277,7 @@ class Sequential(NeuralNet, Dynamic):
         for i, (inputs, layer) in reversed(list(enumerate(zip(cxt.layer_inputs, self.layers)))):
             # TODO: this call to get_ref should not be necessary
             layer = get_ref(layer, URI(self, "layers", i))
-            # TODO: this type expectation and parameter names should not be necessary
-            layer_grad = Map[Gradient](layer.gradient(inputs=inputs, loss=loss))
+            layer_grad = layer.gradient(inputs, loss)
             layer_grads.append(layer_grad)
             loss = layer_grad["inputs"]  # TODO: should this handle other layer eval signatures automatically?
 

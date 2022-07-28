@@ -183,7 +183,7 @@ class Tuple(State, Functional, typing.Generic[T]):
                     return get_ref(item, self.__uri__.append(i))
 
         if hasattr(self, "__orig_class__"):
-            spec = self.__orig_class__.__args__[0]
+            (spec,) = typing.get_args(self.__orig_class__)
             if typing.get_origin(spec) is tuple:
                 spec = typing.get_args(spec)
                 if len(spec) == 2 and spec[1] is Ellipsis:
@@ -302,6 +302,9 @@ def resolve_class(type_hint):
             return type_hint
         elif issubclass(type_hint, Interface):
             return resolve_interface(type_hint)
+    elif callable(type_hint):
+        # assume this is a generic type alias which will return an instance of the correct type when called
+        return type_hint
 
     if type_hint is typing.Any:
         return State

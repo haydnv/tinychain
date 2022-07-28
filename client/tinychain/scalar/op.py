@@ -1,5 +1,10 @@
 """User-defined ops"""
 
+import dataclasses
+import typing
+
+from ..generic import resolve_class
+from ..state import State
 from ..uri import URI
 
 from . import ref
@@ -30,22 +35,44 @@ class Put(Op):
         return ref.Put(self, key, value)
 
 
-class Post(Op):
+Args = typing.TypeVar("Args")
+RType = typing.TypeVar("RType", bound=State)
+
+
+class Post(Op, typing.Generic[Args, RType]):
     """A function which can be called via a POST request."""
 
     __uri__ = URI(Op) + "/post"
 
-    # TODO: this should retain the return type, in the case of a reflected op
-    def __call__(self, params=None, **kwargs):
-        if params is None:
-            params = kwargs
-        elif not isinstance(params, dict):
-            raise TypeError(f"to call a POST op requires named parameters, not {params}")
-        elif kwargs:
-            raise ValueError("POST call takes a Map or kwargs, not both:", params, kwargs)
+    def __init__(self, form):
+        assert str(form) != "$loss"
+        Op.__init__(self, form)
 
-        params = params if params else kwargs
-        return ref.Post(self, params)
+    def __call__(self, *args, **kwargs):
+        if hasattr(self, "__orig_class__"):
+            sig, rtype = typing.get_args(self.__orig_class__)
+            assert dataclasses.is_dataclass(sig)
+            sig = dataclasses.fields(sig)
+            rtype = resolve_class(rtype)
+
+            if len(args) > len(sig):
+                raise TypeError(f"{self} takes {len(sig)} arguments but got {args}")
+
+            params = {}
+            for i, field in enumerate(sig):
+                if i < len(args):
+                    params[field.name] = args[i]
+                elif field.name in kwargs:
+                    params[field.name] = kwargs[field.name]
+                elif field.default is not dataclasses.MISSING:
+                    params[field.name] = field.default
+                else:
+                    raise TypeError(f"missing value for parameter {field.name} in call to {self} with arguments {args}")
+        else:
+            assert not args
+            params = kwargs
+
+        return rtype(form=ref.Post(self, params))
 
 
 class Delete(Op):

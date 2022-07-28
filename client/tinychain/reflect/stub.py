@@ -32,7 +32,7 @@ class ReflectionStub(MethodStub):
     def expand(self, header, name):
         from ..state import State
 
-        sig = list(inspect.signature(self.form).parameters.items())
+        sig = tuple(inspect.signature(self.form).parameters.items())
         params = [header]
 
         if not sig or sig[0][0] != "self":
