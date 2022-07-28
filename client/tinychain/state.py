@@ -1,6 +1,7 @@
 """A discrete :class:`State`."""
 
 import inspect
+import typing
 
 from .base import _Base
 from .interface import Functional
@@ -139,8 +140,10 @@ class Object(State):
     __uri__ = URI(State) + "/object"
 
 
-# TODO: add a generic type parameter
-class Class(Object):
+T = typing.TypeVar("T", bound=type[State])
+
+
+class Class(Object, typing.Generic[T]):
     """A TinyChain class (possibly a user-defined class)."""
 
     __uri__ = URI(Object) + "/class"
@@ -149,13 +152,17 @@ class Class(Object):
         if args and kwargs:
             raise ValueError("Class.__call__ accepts args or kwargs but not both")
 
+        rtype = State
+        if hasattr(self, "__orig_class__"):
+            from .generic import resolve_class
+            (rtype,) = typing.get_args(self.__orig_class__)
+            rtype = resolve_class(rtype)
+
         from .scalar.ref import Get
 
         subject = self.__uri__
-        if args:
-            return Get(subject, args)
-        else:
-            return Get(subject, kwargs)
+        op_ref = Get(subject, args) if args else Get(subject, kwargs)
+        return rtype(form=op_ref)
 
 
 class Instance(Object):

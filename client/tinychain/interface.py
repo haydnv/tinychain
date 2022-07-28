@@ -75,7 +75,6 @@ class Compare(Equality):
         raise NotImplementedError(f"{self.__class__} must implement the `lte` method")
 
 
-# TODO: generic type support
 class Functional(Interface):
     def filter(self, op):
         """Filter the elements of this :class:`Functional` using the given `op`."""

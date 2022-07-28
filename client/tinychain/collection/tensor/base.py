@@ -261,8 +261,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
             if inspect.isclass(dtype) and issubclass(dtype, Number):
                 return dtype
 
-        # TODO: update with a generic type parameter
-        return Class(ref.Get(URI(self, "dtype")))
+        return Class[Number](form=ref.Get(URI(self, "dtype")))
 
     @property
     def ndim(self):
