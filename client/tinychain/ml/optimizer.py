@@ -2,9 +2,7 @@ from .. import error
 from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
-from ..generic import Map
 from ..math.operator import constant, derivative_of, is_constant
-from ..ml.interface import Gradient
 from ..ml.variable import namespace
 from ..scalar.number import Float, F32, F64, UInt
 from ..scalar.ref import form_of, After, If
@@ -13,6 +11,8 @@ from . import LIB_URI
 
 
 class Optimizer(Model):
+    """An optimizer for a :class:`Differentiable` :class:`Model`"""
+
     __uri__ = LIB_URI.append("Optimizer")
 
     @post

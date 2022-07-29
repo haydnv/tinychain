@@ -249,6 +249,8 @@ class NeuralNet(Model, Differentiable):
 
 
 class Sequential(NeuralNet, Dynamic):
+    """A sequence of :class:`Layer` s"""
+
     def __init__(self, layers):
         if not layers:
             raise ValueError("Sequential requires at least one layer")

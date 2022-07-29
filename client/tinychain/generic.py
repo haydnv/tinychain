@@ -90,6 +90,8 @@ class Map(State, typing.Generic[T]):
 
 
 class MapRef(StateRef):
+    """A named reference to a :class:`Map`."""
+
     def __getitem__(self, key):
         return self.state[key]
 
@@ -209,6 +211,7 @@ class Tuple(State, Functional, typing.Generic[T]):
 
     def contains(self, item):
         """Return a :class:`Bool` indicating whether the given `item` is present in this :class:`Tuple`."""
+
         from .scalar.number import Bool
         return self._get("contains", item, Bool)
 
@@ -252,6 +255,8 @@ class Tuple(State, Functional, typing.Generic[T]):
 
 
 class TupleRef(StateRef):
+    """A named reference to a :class:`Tuple`."""
+
     def __getitem__(self, i):
         return self.state[i]
 

@@ -199,6 +199,12 @@ class StateRef(ref.Ref):
 
 
 def hash_of(state):
+    """
+    Return the hash of the given `state`.
+
+    This differs from Python's built-in `hash` function in that it supports :class:`Map` and :class:`Tuple`.
+    """
+
     if isinstance(state, (list, tuple)):
         return hash(tuple(hash_of(item) for item in state))
     elif isinstance(state, dict):

@@ -27,3 +27,4 @@ Modules
    state
    table
    tensor
+   uri

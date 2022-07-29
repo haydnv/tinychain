@@ -68,6 +68,8 @@ class Operator(Op):
 
     @property
     def shape(self):
+        """The shape of the result of this operation"""
+
         raise NotImplementedError(f"{self.__class__.__name__}.shape")
 
     def forward(self):

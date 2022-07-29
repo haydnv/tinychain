@@ -1,6 +1,10 @@
 
 
 def validate(name, state=None):
+    """
+    Return the given `name` as allowed for use as a path segment in a :class:`URI`, or raise a :class:`KeyError`.
+    """
+
     name = str(name)
     name = str(name[1:]) if name.startswith('$') else name
 
@@ -15,7 +19,7 @@ def validate(name, state=None):
 
 class URI(object):
     """
-    An absolute or relative link to a TinyChain state.
+    An absolute or relative link to a :class:`State`.
 
     Examples:
         .. highlight:: python
@@ -225,4 +229,6 @@ class URI(object):
                 return uri[:i]
 
     def startswith(self, prefix):
+        """Return `True` if this :class:`URI` starts with the given `prefix`."""
+
         return str(self).startswith(str(prefix))
