@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use freqfs::DirLock;
-use futures::future::{join_all, TryFutureExt};
+use futures::future::{self, join_all, TryFutureExt};
 use log::debug;
 use safecast::AsType;
 use uuid::Uuid;
@@ -237,6 +237,7 @@ impl fmt::Display for FileEntry {
 enum DirEntry {
     Dir(Dir),
     File(FileEntry),
+    Raw(DirLock<CacheBlock>),
 }
 
 impl fmt::Display for DirEntry {
@@ -244,6 +245,9 @@ impl fmt::Display for DirEntry {
         match self {
             Self::Dir(dir) => fmt::Display::fmt(dir, f),
             Self::File(file) => fmt::Display::fmt(file, f),
+            Self::Raw(_) => {
+                f.write_str("a directory entry which manages its own transactional state")
+            }
         }
     }
 }
@@ -294,7 +298,7 @@ pub struct Dir {
 
 impl Dir {
     pub fn new(cache: DirLock<CacheBlock>) -> Self {
-        let lock_name = "contents of transactional filesystem directory";
+        let lock_name = "contents of a transactional filesystem directory";
 
         Self {
             cache,
@@ -302,6 +306,7 @@ impl Dir {
         }
     }
 
+    /// Load an existing [`Dir`] from the filesystem.
     pub fn load<'a>(cache: DirLock<CacheBlock>, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
             let fs_dir = cache.read().await;
@@ -350,11 +355,57 @@ impl Dir {
         })
     }
 
+    /// Get the child directory with the given `name` or create a new one.
     pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
         if let Some(dir) = fs::Dir::get_dir(self, txn_id, &name).await? {
             Ok(dir)
         } else {
             fs::Dir::create_dir(self, txn_id, name).await
+        }
+    }
+
+    /// Create a new raw directory descriptor.
+    ///
+    /// The transactional state of a raw directory descriptor must be managed by the calling code.
+    pub(crate) async fn create_raw(
+        &self,
+        txn_id: TxnId,
+        name: PathSegment,
+    ) -> TCResult<DirLock<CacheBlock>> {
+        let mut listing = self.listing.write(txn_id).await?;
+        if listing.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "filesystem entry already exists",
+                name,
+            ));
+        }
+
+        let descriptor = {
+            let mut cache = self.cache.write().await;
+            cache.create_dir(name.to_string()).map_err(io_err)?
+        };
+
+        listing.insert(name, DirEntry::Raw(descriptor.clone()));
+        Ok(descriptor)
+    }
+
+    /// Get a raw directory descriptor.
+    ///
+    /// The transactional state of a raw directory descriptor must be managed by the calling code.
+    pub(crate) async fn get_raw(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<DirLock<CacheBlock>>> {
+        let listing = self.listing.read(txn_id).await?;
+        if !listing.contains_key(name) {
+            return Ok(None);
+        }
+
+        match listing.get(name) {
+            Some(DirEntry::Raw(dir)) => Ok(Some(dir.clone())),
+            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
+            None => Ok(None),
         }
     }
 }
@@ -537,6 +588,7 @@ impl Transact for Dir {
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.commit(txn_id),
             },
+            DirEntry::Raw(_) => Box::pin(future::ready(())), // no-op
         }))
         .await;
     }
@@ -557,6 +609,7 @@ impl Transact for Dir {
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => file.finalize(txn_id),
                 },
+                DirEntry::Raw(_) => Box::pin(future::ready(())), // no-op
             }))
             .await;
         }
