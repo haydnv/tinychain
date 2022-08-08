@@ -17,7 +17,6 @@ use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;
 
 use crate::fs;
-use crate::route::Public;
 use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
@@ -161,19 +160,29 @@ impl de::Visitor for ChainVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let schema = seq
+        let schema: Schema = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
 
-        let history = seq
+        let history: History = seq
             .next_element(self.txn.clone())
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "a BlockChain history"))?;
 
-        validate(self.txn, schema, history)
+        let dir = self
+            .txn
+            .context()
+            .create_dir_unique(*self.txn.id())
             .map_err(de::Error::custom)
-            .await
+            .await?;
+        let subject = Subject::create(schema.clone(), &dir, *self.txn.id())
+            .map_err(de::Error::custom)
+            .await?;
+
+        // TODO: validate that `subject` is the end-state of `history` as applied to `schema`
+
+        Ok(BlockChain::new(schema, subject, history))
     }
 }
 
@@ -196,49 +205,4 @@ impl<'en> IntoView<'en, fs::Dir> for BlockChain {
         let history = self.history.into_view(txn).await?;
         Ok((self.schema, history))
     }
-}
-
-async fn validate(txn: Txn, schema: Schema, history: History) -> TCResult<BlockChain> {
-    use super::data::Mutation;
-
-    let txn_id = txn.id();
-
-    // it's ok to give the Subject a temporary Dir here because this
-    // validation is only run by the deserialization code
-    let dir = txn.context().create_dir_unique(*txn.id()).await?;
-    let subject = Subject::create(schema.clone(), &dir, *txn.id()).await?;
-
-    let mut i = 0u64;
-    while history.contains_block(*txn_id, i).await? {
-        let block = history.read_block(*txn_id, i.into()).await?;
-
-        for (_, ops) in block.mutations() {
-            for mutation in ops.iter().cloned() {
-                let result = match mutation {
-                    Mutation::Delete(path, key) => {
-                        debug!("replay DELETE op: {}: {}", path, key);
-                        subject.delete(&txn, &path, key).await
-                    }
-                    Mutation::Put(path, key, value) => {
-                        debug!("replay PUT op: {}: {} <- {}", path, key, value);
-                        history
-                            .resolve(&txn, value)
-                            .and_then(|value| subject.put(&txn, &path, key, value))
-                            .await
-                    }
-                };
-
-                if let Err(cause) = result {
-                    return Err(TCError::bad_request(
-                        format!("error replaying block {}", i),
-                        cause,
-                    ));
-                }
-            }
-        }
-
-        i += 1;
-    }
-
-    Ok(BlockChain::new(schema, subject, history))
 }

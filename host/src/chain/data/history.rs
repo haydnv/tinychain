@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt;
-use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -10,42 +8,38 @@ use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
 use safecast::*;
 
-use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableInstance;
-#[cfg(feature = "tensor")]
-use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{
-    label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
-};
+use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
 
 use crate::chain::{null_hash, ChainType, Subject, BLOCK_SIZE, CHAIN};
-use crate::collection::*;
 use crate::fs;
 use crate::route::Public;
-use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{ChainBlock, Mutation};
+use super::{ChainBlock, Mutation, Store};
 
 const DATA: Label = label("data");
 
 #[derive(Clone)]
 pub struct History {
-    dir: fs::Dir,
     file: fs::File<ChainBlock>,
     latest: TxnLock<u64>,
+    store: Store,
 }
 
 impl History {
     fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
         let latest = TxnLock::new("latest block ordinal", latest);
-        Self { dir, latest, file }
+        Self {
+            file,
+            latest,
+            store: Store::new(dir),
+        }
     }
 
     pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
@@ -74,7 +68,7 @@ impl History {
         value: State,
     ) -> TCResult<()> {
         let txn_id = *txn.id();
-        let value = self.save_state(txn, value).await?;
+        let value = self.store.save_state(txn, value).await?;
 
         debug!(
             "History::append_put {} {} {:?} {:?}",
@@ -85,104 +79,6 @@ impl History {
         block.append_put(txn_id, path, key, value);
 
         Ok(())
-    }
-
-    async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
-        if state.is_ref() {
-            return Err(TCError::bad_request(
-                "cannot update Chain with reference: {}",
-                state,
-            ));
-        }
-
-        let hash = state
-            .clone()
-            .hash(txn.clone())
-            .map_ok(Id::from_hash)
-            .await?;
-
-        let txn_id = *txn.id();
-        match state {
-            State::Collection(collection) => match collection {
-                Collection::BTree(btree) => {
-                    let schema = btree.schema().to_vec();
-                    let classpath = BTreeType::default().path();
-
-                    if self.dir.contains(txn_id, &hash).await? {
-                        debug!("BTree with hash {} is already saved", hash);
-                    } else {
-                        let file = self
-                            .dir
-                            .create_file(txn_id, hash.clone(), btree.class())
-                            .await?;
-
-                        BTreeFile::copy_from(btree, file, txn).await?;
-                        debug!("saved BTree with hash {}", hash);
-                    }
-
-                    Ok(OpRef::Get((
-                        (hash.into(), classpath).into(),
-                        Value::from_iter(schema).into(),
-                    ))
-                    .into())
-                }
-
-                Collection::Table(table) => {
-                    let schema = table.schema().clone();
-                    let classpath = TableType::default().path();
-
-                    if self.dir.contains(txn_id, &hash).await? {
-                        debug!("Table with hash {} is already saved", hash);
-                    } else {
-                        let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
-                        TableIndex::copy_from(table, dir, txn).await?;
-                        debug!("saved Table with hash {}", hash);
-                    }
-
-                    Ok(OpRef::Get((
-                        (hash.into(), classpath).into(),
-                        Value::cast_from(schema).into(),
-                    ))
-                    .into())
-                }
-
-                #[cfg(feature = "tensor")]
-                Collection::Tensor(tensor) => {
-                    let shape = tensor.shape().clone();
-                    let dtype = tensor.dtype();
-                    let schema = tc_tensor::Schema { shape, dtype };
-                    let classpath = tensor.class().path();
-
-                    if !self.dir.contains(txn_id, &hash).await? {
-                        match tensor {
-                            Tensor::Dense(dense) => {
-                                let file = self
-                                    .dir
-                                    .create_file(txn_id, hash.clone(), TensorType::Dense)
-                                    .await?;
-
-                                DenseTensor::copy_from(dense, file, txn).await?;
-                                debug!("saved Tensor with hash {}", hash);
-                            }
-                            Tensor::Sparse(sparse) => {
-                                let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
-                                SparseTensor::copy_from(sparse, dir, txn).await?;
-                                debug!("saved Tensor with hash {}", hash);
-                            }
-                        };
-                    }
-
-                    let schema: Value = schema.cast_into();
-                    Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
-                }
-            },
-            State::Scalar(value) => Ok(value),
-            other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
-            other => Err(TCError::bad_request(
-                "Chain does not support value",
-                other.class(),
-            )),
-        }
     }
 
     pub async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
@@ -269,7 +165,8 @@ impl History {
                     Mutation::Put(path, key, value) => {
                         debug!("replay PUT {}{}: {} <- {}", subject, path, key, value);
 
-                        self.resolve(txn, value.clone())
+                        self.store
+                            .resolve(txn, value.clone())
                             .and_then(|value| subject.put(txn, path, key.clone(), value))
                             .await
                     }
@@ -360,8 +257,8 @@ impl History {
                             subject.delete(txn, &path, key).await
                         }
                         Mutation::Put(path, key, value) => {
-                            let value = other.resolve(txn, value).await?;
-                            let value_ref = self.save_state(txn, value.clone()).await?;
+                            let value = other.store.resolve(txn, value).await?;
+                            let value_ref = self.store.save_state(txn, value.clone()).await?;
 
                             if append {
                                 dest.append_put(*past_txn_id, path.clone(), key.clone(), value_ref);
@@ -396,115 +293,6 @@ impl History {
         }
 
         Ok(())
-    }
-
-    pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
-        debug!("History::resolve {}", scalar);
-
-        type OpSubject = crate::scalar::Subject;
-
-        if let Scalar::Ref(tc_ref) = scalar {
-            if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
-                let class = CollectionType::from_path(&classpath).ok_or_else(|| {
-                    TCError::internal(format!("invalid Collection type: {}", classpath))
-                })?;
-
-                self.resolve_inner(txn, hash.into(), schema, class)
-                    .map_ok(State::from)
-                    .await
-            } else {
-                error!("invalid subject for historical Chain state {}", tc_ref);
-
-                Err(TCError::internal(format!(
-                    "invalid subject for historical Chain state {}",
-                    tc_ref
-                )))
-            }
-        } else {
-            Ok(scalar.into())
-        }
-    }
-
-    async fn resolve_inner(
-        &self,
-        txn: &Txn,
-        hash: Id,
-        schema: Scalar,
-        class: CollectionType,
-    ) -> TCResult<Collection> {
-        debug!("resolve historical collection value of type {}", class);
-
-        match class {
-            CollectionType::BTree(_) => {
-                fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid BTree schema for historical Chain state: {}",
-                        info
-                    ))
-                }
-
-                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
-                let schema = schema.try_cast_into(|v| schema_err(v))?;
-
-                let file = self.dir.get_file(*txn.id(), &hash).await?.ok_or_else(|| {
-                    TCError::internal(format!("Chain is missing historical state {}", hash))
-                })?;
-
-                let btree = BTreeFile::load(txn, schema, file).await?;
-                Ok(Collection::BTree(btree.into()))
-            }
-
-            CollectionType::Table(_) => {
-                fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid Table schema for historical Chain state: {}",
-                        info
-                    ))
-                }
-
-                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
-                let schema = schema.try_cast_into(|v| schema_err(v))?;
-
-                let dir = self.dir.get_dir(*txn.id(), &hash).await?;
-                let dir = dir.ok_or_else(|| {
-                    TCError::internal(format!("missing historical Chain state {}", hash))
-                })?;
-
-                let table = TableIndex::load(txn, schema, dir).await?;
-                Ok(Collection::Table(table.into()))
-            }
-
-            #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => {
-                let schema: Value = schema.try_cast_into(|s| {
-                    TCError::internal(format!("invalid Tensor schema: {}", s))
-                })?;
-                let schema = schema.try_cast_into(|v| {
-                    TCError::internal(format!("invalid Tensor schema: {}", v))
-                })?;
-
-                match tt {
-                    TensorType::Dense => {
-                        let file = self.dir.get_file(*txn.id(), &hash).await?;
-                        let file = file.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
-
-                        let tensor = DenseTensor::load(txn, schema, file).await?;
-                        Ok(Collection::Tensor(tensor.into()))
-                    }
-                    TensorType::Sparse => {
-                        let dir = self.dir.get_dir(*txn.id(), &hash).await?;
-                        let dir = dir.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
-
-                        let tensor = SparseTensor::load(txn, schema, dir).await?;
-                        Ok(Collection::Tensor(tensor.into()))
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -562,11 +350,11 @@ impl Persist<fs::Dir> for History {
 impl Transact for History {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("Chain history commit");
-        join!(self.file.commit(txn_id), self.dir.commit(txn_id));
+        join!(self.file.commit(txn_id), self.store.commit(txn_id));
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(self.file.finalize(txn_id), self.dir.finalize(txn_id));
+        join!(self.file.finalize(txn_id), self.store.finalize(txn_id));
     }
 }
 
@@ -695,7 +483,7 @@ async fn parse_block_state(
                 parsed.push(Mutation::Delete(path, key));
             } else if op.matches::<(TCPathBuf, Value, State)>() {
                 let (path, key, value) = op.opt_cast_into().unwrap();
-                let value = history.save_state(txn, value).await?;
+                let value = history.store.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(path, key, value));
             } else {
                 return Err(TCError::bad_request(
@@ -764,6 +552,7 @@ async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<
             debug!("historical mutation: PUT {}: {} <- {}", path, key, value);
 
             let value = history
+                .store
                 .resolve(&txn, value)
                 .map_err(|err| {
                     error!("unable to load historical Chain data: {}", err);
