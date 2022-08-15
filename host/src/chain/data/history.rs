@@ -81,15 +81,6 @@ impl History {
         Ok(())
     }
 
-    pub async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
-        let block = self.read_latest(txn_id).await?;
-        Ok(block.mutations().keys().next().cloned())
-    }
-
-    pub async fn latest_block_id(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.latest.read(txn_id).map_ok(|id| *id).await
-    }
-
     pub async fn contains_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<bool> {
         self.file.contains_block(txn_id, &block_id.into()).await
     }
@@ -144,46 +135,6 @@ impl History {
         self.write_block(txn_id, (*latest).into()).await
     }
 
-    pub async fn apply_last(&self, txn: &Txn, subject: &Subject) -> TCResult<()> {
-        let latest = *self.latest.read(*txn.id()).await?;
-        let block = self.read_block(*txn.id(), latest.into()).await?;
-
-        let last_block = if latest > 0 && block.mutations().is_empty() {
-            self.read_block(*txn.id(), (latest - 1).into()).await?
-        } else {
-            block
-        };
-
-        if let Some((last_txn_id, ops)) = last_block.mutations().iter().last() {
-            for op in ops {
-                let result = match op {
-                    Mutation::Delete(path, key) => {
-                        debug!("replay DELETE {}{}: {}", subject, path, key);
-
-                        subject.delete(txn, path, key.clone()).await
-                    }
-                    Mutation::Put(path, key, value) => {
-                        debug!("replay PUT {}{}: {} <- {}", subject, path, key, value);
-
-                        self.store
-                            .resolve(txn, value.clone())
-                            .and_then(|value| subject.put(txn, path, key.clone(), value))
-                            .await
-                    }
-                };
-
-                if let Err(cause) = result {
-                    return Err(TCError::internal(format!(
-                        "error replaying last transaction {}: {}",
-                        last_txn_id, cause
-                    )));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
         debug!("replicate chain history");
 
@@ -211,7 +162,7 @@ impl History {
                 return Err(TCError::bad_request(ERR_DIVERGENT, i));
             }
 
-            if let Some(txn_id) = block.mutations().keys().last() {
+            if let Some(txn_id) = block.mutations.keys().last() {
                 latest_txn_id = Some(*txn_id);
             }
         }
@@ -223,8 +174,8 @@ impl History {
             let source = other.read_block(txn_id, i).await?;
             let mut dest = self.write_block(txn_id, i).await?;
 
-            let mut mutation_ids = source.mutations().keys();
-            for past_txn_id in dest.mutations().keys() {
+            let mut mutation_ids = source.mutations.keys();
+            for past_txn_id in dest.mutations.keys() {
                 if mutation_ids.next() != Some(past_txn_id) {
                     return Err(TCError::bad_request(
                         "error replicating Chain",
@@ -235,7 +186,7 @@ impl History {
                 latest_txn_id = Some(*past_txn_id);
             }
 
-            for (past_txn_id, ops) in source.mutations() {
+            for (past_txn_id, ops) in &source.mutations {
                 let append = if let Some(latest) = &latest_txn_id {
                     if past_txn_id < latest {
                         continue;
@@ -523,7 +474,7 @@ impl<'en> IntoView<'en, fs::Dir> for History {
                 let this = self.clone();
                 let txn = txn.clone();
                 let map =
-                    stream::iter(block.mutations().clone()).map(move |(past_txn_id, mutations)| {
+                    stream::iter(block.mutations.clone()).map(move |(past_txn_id, mutations)| {
                         debug!("reading block mutations");
 
                         let this = this.clone();

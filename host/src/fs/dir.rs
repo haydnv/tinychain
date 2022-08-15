@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use freqfs::DirLock;
-use futures::future::{self, join_all, TryFutureExt};
+use futures::future::{join_all, TryFutureExt};
 use log::debug;
 use safecast::AsType;
 use uuid::Uuid;
@@ -237,7 +237,6 @@ impl fmt::Display for FileEntry {
 enum DirEntry {
     Dir(Dir),
     File(FileEntry),
-    Raw(DirLock<CacheBlock>),
 }
 
 impl fmt::Display for DirEntry {
@@ -245,9 +244,6 @@ impl fmt::Display for DirEntry {
         match self {
             Self::Dir(dir) => fmt::Display::fmt(dir, f),
             Self::File(file) => fmt::Display::fmt(file, f),
-            Self::Raw(_) => {
-                f.write_str("a directory entry which manages its own transactional state")
-            }
         }
     }
 }
@@ -334,9 +330,14 @@ impl Dir {
                     let name = name.parse().map_err(TCError::internal)?;
                     (name, DirEntry::Dir(subdir))
                 } else {
+                    #[cfg(debug_assertions)]
+                    let fs_path = format!("{:?} entry \"{}\"", &*fs_dir, name);
+                    #[cfg(not(debug_assertions))]
+                    let fs_path = name;
+
                     return Err(TCError::internal(format!(
                         "directory {} contains both blocks and subdirectories",
-                        name
+                        fs_path
                     )));
                 };
 
@@ -364,49 +365,8 @@ impl Dir {
         }
     }
 
-    /// Create a new raw directory descriptor.
-    ///
-    /// The transactional state of a raw directory descriptor must be managed by the calling code.
-    pub(crate) async fn create_raw(
-        &self,
-        txn_id: TxnId,
-        name: PathSegment,
-    ) -> TCResult<DirLock<CacheBlock>> {
-        let mut listing = self.listing.write(txn_id).await?;
-        if listing.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "filesystem entry already exists",
-                name,
-            ));
-        }
-
-        let descriptor = {
-            let mut cache = self.cache.write().await;
-            cache.create_dir(name.to_string()).map_err(io_err)?
-        };
-
-        listing.insert(name, DirEntry::Raw(descriptor.clone()));
-        Ok(descriptor)
-    }
-
-    /// Get a raw directory descriptor.
-    ///
-    /// The transactional state of a raw directory descriptor must be managed by the calling code.
-    pub(crate) async fn get_raw(
-        &self,
-        txn_id: TxnId,
-        name: &PathSegment,
-    ) -> TCResult<Option<DirLock<CacheBlock>>> {
-        let listing = self.listing.read(txn_id).await?;
-        if !listing.contains_key(name) {
-            return Ok(None);
-        }
-
-        match listing.get(name) {
-            Some(DirEntry::Raw(dir)) => Ok(Some(dir.clone())),
-            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
-            None => Ok(None),
-        }
+    pub fn into_inner(self) -> DirLock<CacheBlock> {
+        self.cache
     }
 }
 
@@ -426,10 +386,12 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool> {
-        self.listing
-            .read(txn_id)
-            .map_ok(|listing| listing.contains_key(name))
-            .await
+        debug!("Dir::contains");
+
+        let listing = self.listing.read(txn_id).await?;
+        debug!("Dir::contains locked entry list for reading");
+
+        Ok(listing.contains_key(name))
     }
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
@@ -478,6 +440,8 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
+        debug!("Dir::create_file");
+
         let mut listing = self.listing.write(txn_id).await?;
         if listing.contains_key(&file_id) {
             return Err(TCError::bad_request(
@@ -485,6 +449,8 @@ impl fs::Dir for Dir {
                 file_id,
             ));
         }
+
+        debug!("Dir::create_file got write lock on content listing");
 
         let file = {
             let mut cache = self.cache.write().await;
@@ -498,6 +464,9 @@ impl fs::Dir for Dir {
         };
 
         listing.insert(file_id, DirEntry::File(file.clone()));
+
+        debug!("Dir::create_file created new file entry");
+
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
@@ -588,7 +557,6 @@ impl Transact for Dir {
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.commit(txn_id),
             },
-            DirEntry::Raw(_) => Box::pin(future::ready(())), // no-op
         }))
         .await;
     }
@@ -609,7 +577,6 @@ impl Transact for Dir {
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => file.finalize(txn_id),
                 },
-                DirEntry::Raw(_) => Box::pin(future::ready(())), // no-op
             }))
             .await;
         }
@@ -662,6 +629,7 @@ fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
     let stem = name[..i].parse().map_err(TCError::internal)?;
     let class = ext_class(&name[i..])
         .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
+
     Ok((stem, class))
 }
 

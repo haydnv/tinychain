@@ -36,6 +36,8 @@ impl Store {
     }
 
     pub async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
+        debug!("chain data store saving state {}...", state);
+
         if state.is_ref() {
             return Err(TCError::bad_request(
                 "cannot update Chain with reference: {}",
@@ -48,6 +50,8 @@ impl Store {
             .hash(txn.clone())
             .map_ok(Id::from_hash)
             .await?;
+
+        debug!("computed hash of {}: {}", state, hash);
 
         let txn_id = *txn.id();
         match state {
@@ -96,19 +100,29 @@ impl Store {
 
                 #[cfg(feature = "tensor")]
                 Collection::Tensor(tensor) => {
+                    debug!("chain data store copying {} into data store", tensor);
+
                     let shape = tensor.shape().clone();
                     let dtype = tensor.dtype();
                     let schema = tc_tensor::Schema { shape, dtype };
                     let classpath = tensor.class().path();
 
-                    if !self.dir.contains(txn_id, &hash).await? {
+                    if self.dir.contains(txn_id, &hash).await? {
+                        debug!("Tensor with hash {} is already saved", tensor);
+                    } else {
                         match tensor {
                             Tensor::Dense(dense) => {
+                                debug!(
+                                    "chain data store creating destination file for {}...",
+                                    dense
+                                );
+
                                 let file = self
                                     .dir
                                     .create_file(txn_id, hash.clone(), TensorType::Dense)
                                     .await?;
 
+                                debug!("chain data store created destination file for {}", dense);
                                 DenseTensor::copy_from(dense, file, txn).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }

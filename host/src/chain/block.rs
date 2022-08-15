@@ -65,10 +65,6 @@ impl ChainInstance for BlockChain {
             .await
     }
 
-    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
-        self.history.last_commit(txn_id).await
-    }
-
     fn subject(&self) -> &Subject {
         &self.subject
     }
@@ -126,10 +122,9 @@ impl Persist<fs::Dir> for BlockChain {
         let history = if is_new {
             History::create(*txn.id(), dir, ChainType::Block).await?
         } else {
+            todo!("reapply last-committed mutations");
             History::load(txn, (), dir).await?
         };
-
-        history.apply_last(txn, &subject).await?;
 
         Ok(BlockChain::new(schema, subject, history))
     }
@@ -139,6 +134,7 @@ impl Persist<fs::Dir> for BlockChain {
 impl Transact for BlockChain {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("BlockChain::commit");
+        // assume `self.history` has already been committed by calling the `write_ahead` method
         self.subject.commit(txn_id).await;
     }
 
@@ -176,6 +172,7 @@ impl de::Visitor for ChainVisitor {
             .create_dir_unique(*self.txn.id())
             .map_err(de::Error::custom)
             .await?;
+
         let subject = Subject::create(schema.clone(), &dir, *self.txn.id())
             .map_err(de::Error::custom)
             .await?;

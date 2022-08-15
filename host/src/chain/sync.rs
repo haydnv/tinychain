@@ -3,24 +3,29 @@
 
 use async_trait::async_trait;
 use destream::de;
+use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
-use futures::join;
+use futures::try_join;
 use log::debug;
 use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Persist, Store};
+use tc_transact::fs::{Dir, Persist, Store};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::TCPathBuf;
+use tcgeneric::{label, Label, TCPathBuf};
 
 use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::data::History;
-use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
+use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
+
+const BLOCKS: Label = label("blocks.chain_block");
+const COMMITTED: Label = label("committed.chain_block");
+const PENDING: Label = label("pending.chain_block");
+const STORE: Label = label("store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -28,17 +33,18 @@ use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
 pub struct SyncChain {
     schema: Schema,
     subject: Subject,
-    history: History,
+    pending: FileLock<fs::CacheBlock>,
+    committed: FileLock<fs::CacheBlock>,
+    store: super::data::Store,
 }
 
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        let mut block = self.history.write_latest(txn_id).await?;
+        let mut block: FileWriteGuard<_, ChainBlock> =
+            self.pending.write().map_err(fs::io_err).await?;
 
-        block.clear_until(&txn_id);
         block.append_delete(txn_id, path, key);
-
         Ok(())
     }
 
@@ -49,21 +55,22 @@ impl ChainInstance for SyncChain {
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        {
-            let mut block = self.history.write_latest(*txn.id()).await?;
+        debug!("SyncChain::append_put {}: {} <- {}", path, key, value);
 
-            block.clear_until(txn.id());
-        }
+        let value = self.store.save_state(txn, value).await?;
 
-        self.history.append_put(txn, path, key, value).await
+        debug!("locking pending transaction log block...");
+        let mut block: FileWriteGuard<_, ChainBlock> =
+            self.pending.write().map_err(fs::io_err).await?;
+
+        block.append_put(*txn.id(), path, key, value);
+
+        debug!("locked pending transaction log block");
+        Ok(())
     }
 
     async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
         self.subject.hash(txn).await
-    }
-
-    async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
-        self.history.last_commit(txn_id).await
     }
 
     fn subject(&self) -> &Subject {
@@ -74,14 +81,40 @@ impl ChainInstance for SyncChain {
         let subject = txn.get(source, Value::None).await?;
         self.subject.restore(txn, subject).await?;
 
-        let mut block = self.history.write_latest(*txn.id()).await?;
-        *block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        let (mut pending, mut committed): (
+            FileWriteGuard<_, ChainBlock>,
+            FileWriteGuard<_, ChainBlock>,
+        ) = try_join!(
+            self.pending.write().map_err(fs::io_err),
+            self.committed.write().map_err(fs::io_err)
+        )?;
+
+        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        *committed = ChainBlock::new(null_hash().to_vec());
 
         Ok(())
     }
 
     async fn write_ahead(&self, txn_id: &TxnId) {
-        self.history.commit(txn_id).await
+        self.store.commit(txn_id).await;
+
+        {
+            let (mut pending, mut committed): (
+                FileWriteGuard<_, ChainBlock>,
+                FileWriteGuard<_, ChainBlock>,
+            ) = try_join!(
+                self.pending.write().map_err(fs::io_err),
+                self.committed.write().map_err(fs::io_err)
+            )
+            .expect("SyncChain blocks");
+
+            if let Some(mutations) = pending.mutations.remove(txn_id) {
+                committed.mutations.insert(*txn_id, mutations);
+            }
+        }
+
+        try_join!(self.pending.sync(false), self.committed.sync(false))
+            .expect("sync SyncChain blocks");
     }
 }
 
@@ -96,30 +129,67 @@ impl Persist<fs::Dir> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let is_new = dir.is_empty(*txn.id()).await?;
+        let txn_id = *txn.id();
+        let is_new = dir.is_empty(txn_id).await?;
 
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
-        let history = if is_new {
-            History::create(*txn.id(), dir, ChainType::Sync).await?
+        let (store, pending, committed) = if is_new {
+            let store = dir
+                .create_dir(txn_id, STORE.into())
+                .map_ok(super::data::Store::new)
+                .await?;
+
+            let blocks_dir = dir.create_dir(txn_id, BLOCKS.into()).await?;
+            let mut blocks_dir = blocks_dir.into_inner().write().await;
+
+            let pending = blocks_dir
+                .create_file(
+                    PENDING.to_string(),
+                    ChainBlock::with_txn(null_hash().to_vec(), txn_id),
+                    Some(0),
+                )
+                .map_err(fs::io_err)?;
+
+            let committed = blocks_dir
+                .create_file(
+                    COMMITTED.to_string(),
+                    ChainBlock::new(null_hash().to_vec()),
+                    Some(0),
+                )
+                .map_err(fs::io_err)?;
+
+            (store, pending, committed)
         } else {
-            History::load(txn, (), dir).await?
+            let store = dir
+                .get_or_create_dir(txn_id, STORE.into())
+                .map_ok(super::data::Store::new)
+                .await?;
+
+            let dir = dir.into_inner().read().await;
+            let blocks_dir = dir
+                .get_dir(&BLOCKS.to_string())
+                .ok_or_else(|| TCError::not_found(BLOCKS))?;
+
+            let blocks_dir = blocks_dir.read().await;
+
+            let pending = blocks_dir
+                .get_file(&PENDING.to_string())
+                .ok_or_else(|| TCError::not_found(PENDING))?;
+
+            let committed = blocks_dir
+                .get_file(&COMMITTED.to_string())
+                .ok_or_else(|| TCError::not_found(PENDING))?;
+
+            (store, pending, committed)
         };
-
-        let latest = history.latest_block_id(*txn.id()).await?;
-        if latest > 0 {
-            return Err(TCError::internal(format!(
-                "a SyncChain can only have one block, found {}",
-                latest
-            )));
-        }
-
-        history.apply_last(txn, &subject).await?;
 
         Ok(SyncChain {
             schema,
             subject,
-            history,
+            pending,
+            committed,
+            store,
         })
     }
 }
@@ -128,11 +198,31 @@ impl Persist<fs::Dir> for SyncChain {
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("SyncChain::commit");
+
         self.subject.commit(txn_id).await;
+
+        // assume the mutations for the transaction have already been moved and sync'd
+        // from `self.pending` to `self.committed` by calling the `write_ahead` method
+        {
+            let mut committed: FileWriteGuard<_, ChainBlock> =
+                self.committed.write().await.expect("committed");
+
+            committed.mutations.remove(txn_id);
+        }
+
+        self.committed.sync(false).await.expect("sync commit block");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(self.subject.finalize(txn_id), self.history.finalize(txn_id));
+        {
+            let mut pending: FileWriteGuard<_, ChainBlock> =
+                self.pending.write().await.expect("pending");
+
+            pending.mutations.remove(txn_id);
+        }
+
+        self.pending.sync(false).await.expect("sync pending block");
+        self.subject.finalize(txn_id).await
     }
 }
 
@@ -159,7 +249,11 @@ impl de::Visitor for ChainVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let history = History::create(*self.txn.id(), self.txn.context().clone(), ChainType::Sync)
+        let txn_id = *self.txn.id();
+        let dir = self
+            .txn
+            .context()
+            .create_dir_unique(txn_id)
             .map_err(de::Error::custom)
             .await?;
 
@@ -173,10 +267,41 @@ impl de::Visitor for ChainVisitor {
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "the subject of a SyncChain"))?;
 
+        let store = dir
+            .create_dir(txn_id, STORE.into())
+            .map_ok(super::data::Store::new)
+            .map_err(de::Error::custom)
+            .await?;
+
+        let blocks_dir = dir
+            .create_dir(txn_id, BLOCKS.into())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let mut blocks_dir = blocks_dir.into_inner().write().await;
+
+        let committed = blocks_dir
+            .create_file(
+                COMMITTED.to_string(),
+                ChainBlock::new(null_hash().to_vec()),
+                Some(0),
+            )
+            .map_err(de::Error::custom)?;
+
+        let pending = blocks_dir
+            .create_file(
+                PENDING.to_string(),
+                ChainBlock::with_txn(null_hash().to_vec(), txn_id),
+                Some(0),
+            )
+            .map_err(de::Error::custom)?;
+
         Ok(SyncChain {
             schema,
             subject,
-            history,
+            pending,
+            committed,
+            store,
         })
     }
 }
