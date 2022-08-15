@@ -23,8 +23,8 @@ use crate::txn::Txn;
 use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
 
 const BLOCKS: Label = label("blocks.chain_block");
-const COMMITTED: Label = label("committed.chain_block");
-const PENDING: Label = label("pending.chain_block");
+const COMMITTED: &str = "committed.chain_block";
+const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
@@ -174,11 +174,11 @@ impl Persist<fs::Dir> for SyncChain {
             let blocks_dir = blocks_dir.read().await;
 
             let pending = blocks_dir
-                .get_file(&PENDING.to_string())
+                .get_file(PENDING)
                 .ok_or_else(|| TCError::not_found(PENDING))?;
 
             let committed = blocks_dir
-                .get_file(&COMMITTED.to_string())
+                .get_file(COMMITTED)
                 .ok_or_else(|| TCError::not_found(PENDING))?;
 
             (store, pending, committed)

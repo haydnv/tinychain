@@ -22,7 +22,7 @@ use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::History;
-use super::{Chain, ChainInstance, ChainType, Schema, Subject, CHAIN};
+use super::{Chain, ChainInstance, Schema, Subject, CHAIN};
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
 #[derive(Clone)]
@@ -86,21 +86,6 @@ impl ChainInstance for BlockChain {
     }
 
     async fn write_ahead(&self, txn_id: &TxnId) {
-        {
-            let block = self
-                .history
-                .read_latest(*txn_id)
-                .await
-                .expect("read latest chain block");
-
-            if block.size().await.expect("block size") >= super::BLOCK_SIZE {
-                self.history
-                    .create_next_block(*txn_id)
-                    .await
-                    .expect("bump chain block number");
-            }
-        }
-
         self.history.commit(txn_id).await
     }
 }
@@ -120,7 +105,7 @@ impl Persist<fs::Dir> for BlockChain {
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
         let history = if is_new {
-            History::create(*txn.id(), dir, ChainType::Block).await?
+            History::create(*txn.id(), dir).await?
         } else {
             todo!("reapply last-committed mutations");
             History::load(txn, (), dir).await?

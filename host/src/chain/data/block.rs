@@ -229,6 +229,7 @@ impl fmt::Debug for ChainBlock {
         writeln!(f, "chain block:")?;
         writeln!(f, "\thash: {}", hex::encode(&self.last_hash))?;
         writeln!(f, "\tentries: {}", self.mutations.len())?;
+
         for (txn_id, mutations) in &self.mutations {
             writeln!(
                 f,

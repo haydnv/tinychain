@@ -53,6 +53,8 @@ impl Store {
 
         debug!("computed hash of {}: {}", state, hash);
 
+        // TODO: it should be possible to lock the directory listing,
+        // to combine the calls to `self.dir.contains` with `self.dir.create...`
         let txn_id = *txn.id();
         match state {
             State::Collection(collection) => match collection {
