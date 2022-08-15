@@ -19,6 +19,7 @@ use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple
 
 use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
 use crate::fs;
+use crate::route::Public;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -148,7 +149,6 @@ impl History {
             ));
         }
 
-        let mut last_hash = null_hash();
         let mut latest_txn_id = None;
 
         const ERR_DIVERGENT: &str = "chain to replicate diverges at block";
@@ -165,11 +165,84 @@ impl History {
         }
 
         let mut last_hash = {
-            let latest = self.read_latest(txn_id).await?;
-            latest.last_hash().clone()
+            let (mut dest, source) =
+                try_join!(self.write_block(*latest), other.read_block(*latest))?;
+
+            if let Some(txn_id) = dest.mutations.keys().last() {
+                latest_txn_id = Some(*txn_id);
+            }
+
+            for (txn_id, ops) in &source.mutations {
+                if let Some(latest_txn_id) = &latest_txn_id {
+                    if txn_id <= latest_txn_id {
+                        continue;
+                    }
+                }
+
+                for op in ops {
+                    match op {
+                        Mutation::Delete(path, key) => {
+                            dest.append_delete(*txn_id, path.clone(), key.clone());
+                            subject.delete(txn, &path, key.clone()).await?
+                        }
+                        Mutation::Put(path, key, value) => {
+                            let value = other.store.resolve(txn, value.clone()).await?;
+                            let value_ref = self.store.save_state(txn, value.clone()).await?;
+
+                            dest.append_put(*txn_id, path.clone(), key.clone(), value_ref);
+                            subject.put(txn, &path, key.clone(), value).await?
+                        }
+                    }
+                }
+            }
+
+            let last_hash = dest.hash().to_vec();
+            if &last_hash[..] != &source.hash()[..] {
+                return Err(TCError::internal(ERR_DIVERGENT));
+            }
+
+            last_hash
         };
 
-        unimplemented!("replicate block chain")
+        let mut this_file = self.file.write().await;
+        for block_id in (*latest + 1)..(*other_latest + 1) {
+            let source = other.read_block(block_id).await?;
+
+            let dest = this_file
+                .create_file(
+                    block_name(block_id),
+                    ChainBlock::new(last_hash.to_vec()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+
+            let mut dest: FileWriteGuard<_, ChainBlock> = dest.write().map_err(fs::io_err).await?;
+
+            for (txn_id, ops) in &source.mutations {
+                for op in ops {
+                    match op {
+                        Mutation::Delete(path, key) => {
+                            dest.append_delete(*txn_id, path.clone(), key.clone());
+                            subject.delete(txn, &path, key.clone()).await?
+                        }
+                        Mutation::Put(path, key, value) => {
+                            let value = other.store.resolve(txn, value.clone()).await?;
+                            let value_ref = self.store.save_state(txn, value.clone()).await?;
+
+                            dest.append_put(*txn_id, path.clone(), key.clone(), value_ref);
+                            subject.put(txn, &path, key.clone(), value).await?
+                        }
+                    }
+                }
+            }
+
+            last_hash = dest.hash().to_vec();
+            if &last_hash[..] != &source.hash()[..] {
+                return Err(TCError::internal(ERR_DIVERGENT));
+            }
+        }
+
+        Ok(())
     }
 }
 
