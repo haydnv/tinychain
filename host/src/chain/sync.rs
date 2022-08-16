@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use destream::de;
-use freqfs::{FileLock, FileWriteGuard};
+use freqfs::{FileLock, FileReadGuard, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
 use log::debug;
@@ -180,6 +180,18 @@ impl Persist<fs::Dir> for SyncChain {
             let committed = blocks_dir
                 .get_file(COMMITTED)
                 .ok_or_else(|| TCError::not_found(PENDING))?;
+
+            let last_block: FileReadGuard<_, ChainBlock> =
+                committed.read().map_err(fs::io_err).await?;
+
+            if let Some(past_txn_id) = last_block.mutations.keys().last() {
+                let mutations = last_block
+                    .mutations
+                    .get(past_txn_id)
+                    .expect("last-committed mutations");
+
+                super::data::replay_all(&subject, past_txn_id, mutations, txn, &store).await?;
+            }
 
             (store, pending, committed)
         };

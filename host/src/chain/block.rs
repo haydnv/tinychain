@@ -107,9 +107,18 @@ impl Persist<fs::Dir> for BlockChain {
         let history = if is_new {
             History::create(*txn.id(), dir).await?
         } else {
-            todo!("reapply last-committed mutations");
             History::load(txn, (), dir).await?
         };
+
+        let last_block = history.read_latest(*txn.id()).await?;
+        if let Some(past_txn_id) = last_block.mutations.keys().last() {
+            let mutations = last_block
+                .mutations
+                .get(past_txn_id)
+                .expect("last-committed mutations");
+
+            super::data::replay_all(&subject, past_txn_id, mutations, txn, history.store()).await?;
+        }
 
         Ok(BlockChain::new(schema, subject, history))
     }

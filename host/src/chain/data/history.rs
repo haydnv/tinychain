@@ -17,9 +17,9 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
 
+use crate::chain::data::replay_all;
 use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
 use crate::fs;
-use crate::route::Public;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -65,6 +65,10 @@ impl History {
             .map_err(fs::io_err)?;
 
         Ok(Self::new(file, store, 0, txn_id))
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
@@ -180,21 +184,9 @@ impl History {
                     }
                 }
 
-                for op in ops {
-                    match op {
-                        Mutation::Delete(path, key) => {
-                            dest.append_delete(*txn_id, path.clone(), key.clone());
-                            subject.delete(txn, &path, key.clone()).await?
-                        }
-                        Mutation::Put(path, key, value) => {
-                            let value = other.store.resolve(txn, value.clone()).await?;
-                            let value_ref = self.store.save_state(txn, value.clone()).await?;
-
-                            dest.append_put(*txn_id, path.clone(), key.clone(), value_ref);
-                            subject.put(txn, &path, key.clone(), value).await?
-                        }
-                    }
-                }
+                assert!(!dest.mutations.contains_key(txn_id));
+                replay_all(&subject, txn_id, ops, txn, &self.store).await?;
+                dest.mutations.insert(*txn_id, ops.to_vec());
             }
 
             let last_hash = dest.hash().to_vec();
@@ -220,21 +212,9 @@ impl History {
             let mut dest: FileWriteGuard<_, ChainBlock> = dest.write().map_err(fs::io_err).await?;
 
             for (txn_id, ops) in &source.mutations {
-                for op in ops {
-                    match op {
-                        Mutation::Delete(path, key) => {
-                            dest.append_delete(*txn_id, path.clone(), key.clone());
-                            subject.delete(txn, &path, key.clone()).await?
-                        }
-                        Mutation::Put(path, key, value) => {
-                            let value = other.store.resolve(txn, value.clone()).await?;
-                            let value_ref = self.store.save_state(txn, value.clone()).await?;
-
-                            dest.append_put(*txn_id, path.clone(), key.clone(), value_ref);
-                            subject.put(txn, &path, key.clone(), value).await?
-                        }
-                    }
-                }
+                assert!(!dest.mutations.contains_key(txn_id));
+                replay_all(&subject, txn_id, ops, txn, &self.store).await?;
+                dest.mutations.insert(*txn_id, ops.to_vec());
             }
 
             last_hash = dest.hash().to_vec();
