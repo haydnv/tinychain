@@ -31,17 +31,18 @@ const STORE: Label = label("store");
 #[derive(Clone)]
 pub struct History {
     file: DirLock<fs::CacheBlock>,
-    latest: TxnLock<u64>,
     store: Store,
+    latest: TxnLock<u64>,
+    cutoff: TxnLock<TxnId>,
 }
 
 impl History {
-    fn new(latest: u64, store: Store, file: DirLock<fs::CacheBlock>) -> Self {
-        let latest = TxnLock::new("latest block ordinal", latest);
+    fn new(file: DirLock<fs::CacheBlock>, store: Store, latest: u64, cutoff: TxnId) -> Self {
         Self {
             file,
-            latest,
             store,
+            latest: TxnLock::new("latest block ordinal", latest),
+            cutoff: TxnLock::new("block transaction time cutoff", cutoff),
         }
     }
 
@@ -63,7 +64,7 @@ impl History {
             .create_file(block_name(0u64), block.clone(), Some(0))
             .map_err(fs::io_err)?;
 
-        Ok(Self::new(0, store, file))
+        Ok(Self::new(file, store, 0, txn_id))
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
@@ -275,6 +276,7 @@ impl Persist<fs::Dir> for History {
 
         let file_lock = file.read().await;
 
+        let mut cutoff = *txn_id;
         let mut latest = 0;
         let mut last_hash = Bytes::from(null_hash().to_vec());
 
@@ -290,10 +292,11 @@ impl Persist<fs::Dir> for History {
                 )));
             }
 
+            cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
             latest += 1;
         }
 
-        Ok(History::new(latest, store, file.clone()))
+        Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 }
 
@@ -304,7 +307,17 @@ impl Transact for History {
 
         self.store.commit(txn_id).await;
 
-        let mut latest = self.latest.write(*txn_id).await.expect("latest block id");
+        let (mut latest, mut cutoff) =
+            try_join!(self.latest.write(*txn_id), self.cutoff.write(*txn_id))
+                .expect("BlockChain state");
+
+        assert!(
+            txn_id >= &cutoff,
+            "cannot commit transaction {} since a block has already been committed at {}",
+            txn_id,
+            *cutoff
+        );
+
         let mut file = self.file.write().await;
         let mut pending: FileWriteGuard<_, ChainBlock> = file
             .get_file(&block_name(PENDING))
@@ -322,15 +335,18 @@ impl Transact for History {
             latest_block.mutations.insert(*txn_id, mutations);
 
             if latest_block.size().await.expect("block size") > BLOCK_SIZE {
-                *latest += 1;
+                *cutoff = *txn_id;
 
                 let hash = latest_block.hash();
+
                 file.create_file(
                     block_name(*latest),
                     ChainBlock::new(hash.to_vec()),
                     Some(hash.len()),
                 )
                 .expect("new chain block");
+
+                *latest += 1;
             }
         }
 
@@ -391,89 +407,52 @@ impl de::Visitor for HistoryVisitor {
             .create_dir(CHAIN.to_string())
             .map_err(de::Error::custom)?;
 
-        let block = ChainBlock::new(null_hash.to_vec());
         let mut file_lock = file.write().await;
 
         file_lock
-            .create_file(PENDING.to_string(), block.clone(), Some(0))
+            .create_file(
+                PENDING.to_string(),
+                ChainBlock::new(null_hash.to_vec()),
+                Some(0),
+            )
             .map_err(de::Error::custom)?;
-
-        file_lock
-            .create_file(0u64.to_string(), block, Some(0))
-            .map_err(de::Error::custom)?;
-
-        let history = History::new(0, store, file);
 
         let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
 
         let mut i = 0u64;
-        let txn = subcontext(i).await?;
+        let mut last_hash = null_hash.clone();
 
-        if let Some(state) = seq.next_element::<State>(txn.clone()).await? {
-            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
-                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
-                .map_err(de::Error::custom)?;
-
-            if &hash != &null_hash.to_vec() {
-                let hash = hex::encode(hash);
-                let null_hash = hex::encode(null_hash);
-                return Err(de::Error::invalid_value(
-                    format!("initial block hash {}", hash),
-                    format!("null hash {}", null_hash),
-                ));
-            }
-
-            let mutations = parse_block_state(&history, &txn, block_data)
-                .map_err(de::Error::custom)
-                .await?;
-
-            let mut block = history.write_block(i).map_err(de::Error::custom).await?;
-
-            *block = ChainBlock::with_mutations(hash, mutations);
-        }
-
-        i += 1;
         while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
-            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
-                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
-                .map_err(de::Error::custom)?;
+            let (hash, block_data): (Bytes, Map<Tuple<State>>) =
+                state.try_cast_into(|s| de::Error::invalid_type(s, "a chain block"))?;
 
-            let mut block: FileWriteGuard<_, ChainBlock> = {
-                let block = file_lock
-                    .create_file(
-                        block_name(i),
-                        ChainBlock::new(hash.to_vec()),
-                        Some(hash.len()),
-                    )
-                    .map_err(de::Error::custom)?;
-
-                block.write().map_err(de::Error::custom).await?
-            };
-
-            if block.last_hash() != &hash {
-                let hash = hex::encode(hash);
-                let last_hash = hex::encode(block.last_hash());
+            if &hash[..] != &last_hash[..] {
                 return Err(de::Error::invalid_value(
-                    format!("block with last hash {}", hash),
-                    format!("block with last hash {}", last_hash),
+                    format!("block with last hash {}", hex::encode(hash)),
+                    format!("block with last hash {}", hex::encode(last_hash)),
                 ));
             }
 
-            let mutations = parse_block_state(&history, &txn, block_data)
+            let mutations = parse_block_state(&store, &self.txn, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
-            *block = ChainBlock::with_mutations(hash, mutations);
+            let block = ChainBlock::with_mutations(hash, mutations);
+            last_hash = block.hash();
+
+            file_lock
+                .create_file(block_name(i), block, None)
+                .map_err(de::Error::custom)?;
 
             i += 1;
         }
 
-        Ok(history)
+        Ok(History::new(file, store, i, txn_id))
     }
 }
 
 async fn parse_block_state(
-    history: &History,
+    store: &Store,
     txn: &Txn,
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>> {
@@ -490,7 +469,7 @@ async fn parse_block_state(
                 parsed.push(Mutation::Delete(path, key));
             } else if op.matches::<(TCPathBuf, Value, State)>() {
                 let (path, key, value) = op.opt_cast_into().unwrap();
-                let value = history.store.save_state(txn, value).await?;
+                let value = store.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(path, key, value));
             } else {
                 return Err(TCError::bad_request(
