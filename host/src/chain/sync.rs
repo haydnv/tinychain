@@ -184,12 +184,7 @@ impl Persist<fs::Dir> for SyncChain {
             let last_block: FileReadGuard<_, ChainBlock> =
                 committed.read().map_err(fs::io_err).await?;
 
-            if let Some(past_txn_id) = last_block.mutations.keys().last() {
-                let mutations = last_block
-                    .mutations
-                    .get(past_txn_id)
-                    .expect("last-committed mutations");
-
+            for (past_txn_id, mutations) in &last_block.mutations {
                 super::data::replay_all(&subject, past_txn_id, mutations, txn, &store).await?;
             }
 

@@ -25,8 +25,9 @@ use crate::txn::Txn;
 
 use super::{ChainBlock, Mutation, Store};
 
-const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
+const PENDING: &str = "pending";
+const WRITE_AHEAD: &str = "write_ahead";
 
 #[derive(Clone)]
 pub struct History {
@@ -116,6 +117,16 @@ impl History {
     ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(*latest).await
+    }
+
+    pub async fn read_log(&self) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+        let log = {
+            let file = self.file.read().await;
+            file.get_file(&block_name(WRITE_AHEAD))
+                .expect("write-ahead log")
+        };
+
+        log.read().map_err(fs::io_err).await
     }
 
     pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
@@ -233,6 +244,35 @@ impl History {
 
         Ok(())
     }
+
+    pub async fn write_ahead(&self, txn_id: &TxnId) {
+        self.store.commit(txn_id).await;
+
+        let file = self.file.read().await;
+        let mut pending: FileWriteGuard<_, ChainBlock> = file
+            .get_file(&block_name(PENDING))
+            .expect("pending transactions")
+            .write()
+            .await
+            .expect("pending block write lock");
+
+        if let Some(mutations) = pending.mutations.remove(txn_id) {
+            let write_ahead = file
+                .get_file(&block_name(WRITE_AHEAD))
+                .expect("write-ahead log");
+
+            {
+                let mut write_ahead: FileWriteGuard<_, ChainBlock> = write_ahead
+                    .write()
+                    .await
+                    .expect("write-ahead log write lock");
+
+                write_ahead.mutations.insert(*txn_id, mutations);
+            }
+
+            write_ahead.sync(false).await.expect("sync write-ahead log");
+        }
+    }
 }
 
 const SCHEMA: () = ();
@@ -259,7 +299,11 @@ impl Persist<fs::Dir> for History {
 
         let file = {
             let mut dir = dir.into_inner().write().await;
-            dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
+            if let Some(file) = dir.get_dir(&block_name(CHAIN)) {
+                file.clone()
+            } else {
+                dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
+            }
         };
 
         let mut file_lock = file.write().await;
@@ -273,6 +317,18 @@ impl Persist<fs::Dir> for History {
             file_lock
                 .create_file(
                     block_name(PENDING),
+                    ChainBlock::new(last_hash.clone()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+        }
+
+        if file_lock.get_file(&block_name(WRITE_AHEAD)).is_none() {
+            // if there were no mutations committed after the chain was created,
+            // it may not have a write-ahead block on the filesystem, so just create one now
+            file_lock
+                .create_file(
+                    block_name(WRITE_AHEAD),
                     ChainBlock::new(last_hash.clone()),
                     Some(last_hash.len()),
                 )
@@ -317,7 +373,7 @@ impl Transact for History {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit chain history {}", txn_id);
 
-        self.store.commit(txn_id).await;
+        // assume `self.store` has already been committed by calling `write_ahead`
 
         let (mut latest, mut cutoff) =
             try_join!(self.latest.write(*txn_id), self.cutoff.write(*txn_id))
@@ -331,45 +387,58 @@ impl Transact for History {
         );
 
         let mut file = self.file.write().await;
-        let mut pending: FileWriteGuard<_, ChainBlock> = file
-            .get_file(&block_name(PENDING))
-            .expect("pending transactions")
-            .write()
-            .await
-            .expect("pending transaction lock");
+        let write_ahead = file
+            .get_file(&block_name(WRITE_AHEAD))
+            .expect("write-ahead log");
 
-        if let Some(mutations) = pending.mutations.remove(txn_id) {
-            let latest_block = file.get_file(&block_name(*latest)).expect("latest block");
+        let needs_sync = {
+            let mut write_ahead: FileWriteGuard<_, ChainBlock> =
+                write_ahead.write().await.expect("write-ahead lock");
 
-            {
-                let mut latest_block: FileWriteGuard<_, ChainBlock> =
-                    latest_block.write().await.expect("latest block write lock");
+            if let Some(mutations) = write_ahead.mutations.remove(txn_id) {
+                let latest_block = file.get_file(&block_name(*latest)).expect("latest block");
 
-                latest_block.mutations.insert(*txn_id, mutations);
+                {
+                    let mut latest_block: FileWriteGuard<_, ChainBlock> =
+                        latest_block.write().await.expect("latest block write lock");
 
-                if latest_block.size().await.expect("block size") > BLOCK_SIZE {
-                    *cutoff = *txn_id;
+                    latest_block.mutations.insert(*txn_id, mutations);
 
-                    let hash = latest_block.hash();
+                    if latest_block.size().await.expect("block size") > BLOCK_SIZE {
+                        *cutoff = *txn_id;
 
-                    let new_block = file
-                        .create_file(
-                            block_name(*latest),
-                            ChainBlock::new(hash.to_vec()),
-                            Some(hash.len()),
-                        )
-                        .expect("new chain block");
+                        let hash = latest_block.hash();
 
-                    new_block.sync(true).await.expect("sync new chain block");
+                        let new_block = file
+                            .create_file(
+                                block_name(*latest),
+                                ChainBlock::new(hash.to_vec()),
+                                Some(hash.len()),
+                            )
+                            .expect("new chain block");
 
-                    *latest += 1;
+                        new_block.sync(true).await.expect("sync new chain block");
+
+                        *latest += 1;
+                    }
                 }
-            }
 
-            latest_block
+                latest_block
+                    .sync(false)
+                    .await
+                    .expect("sync latest chain block");
+
+                true
+            } else {
+                false
+            }
+        };
+
+        if needs_sync {
+            write_ahead
                 .sync(false)
                 .await
-                .expect("sync latest chain block");
+                .expect("sync write-ahead log after commit");
         }
 
         std::mem::drop(latest);
@@ -439,7 +508,15 @@ impl de::Visitor for HistoryVisitor {
 
         file_lock
             .create_file(
-                PENDING.to_string(),
+                block_name(PENDING),
+                ChainBlock::new(null_hash.to_vec()),
+                Some(null_hash.len()),
+            )
+            .map_err(de::Error::custom)?;
+
+        file_lock
+            .create_file(
+                block_name(WRITE_AHEAD),
                 ChainBlock::new(null_hash.to_vec()),
                 Some(null_hash.len()),
             )

@@ -86,7 +86,7 @@ impl ChainInstance for BlockChain {
     }
 
     async fn write_ahead(&self, txn_id: &TxnId) {
-        self.history.commit(txn_id).await
+        self.history.write_ahead(txn_id).await
     }
 }
 
@@ -104,13 +104,8 @@ impl Persist<fs::Dir> for BlockChain {
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
         let history = History::load(txn, (), dir).await?;
 
-        let last_block = history.read_latest(*txn.id()).await?;
-        if let Some(past_txn_id) = last_block.mutations.keys().last() {
-            let mutations = last_block
-                .mutations
-                .get(past_txn_id)
-                .expect("last-committed mutations");
-
+        let write_ahead_log = history.read_log().await?;
+        for (past_txn_id, mutations) in &write_ahead_log.mutations {
             super::data::replay_all(&subject, past_txn_id, mutations, txn, history.store()).await?;
         }
 
@@ -122,8 +117,9 @@ impl Persist<fs::Dir> for BlockChain {
 impl Transact for BlockChain {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("BlockChain::commit");
-        // assume `self.history` has already been committed by calling the `write_ahead` method
         self.subject.commit(txn_id).await;
+        // make sure `self.subject` is committed before moving mutations out of the write-ahead log
+        self.history.commit(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
