@@ -37,7 +37,7 @@ async fn replay(subject: &Subject, txn: &Txn, store: &Store, mutation: &Mutation
         Mutation::Delete(path, key) => subject.delete(txn, path, key.clone()).await,
         Mutation::Put(path, key, value) => {
             let value = store.resolve(txn, value.clone()).await?;
-            subject.put(txn, path, key.clone(), value).await
+            subject.put(txn, path, key.clone(), value.clone()).await
         }
     }
 }

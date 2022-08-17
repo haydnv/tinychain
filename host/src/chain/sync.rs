@@ -261,6 +261,7 @@ impl de::Visitor for ChainVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let null_hash = null_hash();
         let txn_id = *self.txn.id();
         let dir = self
             .txn
@@ -295,16 +296,16 @@ impl de::Visitor for ChainVisitor {
         let committed = blocks_dir
             .create_file(
                 COMMITTED.to_string(),
-                ChainBlock::new(null_hash().to_vec()),
-                Some(0),
+                ChainBlock::new(null_hash.to_vec()),
+                Some(null_hash.len()),
             )
             .map_err(de::Error::custom)?;
 
         let pending = blocks_dir
             .create_file(
                 PENDING.to_string(),
-                ChainBlock::with_txn(null_hash().to_vec(), txn_id),
-                Some(0),
+                ChainBlock::with_txn(null_hash.to_vec(), txn_id),
+                Some(null_hash.len()),
             )
             .map_err(de::Error::custom)?;
 

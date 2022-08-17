@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist, Store};
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::TCPathBuf;
@@ -74,7 +74,7 @@ impl ChainInstance for BlockChain {
             State::Chain(Chain::Block(chain)) => chain,
             other => {
                 return Err(TCError::bad_request(
-                    "cannot replicate with a blockchain",
+                    "blockchain expected to replicate a chain of blocks, but found",
                     other,
                 ))
             }
@@ -101,14 +101,8 @@ impl Persist<fs::Dir> for BlockChain {
     }
 
     async fn load(txn: &Txn, schema: Schema, dir: fs::Dir) -> TCResult<Self> {
-        let is_new = dir.is_empty(*txn.id()).await?;
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
-
-        let history = if is_new {
-            History::create(*txn.id(), dir).await?
-        } else {
-            History::load(txn, (), dir).await?
-        };
+        let history = History::load(txn, (), dir).await?;
 
         let last_block = history.read_latest(*txn.id()).await?;
         if let Some(past_txn_id) = last_block.mutations.keys().last() {

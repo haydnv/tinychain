@@ -121,6 +121,7 @@ impl<T> Drop for TxnLockWriteGuard<T> {
             .state
             .lock()
             .expect("TxnLockWriteGuard::drop");
+
         if let Some(readers) = lock_state.readers.get(&self.txn_id) {
             assert_eq!(readers, &0);
         }
