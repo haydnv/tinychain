@@ -1,62 +1,54 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
+use freqfs::{DirLock, FileReadGuard, FileWriteGuard};
 use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
 use safecast::*;
 
-use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableInstance;
-#[cfg(feature = "tensor")]
-use tc_tensor::TensorAccess;
-use tc_transact::fs::*;
+use tc_transact::fs::{BlockData, Dir, File, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{
-    label, Id, Instance, Label, Map, NativeClass, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple,
-};
+use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
 
-use crate::chain::{null_hash, ChainType, Subject, BLOCK_SIZE, CHAIN};
-use crate::collection::*;
+use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
 use crate::fs;
 use crate::route::Public;
-use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{ChainBlock, Mutation};
+use super::{ChainBlock, Mutation, Store};
 
-const DATA: Label = label("data");
+const STORE: Label = label("store");
+const PENDING: &str = "pending";
+const WRITE_AHEAD: &str = "write_ahead";
 
 #[derive(Clone)]
 pub struct History {
-    dir: fs::Dir,
-    file: fs::File<ChainBlock>,
+    file: DirLock<fs::CacheBlock>,
+    store: Store,
     latest: TxnLock<u64>,
+    cutoff: TxnLock<TxnId>,
 }
 
 impl History {
-    fn new(latest: u64, dir: fs::Dir, file: fs::File<ChainBlock>) -> Self {
-        let latest = TxnLock::new("latest block ordinal", latest);
-        Self { dir, latest, file }
+    fn new(file: DirLock<fs::CacheBlock>, store: Store, latest: u64, cutoff: TxnId) -> Self {
+        Self {
+            file,
+            store,
+            latest: TxnLock::new("latest block ordinal", latest),
+            cutoff: TxnLock::new("block transaction time cutoff", cutoff),
+        }
     }
 
-    pub async fn create(txn_id: TxnId, dir: fs::Dir, class: ChainType) -> TCResult<Self> {
-        let block = ChainBlock::new(null_hash().to_vec());
-        let file: fs::File<ChainBlock> = dir.create_file(txn_id, CHAIN.into(), class).await?;
-        file.create_block(txn_id, 0u64.into(), block, BLOCK_SIZE)
-            .await?;
-
-        let dir = dir.create_dir(txn_id, DATA.into()).await?;
-
-        Ok(Self::new(0, dir, file))
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 
     pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
@@ -74,7 +66,7 @@ impl History {
         value: State,
     ) -> TCResult<()> {
         let txn_id = *txn.id();
-        let value = self.save_state(txn, value).await?;
+        let value = self.store.save_state(txn, value).await?;
 
         debug!(
             "History::append_put {} {} {:?} {:?}",
@@ -87,149 +79,28 @@ impl History {
         Ok(())
     }
 
-    async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
-        if state.is_ref() {
-            return Err(TCError::bad_request(
-                "cannot update Chain with reference: {}",
-                state,
-            ));
-        }
-
-        let hash = state
-            .clone()
-            .hash(txn.clone())
-            .map_ok(Id::from_hash)
-            .await?;
-
-        let txn_id = *txn.id();
-        match state {
-            State::Collection(collection) => match collection {
-                Collection::BTree(btree) => {
-                    let schema = btree.schema().to_vec();
-                    let classpath = BTreeType::default().path();
-
-                    if self.dir.contains(txn_id, &hash).await? {
-                        debug!("BTree with hash {} is already saved", hash);
-                    } else {
-                        let file = self
-                            .dir
-                            .create_file(txn_id, hash.clone(), btree.class())
-                            .await?;
-
-                        BTreeFile::copy_from(btree, file, txn).await?;
-                        debug!("saved BTree with hash {}", hash);
-                    }
-
-                    Ok(OpRef::Get((
-                        (hash.into(), classpath).into(),
-                        Value::from_iter(schema).into(),
-                    ))
-                    .into())
-                }
-
-                Collection::Table(table) => {
-                    let schema = table.schema().clone();
-                    let classpath = TableType::default().path();
-
-                    if self.dir.contains(txn_id, &hash).await? {
-                        debug!("Table with hash {} is already saved", hash);
-                    } else {
-                        let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
-                        TableIndex::copy_from(table, dir, txn).await?;
-                        debug!("saved Table with hash {}", hash);
-                    }
-
-                    Ok(OpRef::Get((
-                        (hash.into(), classpath).into(),
-                        Value::cast_from(schema).into(),
-                    ))
-                    .into())
-                }
-
-                #[cfg(feature = "tensor")]
-                Collection::Tensor(tensor) => {
-                    let shape = tensor.shape().clone();
-                    let dtype = tensor.dtype();
-                    let schema = tc_tensor::Schema { shape, dtype };
-                    let classpath = tensor.class().path();
-
-                    if !self.dir.contains(txn_id, &hash).await? {
-                        match tensor {
-                            Tensor::Dense(dense) => {
-                                let file = self
-                                    .dir
-                                    .create_file(txn_id, hash.clone(), TensorType::Dense)
-                                    .await?;
-
-                                DenseTensor::copy_from(dense, file, txn).await?;
-                                debug!("saved Tensor with hash {}", hash);
-                            }
-                            Tensor::Sparse(sparse) => {
-                                let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
-                                SparseTensor::copy_from(sparse, dir, txn).await?;
-                                debug!("saved Tensor with hash {}", hash);
-                            }
-                        };
-                    }
-
-                    let schema: Value = schema.cast_into();
-                    Ok(OpRef::Get(((hash.into(), classpath).into(), schema.into())).into())
-                }
-            },
-            State::Scalar(value) => Ok(value),
-            other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
-            other => Err(TCError::bad_request(
-                "Chain does not support value",
-                other.class(),
-            )),
-        }
-    }
-
-    pub async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>> {
-        let block = self.read_latest(txn_id).await?;
-        Ok(block.mutations().keys().next().cloned())
-    }
-
-    pub async fn latest_block_id(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.latest.read(txn_id).map_ok(|id| *id).await
-    }
-
-    pub async fn contains_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<bool> {
-        self.file.contains_block(txn_id, &block_id.into()).await
-    }
-
-    pub async fn create_next_block(
+    async fn read_block(
         &self,
-        txn_id: TxnId,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
-        let mut latest = self.latest.write(txn_id).await?;
-        let last_block = self.read_block(txn_id, (*latest).into()).await?;
-
-        let hash = last_block.hash();
-        let block = ChainBlock::new(hash.to_vec());
-
-        (*latest) += 1;
-        debug!("creating next chain block {}", *latest);
-
-        self.file
-            .create_block(txn_id, (*latest).into(), block, BLOCK_SIZE)
-            .await
-    }
-
-    pub async fn read_block(
-        &self,
-        txn_id: TxnId,
         block_id: u64,
     ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
-        self.file.read_block(txn_id, block_id.into()).await
+        let file = self.file.read().await;
+        let block = file
+            .get_file(&block_name(block_id))
+            .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
+
+        block.read().map_err(fs::io_err).await
     }
 
-    pub async fn write_block(
+    async fn write_block(
         &self,
-        txn_id: TxnId,
         block_id: u64,
     ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
-        self.file.write_block(txn_id, block_id.into()).await
+        let file = self.file.read().await;
+        let block = file
+            .get_file(&block_name(block_id))
+            .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
+
+        block.write().map_err(fs::io_err).await
     }
 
     pub async fn read_latest(
@@ -237,7 +108,7 @@ impl History {
         txn_id: TxnId,
     ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
         let latest = self.latest.read(txn_id).await?;
-        self.read_block(txn_id, (*latest).into()).await
+        self.read_block(*latest).await
     }
 
     pub async fn write_latest(
@@ -245,55 +116,31 @@ impl History {
         txn_id: TxnId,
     ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
         let latest = self.latest.read(txn_id).await?;
-        self.write_block(txn_id, (*latest).into()).await
+        self.write_block(*latest).await
     }
 
-    pub async fn apply_last(&self, txn: &Txn, subject: &Subject) -> TCResult<()> {
-        let latest = *self.latest.read(*txn.id()).await?;
-        let block = self.read_block(*txn.id(), latest.into()).await?;
-
-        let last_block = if latest > 0 && block.mutations().is_empty() {
-            self.read_block(*txn.id(), (latest - 1).into()).await?
-        } else {
-            block
+    pub async fn read_log(&self) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+        let log = {
+            let file = self.file.read().await;
+            file.get_file(&block_name(WRITE_AHEAD))
+                .expect("write-ahead log")
         };
 
-        if let Some((last_txn_id, ops)) = last_block.mutations().iter().last() {
-            for op in ops {
-                let result = match op {
-                    Mutation::Delete(path, key) => {
-                        debug!("replay DELETE {}{}: {}", subject, path, key);
-
-                        subject.delete(txn, path, key.clone()).await
-                    }
-                    Mutation::Put(path, key, value) => {
-                        debug!("replay PUT {}{}: {} <- {}", subject, path, key, value);
-
-                        self.resolve(txn, value.clone())
-                            .and_then(|value| subject.put(txn, path, key.clone(), value))
-                            .await
-                    }
-                };
-
-                if let Err(cause) = result {
-                    return Err(TCError::internal(format!(
-                        "error replaying last transaction {}: {}",
-                        last_txn_id, cause
-                    )));
-                }
-            }
-        }
-
-        Ok(())
+        log.read().map_err(fs::io_err).await
     }
 
     pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
+        let err_divergent =
+            |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
+
         debug!("replicate chain history");
 
         let txn_id = *txn.id();
 
         let (latest, other_latest) =
             try_join!(self.latest.read(txn_id), other.latest.read(txn_id))?;
+
+        debug!("chain to replicate ends with block {}", *other_latest);
 
         if (*latest) > (*other_latest) {
             return Err(TCError::bad_request(
@@ -304,206 +151,126 @@ impl History {
 
         let mut latest_txn_id = None;
 
-        const ERR_DIVERGENT: &str = "chain to replicate diverges at block";
+        // handle blocks with ordinal < latest, which should be identical
         for i in 0u64..*latest {
-            let block = self.read_block(txn_id, i.into()).await?;
-
-            let other = other.read_block(txn_id, i.into()).await?;
+            let (block, other) = try_join!(self.read_block(i), other.read_block(i))?;
 
             if &*block != &*other {
-                return Err(TCError::bad_request(ERR_DIVERGENT, i));
+                return Err(err_divergent(i));
             }
 
-            if let Some(txn_id) = block.mutations().keys().last() {
+            if let Some(txn_id) = block.mutations.keys().last() {
                 latest_txn_id = Some(*txn_id);
             }
         }
 
-        let mut i = *latest;
-        loop {
-            debug!("copy history from block {}", i);
+        // handle the latest block, which may be shorter than the corresponding block to replicate
+        let mut last_hash = {
+            let (mut dest, source) =
+                try_join!(self.write_block(*latest), other.read_block(*latest))?;
 
-            let source = other.read_block(txn_id, i).await?;
-            let mut dest = self.write_block(txn_id, i).await?;
-
-            let mut mutation_ids = source.mutations().keys();
-            for past_txn_id in dest.mutations().keys() {
-                if mutation_ids.next() != Some(past_txn_id) {
-                    return Err(TCError::bad_request(
-                        "error replicating Chain",
-                        format!("block {} diverges at txn {}", i, past_txn_id),
-                    ));
-                }
-
-                latest_txn_id = Some(*past_txn_id);
+            if let Some(txn_id) = dest.mutations.keys().last() {
+                latest_txn_id = Some(*txn_id);
             }
 
-            for (past_txn_id, ops) in source.mutations() {
-                let append = if let Some(latest) = &latest_txn_id {
-                    if past_txn_id < latest {
+            for (txn_id, ops) in &source.mutations {
+                if let Some(latest_txn_id) = &latest_txn_id {
+                    if txn_id <= latest_txn_id {
                         continue;
                     }
-
-                    past_txn_id > latest
-                } else {
-                    true
-                };
-
-                for op in ops.iter().cloned() {
-                    debug!("replicating mutation at {}: {}", past_txn_id, op);
-
-                    let result = match op {
-                        Mutation::Delete(path, key) => {
-                            if append {
-                                dest.append_delete(*past_txn_id, path.clone(), key.clone());
-                            }
-                            subject.delete(txn, &path, key).await
-                        }
-                        Mutation::Put(path, key, value) => {
-                            let value = other.resolve(txn, value).await?;
-                            let value_ref = self.save_state(txn, value.clone()).await?;
-
-                            if append {
-                                dest.append_put(*past_txn_id, path.clone(), key.clone(), value_ref);
-                            }
-                            subject.put(txn, &path, key, value).await
-                        }
-                    };
-
-                    if let Err(cause) = result {
-                        return Err(TCError::bad_request(
-                            format!("error at {} while replicating Chain", past_txn_id),
-                            cause,
-                        ));
-                    }
                 }
+
+                assert!(!dest.mutations.contains_key(txn_id));
+                replay_and_save(
+                    &subject,
+                    txn,
+                    *txn_id,
+                    ops,
+                    &other.store,
+                    &self.store,
+                    &mut dest,
+                )
+                .await?;
             }
 
-            if source.hash() != dest.hash() {
-                return Err(TCError::bad_request(
-                    "error replicating Chain",
-                    format!("hashes diverge at block {}", i),
-                ));
+            let last_hash = dest.hash().to_vec();
+            if &last_hash[..] != &source.hash()[..] {
+                return Err(TCError::internal(err_divergent(*latest)));
             }
 
-            i += 1;
+            last_hash
+        };
 
-            if other.contains_block(*txn.id(), i).await? {
-                self.create_next_block(*txn.id()).await?;
-            } else {
-                break;
+        // if the other chain has the same number of blocks, replication is complete
+        if *latest == *other_latest {
+            return Ok(());
+        }
+
+        // otherwise, handle the remaining blocks
+        let mut this_file = self.file.write().await;
+        for block_id in (*latest + 1)..(*other_latest + 1) {
+            let source = other.read_block(block_id).await?;
+
+            let dest = this_file
+                .create_file(
+                    block_name(block_id),
+                    ChainBlock::new(last_hash.to_vec()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+
+            let mut dest: FileWriteGuard<_, ChainBlock> = dest.write().map_err(fs::io_err).await?;
+
+            for (txn_id, ops) in &source.mutations {
+                assert!(!dest.mutations.contains_key(txn_id));
+
+                replay_and_save(
+                    &subject,
+                    txn,
+                    *txn_id,
+                    ops,
+                    &other.store,
+                    &self.store,
+                    &mut dest,
+                )
+                .await?;
+            }
+
+            last_hash = dest.hash().to_vec();
+            if &last_hash[..] != &source.hash()[..] {
+                return Err(TCError::internal(err_divergent(block_id)));
             }
         }
 
         Ok(())
     }
 
-    pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
-        debug!("History::resolve {}", scalar);
+    pub async fn write_ahead(&self, txn_id: &TxnId) {
+        self.store.commit(txn_id).await;
 
-        type OpSubject = crate::scalar::Subject;
+        let file = self.file.read().await;
+        let mut pending: FileWriteGuard<_, ChainBlock> = file
+            .get_file(&block_name(PENDING))
+            .expect("pending transactions")
+            .write()
+            .await
+            .expect("pending block write lock");
 
-        if let Scalar::Ref(tc_ref) = scalar {
-            if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
-                let class = CollectionType::from_path(&classpath).ok_or_else(|| {
-                    TCError::internal(format!("invalid Collection type: {}", classpath))
-                })?;
+        if let Some(mutations) = pending.mutations.remove(txn_id) {
+            let write_ahead = file
+                .get_file(&block_name(WRITE_AHEAD))
+                .expect("write-ahead log");
 
-                self.resolve_inner(txn, hash.into(), schema, class)
-                    .map_ok(State::from)
+            {
+                let mut write_ahead: FileWriteGuard<_, ChainBlock> = write_ahead
+                    .write()
                     .await
-            } else {
-                error!("invalid subject for historical Chain state {}", tc_ref);
+                    .expect("write-ahead log write lock");
 
-                Err(TCError::internal(format!(
-                    "invalid subject for historical Chain state {}",
-                    tc_ref
-                )))
-            }
-        } else {
-            Ok(scalar.into())
-        }
-    }
-
-    async fn resolve_inner(
-        &self,
-        txn: &Txn,
-        hash: Id,
-        schema: Scalar,
-        class: CollectionType,
-    ) -> TCResult<Collection> {
-        debug!("resolve historical collection value of type {}", class);
-
-        match class {
-            CollectionType::BTree(_) => {
-                fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid BTree schema for historical Chain state: {}",
-                        info
-                    ))
-                }
-
-                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
-                let schema = schema.try_cast_into(|v| schema_err(v))?;
-
-                let file = self.dir.get_file(*txn.id(), &hash).await?.ok_or_else(|| {
-                    TCError::internal(format!("Chain is missing historical state {}", hash))
-                })?;
-
-                let btree = BTreeFile::load(txn, schema, file).await?;
-                Ok(Collection::BTree(btree.into()))
+                write_ahead.mutations.insert(*txn_id, mutations);
             }
 
-            CollectionType::Table(_) => {
-                fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid Table schema for historical Chain state: {}",
-                        info
-                    ))
-                }
-
-                let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
-                let schema = schema.try_cast_into(|v| schema_err(v))?;
-
-                let dir = self.dir.get_dir(*txn.id(), &hash).await?;
-                let dir = dir.ok_or_else(|| {
-                    TCError::internal(format!("missing historical Chain state {}", hash))
-                })?;
-
-                let table = TableIndex::load(txn, schema, dir).await?;
-                Ok(Collection::Table(table.into()))
-            }
-
-            #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => {
-                let schema: Value = schema.try_cast_into(|s| {
-                    TCError::internal(format!("invalid Tensor schema: {}", s))
-                })?;
-                let schema = schema.try_cast_into(|v| {
-                    TCError::internal(format!("invalid Tensor schema: {}", v))
-                })?;
-
-                match tt {
-                    TensorType::Dense => {
-                        let file = self.dir.get_file(*txn.id(), &hash).await?;
-                        let file = file.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
-
-                        let tensor = DenseTensor::load(txn, schema, file).await?;
-                        Ok(Collection::Tensor(tensor.into()))
-                    }
-                    TensorType::Sparse => {
-                        let dir = self.dir.get_dir(*txn.id(), &hash).await?;
-                        let dir = dir.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
-
-                        let tensor = SparseTensor::load(txn, schema, dir).await?;
-                        Ok(Collection::Tensor(tensor.into()))
-                    }
-                }
-            }
+            write_ahead.sync(false).await.expect("sync write-ahead log");
         }
     }
 }
@@ -523,20 +290,65 @@ impl Persist<fs::Dir> for History {
     async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
         let txn_id = txn.id();
 
-        let file: fs::File<ChainBlock> = dir
-            .get_file(*txn_id, &CHAIN.into())
-            .await?
-            .ok_or_else(|| TCError::internal("Chain has no history file"))?;
-
         // if there's no data in the data dir, it may not have been sync'd to the filesystem
-        // so just create a new one in memory
-        let dir = dir.get_or_create_dir(*txn_id, DATA.into()).await?;
+        // so just create a new one
+        let store = dir
+            .get_or_create_dir(*txn_id, STORE.into())
+            .map_ok(Store::new)
+            .await?;
 
-        let mut last_hash = Bytes::from(null_hash().to_vec());
+        let file = {
+            let mut dir = dir.into_inner().write().await;
+            if let Some(file) = dir.get_dir(&block_name(CHAIN)) {
+                file.clone()
+            } else {
+                dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
+            }
+        };
+
+        let mut file_lock = file.write().await;
+
+        let mut cutoff = *txn_id;
         let mut latest = 0;
+        let mut last_hash = Bytes::from(null_hash().to_vec());
 
-        loop {
-            let block = file.read_block(*txn_id, latest.into()).await?;
+        if file_lock.get_file(&block_name(PENDING)).is_none() {
+            // the pending block may never be sync'd to the filesystem
+            file_lock
+                .create_file(
+                    block_name(PENDING),
+                    ChainBlock::new(last_hash.clone()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+        }
+
+        if file_lock.get_file(&block_name(WRITE_AHEAD)).is_none() {
+            // if there were no mutations committed after the chain was created,
+            // it may not have a write-ahead block on the filesystem, so just create one now
+            file_lock
+                .create_file(
+                    block_name(WRITE_AHEAD),
+                    ChainBlock::new(last_hash.clone()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+        }
+
+        if file_lock.get_file(&block_name(latest)).is_none() {
+            // if there were no mutations committed after the chain was created,
+            // it may not have an initial block on the filesystem, so just create one now
+            file_lock
+                .create_file(
+                    block_name(latest),
+                    ChainBlock::new(last_hash.clone()),
+                    Some(last_hash.len()),
+                )
+                .map_err(fs::io_err)?;
+        }
+
+        while let Some(block) = file_lock.get_file(&block_name(latest)) {
+            let block: FileReadGuard<_, ChainBlock> = block.read().map_err(fs::io_err).await?;
 
             if block.last_hash() == &last_hash {
                 last_hash = block.last_hash().clone();
@@ -547,26 +359,110 @@ impl Persist<fs::Dir> for History {
                 )));
             }
 
-            if file.contains_block(*txn_id, &(latest + 1).into()).await? {
-                latest += 1;
-            } else {
-                break;
-            }
+            cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
+            latest += 1;
         }
 
-        Ok(History::new(latest, dir, file))
+        let latest = if latest == 0 { 0 } else { latest - 1 };
+        Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 }
 
 #[async_trait]
 impl Transact for History {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("Chain history commit");
-        join!(self.file.commit(txn_id), self.dir.commit(txn_id));
+        debug!("commit chain history {}", txn_id);
+
+        // assume `self.store` has already been committed by calling `write_ahead`
+
+        let (mut latest, mut cutoff) =
+            try_join!(self.latest.write(*txn_id), self.cutoff.write(*txn_id))
+                .expect("BlockChain state");
+
+        assert!(
+            txn_id >= &cutoff,
+            "cannot commit transaction {} since a block has already been committed at {}",
+            txn_id,
+            *cutoff
+        );
+
+        let mut file = self.file.write().await;
+        let write_ahead = file
+            .get_file(&block_name(WRITE_AHEAD))
+            .expect("write-ahead log");
+
+        let needs_sync = {
+            let mut write_ahead: FileWriteGuard<_, ChainBlock> =
+                write_ahead.write().await.expect("write-ahead lock");
+
+            if let Some(mutations) = write_ahead.mutations.remove(txn_id) {
+                let latest_block = file.get_file(&block_name(*latest)).expect("latest block");
+
+                {
+                    let mut latest_block: FileWriteGuard<_, ChainBlock> =
+                        latest_block.write().await.expect("latest block write lock");
+
+                    latest_block.mutations.insert(*txn_id, mutations);
+
+                    if latest_block.size().await.expect("block size") > BLOCK_SIZE {
+                        *cutoff = *txn_id;
+
+                        let hash = latest_block.hash();
+
+                        let new_block = file
+                            .create_file(
+                                block_name(*latest),
+                                ChainBlock::new(hash.to_vec()),
+                                Some(hash.len()),
+                            )
+                            .expect("new chain block");
+
+                        new_block.sync(true).await.expect("sync new chain block");
+
+                        *latest += 1;
+                    }
+                }
+
+                latest_block
+                    .sync(false)
+                    .await
+                    .expect("sync latest chain block");
+
+                true
+            } else {
+                false
+            }
+        };
+
+        if needs_sync {
+            write_ahead
+                .sync(false)
+                .await
+                .expect("sync write-ahead log after commit");
+        }
+
+        std::mem::drop(latest);
+        std::mem::drop(cutoff);
+
+        join!(self.latest.commit(txn_id), self.cutoff.commit(txn_id));
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(self.file.finalize(txn_id), self.dir.finalize(txn_id));
+        join!(
+            self.store.finalize(txn_id),
+            self.latest.finalize(txn_id),
+            self.cutoff.finalize(txn_id)
+        );
+
+        let file = self.file.read().await;
+        let mut pending: FileWriteGuard<_, ChainBlock> = file
+            .get_file(&block_name(PENDING))
+            .expect("pending transactions")
+            .write()
+            .await
+            .expect("pending transaction lock");
+
+        pending.mutations.remove(txn_id);
     }
 }
 
@@ -596,89 +492,73 @@ impl de::Visitor for HistoryVisitor {
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
 
-        let file: fs::File<ChainBlock> = dir
-            .create_file(txn_id, CHAIN.into(), ChainType::default())
+        let store = dir
+            .create_dir(txn_id, STORE.into())
+            .map_ok(Store::new)
             .map_err(de::Error::custom)
             .await?;
 
-        let dir = dir
-            .create_dir(txn_id, DATA.into())
-            .map_err(de::Error::custom)
-            .await?;
+        let file = {
+            let mut dir = dir.into_inner().write().await;
+            dir.create_dir(block_name(CHAIN))
+                .map_err(de::Error::custom)?
+        };
 
-        let first_block = ChainBlock::new(null_hash.to_vec());
-        file.create_block(txn_id, 0u64.into(), first_block, BLOCK_SIZE)
-            .map_err(de::Error::custom)
-            .await?;
+        let mut file_lock = file.write().await;
 
-        let history = History::new(0, dir, file);
+        file_lock
+            .create_file(
+                block_name(PENDING),
+                ChainBlock::new(null_hash.to_vec()),
+                Some(null_hash.len()),
+            )
+            .map_err(de::Error::custom)?;
+
+        file_lock
+            .create_file(
+                block_name(WRITE_AHEAD),
+                ChainBlock::new(null_hash.to_vec()),
+                Some(null_hash.len()),
+            )
+            .map_err(de::Error::custom)?;
 
         let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
 
         let mut i = 0u64;
-        let txn = subcontext(i).await?;
+        let mut last_hash = null_hash.clone();
 
-        if let Some(state) = seq.next_element::<State>(txn.clone()).await? {
-            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
-                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
-                .map_err(de::Error::custom)?;
-
-            if &hash != &null_hash.to_vec() {
-                let hash = hex::encode(hash);
-                let null_hash = hex::encode(null_hash);
-                return Err(de::Error::invalid_value(
-                    format!("initial block hash {}", hash),
-                    format!("null hash {}", null_hash),
-                ));
-            }
-
-            let mutations = parse_block_state(&history, &txn, block_data)
-                .map_err(de::Error::custom)
-                .await?;
-
-            let mut block = history
-                .write_block(txn_id, i)
-                .map_err(de::Error::custom)
-                .await?;
-
-            *block = ChainBlock::with_mutations(hash, mutations);
-        }
-
-        i += 1;
         while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
-            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
-                .try_cast_into(|s| TCError::bad_request("invalid Chain block", s))
-                .map_err(de::Error::custom)?;
+            let (hash, block_data): (Bytes, Map<Tuple<State>>) =
+                state.try_cast_into(|s| de::Error::invalid_type(s, "a chain block"))?;
 
-            let mut block = history
-                .create_next_block(txn_id)
-                .map_err(de::Error::custom)
-                .await?;
-
-            if block.last_hash() != &hash {
-                let hash = hex::encode(hash);
-                let last_hash = hex::encode(block.last_hash());
+            if &hash[..] != &last_hash[..] {
                 return Err(de::Error::invalid_value(
-                    format!("block with last hash {}", hash),
-                    format!("block with last hash {}", last_hash),
+                    format!("block with last hash {}", hex::encode(hash)),
+                    format!("block with last hash {}", hex::encode(last_hash)),
                 ));
             }
 
-            let mutations = parse_block_state(&history, &txn, block_data)
+            let mutations = parse_block_state(&store, &self.txn, block_data)
                 .map_err(de::Error::custom)
                 .await?;
 
-            *block = ChainBlock::with_mutations(hash, mutations);
+            let block = ChainBlock::with_mutations(hash, mutations);
+            last_hash = block.hash();
+
+            file_lock
+                .create_file(block_name(i), block, None)
+                .map_err(de::Error::custom)?;
 
             i += 1;
         }
 
-        Ok(history)
+        let latest = if i == 0 { 0 } else { i - 1 };
+        Ok(History::new(file, store, latest, txn_id))
     }
 }
 
 async fn parse_block_state(
-    history: &History,
+    store: &Store,
     txn: &Txn,
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>> {
@@ -695,7 +575,7 @@ async fn parse_block_state(
                 parsed.push(Mutation::Delete(path, key));
             } else if op.matches::<(TCPathBuf, Value, State)>() {
                 let (path, key, value) = op.opt_cast_into().unwrap();
-                let value = history.save_state(txn, value).await?;
+                let value = store.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(path, key, value));
             } else {
                 return Err(TCError::bad_request(
@@ -709,6 +589,41 @@ async fn parse_block_state(
     }
 
     Ok(mutations)
+}
+
+async fn replay_and_save(
+    subject: &Subject,
+    txn: &Txn,
+    txn_id: TxnId,
+    ops: &[Mutation],
+    source: &Store,
+    dest: &Store,
+    block: &mut ChainBlock,
+) -> TCResult<()> {
+    for op in ops {
+        match op {
+            Mutation::Delete(path, key) => {
+                subject.delete(txn, path, key.clone()).await?;
+                block.append_delete(txn_id, path.clone(), key.clone())
+            }
+            Mutation::Put(path, key, original_hash) => {
+                let state = source.resolve(txn, original_hash.clone()).await?;
+                subject.put(txn, path, key.clone(), state.clone()).await?;
+
+                let computed_hash = dest.save_state(txn, state).await?;
+                if &computed_hash != original_hash {
+                    return Err(TCError::unsupported(format!(
+                        "cannot replicate state with inconsistent hash {} vs {}",
+                        original_hash, computed_hash
+                    )));
+                }
+
+                block.append_put(txn_id, path.clone(), key.clone(), computed_hash)
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub type HistoryView<'en> =
@@ -725,17 +640,19 @@ impl<'en> IntoView<'en, fs::Dir> for History {
         let txn_id = *txn.id();
         let latest = self.latest.read(txn_id).await?;
 
-        let file = self.file.clone();
-        let read_block = move |block_id| Box::pin(file.clone().read_block_owned(txn_id, block_id));
+        let file = self.file.read().await;
 
         let seq = stream::iter(0..((*latest) + 1))
-            .map(BlockId::from)
-            .then(read_block)
-            .map_ok(move |block| {
+            .map(move |block_id| {
+                file.get_file(&block_name(block_id))
+                    .ok_or_else(|| TCError::internal("missing chain block"))
+            })
+            .and_then(|block| Box::pin(async move { block.read().map_err(fs::io_err).await }))
+            .map_ok(move |block: FileReadGuard<_, ChainBlock>| {
                 let this = self.clone();
                 let txn = txn.clone();
                 let map =
-                    stream::iter(block.mutations().clone()).map(move |(past_txn_id, mutations)| {
+                    stream::iter(block.mutations.clone()).map(move |(past_txn_id, mutations)| {
                         debug!("reading block mutations");
 
                         let this = this.clone();
@@ -764,6 +681,7 @@ async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<
             debug!("historical mutation: PUT {}: {} <- {}", path, key, value);
 
             let value = history
+                .store
                 .resolve(&txn, value)
                 .map_err(|err| {
                     error!("unable to load historical Chain data: {}", err);
@@ -806,4 +724,8 @@ impl<'en> en::IntoStream<'en> for MutationView<'en> {
             Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
         }
     }
+}
+
+fn block_name<I: fmt::Display>(block_id: I) -> String {
+    format!("{}.{}", block_id, ChainBlock::ext())
 }

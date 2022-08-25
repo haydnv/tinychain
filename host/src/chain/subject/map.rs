@@ -6,9 +6,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{self, TryFutureExt};
-use futures::join;
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::TryStreamExt;
+use futures::{join, try_join};
 use log::{debug, warn};
 use safecast::{CastFrom, CastInto, TryCastInto};
 use sha2::digest::Output;
@@ -160,7 +160,7 @@ impl SubjectMap {
         );
 
         if ids.contains(id) {
-            Ok(collections.get(id).cloned())
+            Ok((**collections).get(id).cloned())
         } else {
             Ok(None)
         }
@@ -177,12 +177,19 @@ impl SubjectMap {
         let file = file.ok_or_else(|| TCError::internal("dynamic Chain missing schema file"))?;
 
         let (mut ids, mut collections) = self.write(txn_id).await?;
-        if ids.contains(&id) {
-            // TODO: allow overwriting a Collection with the same type & schema
-            Err(TCError::bad_request(
-                "SubjectMap already contains an entry called",
-                id,
-            ))
+
+        if let Some(existing) = collections.get(&id) {
+            assert!(ids.contains(&id));
+            let (existing_hash, collection_hash) = try_join!(
+                collection.clone().hash(txn.clone()),
+                existing.clone().hash(txn.clone())
+            )?;
+
+            if existing_hash == collection_hash {
+                Ok(())
+            } else {
+                put(txn, &file, &container, &mut collections, id, collection).await
+            }
         } else {
             ids.insert(id.clone());
             put(txn, &file, &container, &mut collections, id, collection).await
@@ -338,19 +345,26 @@ async fn put(
     collection: Collection,
 ) -> TCResult<()> {
     let txn_id = *txn.id();
-    let collection = Collection::copy_from(txn, container, id.clone(), collection).await?;
 
-    let collection = SubjectCollection::from_collection(collection)?;
-    schema
-        .create_block(
-            txn_id,
-            id.clone(),
-            collection.schema().cast_into(),
-            BLOCK_SIZE_HINT,
-        )
-        .await?;
+    let collection = if let Some(existing) = collections.get(&id) {
+        existing.restore(txn, collection).await?;
+        existing.clone()
+    } else {
+        let collection = Collection::copy_from(txn, container, id.clone(), collection).await?;
+        SubjectCollection::from_collection(collection)?
+    };
+
+    if !schema.contains_block(txn_id, &id).await? {
+        schema
+            .create_block(
+                txn_id,
+                id.clone(),
+                collection.schema().cast_into(),
+                BLOCK_SIZE_HINT,
+            )
+            .await?;
+    }
 
     collections.insert(id, collection);
-
     Ok(())
 }

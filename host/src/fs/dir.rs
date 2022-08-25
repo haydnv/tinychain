@@ -294,7 +294,7 @@ pub struct Dir {
 
 impl Dir {
     pub fn new(cache: DirLock<CacheBlock>) -> Self {
-        let lock_name = "contents of transactional filesystem directory";
+        let lock_name = "contents of a transactional filesystem directory";
 
         Self {
             cache,
@@ -302,6 +302,7 @@ impl Dir {
         }
     }
 
+    /// Load an existing [`Dir`] from the filesystem.
     pub fn load<'a>(cache: DirLock<CacheBlock>, txn_id: TxnId) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
             let fs_dir = cache.read().await;
@@ -329,9 +330,14 @@ impl Dir {
                     let name = name.parse().map_err(TCError::internal)?;
                     (name, DirEntry::Dir(subdir))
                 } else {
+                    #[cfg(debug_assertions)]
+                    let fs_path = format!("{:?} entry \"{}\"", &*fs_dir, name);
+                    #[cfg(not(debug_assertions))]
+                    let fs_path = name;
+
                     return Err(TCError::internal(format!(
                         "directory {} contains both blocks and subdirectories",
-                        name
+                        fs_path
                     )));
                 };
 
@@ -350,12 +356,17 @@ impl Dir {
         })
     }
 
+    /// Get the child directory with the given `name` or create a new one.
     pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
         if let Some(dir) = fs::Dir::get_dir(self, txn_id, &name).await? {
             Ok(dir)
         } else {
             fs::Dir::create_dir(self, txn_id, name).await
         }
+    }
+
+    pub fn into_inner(self) -> DirLock<CacheBlock> {
+        self.cache
     }
 }
 
@@ -375,10 +386,12 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool> {
-        self.listing
-            .read(txn_id)
-            .map_ok(|listing| listing.contains_key(name))
-            .await
+        debug!("Dir::contains");
+
+        let listing = self.listing.read(txn_id).await?;
+        debug!("Dir::contains locked entry list for reading");
+
+        Ok(listing.contains_key(name))
     }
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
@@ -427,6 +440,8 @@ impl fs::Dir for Dir {
         F: fs::File<B>,
         B: fs::BlockData,
     {
+        debug!("Dir::create_file");
+
         let mut listing = self.listing.write(txn_id).await?;
         if listing.contains_key(&file_id) {
             return Err(TCError::bad_request(
@@ -434,6 +449,8 @@ impl fs::Dir for Dir {
                 file_id,
             ));
         }
+
+        debug!("Dir::create_file got write lock on content listing");
 
         let file = {
             let mut cache = self.cache.write().await;
@@ -447,6 +464,9 @@ impl fs::Dir for Dir {
         };
 
         listing.insert(file_id, DirEntry::File(file.clone()));
+
+        debug!("Dir::create_file created new file entry");
+
         file.into_type()
             .ok_or_else(|| TCError::bad_request("expected file type", class))
     }
@@ -609,6 +629,7 @@ fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
     let stem = name[..i].parse().map_err(TCError::internal)?;
     let class = ext_class(&name[i..])
         .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
+
     Ok((stem, class))
 }
 

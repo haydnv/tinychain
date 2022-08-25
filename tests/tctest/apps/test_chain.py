@@ -5,7 +5,7 @@ from .base import PersistenceTest
 from ..process import DEFAULT_PORT
 
 
-class ChainTests(PersistenceTest, unittest.TestCase):
+class MapChainTests(PersistenceTest, unittest.TestCase):
     NAME = "chain"
 
     def app(self, chain_type):

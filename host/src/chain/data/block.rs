@@ -114,7 +114,7 @@ impl de::Visitor for MutationVisitor {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
     last_hash: Bytes,
-    contents: BTreeMap<TxnId, Vec<Mutation>>,
+    pub mutations: BTreeMap<TxnId, Vec<Mutation>>,
 }
 
 impl ChainBlock {
@@ -122,32 +122,32 @@ impl ChainBlock {
     pub fn new<H: Into<Bytes>>(hash: H) -> Self {
         Self {
             last_hash: hash.into(),
-            contents: BTreeMap::new(),
+            mutations: BTreeMap::new(),
         }
     }
 
     /// Return a new, empty block with an empty mutation list for the given `TxnId`.
     pub fn with_txn<H: Into<Bytes>>(hash: H, txn_id: TxnId) -> Self {
-        let mut contents = BTreeMap::new();
-        contents.insert(txn_id, Vec::new());
+        let mut mutations = BTreeMap::new();
+        mutations.insert(txn_id, Vec::new());
 
         Self {
             last_hash: hash.into(),
-            contents,
+            mutations,
         }
     }
 
     /// Return a new, empty block with an the given mutation list for the given `TxnId`.
-    pub fn with_mutations(hash: Bytes, contents: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
+    pub fn with_mutations(hash: Bytes, mutations: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
         Self {
             last_hash: hash,
-            contents,
+            mutations,
         }
     }
 
     /// Append a [`Mutation`] to this [`ChainBlock`]
     pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
-        match self.contents.entry(txn_id) {
+        match self.mutations.entry(txn_id) {
             Entry::Vacant(entry) => {
                 entry.insert(vec![mutation]);
             }
@@ -168,25 +168,6 @@ impl ChainBlock {
         self.append(txn_id, Mutation::Put(path, key, value))
     }
 
-    /// Delete all mutations in this `ChainBlock` prior to the given `TxnId`.
-    pub fn clear_until(&mut self, txn_id: &TxnId) {
-        let old_txn_ids: Vec<TxnId> = self
-            .contents
-            .keys()
-            .filter(|k| k < &txn_id)
-            .cloned()
-            .collect();
-
-        for old_txn_id in old_txn_ids.into_iter() {
-            self.contents.remove(&old_txn_id);
-        }
-    }
-
-    /// The mutations in this `ChainBlock`.
-    pub fn mutations(&self) -> &BTreeMap<TxnId, Vec<Mutation>> {
-        &self.contents
-    }
-
     /// The hash of the previous block in the chain.
     pub fn last_hash(&self) -> &Bytes {
         &self.last_hash
@@ -196,7 +177,7 @@ impl ChainBlock {
     pub fn hash(&self) -> Output<Sha256> {
         let mut hasher = Sha256::new();
         hasher.update(&self.last_hash);
-        hasher.update(Hash::<Sha256>::hash(&self.contents));
+        hasher.update(Hash::<Sha256>::hash(&self.mutations));
         hasher.finalize()
     }
 
@@ -222,9 +203,9 @@ impl de::FromStream for ChainBlock {
 
     async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(context, decoder)
-            .map_ok(|(hash, contents)| Self {
+            .map_ok(|(hash, mutations)| Self {
                 last_hash: hash,
-                contents,
+                mutations,
             })
             .map_err(|e| de::Error::custom(format!("failed to decode ChainBlock: {}", e)))
             .await
@@ -233,13 +214,13 @@ impl de::FromStream for ChainBlock {
 
 impl<'en> en::IntoStream<'en> for ChainBlock {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((self.last_hash, self.contents), encoder)
+        en::IntoStream::into_stream((self.last_hash, self.mutations), encoder)
     }
 }
 
 impl<'en> en::ToStream<'en> for ChainBlock {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((&self.last_hash, &self.contents), encoder)
+        en::IntoStream::into_stream((&self.last_hash, &self.mutations), encoder)
     }
 }
 
@@ -247,8 +228,9 @@ impl fmt::Debug for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "chain block:")?;
         writeln!(f, "\thash: {}", hex::encode(&self.last_hash))?;
-        writeln!(f, "\tentries: {}", self.contents.len())?;
-        for (txn_id, mutations) in &self.contents {
+        writeln!(f, "\tentries: {}", self.mutations.len())?;
+
+        for (txn_id, mutations) in &self.mutations {
             writeln!(
                 f,
                 "\t\t{}: {:?}",
@@ -267,7 +249,7 @@ impl fmt::Display for ChainBlock {
             f,
             "(a Chain block starting at hash {} with {} entries)",
             hex::encode(&self.last_hash),
-            self.contents.len()
+            self.mutations.len()
         )
     }
 }
