@@ -255,9 +255,6 @@ pub trait ChainInstance {
     /// Return the latest hash of this `Chain`.
     async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>>;
 
-    /// Return the `TxnId` of the last commit to this `Chain`, if there is one.
-    // async fn last_commit(&self, txn_id: TxnId) -> TCResult<Option<TxnId>>;
-
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
 

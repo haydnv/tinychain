@@ -232,6 +232,13 @@ class Complex(Number):
 
     __uri__ = URI(Number) + "/complex"
 
+    def __json__(self):
+        if isinstance(form_of(self), (list, tuple)):
+            assert len(form_of(self)) == 2
+            return {str(URI(type(self))): form_of(self)}
+        else:
+            return Number.__json__(self)
+
     def abs(self):
         """Return the linear norm of this complex number."""
 
