@@ -25,6 +25,30 @@ class Boolean(Interface):
         return Post(URI(self, "xor"), {'r': other})
 
 
+# TODO: define `angle`, `conj`, and `norm` methods
+class Complex(Interface):
+    @property
+    def imag(self):
+        """The imaginary component of this :class:`Complex` :class:`Numeric`"""
+
+        return Get(URI(self, "imag"))
+
+    @property
+    def real(self):
+        """The real component of this :class:`Complex` :class:`Numeric`"""
+
+        return Get(URI(self, "real"))
+
+    def angle(self):
+        """
+        Return the angle of this :class:`Complex` :class:`Numeric` with respect to the origin of the complex plane.
+
+        The angle is given in radians.
+        """
+
+        return (self.real / self.imag).atan()
+
+
 class Numeric(Interface):
     def __add__(self, other):
         return self.add(other)

@@ -1,6 +1,6 @@
 import math
 
-from ..math.interface import Boolean, Numeric, Trigonometric
+from ..math.interface import Boolean, Complex as _Complex, Numeric, Trigonometric
 from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
 from ..math.operator import Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
 from ..uri import URI
@@ -51,6 +51,8 @@ class Number(Value, Numeric, Trigonometric):
         return self.__class__(form=Div(self, other))
 
     def exp(self):
+        """Calculate `e**self`"""
+
         if same_as(self, 0):
             return 1
         elif same_as(self, 1):
@@ -227,7 +229,7 @@ class Bool(Number, Boolean):
         return self._get("xor", other, Bool)
 
 
-class Complex(Number):
+class Complex(Number, _Complex):
     """A complex number."""
 
     __uri__ = URI(Number) + "/complex"
@@ -244,25 +246,41 @@ class Complex(Number):
             Number.__init__(self, (form, imag))
 
     def __json__(self):
+        from ..context import to_json
+
         form = form_of(self)
 
         if isinstance(form, complex):
-            return {str(URI(type(self))): [form.real, form.imag]}
+            return {str(URI(type(self))): [[to_json(form.real), to_json(form.imag)]]}
         if isinstance(form, (list, tuple)):
             assert len(form) == 2
-            return {str(URI(type(self))): form}
+            return {str(URI(type(self))): [to_json(form)]}
         else:
             return Number.__json__(self)
 
-    def abs(self):
-        """Return the linear norm of this complex number."""
+    @property
+    def imag(self):
+        if is_literal(self):
+            return form_of(self).imag
+        else:
+            return self._get("imag", rtype=Float)
 
-        return Number.abs(self)
+    @property
+    def real(self):
+        if is_literal(self):
+            return form_of(self).real
+        else:
+            return self._get("real", rtype=Float)
+
+    def conj(self):
+        """Return the conjugate of this :class:`Complex` number."""
+
+        return self.__class__(form=(self.real, -self.imag))
 
     def norm(self):
-        """Return the linear norm of this complex number."""
+        """Return the linear norm of this :class:`Complex` number."""
 
-        return self.abs()
+        return self.__class__(form=(self.real**2, self.imag**2))
 
 
 class C32(Complex):
