@@ -232,10 +232,25 @@ class Complex(Number):
 
     __uri__ = URI(Number) + "/complex"
 
+    def __init__(self, form, imag=None):
+        if imag is None:
+            if is_literal(form):
+                Number.__init__(self, complex(*form))
+            else:
+                Number.__init__(self, form)
+        elif is_literal((form, imag)):
+            Number.__init__(self, complex(form, imag))
+        else:
+            Number.__init__(self, (form, imag))
+
     def __json__(self):
-        if isinstance(form_of(self), (list, tuple)):
-            assert len(form_of(self)) == 2
-            return {str(URI(type(self))): form_of(self)}
+        form = form_of(self)
+
+        if isinstance(form, complex):
+            return {str(URI(type(self))): [form.real, form.imag]}
+        if isinstance(form, (list, tuple)):
+            assert len(form) == 2
+            return {str(URI(type(self))): form}
         else:
             return Number.__json__(self)
 
