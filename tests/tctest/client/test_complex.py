@@ -82,6 +82,21 @@ class ComplexNumberOpsTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual[key], [0.5, 0.5])
 
+    def testPow(self):
+        cxt = tc.Context()
+        cxt.z = tc.C64((2.3, 3.4)).pow(3)
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = complex(2.3, 3.4)**3
+        self.assertAlmostEqual(actual[key], expected)
+
+    def testExp(self):
+        cxt = tc.Context()
+        cxt.pi = 3.14159265359 
+        cxt.z = (tc.C64((0, 0.25)) * cxt.pi).exp()
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.exp(0.25j * np.pi)
+        self.assertAlmostEqual(actual[key], expected)
+
 
 if __name__ == "__main__":
     unittest.main()
