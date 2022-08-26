@@ -375,17 +375,6 @@ impl Transact for History {
 
         // assume `self.store` has already been committed by calling `write_ahead`
 
-        let (mut latest, mut cutoff) =
-            try_join!(self.latest.write(*txn_id), self.cutoff.write(*txn_id))
-                .expect("BlockChain state");
-
-        assert!(
-            txn_id >= &cutoff,
-            "cannot commit transaction {} since a block has already been committed at {}",
-            txn_id,
-            *cutoff
-        );
-
         let mut file = self.file.write().await;
         let write_ahead = file
             .get_file(&block_name(WRITE_AHEAD))
@@ -396,6 +385,12 @@ impl Transact for History {
                 write_ahead.write().await.expect("write-ahead lock");
 
             if let Some(mutations) = write_ahead.mutations.remove(txn_id) {
+                let mut latest = self
+                    .latest
+                    .write(*txn_id)
+                    .await
+                    .expect("latest block ordinal");
+
                 let latest_block = file.get_file(&block_name(*latest)).expect("latest block");
 
                 {
@@ -405,6 +400,15 @@ impl Transact for History {
                     latest_block.mutations.insert(*txn_id, mutations);
 
                     if latest_block.size().await.expect("block size") > BLOCK_SIZE {
+                        let mut cutoff = self.cutoff.write(*txn_id).await.expect("block cutoff id");
+
+                        assert!(
+                            txn_id >= &cutoff,
+                            "cannot commit transaction {} since a block has already been committed at {}",
+                            txn_id,
+                            *cutoff
+                        );
+
                         *cutoff = *txn_id;
 
                         let hash = latest_block.hash();
@@ -440,9 +444,6 @@ impl Transact for History {
                 .await
                 .expect("sync write-ahead log after commit");
         }
-
-        std::mem::drop(latest);
-        std::mem::drop(cutoff);
 
         join!(self.latest.commit(txn_id), self.cutoff.commit(txn_id));
     }

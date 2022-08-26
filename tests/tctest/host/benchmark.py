@@ -53,10 +53,9 @@ class DataStructures(tc.app.App):
     @tc.get
     def neural_net_train(self, cxt) -> tc.F32:
         cxt.inputs = tc.tensor.Dense.random_uniform([20, 2], 0, 1)
-        cxt.labels = cxt.inputs[:, 0].logical_xor(cxt.inputs[:, 1]).expand_dims().copy()
 
         def cost(i, o):
-            labels = i[:, 0].logical_xor(i[:, 1]).expand_dims()
+            labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
             return (o - labels)**2
 
         layers = [
@@ -66,9 +65,7 @@ class DataStructures(tc.app.App):
         dnn = tc.ml.nn.Sequential(layers)
         cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
 
-        return tc.after(
-            cxt.optimizer.train(1, cxt.inputs),
-            (abs(cxt.labels - cxt.optimizer.ml_model.eval(cxt.inputs)) >= 0.5).cast(tc.U8).sum())
+        return cxt.optimizer.train(1, cxt.inputs)
 
 
 class ConcurrentWriteBenchmarks(benchmark.Benchmark):
@@ -228,7 +225,7 @@ class ReplicationBenchmarks(benchmark.Benchmark):
 
         print(f"replica rejoin time w/ full table reconstruction, including {wait_time}s startup time: {elapsed:.2f}s")
 
-        await self.hosts[0].delete(self._link("/table"))
+        await self.hosts[0].delete(self._link("/"), "table")
 
 
 if __name__ == "__main__":

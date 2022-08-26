@@ -125,7 +125,7 @@ async def main(benchmarks):
     parser = argparse.ArgumentParser(description="Run benchmarks")
     parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
     parser.add_argument('--cache_size', type=str, default="2G", help="host cache size")
-    parser.add_argument('--concurrency', type=int, help="batch size for concurrent requests")
+    parser.add_argument('--concurrency', type=int, default=1, help="batch size for concurrent requests")
     parser.add_argument(
         '--num_users', type=int, nargs='+', action='append',
         help="number of unique users to simulate (this flag can be repeated)")
@@ -149,7 +149,7 @@ async def main(benchmarks):
                     print()
 
                 for num_users in (scales if scales else benchmark.SCALES):
-                    await test(num_users, (concurrency if concurrency else benchmark.CONCURRENCY))
+                    await test(num_users, concurrency)
 
                 print()
 
