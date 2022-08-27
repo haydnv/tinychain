@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::{TCError, TCResult};
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{DirLock, FileLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCBoxTryStream};
@@ -19,7 +19,7 @@ pub struct BTreeSlice<F, D, T> {
     reverse: bool,
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeSlice<F, D, T> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, T: Transaction<D>> BTreeSlice<F, D, T> {
     pub fn new(
         source: BTree<F, D, T>,
         range: Range,
@@ -72,7 +72,8 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T>
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, T: Transaction<D>> BTreeInstance
+    for BTreeSlice<F, D, T>
 where
     BTreeFile<F, D, T>: Clone + 'static,
 {
