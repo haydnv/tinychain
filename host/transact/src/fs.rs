@@ -27,88 +27,156 @@ impl BlockData for afarray::Array {
     }
 }
 
-/// A transactional persistent data store.
+/// A block in a [`File`]
 #[async_trait]
-pub trait Store: Clone + Send + Sync {
-    /// Return `true` if this store contains no data as of the given [`TxnId`].
-    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
-}
-
-/// A transactional file.
-#[async_trait]
-pub trait File<B: Clone>: Store + Sized + 'static {
-    /// A read Lock on a block in this file.
+pub trait Block<B: Clone>: Send + Sync {
+    /// A read lock on a block in this file.
     type Read: Deref<Target = B> + Send;
 
-    /// A read Lock on a block in this file.
+    /// A write lock on a block in this file.
     type Write: DerefMut<Target = B> + Send;
 
-    /// Return the IDs of all this `File`'s blocks.
-    async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>>;
+    /// Lock this [`Block`] for reading.
+    async fn read(&self) -> TCResult<Self::Read>;
 
-    /// Return true if this `File` contains the given [`BlockId`] as of the given [`TxnId`].
-    async fn contains_block(&self, txn_id: TxnId, name: &BlockId) -> TCResult<bool>;
+    /// Lock this [`Block`] for writing.
+    async fn write(&self) -> TCResult<Self::Write>;
+}
 
-    /// Copy all blocks from the source `File` into this `File`.
-    async fn copy_from(&self, other: &Self, txn_id: TxnId) -> TCResult<()>;
+/// A file in a [`Dir`]
+#[async_trait]
+pub trait File<B: Clone>: Send + Sync {
+    type Block: Block<B>;
+
+    /// Get the set of all [`BlockId`]s in this [`File`].
+    async fn block_ids(&self) -> TCResult<HashSet<BlockId>>;
+
+    /// Copy all blocks from the source [`FileLock`] into this [`FileLock`].
+    async fn copy_from(&mut self, other: &Self) -> TCResult<()>;
 
     /// Create a new block.
-    ///
-    /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block(
-        &self,
-        txn_id: TxnId,
+        &mut self,
         name: BlockId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<Self::Write>;
+    ) -> TCResult<<Self::Block as Block<B>>::Write>;
 
     /// Create a new block.
-    ///
-    /// `size_hint` should be the maximum allowed size of the block.
     async fn create_block_unique(
-        &self,
-        txn_id: TxnId,
+        &mut self,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(BlockId, Self::Write)>;
+    ) -> TCResult<(BlockId, <Self::Block as Block<B>>::Write)>;
 
     /// Delete the block with the given ID.
-    async fn delete_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<()>;
+    async fn delete_block(&mut self, name: BlockId) -> TCResult<()>;
 
-    /// Get a read lock on the block at `name`.
-    async fn read_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
+    /// Return the specified [`Block`] in this [`File`], if present.
+    async fn get_block(&self, block_id: &BlockId) -> TCResult<Option<Self::Block>>;
 
-    /// Get a read lock on the block at `name`, without borrowing.
-    async fn read_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Read>;
-
-    /// Get a read lock on the block at `name` as of [`TxnId`].
-    async fn write_block(&self, txn_id: TxnId, name: BlockId) -> TCResult<Self::Write>;
+    /// Return `true` if there are no blocks in this [`File`].
+    async fn is_empty(&self) -> bool;
 
     /// Delete all of this `File`'s blocks.
-    async fn truncate(&self, txn_id: TxnId) -> TCResult<()>;
+    async fn truncate(&mut self) -> TCResult<()>;
+
+    /// Convenience method to lock the block at `name` for reading.
+    async fn read_block(&self, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::Read> {
+        let block = {
+            let block = self.get_block(name).await?;
+            block.ok_or_else(|| TCError::not_found(name))?
+        };
+
+        block.read().await
+    }
+
+    /// Convenience method to lock the block at `name` for writing.
+    async fn write_block(&self, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::Write> {
+        let block = {
+            let block = self.get_block(name).await?;
+            block.ok_or_else(|| TCError::not_found(name))?
+        };
+
+        block.write().await
+    }
 }
 
-/// A transactional directory
+/// A lock on the contents of a transactional [`File`].
 #[async_trait]
-pub trait Dir: Store + Send + Sized + 'static {
-    /// The type of a file entry in this `Dir`
-    type File: Send;
+pub trait FileLock: Store + 'static {
+    /// The type of [`BlockData`] contained in this [`File`]
+    type Block: BlockData;
 
-    /// The `Class` of a file stored in this `Dir`
+    /// The type of this [`File`]
+    type File: File<Self::Block>;
+
+    /// A read lock on this [`File`]
+    type Read: Deref<Target = Self::File> + Send + Sync;
+
+    /// A write lock on this [`File`]
+    type Write: DerefMut<Target = Self::File> + Send + Sync;
+
+    /// Lock the contents of this [`File`] for reading.
+    async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
+
+    /// Lock the contents of this [`File`] for writing.
+    async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
+
+    /// Convenience method to lock the block at `name` for reading.
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        name: &BlockId,
+    ) -> TCResult<<<Self::File as File<Self::Block>>::Block as Block<Self::Block>>::Read> {
+        let block = {
+            let contents = self.read(txn_id).await?;
+            let block = contents.get_block(name).await?;
+            block.ok_or_else(|| TCError::not_found(name))?
+        };
+
+        block.read().await
+    }
+
+    /// Convenience method to lock the block at `name` for writing.
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        name: &BlockId,
+    ) -> TCResult<<<Self::File as File<Self::Block>>::Block as Block<Self::Block>>::Write> {
+        let block = {
+            let contents = self.read(txn_id).await?;
+            let block = contents.get_block(name).await?;
+            block.ok_or_else(|| TCError::not_found(name))?
+        };
+
+        block.write().await
+    }
+}
+
+/// A transactional directory, containing sub-directories and [`File`]s
+#[async_trait]
+pub trait Dir: Clone + Send {
+    /// The type of a file entry in this [`Dir`]
+    type File: FileLock;
+
+    /// The `Class` of a file stored in this [`Dir`]
     type FileClass: Send;
 
+    /// The type of lock used to guard subdirectories in this [`Dir`]
+    type Lock: DirLock<Dir = Self>;
+
     /// Return `true` if this directory has an entry at the given [`PathSegment`].
-    async fn contains(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<bool>;
+    async fn contains(&self, name: &PathSegment) -> TCResult<bool>;
 
     /// Create a new `Dir`.
-    async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
+    async fn create_dir(&mut self, name: PathSegment) -> TCResult<Self>;
 
     /// Create a new `Dir` with a new unique ID.
-    async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Self>;
+    async fn create_dir_unique(&mut self) -> TCResult<Self>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<C, F, B>(&self, txn_id: TxnId, name: Id, class: C) -> TCResult<F>
+    async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         F: Clone,
@@ -118,7 +186,7 @@ pub trait Dir: Store + Send + Sized + 'static {
         F: File<B>;
 
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
         F: Clone,
@@ -128,20 +196,43 @@ pub trait Dir: Store + Send + Sized + 'static {
         F: File<B>;
 
     /// Look up a subdirectory of this `Dir`.
-    async fn get_dir(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
+    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
 
     /// Get a [`Self::File`] in this `Dir`.
-    async fn get_file<F, B>(&self, txn_id: TxnId, name: &Id) -> TCResult<Option<F>>
+    async fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
         F: Clone,
         B: BlockData,
         Self::File: AsType<F>,
         F: File<B>;
+
+    /// Return `true` if there are no files or subdirectories in this [`Dir`].
+    async fn is_empty(&self) -> bool;
 }
+
+/// A transactional directory
+#[async_trait]
+pub trait DirLock: Store + Send + Sized + 'static {
+    /// The type of a file entry in this `Dir`
+    type File: FileLock;
+
+    /// The type of a subdirectory in this `Dir`
+    type Dir: Dir<File = Self::File, Lock = Self>;
+
+    /// A read lock on this [`Dir`].
+    type Read: Deref<Target = Self::Dir>;
+
+    /// A write lock on this [`Dir`].
+    type Write: DerefMut<Target = Self::Dir>;
+}
+
+/// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
+#[async_trait]
+pub trait Store: Clone + Send + Sync {}
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist<D: Dir>: Sized {
+pub trait Persist<D: DirLock>: Sized {
     type Schema;
     type Store: Store;
     type Txn: Transaction<D>;
@@ -155,7 +246,7 @@ pub trait Persist<D: Dir>: Sized {
 
 /// Defines how to copy a base state from another instance, possibly a view.
 #[async_trait]
-pub trait CopyFrom<D: Dir, I>: Persist<D> {
+pub trait CopyFrom<D: DirLock, I>: Persist<D> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
         instance: I,
@@ -166,7 +257,7 @@ pub trait CopyFrom<D: Dir, I>: Persist<D> {
 
 /// Defines how to restore persistent state from backup.
 #[async_trait]
-pub trait Restore<D: Dir>: Persist<D> {
+pub trait Restore<D: DirLock>: Persist<D> {
     /// Restore this persistent state from a backup.
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
 }
