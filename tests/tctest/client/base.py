@@ -2,7 +2,7 @@ import os
 import tinychain as tc
 import unittest
 
-TC_HOST = os.getenv("TC_HOST", "http://localhost:8702")
+TC_HOST = os.getenv("TC_HOST", "http://demo.tinychain.net")
 
 
 class ClientTest(unittest.TestCase):
