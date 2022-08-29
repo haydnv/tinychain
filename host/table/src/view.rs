@@ -9,7 +9,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{DirLock, FileLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, TCBoxTryStream};
@@ -29,7 +29,7 @@ pub struct IndexSlice<F, D, Txn> {
     reverse: bool,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
     pub fn all(source: BTreeFile<F, D, Txn>, schema: IndexSchema, reverse: bool) -> Self {
         IndexSlice {
             source,
@@ -48,7 +48,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
         debug!("IndexSlice::new with bounds {}", bounds);
         let columns = schema.columns();
 
-        assert!(source.schema() == &columns[..]);
+        assert_eq!(source.schema(), &columns[..]);
 
         let bounds = bounds.validate(&columns)?;
         let range = bounds.clone().into_btree_range(&columns)?;
@@ -128,8 +128,8 @@ where
 
 impl<F, D, Txn> TableInstance for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     fn key(&self) -> &[Column] {
@@ -147,8 +147,8 @@ where
 
 impl<F, D, Txn> TableOrder for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     type OrderBy = Self;
@@ -183,8 +183,8 @@ where
 #[async_trait]
 impl<F, D, Txn> TableStream for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -245,7 +245,9 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Limited<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableInstance
+    for Limited<F, D, Txn>
+{
     fn key(&self) -> &[Column] {
         self.source.key()
     }
@@ -260,7 +262,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Limited<F, D,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Limited<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableStream
+    for Limited<F, D, Txn>
+{
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
 
@@ -296,7 +300,7 @@ pub enum MergeSource<F, D, Txn> {
     Merge(Box<Merged<F, D, Txn>>),
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> MergeSource<F, D, Txn> {
     fn bounds(&'_ self) -> &'_ Bounds {
         match self {
             Self::Table(table) => table.bounds(),
@@ -360,7 +364,7 @@ pub struct Merged<F, D, Txn> {
     bounds: Bounds,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> Merged<F, D, Txn> {
     /// Create a new merge of the given `IndexSlice` with the given `MergeSource`.
     pub fn new(left: MergeSource<F, D, Txn>, right: IndexSlice<F, D, Txn>) -> TCResult<Self> {
         let bounds = left
@@ -407,7 +411,9 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Merged<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableInstance
+    for Merged<F, D, Txn>
+{
     fn key(&self) -> &[Column] {
         self.left.key()
     }
@@ -428,7 +434,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Merged<F, D, 
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Merged<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableStream
+    for Merged<F, D, Txn>
+{
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
 
@@ -458,7 +466,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Merged<F, D, Tx
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Merged<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableOrder
+    for Merged<F, D, Txn>
+{
     type OrderBy = Self;
     type Reverse = Self;
 
@@ -485,7 +495,9 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Merged<F, D, Txn
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for Merged<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> super::TableSlice
+    for Merged<F, D, Txn>
+{
     type Slice = Self;
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -520,7 +532,9 @@ pub struct Selection<F, D, Txn, T> {
     phantom: Phantom<F, D, Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance> Selection<F, D, Txn, T> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>, T: TableInstance>
+    Selection<F, D, Txn, T>
+{
     pub fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
         let column_set: HashSet<&Id> = columns.iter().collect();
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
@@ -579,8 +593,8 @@ where
 
 impl<F, D, Txn, T> TableInstance for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
     T: TableInstance,
 {
@@ -612,8 +626,8 @@ where
 
 impl<F, D, Txn, T> TableOrder for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
     T: TableOrder,
     <T as TableOrder>::Reverse: TableStream,
@@ -665,8 +679,8 @@ where
 #[async_trait]
 impl<F, D, Txn, T> TableStream for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
     T: TableStream,
     Table<F, D, Txn>: From<Self>,
@@ -700,8 +714,8 @@ where
 
 impl<F, D, Txn, T> From<Selection<F, D, Txn, T>> for Table<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
     T: TableInstance,
     Table<F, D, Txn>: From<T>,
@@ -723,7 +737,7 @@ pub struct TableSlice<F, D, Txn> {
     slice: IndexSlice<F, D, Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> TableSlice<F, D, Txn> {
     pub fn new(table: TableIndex<F, D, Txn>, bounds: Bounds) -> TCResult<TableSlice<F, D, Txn>> {
         super::TableSlice::validate_bounds(&table, &bounds)?;
 
@@ -773,8 +787,8 @@ where
 
 impl<F, D, Txn> TableInstance for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     fn key(&self) -> &[Column] {
@@ -792,8 +806,8 @@ where
 
 impl<F, D, Txn> TableOrder for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     type OrderBy = Merged<F, D, Txn>;
@@ -820,8 +834,8 @@ where
 #[async_trait]
 impl<F, D, Txn> TableStream for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -846,8 +860,8 @@ where
 
 impl<F, D, Txn> super::TableSlice for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
-    D: Dir,
+    F: FileLock<Block = Node>,
+    D: DirLock<File = F>,
     Txn: Transaction<D>,
 {
     type Slice = Merged<F, D, Txn>;
@@ -881,7 +895,9 @@ struct Phantom<F, D, Txn> {
     txn: PhantomData<Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Default for Phantom<F, D, Txn> {
+impl<F: FileLock<Block = Node>, D: DirLock<File = F>, Txn: Transaction<D>> Default
+    for Phantom<F, D, Txn>
+{
     fn default() -> Self {
         Self {
             file: PhantomData,

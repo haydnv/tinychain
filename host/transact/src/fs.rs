@@ -5,7 +5,6 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use safecast::AsType;
 
 use tc_error::*;
 use tcgeneric::{Id, PathSegment};
@@ -156,7 +155,7 @@ pub trait FileLock: Store + 'static {
 
 /// A transactional directory, containing sub-directories and [`File`]s
 #[async_trait]
-pub trait Dir: Clone + Send {
+pub trait Dir: Clone + Send + Sync {
     /// The type of a file entry in this [`Dir`]
     type File: FileLock;
 
@@ -179,21 +178,15 @@ pub trait Dir: Clone + Send {
     async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
-        F: Clone,
         B: BlockData,
-        Self::FileClass: From<C>,
-        Self::File: AsType<F>,
-        F: File<B>;
+        F: FileLock<Block = B>;
 
     /// Create a new [`Self::File`] with a new unique ID.
     async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
     where
         C: Copy + Send + fmt::Display,
-        F: Clone,
         B: BlockData,
-        Self::FileClass: From<C>,
-        Self::File: AsType<F>,
-        F: File<B>;
+        F: FileLock<Block = B>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
@@ -201,10 +194,8 @@ pub trait Dir: Clone + Send {
     /// Get a [`Self::File`] in this `Dir`.
     async fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
-        F: Clone,
         B: BlockData,
-        Self::File: AsType<F>,
-        F: File<B>;
+        F: FileLock<Block = B>;
 
     /// Return `true` if there are no files or subdirectories in this [`Dir`].
     async fn is_empty(&self) -> bool;
@@ -224,6 +215,12 @@ pub trait DirLock: Store + Send + Sized + 'static {
 
     /// A write lock on this [`Dir`].
     type Write: DerefMut<Target = Self::Dir>;
+
+    /// Lock this [`Dir`] for reading.
+    async fn read(&self, txn_id: TxnId) -> TCResult<Self::Dir>;
+
+    /// Lock this [`Dir`] for writing.
+    async fn write(&self, txn_id: TxnId) -> TCResult<Self::Dir>;
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
