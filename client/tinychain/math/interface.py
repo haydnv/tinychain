@@ -46,7 +46,8 @@ class Complex(Interface):
         The angle is given in radians.
         """
 
-        return (self.real / self.imag).atan()
+        # from: https://en.wikipedia.org/wiki/Atan2#Definition_and_computation
+        return 2 * (self.imag / ((self.real**2 + self.imag**2)**0.5 + self.real)).atan()
 
 
 class Numeric(Interface):

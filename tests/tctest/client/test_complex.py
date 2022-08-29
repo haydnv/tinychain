@@ -28,9 +28,8 @@ class ComplexNumberOpsTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, n.imag)
 
-    # TODO: why does np.angle(a + bj) differ from np.arctan2(a, b) in some cases, like 3 + 4j?
     def testAngle(self):
-        n = 1 + 1j
+        n = 3 + 4j
 
         cxt = tc.Context()
         cxt.z = tc.C64(n).angle()
