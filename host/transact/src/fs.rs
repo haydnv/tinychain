@@ -5,6 +5,7 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
+use safecast::AsType;
 
 use tc_error::*;
 use tcgeneric::{Id, PathSegment};
@@ -157,7 +158,7 @@ pub trait FileLock: Store + 'static {
 #[async_trait]
 pub trait Dir: Clone + Send + Sync {
     /// The type of a file entry in this [`Dir`]
-    type File: FileLock;
+    type FileEntry;
 
     /// The `Class` of a file stored in this [`Dir`]
     type FileClass: Send;
@@ -177,6 +178,7 @@ pub trait Dir: Clone + Send + Sync {
     /// Create a new [`Self::File`].
     async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
+        Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
         F: FileLock<Block = B>;
@@ -184,6 +186,7 @@ pub trait Dir: Clone + Send + Sync {
     /// Create a new [`Self::File`] with a new unique ID.
     async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
     where
+        Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
         F: FileLock<Block = B>;
@@ -194,6 +197,7 @@ pub trait Dir: Clone + Send + Sync {
     /// Get a [`Self::File`] in this `Dir`.
     async fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
+        Self::FileEntry: AsType<F>,
         B: BlockData,
         F: FileLock<Block = B>;
 
@@ -204,11 +208,8 @@ pub trait Dir: Clone + Send + Sync {
 /// A transactional directory
 #[async_trait]
 pub trait DirLock: Store + Send + Sized + 'static {
-    /// The type of a file entry in this `Dir`
-    type File: FileLock;
-
     /// The type of a subdirectory in this `Dir`
-    type Dir: Dir<File = Self::File, Lock = Self>;
+    type Dir: Dir<Lock = Self>;
 
     /// A read lock on this [`Dir`].
     type Read: Deref<Target = Self::Dir>;
