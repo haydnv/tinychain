@@ -215,6 +215,9 @@ class URI(object):
 
         uri = str(self)
 
+        if uri == prefix:
+            return None
+
         if prefix and uri[len(prefix)] == ':':
             end = uri.index('/', len(prefix))
             return int(uri[(len(prefix) + 1):end])
