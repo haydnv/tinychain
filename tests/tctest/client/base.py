@@ -13,4 +13,9 @@ class ClientTest(unittest.TestCase):
         if TC_HOST.host().startswith("127.0.0.1"):
             cls.host = start_host(f"test_client", [], host_uri=TC_HOST)
         else:
-            cls.host = tc.host.Host(TC_HOST)
+            cls.host = tc.host.Host(str(TC_HOST))
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls.host, "stop"):
+            cls.host.stop()
