@@ -30,7 +30,7 @@ pub struct Index<F, D, Txn> {
     schema: IndexSchema,
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Index<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Index<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -146,9 +146,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableInstance
-    for Index<F, D, Txn>
-{
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableInstance for Index<F, D, Txn> {
     fn key(&self) -> &[Column] {
         self.schema.key()
     }
@@ -162,7 +160,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableInstance
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableOrder for Index<F, D, Txn> {
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableOrder for Index<F, D, Txn> {
     type OrderBy = IndexSlice<F, D, Txn>;
     type Reverse = IndexSlice<F, D, Txn>;
 
@@ -195,7 +193,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableOrder for 
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableStream for Index<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableStream for Index<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -220,7 +218,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableSlice for Index<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableSlice for Index<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -273,9 +271,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node> + Transact, D: DirLock, Txn: Transaction<D>> Transact
-    for Index<F, D, Txn>
-{
+impl<F: FileLock<Node> + Transact, D: DirLock, Txn: Transaction<D>> Transact for Index<F, D, Txn> {
     async fn commit(&self, txn_id: &TxnId) {
         self.btree.commit(txn_id).await
     }
@@ -286,7 +282,7 @@ impl<F: FileLock<Block = Node> + Transact, D: DirLock, Txn: Transaction<D>> Tran
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn> {
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn> {
     type Schema = IndexSchema;
     type Store = F;
     type Txn = Txn;
@@ -303,7 +299,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Persist<D> for 
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn> {
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.btree.restore(&backup.btree, txn_id).await
     }
@@ -327,7 +323,7 @@ pub struct TableIndex<F, D, Txn> {
     inner: Arc<Inner<F, D, Txn>>,
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -450,9 +446,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Instance
-    for TableIndex<F, D, Txn>
-{
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Instance for TableIndex<F, D, Txn> {
     type Class = TableType;
 
     fn class(&self) -> TableType {
@@ -461,9 +455,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Instance
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableInstance
-    for TableIndex<F, D, Txn>
-{
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableInstance for TableIndex<F, D, Txn> {
     fn key(&self) -> &[Column] {
         self.inner.primary.key()
     }
@@ -477,8 +469,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableInstance
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableOrder
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableOrder for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -573,9 +564,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableRead
-    for TableIndex<F, D, Txn>
-{
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableRead for TableIndex<F, D, Txn> {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
         let slice = self
             .inner
@@ -590,8 +579,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableRead
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableStream
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableStream for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -615,8 +603,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableSlice
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableSlice for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -771,8 +758,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableWrite
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableWrite for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -865,7 +851,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node> + Transact, D: DirLock, Txn: Transaction<D>> Transact
+impl<F: FileLock<Node> + Transact, D: DirLock, Txn: Transaction<D>> Transact
     for TableIndex<F, D, Txn>
 {
     async fn commit(&self, txn_id: &TxnId) {
@@ -890,8 +876,7 @@ impl<F: FileLock<Block = Node> + Transact, D: DirLock, Txn: Transaction<D>> Tran
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Persist<D>
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -936,8 +921,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> Restore<D>
-    for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -970,8 +954,8 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>, I: TableStream + 'static>
-    CopyFrom<D, I> for TableIndex<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>, I: TableStream + 'static> CopyFrom<D, I>
+    for TableIndex<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -993,7 +977,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> From<TableIndex<F, D, Txn>>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> From<TableIndex<F, D, Txn>>
     for Table<F, D, Txn>
 {
     fn from(table: TableIndex<F, D, Txn>) -> Self {
@@ -1001,9 +985,7 @@ impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> From<TableIndex
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> fmt::Display
-    for TableIndex<F, D, Txn>
-{
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> fmt::Display for TableIndex<F, D, Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Table")
     }

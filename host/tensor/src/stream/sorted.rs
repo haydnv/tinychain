@@ -7,12 +7,12 @@ use safecast::AsType;
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, DirLock, FileLock};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
 use crate::dense::{BlockListFile, PER_BLOCK};
-use crate::{Coord, Shape, TensorAccess, TensorType};
+use crate::{Coord, DenseAccess, Shape, TensorAccess, TensorType};
 
 use super::ReadValueAt;
 
@@ -22,12 +22,12 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
@@ -40,9 +40,8 @@ where
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
     debug!("sorted coords");
 
-    let offsets = offsets
-        .into_stream(txn_id)
-        .map_ok(|array| array.type_cast());
+    let offsets = offsets.block_stream(txn.clone()).await?;
+    let offsets = offsets.map_ok(|array| array.type_cast());
 
     let coords = offsets_to_coords(shape.clone(), offsets);
     let coords = CoordUnique::new(coords, shape.to_vec(), PER_BLOCK);
@@ -55,12 +54,12 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<(Coord, Number)>>>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {
@@ -86,9 +85,9 @@ async fn sort_coords<FD, FS, D, T, S>(
     shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,
 {

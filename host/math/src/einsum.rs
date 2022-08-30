@@ -5,7 +5,7 @@ use log::debug;
 
 use tc_error::*;
 use tc_tensor::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
-use tc_transact::fs::Dir;
+use tc_transact::fs::DirLock;
 use tc_transact::Transaction;
 use tcgeneric::Tuple;
 
@@ -249,7 +249,7 @@ fn validate_args<T: TensorAccess>(f_inputs: &[Label], tensors: &[T]) -> TCResult
 
 fn normalize<D, Txn, T>(tensor: T, f_input: &[char], dimensions: &Dimensions) -> TCResult<T>
 where
-    D: Dir,
+    D: DirLock,
     Txn: Transaction<D>,
     T: TensorAccess
         + TensorReduce<D, Txn = Txn, Reduce = T>
@@ -330,7 +330,7 @@ fn outer_product<D, Txn, T>(
     tensors: Vec<T>,
 ) -> TCResult<T>
 where
-    D: Dir,
+    D: DirLock,
     Txn: Transaction<D>,
     T: TensorAccess
         + TensorMath<D, T, LeftCombine = T>
@@ -359,7 +359,7 @@ where
 
 fn contract<D, T>(mut op: T, dimensions: Dimensions, f_output: Label) -> TCResult<T>
 where
-    D: Dir,
+    D: DirLock,
     T: TensorAccess + TensorReduce<D, Reduce = T> + TensorTransform<Transpose = T>,
 {
     let mut f_input = dimensions.order().to_vec();
@@ -400,7 +400,7 @@ where
 
 pub fn einsum<D, T>(format: &str, tensors: Vec<T>) -> TCResult<T>
 where
-    D: Dir,
+    D: DirLock,
     T: TensorAccess
         + TensorMath<D, T, LeftCombine = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>

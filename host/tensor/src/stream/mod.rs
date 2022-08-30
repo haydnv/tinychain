@@ -3,7 +3,7 @@ use std::pin::Pin;
 use futures::Future;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
+use tc_transact::fs::DirLock;
 use tc_transact::Transaction;
 use tc_value::Number;
 
@@ -16,7 +16,7 @@ mod sorted;
 pub type Read<'a> = Pin<Box<dyn Future<Output = TCResult<(Coord, Number)>> + Send + 'a>>;
 
 /// Trait defining a read operation for a single [`Tensor`] element
-pub trait ReadValueAt<D: Dir> {
+pub trait ReadValueAt<D: DirLock> {
     /// The transaction context
     type Txn: Transaction<D>;
 

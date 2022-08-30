@@ -345,7 +345,7 @@ impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T>
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> BTreeInstance for BTree<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeInstance for BTree<F, D, T>
 where
     Self: 'static,
 {
@@ -402,7 +402,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> BTreeWrite for BTree<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeWrite for BTree<F, D, T>
 where
     Self: 'static,
 {
@@ -439,8 +439,7 @@ struct KeyListVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> de::Visitor
-    for KeyListVisitor<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -463,8 +462,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> de::FromStream
-    for KeyListVisitor<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -486,7 +484,7 @@ struct BTreeVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -518,7 +516,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> de::FromStream for BTree<F, D, T>
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> de::FromStream for BTree<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -555,8 +553,7 @@ impl<F, D, T> fmt::Display for BTree<F, D, T> {
 }
 
 #[async_trait]
-impl<'en, F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> IntoView<'en, D>
-    for BTree<F, D, T>
+impl<'en, F: FileLock<Node>, D: DirLock, T: Transaction<D>> IntoView<'en, D> for BTree<F, D, T>
 where
     Self: 'static,
 {

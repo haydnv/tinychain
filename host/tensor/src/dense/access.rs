@@ -10,9 +10,9 @@ use safecast::AsType;
 
 use tc_btree::*;
 use tc_error::*;
-use tc_transact::fs::{BlockId, Dir, File};
+use tc_transact::fs::{Dir, DirLock, FileLock};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType, UIntType};
+use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
 use crate::sparse::{SparseAccess, SparseAccessor};
@@ -24,11 +24,11 @@ use crate::{
 
 use super::file::{BlockListFile, BlockListFileSlice};
 use super::stream::SparseValueStream;
-use super::{array_err, div_ceil, DenseTensor, PER_BLOCK};
+use super::{DenseTensor, PER_BLOCK};
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
-pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
+pub trait DenseAccess<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>>:
     ReadValueAt<D, Txn = T> + TensorAccess + Clone + fmt::Display + Send + Sync + Sized + 'static
 {
     /// The type returned by `slice`
@@ -86,7 +86,7 @@ pub trait DenseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
-pub trait DenseWrite<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
+pub trait DenseWrite<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>>:
     DenseAccess<FD, FS, D, T>
 {
     /// Overwrite this accessor's contents with those of the given accessor.
@@ -141,12 +141,12 @@ macro_rules! dispatch {
 
 impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         dispatch!(self, this, this.dtype())
@@ -168,12 +168,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
 {
     type Slice = Self;
     type Transpose = Self;
@@ -211,12 +211,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
 {
     async fn write<V: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -240,12 +240,12 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for DenseAccessor<FD, FS, D, T>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -256,9 +256,9 @@ where
 
 impl<FD, FS, D, T> From<BlockListFile<FD, FS, D, T>> for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
 {
     fn from(file: BlockListFile<FD, FS, D, T>) -> Self {
@@ -284,11 +284,11 @@ pub struct BlockListCombine<FD, FS, D, T, L, R> {
 
 impl<FD, FS, D, T, L, R> BlockListCombine<FD, FS, D, T, L, R>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -319,9 +319,9 @@ where
 
 impl<FD, FS, D, T, L, R> TensorAccess for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
@@ -346,12 +346,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, L, R> DenseAccess<FD, FS, D, T> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -470,12 +470,12 @@ where
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -535,10 +535,10 @@ impl<FD, FS, D, T, B> BlockListConst<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListConst<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
@@ -562,9 +562,9 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListConst<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -629,10 +629,10 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListConst<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -666,9 +666,9 @@ pub struct BlockListBroadcast<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -685,9 +685,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -711,12 +711,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -783,12 +783,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -821,9 +821,9 @@ pub struct BlockListCast<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -838,9 +838,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -864,12 +864,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListCast<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListCast<FD, FS, D, T, B::Slice>;
@@ -913,12 +913,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListCast<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -949,9 +949,9 @@ pub struct BlockListExpand<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -967,9 +967,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -993,12 +993,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListExpand<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -1092,12 +1092,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListExpand<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1128,9 +1128,9 @@ pub struct BlockListFlip<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1146,9 +1146,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1172,12 +1172,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListFlip<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -1255,12 +1255,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListFlip<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1338,11 +1338,11 @@ pub struct BlockListReduce<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1401,9 +1401,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1427,12 +1427,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReduce<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
@@ -1533,12 +1533,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReduce<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1586,9 +1586,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListReshape<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1612,12 +1612,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReshape<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListFile<FD, FS, D, T>;
@@ -1667,10 +1667,10 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReshape<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1696,9 +1696,9 @@ pub struct BlockListTranspose<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1714,9 +1714,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1740,12 +1740,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListTranspose<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = <<B as DenseAccess<FD, FS, D, T>>::Slice as DenseAccess<FD, FS, D, T>>::Transpose;
@@ -1816,12 +1816,12 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListTranspose<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1852,9 +1852,9 @@ pub struct BlockListSparse<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> TensorAccess for BlockListSparse<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1878,12 +1878,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> DenseAccess<FD, FS, D, T> for BlockListSparse<FD, FS, D, T, A>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListSparse<FD, FS, D, T, A::Slice>;
@@ -1939,12 +1939,12 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for BlockListSparse<FD, FS, D, T, A>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1982,9 +1982,9 @@ pub struct BlockListUnary<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -2006,9 +2006,9 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -2032,12 +2032,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListUnary<FD, FS, D, T, B>
 where
-    D: Dir,
+    D: DirLock,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Dir as Dir>::FileClass: From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListUnary<FD, FS, D, T, B::Slice>;
@@ -2101,9 +2101,9 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
+    FD: FileLock<Array>,
+    FS: FileLock<Node>,
+    D: DirLock,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -2124,63 +2124,4 @@ impl<FD, FS, D, T, B> fmt::Display for BlockListUnary<FD, FS, D, T, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("dense Tensor unary op")
     }
-}
-
-// TODO: add support for sorting along a given axis
-/// Compute the coordinates needed to sort the elements in the given dense Tensor.
-pub async fn arg_sort<FD, FS, D, T, B>(source: B, txn: T) -> TCResult<BlockListFile<FD, FS, D, T>>
-where
-    FD: File<Array>,
-    FS: File<Node>,
-    D: Dir,
-    T: Transaction<D>,
-    B: DenseAccess<FD, FS, D, T>,
-    D::File: AsType<FD>,
-    D::FileClass: From<TensorType>,
-{
-    let txn_id = *txn.id();
-    let file = txn
-        .context()
-        .create_file_unique(txn_id, TensorType::Dense)
-        .await?;
-
-    let shape = source.shape().clone();
-    let size = source.size();
-    let dtype = source.dtype();
-    let source_blocks = source.block_stream(txn.clone()).await?;
-    let copy = BlockListFile::<FD, FS, D, T>::from_blocks(
-        file,
-        txn_id,
-        Some(shape.clone()),
-        dtype,
-        source_blocks,
-    )
-    .await?;
-
-    let num_blocks = div_ceil(size, PER_BLOCK as u64);
-    if num_blocks == 0 {
-        return Ok(copy);
-    } else if num_blocks == 1 {
-        let block_id = BlockId::from(0u64);
-        let block = copy.file().read_block(txn_id, block_id).await?;
-        let (_, indices) = block.argsort(true).map_err(array_err)?;
-        let blocks = stream::once(future::ready(Ok(indices.into())));
-
-        let file = txn
-            .context()
-            .create_file_unique(txn_id, TensorType::Dense)
-            .await?;
-
-        return BlockListFile::from_blocks(
-            file,
-            txn_id,
-            Some(vec![size].into()),
-            UIntType::U64.into(),
-            blocks,
-        )
-        .await;
-    }
-
-    // TODO: add support for large tensors
-    Err(TCError::not_implemented("arg_sort with multiple blocks"))
 }

@@ -207,7 +207,7 @@ where
     }
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -250,7 +250,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -304,7 +304,7 @@ where
     }
 }
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -321,7 +321,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -379,7 +379,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -412,7 +412,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Dir as Dir>::FileEntry: AsType<F>,
@@ -452,7 +452,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -470,8 +470,7 @@ where
 }
 
 #[async_trait]
-impl<'en, F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> IntoView<'en, D>
-    for Table<F, D, Txn>
+impl<'en, F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -503,15 +502,14 @@ where
     }
 }
 
-struct TableVisitor<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> {
+struct TableVisitor<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> {
     txn: Txn,
     phantom_file: PhantomData<F>,
     phantom_dir: PhantomData<D>,
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> de::Visitor
-    for TableVisitor<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -543,14 +541,13 @@ where
     }
 }
 
-struct RowVisitor<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> {
+struct RowVisitor<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> {
     table: TableIndex<F, D, Txn>,
     txn_id: TxnId,
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> de::Visitor
-    for RowVisitor<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {
@@ -580,8 +577,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, Txn: Transaction<D>> de::FromStream
-    for RowVisitor<F, D, Txn>
+impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
 where
     <D::Dir as Dir>::FileEntry: AsType<F>,
 {

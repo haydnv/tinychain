@@ -1,5 +1,6 @@
 //! Transactional filesystem traits and data structures.
 
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
@@ -82,20 +83,26 @@ pub trait File<B: Clone>: Send + Sync {
     async fn truncate(&mut self) -> TCResult<()>;
 
     /// Convenience method to lock the block at `name` for reading.
-    async fn read_block(&self, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::Read> {
+    async fn read_block<I>(&self, name: I) -> TCResult<<Self::Block as Block<B>>::Read>
+    where
+        I: Borrow<BlockId> + Send + Sync,
+    {
         let block = {
-            let block = self.get_block(name).await?;
-            block.ok_or_else(|| TCError::not_found(name))?
+            let block = self.get_block(name.borrow()).await?;
+            block.ok_or_else(|| TCError::not_found(name.borrow()))?
         };
 
         block.read().await
     }
 
     /// Convenience method to lock the block at `name` for writing.
-    async fn write_block(&self, name: &BlockId) -> TCResult<<Self::Block as Block<B>>::Write> {
+    async fn write_block<I>(&self, name: I) -> TCResult<<Self::Block as Block<B>>::Write>
+    where
+        I: Borrow<BlockId> + Send + Sync,
+    {
         let block = {
-            let block = self.get_block(name).await?;
-            block.ok_or_else(|| TCError::not_found(name))?
+            let block = self.get_block(name.borrow()).await?;
+            block.ok_or_else(|| TCError::not_found(name.borrow()))?
         };
 
         block.write().await
@@ -104,18 +111,15 @@ pub trait File<B: Clone>: Send + Sync {
 
 /// A lock on the contents of a transactional [`File`].
 #[async_trait]
-pub trait FileLock: Store + 'static {
-    /// The type of [`BlockData`] contained in this [`File`]
-    type Block: BlockData;
-
+pub trait FileLock<B: BlockData>: Store + 'static {
     /// The type of this [`File`]
-    type File: File<Self::Block>;
+    type File: File<B>;
 
     /// A read lock on this [`File`]
-    type Read: Deref<Target = Self::File> + Send + Sync;
+    type Read: Deref<Target = Self::File> + Send + Sync + 'static;
 
     /// A write lock on this [`File`]
-    type Write: DerefMut<Target = Self::File> + Send + Sync;
+    type Write: DerefMut<Target = Self::File> + Send + Sync + 'static;
 
     /// Lock the contents of this [`File`] for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
@@ -124,30 +128,54 @@ pub trait FileLock: Store + 'static {
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
 
     /// Convenience method to lock the block at `name` for reading.
-    async fn read_block(
+    async fn read_block<I>(
         &self,
         txn_id: TxnId,
-        name: &BlockId,
-    ) -> TCResult<<<Self::File as File<Self::Block>>::Block as Block<Self::Block>>::Read> {
+        name: I,
+    ) -> TCResult<<<Self::File as File<B>>::Block as Block<B>>::Read>
+        where
+            I: Borrow<BlockId> + Send + Sync,
+    {
         let block = {
             let contents = self.read(txn_id).await?;
-            let block = contents.get_block(name).await?;
-            block.ok_or_else(|| TCError::not_found(name))?
+            let block = contents.get_block(name.borrow()).await?;
+            block.ok_or_else(|| TCError::not_found(name.borrow()))?
+        };
+
+        block.read().await
+    }
+
+    /// Convenience method to lock the block at `name` for reading, without borrowing.
+    async fn read_block_owned<I>(
+        self,
+        txn_id: TxnId,
+        name: I,
+    ) -> TCResult<<<Self::File as File<B>>::Block as Block<B>>::Read>
+        where
+            I: Borrow<BlockId> + Send + Sync,
+    {
+        let block = {
+            let contents = self.read(txn_id).await?;
+            let block = contents.get_block(name.borrow()).await?;
+            block.ok_or_else(|| TCError::not_found(name.borrow()))?
         };
 
         block.read().await
     }
 
     /// Convenience method to lock the block at `name` for writing.
-    async fn write_block(
+    async fn write_block<I>(
         &self,
         txn_id: TxnId,
-        name: &BlockId,
-    ) -> TCResult<<<Self::File as File<Self::Block>>::Block as Block<Self::Block>>::Write> {
+        name: I,
+    ) -> TCResult<<<Self::File as File<B>>::Block as Block<B>>::Write>
+    where
+        I: Borrow<BlockId> + Send + Sync,
+    {
         let block = {
             let contents = self.read(txn_id).await?;
-            let block = contents.get_block(name).await?;
-            block.ok_or_else(|| TCError::not_found(name))?
+            let block = contents.get_block(name.borrow()).await?;
+            block.ok_or_else(|| TCError::not_found(name.borrow()))?
         };
 
         block.write().await
@@ -170,10 +198,10 @@ pub trait Dir: Clone + Send + Sync {
     async fn contains(&self, name: &PathSegment) -> TCResult<bool>;
 
     /// Create a new `Dir`.
-    async fn create_dir(&mut self, name: PathSegment) -> TCResult<Self>;
+    async fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock>;
 
     /// Create a new `Dir` with a new unique ID.
-    async fn create_dir_unique(&mut self) -> TCResult<Self>;
+    async fn create_dir_unique(&mut self) -> TCResult<Self::Lock>;
 
     /// Create a new [`Self::File`].
     async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
@@ -181,7 +209,7 @@ pub trait Dir: Clone + Send + Sync {
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: FileLock<Block = B>;
+        F: FileLock<B>;
 
     /// Create a new [`Self::File`] with a new unique ID.
     async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
@@ -189,7 +217,7 @@ pub trait Dir: Clone + Send + Sync {
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: FileLock<Block = B>;
+        F: FileLock<B>;
 
     /// Look up a subdirectory of this `Dir`.
     async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
@@ -199,7 +227,7 @@ pub trait Dir: Clone + Send + Sync {
     where
         Self::FileEntry: AsType<F>,
         B: BlockData,
-        F: FileLock<Block = B>;
+        F: FileLock<B>;
 
     /// Return `true` if there are no files or subdirectories in this [`Dir`].
     async fn is_empty(&self) -> bool;
@@ -222,6 +250,24 @@ pub trait DirLock: Store + Send + Sized + 'static {
 
     /// Lock this [`Dir`] for writing.
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Dir>;
+
+    /// Convenience method to create a temporary working directory
+    async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Self> {
+        let mut dir = self.write(txn_id).await?;
+        dir.create_dir_unique().await
+    }
+
+    /// Convenience method to create a temporary file
+    async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    where
+        <Self::Dir as Dir>::FileEntry: AsType<F>,
+        C: Copy + Send + fmt::Display,
+        B: BlockData,
+        F: FileLock<B>,
+    {
+        let mut dir = self.write(txn_id).await?;
+        dir.create_file_unique(class).await
+    }
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].

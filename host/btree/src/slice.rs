@@ -19,7 +19,7 @@ pub struct BTreeSlice<F, D, T> {
     reverse: bool,
 }
 
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> BTreeSlice<F, D, T> {
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeSlice<F, D, T> {
     pub fn new(
         source: BTree<F, D, T>,
         range: Range,
@@ -72,9 +72,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Block = Node>, D: DirLock, T: Transaction<D>> BTreeInstance
-    for BTreeSlice<F, D, T>
-{
+impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T> {
     type Slice = Self;
 
     fn collator(&'_ self) -> &'_ ValueCollator {
