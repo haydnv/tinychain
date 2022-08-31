@@ -333,7 +333,7 @@ class ComplexSparseTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
 
         expected = np.zeros(shape, dtype=complex)
-        expected[coord] = 3 + 4j
+        expected[tuple(coord)] = 3 + 4j
         self._expectSparse(actual, expected)
 
     def testSumComplexTensorComplexTensor(self):
@@ -401,7 +401,7 @@ class ComplexSparseTests(ClientTest):
         cxt.result = tc.after(cxt.sparse[1].write(tc.C32(2 + 2j)), cxt.sparse / cxt.dense)
 
         actual = self.host.post(ENDPOINT, cxt)
-        l = np.arange(1, 181, dtype=complex).reshape([30, 3, 2]) + (1 + 1j)
+        l = np.zeros([30, 3, 2], dtype=complex) + (1 + 1j)
         r = np.zeros([3, 2], complex)
         r[1] = 2 + 2j
         expected = r / l
@@ -436,8 +436,11 @@ class ComplexSparseTests(ClientTest):
 
     def _expectSparse(self, actual, expected):
         ((shape, dtype), actual) = actual[str(tc.URI(tc.tensor.Sparse))]
-        expected = nparray_to_sparse(expected, tc.C32)
-        self.assertTrue(expected, actual)
+        actual_np = np.zeros(expected.shape) + 0j
+        for coord, n in actual:
+            actual_np[tuple(coord)] = complex(*n)
+
+        self.assertTrue(np.allclose(actual_np, expected))
 
 
 def expect_number(as_json, dtype=tc.C64):
@@ -451,14 +454,6 @@ def load_dense(x, dtype=tc.C32):
         data = x.flatten().tolist()
 
     return tc.tensor.Dense.load(x.shape, data, dtype)
-
-
-def nparray_to_sparse(arr, dtype):
-    dtype = complex
-    zero = dtype(0)
-    coords = itertools.product(*[range(dim) for dim in arr.shape])
-    sparse = [[list(coord), [n.real, n.imag]] for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten())) if n != zero]
-    return sparse
 
 
 if __name__ == "__main__":
