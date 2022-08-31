@@ -1,7 +1,8 @@
-import tinychain as tc
-import unittest
+import itertools
 
 import numpy as np
+import tinychain as tc
+import unittest
 
 from .base import ClientTest
 
@@ -143,7 +144,7 @@ class ComplexNumberOpsTests(ClientTest):
 
 
 # TODO: move to test_tensor.py
-class ComplexTensorOpsTests(ClientTest):
+class ComplexDenseTensorOpsTests(ClientTest):
     def testCreateComplexTensor(self):
         shape = (3, 6)
         x = np.ones(shape) + np.ones(shape)*1j
@@ -320,6 +321,125 @@ class ComplexTensorOpsTests(ClientTest):
         self.assertTrue(np.allclose(expected.flatten(), actual))
 
 
+class ComplexSparseTests(ClientTest):
+    def testCreateComplexTensor(self):
+        shape = (3, 6)
+        coord = [0, 0]
+        value = tc.C32(3 + 4j)
+        
+        cxt = tc.Context()
+        cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.C32)
+        cxt.result = tc.after(cxt.tensor[coord].write(value), cxt.tensor)
+        actual = self.host.post(ENDPOINT, cxt)
+
+        expected = np.zeros(shape, dtype=complex)
+        expected[coord] = 3 + 4j
+        self._expectSparse(actual, expected)
+
+    def testSumComplexTensorComplexTensor(self):
+        shape = [5, 2, 3]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape, tc.C32)
+        cxt.small = tc.tensor.Sparse.zeros([3], tc.C32)
+        cxt.result = tc.after([
+            cxt.big[1].write(tc.C32(1 + 1j)),
+            cxt.small[1].write(tc.C32(2 + 2j)),
+        ], cxt.big + cxt.small)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        big = np.zeros(shape, dtype=complex)
+        big[1] = 1 + 1j
+        small = np.zeros([3], dtype=complex)
+        small[1] = 2 + 2j
+        expected = big + small
+
+        self._expectSparse(actual, expected)
+
+    def testSumComplexTensorRealTensor(self):
+        shape = [5, 2, 3]
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape, tc.C32)
+        cxt.small = tc.tensor.Sparse.zeros([3], tc.F32)
+        cxt.result = tc.after([
+            cxt.big[1].write(tc.C32(1 + 1j)),
+            cxt.small[1].write(2),
+        ], cxt.big + cxt.small)
+
+        actual = self.host.post(ENDPOINT, cxt)
+
+        big = np.zeros(shape, dtype=complex)
+        big[1] = 1 + 1j
+        small = np.zeros([3])
+        small[1] = 2
+        expected = big + small
+
+        self._expectSparse(actual, expected)
+
+    def testDivComplexTensorRealTensor(self):
+        self.maxDiff = None
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
+        cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.C32)
+        cxt.result = tc.after(cxt.sparse[1].write(tc.C32(2 + 2j)), cxt.sparse / cxt.dense)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        l = np.arange(1, 181).reshape([30, 3, 2])
+        r = np.zeros([3, 2], complex)
+        r[1] = 2 + 2j
+        expected = r / l
+
+        self._expectSparse(actual, expected)
+
+    def testDivComplexTensorComplexTensor(self):
+        self.maxDiff = None
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.zeros([30, 3, 2], tc.C32) + tc.C32(1 + 1j)
+        cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.C32)
+        cxt.result = tc.after(cxt.sparse[1].write(tc.C32(2 + 2j)), cxt.sparse / cxt.dense)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        l = np.arange(1, 181, dtype=complex).reshape([30, 3, 2]) + (1 + 1j)
+        r = np.zeros([3, 2], complex)
+        r[1] = 2 + 2j
+        expected = r / l
+
+        self._expectSparse(actual, expected)
+
+    def testMulComplexTensorRealTensor(self):
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
+        cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.C32)
+        cxt.result = tc.after(cxt.sparse[0, 1:3].write(tc.C32(2 + 2j)), cxt.dense * cxt.sparse)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.zeros([2, 3], dtype=complex)
+        expected[0, 1:3] = 2 + 2j
+        expected = expected * np.arange(0, 3)
+
+        self._expectSparse(actual, expected)
+
+    def testMulComplexTensorComplexTensor(self):
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.ones([3]) + tc.C32(1j)
+        cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.C32)
+        cxt.result = tc.after(cxt.sparse[0, 1:3].write(tc.C32(2 + 2j)), cxt.dense * cxt.sparse)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.zeros([2, 3], dtype=complex)
+        expected[0, 1:3] = 2 + 2j
+        expected = expected * (np.ones(3) + 1j)
+
+        self._expectSparse(actual, expected)
+
+    def _expectSparse(self, actual, expected):
+        ((shape, dtype), actual) = actual[str(tc.URI(tc.tensor.Sparse))]
+        expected = nparray_to_sparse(expected, tc.C32)
+        self.assertTrue(expected, actual)
+
+
 def expect_number(as_json, dtype=tc.C64):
     return complex(*as_json[str(tc.URI(dtype))])
 
@@ -331,6 +451,14 @@ def load_dense(x, dtype=tc.C32):
         data = x.flatten().tolist()
 
     return tc.tensor.Dense.load(x.shape, data, dtype)
+
+
+def nparray_to_sparse(arr, dtype):
+    dtype = complex
+    zero = dtype(0)
+    coords = itertools.product(*[range(dim) for dim in arr.shape])
+    sparse = [[list(coord), [n.real, n.imag]] for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten())) if n != zero]
+    return sparse
 
 
 if __name__ == "__main__":
