@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist, Store};
+use tc_transact::fs::{Dir, DirRead, DirWrite, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label, TCPathBuf};
@@ -129,18 +129,19 @@ impl Persist<fs::Dir> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let txn_id = *txn.id();
-        let is_new = dir.is_empty(txn_id).await?;
-
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
+        let txn_id = *txn.id();
+        let mut dir_lock = dir.write(txn_id).await?;
+        let is_new = dir_lock.is_empty().await;
+
         let (store, pending, committed) = if is_new {
-            let store = dir
-                .create_dir(txn_id, STORE.into())
+            let store = dir_lock
+                .create_dir(STORE.into())
                 .map_ok(super::data::Store::new)
                 .await?;
 
-            let blocks_dir = dir.create_dir(txn_id, BLOCKS.into()).await?;
+            let blocks_dir = dir_lock.create_dir(BLOCKS.into()).await?;
             let mut blocks_dir = blocks_dir.into_inner().write().await;
 
             let pending = blocks_dir
@@ -161,8 +162,8 @@ impl Persist<fs::Dir> for SyncChain {
 
             (store, pending, committed)
         } else {
-            let store = dir
-                .get_or_create_dir(txn_id, STORE.into())
+            let store = dir_lock
+                .get_or_create_dir(STORE.into())
                 .map_ok(super::data::Store::new)
                 .await?;
 
@@ -258,12 +259,16 @@ impl de::Visitor for ChainVisitor {
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let null_hash = null_hash();
         let txn_id = *self.txn.id();
-        let dir = self
-            .txn
-            .context()
-            .create_dir_unique(txn_id)
-            .map_err(de::Error::custom)
-            .await?;
+        let mut dir = {
+            let dir = self
+                .txn
+                .context()
+                .create_dir_unique(txn_id)
+                .map_err(de::Error::custom)
+                .await?;
+
+            dir.write(txn_id).map_err(de::Error::custom).await?
+        };
 
         let schema = seq
             .next_element(())
@@ -276,13 +281,13 @@ impl de::Visitor for ChainVisitor {
             .ok_or_else(|| de::Error::invalid_length(1, "the subject of a SyncChain"))?;
 
         let store = dir
-            .create_dir(txn_id, STORE.into())
+            .create_dir(STORE.into())
             .map_ok(super::data::Store::new)
             .map_err(de::Error::custom)
             .await?;
 
         let blocks_dir = dir
-            .create_dir(txn_id, BLOCKS.into())
+            .create_dir(BLOCKS.into())
             .map_err(de::Error::custom)
             .await?;
 

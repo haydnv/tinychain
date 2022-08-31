@@ -222,7 +222,7 @@ pub struct BTreeFile<F, D, T> {
     inner: Arc<Inner<F, D, T>>,
 }
 
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeFile<F, D, T>
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
 where
     Self: Clone,
 {
@@ -315,7 +315,7 @@ where
     fn _insert(
         &self,
         txn_id: TxnId,
-        mut node: <<F::File as File<Node>>::Block as Block<Node>>::Write,
+        mut node: <F::Read as FileRead<Node>>::Write,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
@@ -524,14 +524,11 @@ where
     async fn split_child(
         order: usize,
         mut file: F::Write,
-        mut node: <<F::File as File<Node>>::Block as Block<Node>>::Write,
+        mut node: <F::Read as FileRead<Node>>::Write,
         node_id: NodeId,
-        mut child: <<F::File as File<Node>>::Block as Block<Node>>::Write,
+        mut child: <F::Read as FileRead<Node>>::Write,
         i: usize,
-    ) -> TCResult<(
-        F::Write,
-        <<F::File as File<Node>>::Block as Block<Node>>::Write,
-    )> {
+    ) -> TCResult<(F::Write, <F::Read as FileRead<Node>>::Write)> {
         debug!("BTree::split_child");
 
         assert_eq!(node_id, node.children[i].clone());
@@ -576,7 +573,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
 where
     Self: Clone,
     BTreeSlice<F, D, T>: 'static,
@@ -621,7 +618,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
 where
     Self: Clone,
     BTreeSlice<F, D, T>: 'static,
@@ -698,7 +695,7 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node> + Transact, D: DirLock, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
+impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
     async fn commit(&self, txn_id: &TxnId) {
         join!(
             self.inner.file.commit(txn_id),
@@ -715,7 +712,7 @@ impl<F: FileLock<Node> + Transact, D: DirLock, T: Transaction<D>> Transact for B
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
     type Schema = RowSchema;
     type Store = F;
     type Txn = T;
@@ -753,7 +750,7 @@ impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> Persist<D> for BTreeFile<
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
+impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
@@ -761,18 +758,15 @@ impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>> Restore<D> for BTreeFile<
             ));
         }
 
-        let mut file = self.inner.file.write(txn_id).await?;
-        let mut root_id = self.inner.root.write(txn_id).await?;
-
-        file.truncate().await?;
-        *root_id = backup.inner.root.read(txn_id).await?.clone();
-        file.copy_from(&*backup.inner.file.read(txn_id).await?)
+        self.inner
+            .file
+            .copy_from(txn_id, &backup.inner.file, true)
             .await
     }
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
+impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
     for BTreeFile<F, D, T>
 {
     async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {

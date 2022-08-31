@@ -15,7 +15,7 @@ use tc_error::*;
 use tc_table::TableStream;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
-use tc_transact::fs::{Dir, Persist, Restore};
+use tc_transact::fs::{Dir, DirRead, DirWrite, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -79,33 +79,31 @@ impl SubjectCollection {
         name: Id,
     ) -> TCBoxTryFuture<Self> {
         Box::pin(async move {
+            let mut dir = dir.write(txn_id).await?;
+
             match schema {
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Dense(schema) => {
-                    let file = dir.create_file(txn_id, name, TensorType::Dense).await?;
-
+                    let file = dir.create_file(name, TensorType::Dense).await?;
                     DenseTensor::create(file, schema, txn_id)
                         .map_ok(Self::Dense)
                         .await
                 }
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Sparse(schema) => {
-                    let dir = dir.create_dir(txn_id, name).await?;
-                    let tensor = SparseTensor::create(&dir, schema, txn_id)
+                    let dir = dir.create_dir(name).await?;
+                    SparseTensor::create(&dir, schema, txn_id)
                         .map_ok(Self::Sparse)
-                        .await?;
-
-                    Ok(tensor)
+                        .await
                 }
                 CollectionSchema::Table(schema) => {
-                    let dir = dir.create_dir(txn_id, name).await?;
+                    let dir = dir.create_dir(name).await?;
                     TableIndex::create(&dir, schema, txn_id)
                         .map_ok(Self::Table)
                         .await
                 }
                 CollectionSchema::BTree(schema) => {
-                    let file = dir.create_file(txn_id, name, BTreeType::default()).await?;
-
+                    let file = dir.create_file(name, BTreeType::default()).await?;
                     BTreeFile::create(file, schema, txn_id)
                         .map_ok(Self::BTree)
                         .await
@@ -122,44 +120,49 @@ impl SubjectCollection {
     ) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
             let txn_id = *txn.id();
+            let container = dir.read(txn_id).await?;
 
             match schema {
                 CollectionSchema::BTree(schema) => {
-                    if let Some(file) = dir.get_file(txn_id, &name).await? {
+                    if let Some(file) = container.get_file(&name).await? {
                         BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                     } else {
+                        std::mem::drop(container);
                         Self::create(CollectionSchema::BTree(schema), dir, txn_id, name).await
                     }
                 }
 
                 CollectionSchema::Table(schema) => {
-                    if let Some(dir) = dir.get_dir(txn_id, &name).await? {
+                    if let Some(dir) = container.get_dir(&name).await? {
                         TableIndex::load(txn, schema, dir.clone())
                             .map_ok(Self::Table)
                             .await
                     } else {
+                        std::mem::drop(container);
                         Self::create(CollectionSchema::Table(schema), dir, txn_id, name).await
                     }
                 }
 
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Dense(schema) => {
-                    if let Some(file) = dir.get_file(txn_id, &name).await? {
+                    if let Some(file) = container.get_file(&name).await? {
                         DenseTensor::load(txn, schema, file)
                             .map_ok(Self::Dense)
                             .await
                     } else {
+                        std::mem::drop(container);
                         Self::create(CollectionSchema::Dense(schema), dir, txn_id, name).await
                     }
                 }
 
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Sparse(schema) => {
-                    if let Some(dir) = dir.get_dir(txn_id, &name).await? {
+                    if let Some(dir) = container.get_dir(&name).await? {
                         SparseTensor::load(txn, schema, dir)
                             .map_ok(Self::Sparse)
                             .await
                     } else {
+                        std::mem::drop(container);
                         Self::create(CollectionSchema::Sparse(schema), dir, txn_id, name).await
                     }
                 }

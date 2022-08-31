@@ -10,7 +10,7 @@ use safecast::AsType;
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_transact::fs::{Dir, DirLock, FileLock};
+use tc_transact::fs::{Dir, DirRead, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -28,7 +28,7 @@ use super::{SparseRow, SparseStream, SparseTensor};
 
 /// Access methods for [`SparseTensor`] data
 #[async_trait]
-pub trait SparseAccess<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>>:
+pub trait SparseAccess<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     ReadValueAt<D, Txn = T> + TensorAccess + Clone + fmt::Display + Send + Sync + 'static
 {
     /// The type of a slice of this accessor
@@ -65,7 +65,7 @@ pub trait SparseAccess<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: T
 
 /// Write methods for [`SparseTensor`] data
 #[async_trait]
-pub trait SparseWrite<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>>:
+pub trait SparseWrite<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>>:
     SparseAccess<FD, FS, D, T>
 {
     /// Write the given `value` at the given `coord` of this [`SparseTensor`].
@@ -114,12 +114,12 @@ macro_rules! dispatch {
 
 impl<FD, FS, D, T> TensorAccess for SparseAccessor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         dispatch!(self, this, this.dtype())
@@ -141,12 +141,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Slice = Self;
 
@@ -186,12 +186,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseAccessor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
@@ -203,12 +203,12 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseAccessor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -231,9 +231,9 @@ pub struct DenseToSparse<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> TensorAccess for DenseToSparse<FD, FS, D, T, B>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -257,13 +257,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> SparseAccess<FD, FS, D, T> for DenseToSparse<FD, FS, D, T, B>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Slice = DenseToSparse<FD, FS, D, T, B::Slice>;
 
@@ -371,9 +371,9 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for DenseToSparse<FD, FS, D, T, B>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -410,12 +410,12 @@ pub struct SparseBroadcast<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseBroadcast<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     pub fn new(source: A, shape: Shape) -> TCResult<Self> {
@@ -433,9 +433,9 @@ where
 
 impl<FD, FS, D, T, A> TensorAccess for SparseBroadcast<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -459,12 +459,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseBroadcast<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -608,12 +608,12 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseBroadcast<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -656,9 +656,9 @@ impl<FD, FS, D, T, A> SparseCast<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> TensorAccess for SparseCast<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -682,11 +682,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseCast<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -749,9 +749,9 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseCast<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -784,9 +784,9 @@ pub struct SparseCombinator<FD, FS, D, T, L, R> {
 
 impl<FD, FS, D, T, L, R> SparseCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -847,9 +847,9 @@ where
 
 impl<FD, FS, D, T, L, R> TensorAccess for SparseCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -874,12 +874,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, L, R> SparseAccess<FD, FS, D, T> for SparseCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
@@ -981,9 +981,9 @@ where
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for SparseCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -1028,9 +1028,9 @@ impl<FD, FS, D, T, A> SparseConstCombinator<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> TensorAccess for SparseConstCombinator<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1054,11 +1054,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseConstCombinator<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1126,10 +1126,10 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseConstCombinator<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
+    FD: File<Array>,
+    FS: File<Node>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1163,9 +1163,9 @@ pub struct SparseLeftCombinator<FD, FS, D, T, L, R> {
 
 impl<FD, FS, D, T, L, R> SparseLeftCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -1214,9 +1214,9 @@ where
 
 impl<FD, FS, D, T, L, R> TensorAccess for SparseLeftCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -1241,12 +1241,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, L, R> SparseAccess<FD, FS, D, T> for SparseLeftCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
@@ -1348,9 +1348,9 @@ where
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for SparseLeftCombinator<FD, FS, D, T, L, R>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
@@ -1393,9 +1393,9 @@ pub struct SparseExpand<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseExpand<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1411,9 +1411,9 @@ where
 
 impl<FD, FS, D, T, A> TensorAccess for SparseExpand<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1437,12 +1437,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseExpand<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -1583,9 +1583,9 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseExpand<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1619,9 +1619,9 @@ pub struct SparseFlip<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseFlip<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1638,9 +1638,9 @@ where
 
 impl<FD, FS, D, T, A> TensorAccess for SparseFlip<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1664,12 +1664,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseFlip<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -1764,9 +1764,9 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseFlip<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1801,12 +1801,12 @@ pub struct SparseReduce<FD, FS, D, T> {
 
 impl<FD, FS, D, T> SparseReduce<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     pub fn new(
         source: SparseAccessor<FD, FS, D, T>,
@@ -1824,12 +1824,12 @@ where
 
 impl<FD, FS, D, T> TensorAccess for SparseReduce<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -1851,12 +1851,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseReduce<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Slice = SparseReduce<FD, FS, D, T>;
 
@@ -1976,12 +1976,12 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseReduce<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -2011,9 +2011,9 @@ pub struct SparseReshape<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseReshape<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -2029,10 +2029,10 @@ where
 
 impl<FD, FS, D, T, A> TensorAccess for SparseReshape<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
+    FD: File<Array>,
+    FS: File<Node>,
     A: SparseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
@@ -2055,12 +2055,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseReshape<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseTable<FD, FS, D, T>;
@@ -2127,10 +2127,10 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseReshape<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
+    FD: File<Array>,
+    FS: File<Node>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -2156,9 +2156,9 @@ pub struct SparseTranspose<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> SparseTranspose<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -2183,9 +2183,9 @@ where
 
 impl<FD, FS, D, T, A> TensorAccess for SparseTranspose<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -2209,12 +2209,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> SparseAccess<FD, FS, D, T> for SparseTranspose<FD, FS, D, T, A>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
     A::Slice: SparseAccess<FD, FS, D, T>,
 {
@@ -2312,9 +2312,9 @@ where
 
 impl<FD, FS, D, T, A> ReadValueAt<D> for SparseTranspose<FD, FS, D, T, A>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -2360,12 +2360,12 @@ impl<FD, FS, D, T> SparseUnary<FD, FS, D, T> {
 
 impl<FD, FS, D, T> TensorAccess for SparseUnary<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         self.dtype
@@ -2387,12 +2387,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseUnary<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Slice = Self;
 
@@ -2449,12 +2449,12 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseUnary<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
 

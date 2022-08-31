@@ -13,7 +13,7 @@ use safecast::*;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, DirLock, FileLock};
+use tc_transact::fs::{Dir, DirRead, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
 use tcgeneric::{
@@ -261,7 +261,7 @@ pub trait TensorCompareConst {
 
 /// [`Tensor`] linear algebra operations
 #[async_trait]
-pub trait TensorDiagonal<D: DirLock> {
+pub trait TensorDiagonal<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -273,7 +273,7 @@ pub trait TensorDiagonal<D: DirLock> {
 
 /// [`Tensor`] I/O operations
 #[async_trait]
-pub trait TensorIO<D: DirLock> {
+pub trait TensorIO<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -289,7 +289,7 @@ pub trait TensorIO<D: DirLock> {
 
 /// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
 #[async_trait]
-pub trait TensorDualIO<D: DirLock, O> {
+pub trait TensorDualIO<D: Dir, O> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -299,7 +299,7 @@ pub trait TensorDualIO<D: DirLock, O> {
 
 /// [`Tensor`] indexing operations
 #[async_trait]
-pub trait TensorIndex<D: DirLock> {
+pub trait TensorIndex<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -314,7 +314,7 @@ pub trait TensorIndex<D: DirLock> {
 }
 
 /// [`Tensor`] math operations
-pub trait TensorMath<D: DirLock, O> {
+pub trait TensorMath<D: Dir, O> {
     /// The result type of a math operation
     type Combine: TensorInstance;
 
@@ -376,7 +376,7 @@ pub trait TensorPersist: Sized {
 }
 
 /// [`Tensor`] reduction operations
-pub trait TensorReduce<D: DirLock> {
+pub trait TensorReduce<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -456,7 +456,7 @@ pub trait TensorTransform {
 
 /// Unary [`Tensor`] operations
 #[async_trait]
-pub trait TensorUnary<D: DirLock> {
+pub trait TensorUnary<D: Dir> {
     /// The type of [`Transaction`] to expect
     type Txn: Transaction<D>;
 
@@ -587,12 +587,12 @@ pub enum Tensor<FD, FS, D, T> {
 
 impl<FD, FS, D, T> Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     /// Get the [`Schema`] of this [`Tensor`]
     pub fn schema(&self) -> Schema {
@@ -603,9 +603,7 @@ where
     }
 }
 
-impl<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>> Instance
-    for Tensor<FD, FS, D, T>
-{
+impl<FD: File<Array>, FS: File<Node>, D: Dir, T: Transaction<D>> Instance for Tensor<FD, FS, D, T> {
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -618,12 +616,12 @@ impl<FD: FileLock<Array>, FS: FileLock<Node>, D: DirLock, T: Transaction<D>> Ins
 
 impl<FD, FS, D, T> TensorAccess for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         match self {
@@ -656,12 +654,12 @@ where
 
 impl<FD, FS, D, T> TensorInstance for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Dense = Self;
     type Sparse = Self;
@@ -683,12 +681,12 @@ where
 
 impl<FD, FS, D, T> TensorBoolean<Self> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -717,12 +715,12 @@ where
 
 impl<FD, FS, D, T> TensorBooleanConst for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -751,12 +749,12 @@ where
 
 impl<FD, FS, D, T> TensorCompare<Self> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Compare = Self;
     type Dense = Self;
@@ -806,12 +804,12 @@ where
 
 impl<FD, FS, D, T> TensorCompareConst for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Compare = Self;
 
@@ -861,12 +859,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDiagonal<D> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
     SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
 {
     type Txn = T;
@@ -883,12 +881,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
 
@@ -919,12 +917,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDualIO<D, Self> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -941,12 +939,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIndex<D> for Tensor<FD, FS, D, T>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type Index = Self;
@@ -968,12 +966,12 @@ where
 
 impl<FD, FS, D, T> TensorMath<D, Self> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -1023,12 +1021,12 @@ where
 
 impl<FD, FS, D, T> TensorMathConst for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -1078,12 +1076,12 @@ where
 
 impl<FD, FS, D, T> TensorReduce<D> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
     type Reduce = Self;
@@ -1147,12 +1145,12 @@ where
 
 impl<FD, FS, D, T> TensorTransform for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Broadcast = Self;
     type Cast = Self;
@@ -1249,12 +1247,12 @@ macro_rules! trig {
 
 impl<FD, FS, D, T> TensorTrig for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Unary = Self;
 
@@ -1277,12 +1275,12 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorUnary<D> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
     type Unary = Self;
@@ -1339,13 +1337,13 @@ where
 
 impl<FD, FS, D, T, B> From<DenseTensor<FD, FS, D, T, B>> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn from(dense: DenseTensor<FD, FS, D, T, B>) -> Self {
         Self::Dense(dense.into_inner().accessor().into())
@@ -1354,13 +1352,13 @@ where
 
 impl<FD, FS, D, T, A> From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     A: SparseAccess<FD, FS, D, T>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn from(sparse: SparseTensor<FD, FS, D, T, A>) -> Self {
         Self::Sparse(sparse.into_inner().accessor().into())
@@ -1370,13 +1368,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = T;
 
@@ -1406,13 +1404,13 @@ impl<FD, FS, D, T> TensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for TensorVisitor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = Tensor<FD, FS, D, T>;
 
@@ -1447,12 +1445,12 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     type Txn = T;
     type View = TensorView<'en>;
@@ -1482,12 +1480,12 @@ impl<'en> en::IntoStream<'en> for TensorView<'en> {
 
 impl<FD, FS, D, T> fmt::Debug for Tensor<FD, FS, D, T>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
@@ -1496,12 +1494,12 @@ where
 
 impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1588,7 +1586,7 @@ impl<FD, FS, D, T> Default for Phantom<FD, FS, D, T> {
 
 async fn tile<D, T, I, O>(txn: T, input: I, output: O, multiples: Vec<u64>) -> TCResult<O>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
     I: TensorAccess + Clone,
     O: TensorAccess + TensorDualIO<D, I, Txn = T> + Clone,

@@ -17,7 +17,7 @@ pub use id::{TxnId, MIN_ID};
 
 /// Trait to define a view which can be encoded with [`en::IntoStream`].
 #[async_trait]
-pub trait IntoView<'en, D: fs::DirLock> {
+pub trait IntoView<'en, D: fs::Dir> {
     type Txn: Transaction<D>;
     type View: en::IntoStream<'en> + Sized;
 
@@ -37,11 +37,11 @@ pub trait Transact {
 
 /// Common transaction context properties.
 #[async_trait]
-pub trait Transaction<D: fs::DirLock>: Clone + Sized + Send + Sync + 'static {
+pub trait Transaction<D: fs::Dir>: Clone + Sized + Send + Sync + 'static {
     /// The [`TxnId`] of this transaction context.
     fn id(&'_ self) -> &'_ TxnId;
 
-    /// Borrow the [`fs::DirLock`] of this transaction context.
+    /// Borrow the [`fs::Dir`] of this transaction context.
     fn context(&'_ self) -> &'_ D;
 
     /// Return a transaction subcontext with its own [`fs::Dir`].

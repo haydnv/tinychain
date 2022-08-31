@@ -7,7 +7,7 @@ use safecast::AsType;
 
 use tc_btree::Node;
 use tc_error::*;
-use tc_transact::fs::{Dir, DirLock, FileLock};
+use tc_transact::fs::{Dir, DirRead, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
@@ -22,12 +22,12 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
@@ -54,12 +54,12 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<(Coord, Number)>>>
 where
-    D: DirLock,
+    D: Dir,
     T: Transaction<D>,
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    <D::Dir as Dir>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Dir as Dir>::FileClass: From<TensorType>,
+    FD: File<Array>,
+    FS: File<Node>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileClass: From<TensorType>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {
@@ -85,9 +85,9 @@ async fn sort_coords<FD, FS, D, T, S>(
     shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
-    FD: FileLock<Array>,
-    FS: FileLock<Node>,
-    D: DirLock,
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
     T: Transaction<D>,
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,
 {

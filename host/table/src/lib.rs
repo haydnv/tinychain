@@ -12,7 +12,7 @@ use futures::stream::TryStreamExt;
 use safecast::AsType;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirLock, FileLock};
+use tc_transact::fs::{Dir, DirRead, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
@@ -207,10 +207,10 @@ where
     }
 }
 
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
         match self {
@@ -250,10 +250,10 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Self;
     type Reverse = Self;
@@ -304,10 +304,10 @@ where
     }
 }
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
         match self {
@@ -321,10 +321,10 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Self;
     type Selection = Self;
@@ -379,10 +379,10 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Self;
 
@@ -412,10 +412,10 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
 where
     Self: Send + Sync,
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         if let Self::Table(table) = self {
@@ -452,9 +452,9 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
 where
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Context = Txn;
 
@@ -470,9 +470,9 @@ where
 }
 
 #[async_trait]
-impl<'en, F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
+impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
 where
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Txn = Txn;
     type View = TableView<'en>;
@@ -502,16 +502,16 @@ where
     }
 }
 
-struct TableVisitor<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> {
+struct TableVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     txn: Txn,
     phantom_file: PhantomData<F>,
     phantom_dir: PhantomData<D>,
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
 where
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Value = Table<F, D, Txn>;
 
@@ -541,15 +541,15 @@ where
     }
 }
 
-struct RowVisitor<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> {
+struct RowVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
     table: TableIndex<F, D, Txn>,
     txn_id: TxnId,
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
 where
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Value = Self;
 
@@ -577,9 +577,9 @@ where
 }
 
 #[async_trait]
-impl<F: FileLock<Node>, D: DirLock, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
+impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
 where
-    <D::Dir as Dir>::FileEntry: AsType<F>,
+    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Context = (TxnId, TableIndex<F, D, Txn>);
 

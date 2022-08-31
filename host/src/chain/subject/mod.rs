@@ -12,7 +12,7 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
+use tc_transact::fs::{Dir, DirRead, DirWrite};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -82,18 +82,16 @@ impl Subject {
                         .await
                 }
                 Schema::Tuple(schema) => {
-                    let creates = schema
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, schema)| async move {
-                            let dir = dir.create_dir(txn_id, i.into()).await?;
-                            Self::create(schema, &dir, txn_id).await
-                        });
+                    let mut container = dir.write(txn_id).await?;
+                    let mut subjects = Vec::with_capacity(schema.len());
 
-                    try_join_all(creates)
-                        .map_ok(Tuple::from)
-                        .map_ok(Self::Tuple)
-                        .await
+                    for (i, schema) in schema.into_iter().enumerate() {
+                        let dir = container.create_dir(i.into()).await?;
+                        let subject = Self::create(schema, &dir, txn_id).await?;
+                        subjects.push(subject);
+                    }
+
+                    Ok(Self::Tuple(subjects.into()))
                 }
                 Schema::Map(schema) if schema.is_empty() => {
                     SubjectMap::create(dir.clone(), txn_id)
@@ -101,17 +99,16 @@ impl Subject {
                         .await
                 }
                 Schema::Map(schema) => {
-                    let creates = schema.into_iter().map(|(name, schema)| async move {
-                        let dir = dir.create_dir(txn_id, name.clone()).await?;
-                        Self::create(schema, &dir, txn_id)
-                            .map_ok(|subject| (name, subject))
-                            .await
-                    });
+                    let mut container = dir.write(txn_id).await?;
+                    let mut subjects = Map::new();
 
-                    try_join_all(creates)
-                        .map_ok(|schemata| schemata.into_iter().collect())
-                        .map_ok(Self::Map)
-                        .await
+                    for (name, schema) in schema.into_iter() {
+                        let dir = container.create_dir(name.clone()).await?;
+                        let subject = Self::create(schema, &dir, txn_id).await?;
+                        subjects.insert(name, subject);
+                    }
+
+                    Ok(Self::Map(subjects))
                 }
             }
         })
@@ -133,48 +130,48 @@ impl Subject {
                 }
 
                 Schema::Map(schema) if schema.is_empty() => {
-                    if let Some(dir) = dir.get_dir(txn_id, &DYNAMIC.into()).await? {
+                    let mut container = dir.write(txn_id).await?;
+                    if let Some(dir) = container.get_dir(&DYNAMIC.into()).await? {
                         SubjectMap::load(txn, dir).map_ok(Self::Dynamic).await
                     } else {
-                        let dir = dir.create_dir(txn_id, DYNAMIC.into()).await?;
+                        let dir = container.create_dir(DYNAMIC.into()).await?;
                         SubjectMap::create(dir, txn_id).map_ok(Self::Dynamic).await
                     }
                 }
                 Schema::Map(schema) => {
-                    try_join_all(schema.into_iter().map(|(name, schema)| async move {
-                        if let Some(dir) = dir.get_dir(txn_id, &name).await? {
-                            Self::load(txn, schema, &dir)
-                                .map_ok(|subject| (name, subject))
-                                .await
+                    let mut container = dir.write(txn_id).await?;
+                    let mut subjects = Map::new();
+
+                    for (name, schema) in schema.into_iter() {
+                        let subject = if let Some(dir) = container.get_dir(&name).await? {
+                            Self::load(txn, schema, &dir).await
                         } else {
-                            let dir = dir.create_dir(txn_id, name.clone()).await?;
-                            Self::create(schema, &dir, txn_id)
-                                .map_ok(|subject| (name, subject))
-                                .await
-                        }
-                    }))
-                    .map_ok(|subjects| subjects.into_iter().collect())
-                    .map_ok(Self::Map)
-                    .await
+                            let dir = container.create_dir(name.clone()).await?;
+                            Self::create(schema, &dir, txn_id).await
+                        }?;
+
+                        subjects.insert(name, subject);
+                    }
+
+                    Ok(Self::Map(subjects))
                 }
 
                 Schema::Tuple(schema) => {
-                    try_join_all(
-                        schema
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, schema)| async move {
-                                if let Some(dir) = dir.get_dir(txn_id, &i.into()).await? {
-                                    Self::load(txn, schema, &dir).await
-                                } else {
-                                    let dir = dir.create_dir(txn_id, i.into()).await?;
-                                    Self::create(schema, &dir, txn_id).await
-                                }
-                            }),
-                    )
-                    .map_ok(Tuple::from)
-                    .map_ok(Self::Tuple)
-                    .await
+                    let mut container = dir.write(txn_id).await?;
+                    let mut subjects = Vec::with_capacity(schema.len());
+
+                    for (i, schema) in schema.into_iter().enumerate() {
+                        let subject = if let Some(dir) = container.get_dir(&i.into()).await? {
+                            Self::load(txn, schema, &dir).await
+                        } else {
+                            let dir = container.create_dir(i.into()).await?;
+                            Self::create(schema, &dir, txn_id).await
+                        }?;
+
+                        subjects.push(subject);
+                    }
+
+                    Ok(Self::Tuple(subjects.into()))
                 }
             }
         })

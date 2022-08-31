@@ -11,7 +11,7 @@ use log::{debug, error};
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File, Persist};
+use tc_transact::fs::{BlockData, Dir, DirWrite, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
@@ -19,6 +19,7 @@ use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple
 
 use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::route::Public;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -82,7 +83,7 @@ impl History {
     async fn read_block(
         &self,
         block_id: u64,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(block_id))
@@ -94,7 +95,7 @@ impl History {
     async fn write_block(
         &self,
         block_id: u64,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
+    ) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(block_id))
@@ -106,7 +107,7 @@ impl History {
     pub async fn read_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.read_block(*latest).await
     }
@@ -114,12 +115,12 @@ impl History {
     pub async fn write_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
+    ) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(*latest).await
     }
 
-    pub async fn read_log(&self) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let log = {
             let file = self.file.read().await;
             file.get_file(&block_name(WRITE_AHEAD))
@@ -292,10 +293,12 @@ impl Persist<fs::Dir> for History {
 
         // if there's no data in the data dir, it may not have been sync'd to the filesystem
         // so just create a new one
-        let store = dir
-            .get_or_create_dir(*txn_id, STORE.into())
-            .map_ok(Store::new)
-            .await?;
+        let store = {
+            let mut dir = dir.write(*txn_id).await?;
+            dir.get_or_create_dir(STORE.into())
+                .map_ok(Store::new)
+                .await?
+        };
 
         let file = {
             let mut dir = dir.into_inner().write().await;
@@ -493,11 +496,13 @@ impl de::Visitor for HistoryVisitor {
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
 
-        let store = dir
-            .create_dir(txn_id, STORE.into())
-            .map_ok(Store::new)
-            .map_err(de::Error::custom)
-            .await?;
+        let store = {
+            let mut dir = dir.write(txn_id).map_err(de::Error::custom).await?;
+            dir.create_dir(STORE.into())
+                .map_ok(Store::new)
+                .map_err(de::Error::custom)
+                .await?
+        };
 
         let file = {
             let mut dir = dir.into_inner().write().await;

@@ -1103,7 +1103,11 @@ impl StateVisitor {
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
             StateType::Object(ot) => {
-                let txn = self.txn.subcontext_tmp().map_err(de::Error::custom).await?;
+                let txn = self
+                    .txn
+                    .subcontext_unique()
+                    .map_err(de::Error::custom)
+                    .await?;
                 let state = access.next_value(txn).await?;
                 ObjectVisitor::new()
                     .visit_map_value(ot, state)
