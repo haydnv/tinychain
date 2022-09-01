@@ -108,7 +108,7 @@ impl Route for StateType {
 
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("{} route {}", self.class(), TCPath::from(path));
+        debug!("instance of {} route {}", self.class(), TCPath::from(path));
 
         if let Some(handler) = match self {
             Self::Chain(chain) => chain.route(path),

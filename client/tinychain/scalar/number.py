@@ -1,6 +1,6 @@
 import math
 
-from ..math.interface import Boolean, Numeric, Trigonometric
+from ..math.interface import Boolean, Complex as _Complex, Numeric, Trigonometric
 from ..math.operator import Add, Div, Mul, Sub, Exp, Pow
 from ..math.operator import Acos, Acosh, Asin, Asinh, Atan, Atanh, Cos, Cosh, Sin, Sinh, Tan, Tanh
 from ..uri import URI
@@ -39,7 +39,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the quotient of `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) / deref(other)
+            from ..context import autobox
+            return autobox(deref(self) / deref(other))
 
         if same_as(other, 1):
             return self
@@ -51,6 +52,8 @@ class Number(Value, Numeric, Trigonometric):
         return self.__class__(form=Div(self, other))
 
     def exp(self):
+        """Calculate `e**self`"""
+
         if same_as(self, 0):
             return 1
         elif same_as(self, 1):
@@ -62,7 +65,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the remainder of `self` divided by `other`."""
 
         if is_literal((self, other)):
-            return deref(self) % deref(other)
+            from ..context import autobox
+            return autobox(deref(self) % deref(other))
 
         if same_as(other, 0):
             raise ValueError(f"divide by zero: {self} / {other}")
@@ -78,7 +82,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the product of `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) * deref(other)
+            from ..context import autobox
+            return autobox(deref(self) * deref(other))
 
         if same_as(other, 1):
             return self
@@ -93,7 +98,8 @@ class Number(Value, Numeric, Trigonometric):
         """Raise `self` to the power of `other`."""
 
         if is_literal((self, other)):
-            return deref(self)**deref(other)
+            from ..context import autobox
+            return autobox(deref(self)**deref(other))
 
         if same_as(self, 1) or same_as(self, 0) or same_as(other, 1):
             return self
@@ -109,7 +115,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the difference between `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) - deref(other)
+            from ..context import autobox
+            return autobox(deref(self) - deref(other))
 
         if same_as(other, 0):
             return self
@@ -174,7 +181,7 @@ class Bool(Number, Boolean):
             return other.logical_and(self)
 
         if is_literal((self, other)):
-            return deref(self) and deref(other)
+            return Bool(deref(self) and deref(other))
 
         if same_as(other, 1):
             return self
@@ -185,7 +192,7 @@ class Bool(Number, Boolean):
         """Boolean NOT"""
 
         if is_literal(self):
-            return not deref(self)
+            return Bool(not deref(self))
 
         if same_as(self, 1):
             return False
@@ -198,7 +205,7 @@ class Bool(Number, Boolean):
         """Boolean OR"""
 
         if is_literal((self, other)):
-            return deref(self) or deref(other)
+            return Bool(deref(self) or deref(other))
 
         if same_as(other, 0):
             return self
@@ -213,7 +220,7 @@ class Bool(Number, Boolean):
         """Boolean XOR"""
 
         if is_literal((self, other)):
-            return deref(self) ^ deref(other)
+            return Bool(deref(self) ^ deref(other))
 
         if same_as(other, 1):
             return self.logical_not()
@@ -227,20 +234,60 @@ class Bool(Number, Boolean):
         return self._get("xor", other, Bool)
 
 
-class Complex(Number):
+class Complex(Number, _Complex):
     """A complex number."""
 
     __uri__ = URI(Number) + "/complex"
 
-    def abs(self):
-        """Return the linear norm of this complex number."""
+    def __init__(self, form, imag=None):
+        if imag is not None:
+            form = (form, imag)
 
-        return Number.abs(self)
+        if is_literal(form):
+            form = deref(form)
+            if isinstance(form, complex):
+                Number.__init__(self, form)
+            else:
+                Number.__init__(self, complex(*form))
+        else:
+            Number.__init__(self, form)
+
+    def __json__(self):
+        from ..context import to_json
+
+        form = form_of(self)
+
+        if isinstance(form, complex):
+            return {str(URI(type(self))): [[to_json(form.real), to_json(form.imag)]]}
+        elif isinstance(form, (list, tuple)):
+            assert len(form) == 2
+            return {str(URI(type(self))): [to_json(form)]}
+        else:
+            return Value.__json__(self)
+
+    @property
+    def imag(self):
+        if is_literal(self):
+            return form_of(self).imag
+        else:
+            return self._get("imag", rtype=Float)
+
+    @property
+    def real(self):
+        if is_literal(self):
+            return form_of(self).real
+        else:
+            return self._get("real", rtype=Float)
+
+    def conj(self):
+        """Return the conjugate of this :class:`Complex` number."""
+
+        return self.__class__(form=(self.real, -self.imag))
 
     def norm(self):
-        """Return the linear norm of this complex number."""
+        """Return the linear norm of this :class:`Complex` number."""
 
-        return self.abs()
+        return self.__class__(form=(self.real**2, self.imag**2))
 
 
 class C32(Complex):
