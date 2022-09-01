@@ -1,5 +1,8 @@
+import cmath
+import math
+
 from ..interface import Interface
-from ..scalar.ref import Get, Post
+from ..scalar.ref import deref, is_literal, Get, Post
 from ..uri import URI
 
 
@@ -23,31 +26,6 @@ class Boolean(Interface):
         """Return `True` where either this :class:`Boolean` or the `other` is `True`, but not both."""
 
         return Post(URI(self, "xor"), {'r': other})
-
-
-# TODO: define `angle`, `conj`, and `norm` methods
-class Complex(Interface):
-    @property
-    def imag(self):
-        """The imaginary component of this :class:`Complex` :class:`Numeric`"""
-
-        return Get(URI(self, "imag"))
-
-    @property
-    def real(self):
-        """The real component of this :class:`Complex` :class:`Numeric`"""
-
-        return Get(URI(self, "real"))
-
-    def angle(self):
-        """
-        Return the angle of this :class:`Complex` :class:`Numeric` with respect to the origin of the complex plane.
-
-        The angle is given in radians.
-        """
-
-        # from: https://en.wikipedia.org/wiki/Atan2#Definition_and_computation
-        return 2 * (self.imag / ((self.real**2 + self.imag**2)**0.5 + self.real)).atan()
 
 
 class Numeric(Interface):
@@ -112,7 +90,14 @@ class Numeric(Interface):
     def exp(self):
         """Raise `e` to the power of this `Numeric`."""
 
-        return self._get("exp", rtype=self.__class__)
+        if is_literal(self):
+            form = deref(self)
+            if isinstance(form, complex):
+                return self.__class__(form=cmath.exp(form))
+            else:
+                return self.__class__(form=math.exp(deref(self)))
+        else:
+            return self._get("exp", rtype=self.__class__)
 
     def log(self, base=None):
         """
@@ -156,6 +141,35 @@ class Numeric(Interface):
         """Subtraction"""
 
         return self._post("sub", {"r": other}, self.__class__)
+
+
+# TODO: define `angle`, `conj`, and `norm` methods
+class Complex(Numeric):
+    @property
+    def imag(self):
+        """The imaginary component of this :class:`Complex` :class:`Numeric`"""
+
+        return Get(URI(self, "imag"))
+
+    @property
+    def real(self):
+        """The real component of this :class:`Complex` :class:`Numeric`"""
+
+        return Get(URI(self, "real"))
+
+    def angle(self):
+        """
+        Return the angle of this :class:`Complex` number with respect to the origin of the complex plane.
+
+        The angle is given in radians.
+        """
+
+        # from: https://en.wikipedia.org/wiki/Atan2#Definition_and_computation
+        if isinstance(deref(self), complex):
+            form = deref(self)
+            return math.atan2(form.imag, form.real)
+        else:
+            return 2 * (self.imag / ((self.real**2 + self.imag**2)**0.5 + self.real)).atan()
 
 
 class Trigonometric(Interface):

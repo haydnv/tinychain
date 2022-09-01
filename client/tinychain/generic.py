@@ -5,7 +5,7 @@ from .interface import Functional, Interface
 from .json import to_json
 from .scalar.bound import Range
 from .scalar.ref import deref, form_of, get_ref, is_literal, same_as, Get, Post
-from .state import Class, State, StateRef
+from .state import State, StateRef
 from .uri import URI
 
 T = typing.TypeVar("T", bound=State)
@@ -274,9 +274,6 @@ def autobox(state):
     if isinstance(state, bool):
         from .scalar.number import Bool
         return Bool(state)
-    elif isinstance(state, float):
-        from .scalar.number import Float
-        return Float(state)
     elif isinstance(state, int):
         from .scalar.number import Int
         return Int(state)
@@ -291,6 +288,12 @@ def autobox(state):
     elif isinstance(state, str):
         from .scalar.value import String
         return String(state)
+    elif isinstance(state, float):
+        from .scalar.number import Float
+        return Float(state)
+    elif isinstance(state, complex):
+        from .scalar.number import Complex
+        return Complex(state)
 
     from .scalar.ref import Ref
     if isinstance(state, Ref):

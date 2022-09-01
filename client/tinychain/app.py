@@ -33,7 +33,6 @@ def class_name(object_):
 
 
 class Model(Object, metaclass=Meta):
-
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)

@@ -39,7 +39,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the quotient of `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) / deref(other)
+            from ..context import autobox
+            return autobox(deref(self) / deref(other))
 
         if same_as(other, 1):
             return self
@@ -64,7 +65,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the remainder of `self` divided by `other`."""
 
         if is_literal((self, other)):
-            return deref(self) % deref(other)
+            from ..context import autobox
+            return autobox(deref(self) % deref(other))
 
         if same_as(other, 0):
             raise ValueError(f"divide by zero: {self} / {other}")
@@ -80,7 +82,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the product of `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) * deref(other)
+            from ..context import autobox
+            return autobox(deref(self) * deref(other))
 
         if same_as(other, 1):
             return self
@@ -95,7 +98,8 @@ class Number(Value, Numeric, Trigonometric):
         """Raise `self` to the power of `other`."""
 
         if is_literal((self, other)):
-            return deref(self)**deref(other)
+            from ..context import autobox
+            return autobox(deref(self)**deref(other))
 
         if same_as(self, 1) or same_as(self, 0) or same_as(other, 1):
             return self
@@ -111,7 +115,8 @@ class Number(Value, Numeric, Trigonometric):
         """Return the difference between `self` and `other`."""
 
         if is_literal((self, other)):
-            return deref(self) - deref(other)
+            from ..context import autobox
+            return autobox(deref(self) - deref(other))
 
         if same_as(other, 0):
             return self
@@ -176,7 +181,7 @@ class Bool(Number, Boolean):
             return other.logical_and(self)
 
         if is_literal((self, other)):
-            return deref(self) and deref(other)
+            return Bool(deref(self) and deref(other))
 
         if same_as(other, 1):
             return self
@@ -187,7 +192,7 @@ class Bool(Number, Boolean):
         """Boolean NOT"""
 
         if is_literal(self):
-            return not deref(self)
+            return Bool(not deref(self))
 
         if same_as(self, 1):
             return False
@@ -200,7 +205,7 @@ class Bool(Number, Boolean):
         """Boolean OR"""
 
         if is_literal((self, other)):
-            return deref(self) or deref(other)
+            return Bool(deref(self) or deref(other))
 
         if same_as(other, 0):
             return self
@@ -215,7 +220,7 @@ class Bool(Number, Boolean):
         """Boolean XOR"""
 
         if is_literal((self, other)):
-            return deref(self) ^ deref(other)
+            return Bool(deref(self) ^ deref(other))
 
         if same_as(other, 1):
             return self.logical_not()
@@ -235,15 +240,17 @@ class Complex(Number, _Complex):
     __uri__ = URI(Number) + "/complex"
 
     def __init__(self, form, imag=None):
-        if imag is None:
-            if is_literal(form):
-                Number.__init__(self, complex(*form))
-            else:
+        if imag is not None:
+            form = (form, imag)
+
+        if is_literal(form):
+            form = deref(form)
+            if isinstance(form, complex):
                 Number.__init__(self, form)
-        elif is_literal((form, imag)):
-            Number.__init__(self, complex(form, imag))
+            else:
+                Number.__init__(self, complex(*form))
         else:
-            Number.__init__(self, (form, imag))
+            Number.__init__(self, form)
 
     def __json__(self):
         from ..context import to_json
@@ -252,11 +259,11 @@ class Complex(Number, _Complex):
 
         if isinstance(form, complex):
             return {str(URI(type(self))): [[to_json(form.real), to_json(form.imag)]]}
-        if isinstance(form, (list, tuple)):
+        elif isinstance(form, (list, tuple)):
             assert len(form) == 2
             return {str(URI(type(self))): [to_json(form)]}
         else:
-            return Number.__json__(self)
+            return Value.__json__(self)
 
     @property
     def imag(self):

@@ -8,6 +8,8 @@ from torch.autograd import grad as grad_torch
 from tinychain.collection.tensor import Dense
 from tinychain.math.operator import gradients as grad_tc
 
+from .base import ClientTest
+
 TENSOR_URI = str(tc.URI(Dense))
 HOST = tc.host.Host('http://127.0.0.1:8702')
 ENDPOINT = '/transact/hypothetical'
@@ -20,7 +22,7 @@ ones_like_tc = tc.tensor.Dense.ones_like
 # based on:
 #  - https://mathinsight.org/chain_rule_simple_examples
 #  - https://math.hmc.edu/calculus/hmc-mathematics-calculus-online-tutorials/multivariable-calculus/multi-variable-chain-rule/
-class ChainRuleTests(unittest.TestCase):
+class ChainRuleTests(ClientTest):
     def testAdd(self):
         cxt = tc.Context()
         cxt.x = tc.ml.Variable.ones([1])
@@ -83,7 +85,7 @@ class ChainRuleTests(unittest.TestCase):
         self.assertTrue(np.allclose(load_np(actual), expected))
 
 
-class OperatorTests(unittest.TestCase):
+class OperatorTests(ClientTest):
     def __init__(self, *args, **kwargs):
         super(OperatorTests, self).__init__(*args, **kwargs)
         x = np.random.rand(2, 2)

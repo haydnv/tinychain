@@ -33,10 +33,12 @@ class ComplexNumberOpsTests(ClientTest):
         n = 3 + 4j
 
         cxt = tc.Context()
-        cxt.z = tc.C64(n).angle()
+        cxt.n = n
+        cxt.a = tc.C64(n).angle()
+        cxt.b = tc.Complex(tc.URI("n")).angle()
+        cxt.test = cxt.a == cxt.b
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertAlmostEqual(actual, np.angle(n))
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testConjugate(self):
         n = 2 - 2j
@@ -69,7 +71,8 @@ class ComplexNumberOpsTests(ClientTest):
         n = complex(4, 4)
 
         cxt = tc.Context()
-        cxt.z = tc.C64(n) - tc.C64(n)
+        cxt.n = n
+        cxt.z = tc.C64(tc.URI('n')) - cxt.n
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(expect_number(actual), n - n)
@@ -79,10 +82,13 @@ class ComplexNumberOpsTests(ClientTest):
         b = complex(3, 4)
 
         cxt = tc.Context()
-        cxt.z = tc.C64(a) * tc.C64(b)
+        cxt.a = complex(1, 2)
+        cxt.b = complex(3, 4)
+        cxt.z1 = cxt.a * cxt.b
+        cxt.z2 = tc.Complex(tc.URI('a')) * cxt.b
+        cxt.check = cxt.z1 == cxt.z2
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(expect_number(actual), a * b)
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testProdReal(self):
         a = complex(1, 2)
@@ -115,32 +121,32 @@ class ComplexNumberOpsTests(ClientTest):
         self.assertEqual(expect_number(actual), a / b)
 
     def testDivReal2(self):
-        a = 2
-        b = complex(2, 2)
-
         cxt = tc.Context()
-        cxt.z = a / tc.C64(b)
+        cxt.a = 2
+        cxt.b = complex(2, 2)
+        cxt.z1 = cxt.a / cxt.b
+        cxt.z2 = cxt.a / tc.URI('b')
+        cxt.check = cxt.z1 == cxt.z2
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertAlmostEqual(expect_number(actual), a / b)
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testPow(self):
-        n = 2.3 + 3.4j
-
         cxt = tc.Context()
-        cxt.z = tc.C64(n)**3
+        cxt.n = 2.3 + 3.4j
+        cxt.z1 = cxt.n**3
+        cxt.z2 = tc.C32(tc.URI('n'))**3
+        cxt.test = cxt.z1 == cxt.z2
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertAlmostEqual(expect_number(actual), n**3)
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
     def testExp(self):
-        n = 0.25j
-
         cxt = tc.Context()
-        cxt.z = (tc.C64(n) * np.pi).exp()
+        cxt.n = 0.25j
+        cxt.z1 = (cxt.n * np.pi).exp()
+        cxt.z2 = (tc.C64(tc.URI('n')) * np.pi).exp()
+        cxt.test = cxt.z1 == cxt.z2
 
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertAlmostEqual(expect_number(actual), np.exp(n * np.pi))
+        self.assertTrue(self.host.post(ENDPOINT, cxt))
 
 
 # TODO: move to test_tensor.py
