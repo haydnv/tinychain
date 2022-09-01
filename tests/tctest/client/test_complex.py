@@ -9,7 +9,6 @@ from .base import ClientTest
 ENDPOINT = "/transact/hypothetical"
 
 
-# TODO: move to the host test package
 class ComplexNumberOpsTests(ClientTest):
     def testReal(self):
         n = complex(1, 2)
@@ -149,7 +148,6 @@ class ComplexNumberOpsTests(ClientTest):
         self.assertTrue(self.host.post(ENDPOINT, cxt))
 
 
-# TODO: move to test_tensor.py
 class ComplexDenseTensorOpsTests(ClientTest):
     def testCreateComplexTensor(self):
         shape = (3, 6)
