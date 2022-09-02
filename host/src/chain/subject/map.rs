@@ -70,15 +70,14 @@ impl SubjectMap {
     pub async fn create(dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         let mut dir_lock = dir.write(txn_id).await?;
 
-        if !dir_lock.is_empty().await {
+        if !dir_lock.is_empty() {
             return Err(TCError::internal(
                 "tried to create a new dynamic Chain with a non-empty directory",
             ));
         }
 
-        let _file: fs::File<Scalar> = dir_lock
-            .create_file(DYNAMIC.into(), ScalarType::default())
-            .await?;
+        let _file: fs::File<Scalar> =
+            dir_lock.create_file(DYNAMIC.into(), ScalarType::default())?;
 
         Ok(Self {
             dir,
@@ -93,7 +92,7 @@ impl SubjectMap {
 
             let file: FileGuard<freqfs::DirReadGuard<CacheBlock>> = {
                 let dir = dir.read(txn_id).await?;
-                let file = dir.get_file(&DYNAMIC.into()).await?;
+                let file = dir.get_file(&DYNAMIC.into())?;
                 let file: fs::File<Scalar> = file.ok_or_else(|| {
                     TCError::internal(format!("dynamic Chain is missing its schema file"))
                 })?;
@@ -280,8 +279,7 @@ impl de::Visitor for SubjectMapVisitor {
                     .await?;
 
                 dir.create_file(DYNAMIC.into(), ScalarType::default())
-                    .map_err(de::Error::custom)
-                    .await?
+                    .map_err(de::Error::custom)?
             };
 
             file.write(txn_id).map_err(de::Error::custom).await?
@@ -355,7 +353,7 @@ async fn put(
     let txn_id = *txn.id();
     let mut schema = {
         let container = container.read(txn_id).await?;
-        let schema: Option<fs::File<Scalar>> = container.get_file(&DYNAMIC.into()).await?;
+        let schema: Option<fs::File<Scalar>> = container.get_file(&DYNAMIC.into())?;
         let schema = schema.ok_or_else(|| TCError::internal("missing schema file"))?;
         schema.write(txn_id).await?
     };

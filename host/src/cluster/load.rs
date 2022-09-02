@@ -117,7 +117,7 @@ pub async fn instantiate(
     for (id, (class, schema)) in chain_schema.into_iter() {
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
-        let dir = dir.get_or_create_dir(id.clone()).await?;
+        let dir = dir.get_or_create_dir(id.clone())?;
         let chain = chain::load(txn, class, schema, dir).await?;
         chains.insert(id, chain);
     }
@@ -147,7 +147,7 @@ async fn get_or_create_dir(
     for name in path {
         dir = {
             let mut dir = dir.write(txn_id).await?;
-            dir.get_or_create_dir(name.clone()).await?
+            dir.get_or_create_dir(name.clone())?
         }
     }
 

@@ -12,7 +12,7 @@ use futures::stream::TryStreamExt;
 use safecast::AsType;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
@@ -22,7 +22,7 @@ use tcgeneric::{
 use index::*;
 use view::*;
 
-pub use tc_btree::Node;
+pub use tc_btree::{BTreeType, Node};
 
 pub use bounds::*;
 pub use index::TableIndex;
@@ -210,6 +210,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
@@ -253,6 +254,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Self;
@@ -307,6 +309,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
@@ -324,6 +327,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Self;
@@ -382,6 +386,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Self;
@@ -415,6 +420,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
 where
     Self: Send + Sync,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
@@ -454,6 +460,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Context = Txn;
@@ -472,6 +479,7 @@ where
 #[async_trait]
 impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Txn = Txn;
@@ -511,6 +519,7 @@ struct TableVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Value = Table<F, D, Txn>;
@@ -549,6 +558,7 @@ struct RowVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Value = Self;
@@ -579,6 +589,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Context = (TxnId, TableIndex<F, D, Txn>);

@@ -13,10 +13,10 @@ use log::debug;
 use safecast::AsType;
 use strided::Stride;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{
-    BlockId, CopyFrom, Dir, DirRead, File, FileRead, FileWrite, Persist, Restore,
+    BlockId, CopyFrom, Dir, DirRead, DirWrite, File, FileRead, FileWrite, Persist, Restore,
 };
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
@@ -347,7 +347,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -426,7 +426,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn write<B: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -561,7 +561,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -1029,7 +1029,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = Self;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1104,7 +1104,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 

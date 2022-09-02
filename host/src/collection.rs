@@ -159,7 +159,7 @@ impl Collection {
         let txn_id = *txn.id();
         let mut lock = container.write(txn_id).await?;
 
-        if !lock.is_empty().await {
+        if !lock.is_empty() {
             return Err(TCError::bad_request(
                 "cannot copy into a non-empty directory",
                 container,
@@ -169,14 +169,14 @@ impl Collection {
         match source {
             Collection::BTree(source) => {
                 let class = BTreeType::default();
-                let file = lock.create_file(name, class).await?;
+                let file = lock.create_file(name, class)?;
                 BTreeFile::copy_from(source, file, txn)
                     .map_ok(BTree::from)
                     .map_ok(Collection::BTree)
                     .await
             }
             Collection::Table(source) => {
-                let dir = lock.create_dir(name).await?;
+                let dir = lock.create_dir(name)?;
                 TableIndex::copy_from(source, dir, txn)
                     .map_ok(Table::from)
                     .map_ok(Collection::Table)
@@ -185,14 +185,14 @@ impl Collection {
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let file = lock.create_file(name, dense.class()).await?;
+                    let file = lock.create_file(name, dense.class())?;
                     DenseTensor::copy_from(dense, file, txn)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)
                         .await
                 }
                 Tensor::Sparse(sparse) => {
-                    let dir = lock.create_dir(name).await?;
+                    let dir = lock.create_dir(name)?;
                     SparseTensor::copy_from(sparse, dir, txn)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)

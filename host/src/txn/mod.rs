@@ -271,7 +271,7 @@ impl Transaction<fs::Dir> for Txn {
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
         let dir = {
             let mut dir = self.dir.write(*self.request.txn_id()).await?;
-            dir.create_dir(id).await?
+            dir.create_dir(id)?
         };
 
         Ok(Txn {

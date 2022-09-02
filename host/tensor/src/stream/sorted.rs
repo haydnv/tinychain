@@ -5,9 +5,9 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
@@ -27,7 +27,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
@@ -59,7 +59,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {

@@ -10,7 +10,7 @@ use safecast::AsType;
 
 use tc_btree::*;
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -146,7 +146,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         dispatch!(self, this, this.dtype())
@@ -173,7 +173,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = Self;
     type Transpose = Self;
@@ -216,7 +216,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn write<V: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -245,7 +245,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -351,7 +351,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -475,7 +475,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
 {
@@ -716,7 +716,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -788,7 +788,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -869,7 +869,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListCast<FD, FS, D, T, B::Slice>;
@@ -918,7 +918,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -998,7 +998,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -1097,7 +1097,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1177,7 +1177,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
@@ -1260,7 +1260,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1342,7 +1342,7 @@ where
     FS: File<Node>,
     D: Dir,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -1432,7 +1432,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
@@ -1538,7 +1538,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1617,7 +1617,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListFile<FD, FS, D, T>;
@@ -1745,7 +1745,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = <<B as DenseAccess<FD, FS, D, T>>::Slice as DenseAccess<FD, FS, D, T>>::Transpose;
@@ -1821,7 +1821,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1883,7 +1883,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListSparse<FD, FS, D, T, A::Slice>;
@@ -1944,7 +1944,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -2037,7 +2037,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Slice = BlockListUnary<FD, FS, D, T, B::Slice>;

@@ -86,7 +86,7 @@ impl Subject {
                     let mut subjects = Vec::with_capacity(schema.len());
 
                     for (i, schema) in schema.into_iter().enumerate() {
-                        let dir = container.create_dir(i.into()).await?;
+                        let dir = container.create_dir(i.into())?;
                         let subject = Self::create(schema, &dir, txn_id).await?;
                         subjects.push(subject);
                     }
@@ -103,7 +103,7 @@ impl Subject {
                     let mut subjects = Map::new();
 
                     for (name, schema) in schema.into_iter() {
-                        let dir = container.create_dir(name.clone()).await?;
+                        let dir = container.create_dir(name.clone())?;
                         let subject = Self::create(schema, &dir, txn_id).await?;
                         subjects.insert(name, subject);
                     }
@@ -131,10 +131,10 @@ impl Subject {
 
                 Schema::Map(schema) if schema.is_empty() => {
                     let mut container = dir.write(txn_id).await?;
-                    if let Some(dir) = container.get_dir(&DYNAMIC.into()).await? {
+                    if let Some(dir) = container.get_dir(&DYNAMIC.into())? {
                         SubjectMap::load(txn, dir).map_ok(Self::Dynamic).await
                     } else {
-                        let dir = container.create_dir(DYNAMIC.into()).await?;
+                        let dir = container.create_dir(DYNAMIC.into())?;
                         SubjectMap::create(dir, txn_id).map_ok(Self::Dynamic).await
                     }
                 }
@@ -143,10 +143,10 @@ impl Subject {
                     let mut subjects = Map::new();
 
                     for (name, schema) in schema.into_iter() {
-                        let subject = if let Some(dir) = container.get_dir(&name).await? {
+                        let subject = if let Some(dir) = container.get_dir(&name)? {
                             Self::load(txn, schema, &dir).await
                         } else {
-                            let dir = container.create_dir(name.clone()).await?;
+                            let dir = container.create_dir(name.clone())?;
                             Self::create(schema, &dir, txn_id).await
                         }?;
 
@@ -161,10 +161,10 @@ impl Subject {
                     let mut subjects = Vec::with_capacity(schema.len());
 
                     for (i, schema) in schema.into_iter().enumerate() {
-                        let subject = if let Some(dir) = container.get_dir(&i.into()).await? {
+                        let subject = if let Some(dir) = container.get_dir(&i.into())? {
                             Self::load(txn, schema, &dir).await
                         } else {
-                            let dir = container.create_dir(i.into()).await?;
+                            let dir = container.create_dir(i.into())?;
                             Self::create(schema, &dir, txn_id).await
                         }?;
 

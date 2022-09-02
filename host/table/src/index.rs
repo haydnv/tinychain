@@ -32,6 +32,7 @@ pub struct Index<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     pub async fn create(file: F, schema: IndexSchema, txn_id: TxnId) -> TCResult<Self> {
@@ -195,6 +196,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Index<F, D, Txn>
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Index<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -220,6 +222,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for Index<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = IndexSlice<F, D, Txn>;
@@ -325,6 +328,7 @@ pub struct TableIndex<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     /// Create a new `TableIndex` with the given [`TableSchema`].
@@ -335,10 +339,7 @@ where
     ) -> TCResult<TableIndex<F, D, Txn>> {
         let mut dir = context.write(txn_id).await?;
 
-        let primary_file = dir
-            .create_file(PRIMARY_INDEX.into(), BTreeType::default())
-            .await?;
-
+        let primary_file = dir.create_file(PRIMARY_INDEX.into(), BTreeType::default())?;
         let primary = Index::create(primary_file, schema.primary().clone(), txn_id).await?;
 
         let primary_schema = schema.primary();
@@ -351,8 +352,7 @@ where
                 ));
             }
 
-            let file = dir.create_file(name.clone(), BTreeType::default()).await?;
-
+            let file = dir.create_file(name.clone(), BTreeType::default())?;
             let index = Self::create_index(file, primary_schema, column_names.to_vec(), txn_id)
                 .map_ok(move |index| (name.clone(), index))
                 .await?;
@@ -462,6 +462,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for TableIndex<F,
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Merged<F, D, Txn>;
@@ -572,6 +573,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for TableIndex<F, D, 
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -596,6 +598,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Merged<F, D, Txn>;
@@ -751,6 +754,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableWrite for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
@@ -867,6 +871,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Schema = TableSchema;
@@ -881,15 +886,14 @@ where
         let dir = store.read(*txn.id()).await?;
 
         let file = dir
-            .get_file(&PRIMARY_INDEX.into())
-            .await?
+            .get_file(&PRIMARY_INDEX.into())?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
         let primary = Index::load(txn, schema.primary().clone(), file).await?;
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
-            let file = dir.get_file(name).await?.ok_or_else(|| {
+            let file = dir.get_file(name)?.ok_or_else(|| {
                 TCError::internal(format!("cannot load Table: missing index {}", name))
             })?;
 
@@ -912,6 +916,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
@@ -946,6 +951,7 @@ where
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>, I: TableStream + 'static> CopyFrom<D, I>
     for TableIndex<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn copy_from(source: I, dir: D, txn: &Txn) -> TCResult<Self> {

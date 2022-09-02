@@ -116,7 +116,7 @@ pub struct File<B> {
 }
 
 impl<B: fs::BlockData> File<B> {
-    pub async fn new(canon: freqfs::DirLock<CacheBlock>) -> TCResult<Self> {
+    pub fn new(canon: freqfs::DirLock<CacheBlock>) -> TCResult<Self> {
         todo!()
     }
 

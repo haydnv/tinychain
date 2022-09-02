@@ -84,26 +84,26 @@ impl SubjectCollection {
             match schema {
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Dense(schema) => {
-                    let file = dir.create_file(name, TensorType::Dense).await?;
+                    let file = dir.create_file(name, TensorType::Dense)?;
                     DenseTensor::create(file, schema, txn_id)
                         .map_ok(Self::Dense)
                         .await
                 }
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Sparse(schema) => {
-                    let dir = dir.create_dir(name).await?;
+                    let dir = dir.create_dir(name)?;
                     SparseTensor::create(&dir, schema, txn_id)
                         .map_ok(Self::Sparse)
                         .await
                 }
                 CollectionSchema::Table(schema) => {
-                    let dir = dir.create_dir(name).await?;
+                    let dir = dir.create_dir(name)?;
                     TableIndex::create(&dir, schema, txn_id)
                         .map_ok(Self::Table)
                         .await
                 }
                 CollectionSchema::BTree(schema) => {
-                    let file = dir.create_file(name, BTreeType::default()).await?;
+                    let file = dir.create_file(name, BTreeType::default())?;
                     BTreeFile::create(file, schema, txn_id)
                         .map_ok(Self::BTree)
                         .await
@@ -124,7 +124,7 @@ impl SubjectCollection {
 
             match schema {
                 CollectionSchema::BTree(schema) => {
-                    if let Some(file) = container.get_file(&name).await? {
+                    if let Some(file) = container.get_file(&name)? {
                         BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                     } else {
                         std::mem::drop(container);
@@ -133,7 +133,7 @@ impl SubjectCollection {
                 }
 
                 CollectionSchema::Table(schema) => {
-                    if let Some(dir) = container.get_dir(&name).await? {
+                    if let Some(dir) = container.get_dir(&name)? {
                         TableIndex::load(txn, schema, dir.clone())
                             .map_ok(Self::Table)
                             .await
@@ -145,7 +145,7 @@ impl SubjectCollection {
 
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Dense(schema) => {
-                    if let Some(file) = container.get_file(&name).await? {
+                    if let Some(file) = container.get_file(&name)? {
                         DenseTensor::load(txn, schema, file)
                             .map_ok(Self::Dense)
                             .await
@@ -157,7 +157,7 @@ impl SubjectCollection {
 
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Sparse(schema) => {
-                    if let Some(dir) = container.get_dir(&name).await? {
+                    if let Some(dir) = container.get_dir(&name)? {
                         SparseTensor::load(txn, schema, dir)
                             .map_ok(Self::Sparse)
                             .await
@@ -189,8 +189,7 @@ impl SubjectCollection {
                     Collection::Tensor(Tensor::Dense(backup)) => {
                         let file = txn
                             .context()
-                            .create_file_unique(txn_id, TensorType::Dense)
-                            .await?;
+                            .create_file_unique(txn_id, TensorType::Dense)?;
 
                         let backup =
                             tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;
@@ -206,7 +205,7 @@ impl SubjectCollection {
                 #[cfg(feature = "tensor")]
                 Self::Sparse(tensor) => match backup {
                     Collection::Tensor(Tensor::Sparse(backup)) => {
-                        let dir = txn.context().create_dir_unique(txn_id).await?;
+                        let dir = txn.context().create_dir_unique(txn_id)?;
                         let backup = tc_transact::fs::CopyFrom::copy_from(backup, dir, txn).await?;
                         tensor.restore(&backup, txn_id).await
                     }

@@ -130,65 +130,65 @@ pub trait File<B: BlockData>: Store + 'static {
 }
 
 /// A read lock on a [`Dir`]
-#[async_trait]
 pub trait DirRead: Send + Sync {
     /// The type of a file entry in this [`Dir`]
     type FileEntry;
-
-    /// The `Class` of a file stored in this [`Dir`]
-    type FileClass: Send;
 
     /// The type of lock used to guard subdirectories in this [`Dir`]
     type Lock: Dir;
 
     /// Return `true` if this directory has an entry at the given [`PathSegment`].
-    async fn contains(&self, name: &PathSegment) -> TCResult<bool>;
+    fn contains(&self, name: &PathSegment) -> bool;
 
     /// Look up a subdirectory of this `Dir`.
-    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
+    fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
 
     /// Get a [`Self::File`] in this `Dir`.
-    async fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
+    fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
         Self::FileEntry: AsType<F>,
         B: BlockData,
         F: File<B>;
 
     /// Return `true` if there are no files or subdirectories in this [`Dir`].
-    async fn is_empty(&self) -> bool;
+    fn is_empty(&self) -> bool;
 }
 
 /// A write lock on a [`Dir`]
-#[async_trait]
 pub trait DirWrite: DirRead {
+    /// The `Class` of a file stored in this [`Dir`]
+    type FileClass: Copy + Send + fmt::Display;
+
     /// Create a new `Dir`.
-    async fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock>;
+    fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock>;
 
     /// Create a new `Dir` with a new unique ID.
-    async fn create_dir_unique(&mut self) -> TCResult<Self::Lock>;
+    fn create_dir_unique(&mut self) -> TCResult<Self::Lock>;
 
     /// Create a new [`Self::File`].
-    async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
+    fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
+        Self::FileClass: From<C>,
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
         F: File<B>;
 
     /// Create a new [`Self::File`] with a new unique ID.
-    async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
+    fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
     where
+        Self::FileClass: From<C>,
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
         F: File<B>;
 
     /// Get the [`Dir`] with the given `name` and create a new one if none exists.
-    async fn get_or_create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
-        if let Some(file) = self.get_dir(&name).await? {
-            Ok(file)
+    fn get_or_create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
+        if let Some(dir) = self.get_dir(&name)? {
+            Ok(dir)
         } else {
-            self.create_dir(name).await
+            self.create_dir(name)
         }
     }
 }
@@ -200,11 +200,7 @@ pub trait Dir: Store + Send + Sized + 'static {
     type Read: DirRead<Lock = Self>;
 
     /// The type of write guard used by this `Dir`
-    type Write: DirWrite<
-        FileEntry = <Self::Read as DirRead>::FileEntry,
-        FileClass = <Self::Read as DirRead>::FileClass,
-        Lock = Self,
-    >;
+    type Write: DirWrite<FileEntry = <Self::Read as DirRead>::FileEntry, Lock = Self>;
 
     /// Lock this [`Dir`] for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
@@ -215,19 +211,20 @@ pub trait Dir: Store + Send + Sized + 'static {
     /// Convenience method to create a temporary working directory
     async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Self> {
         let mut dir = self.write(txn_id).await?;
-        dir.create_dir_unique().await
+        dir.create_dir_unique()
     }
 
     /// Convenience method to create a temporary file
     async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
+        <Self::Write as DirWrite>::FileClass: From<C>,
         <Self::Read as DirRead>::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
         F: File<B>,
     {
         let mut dir = self.write(txn_id).await?;
-        dir.create_file_unique(class).await
+        dir.create_file_unique(class)
     }
 }
 

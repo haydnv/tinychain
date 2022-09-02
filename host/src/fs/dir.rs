@@ -1,12 +1,14 @@
 //! A transactional filesystem directory.
 
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
+use futures::join;
 use log::debug;
 use safecast::AsType;
 use uuid::Uuid;
@@ -16,14 +18,15 @@ use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
-use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
+use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::chain::{ChainBlock, ChainType};
 use crate::collection::CollectionType;
 use crate::scalar::{Scalar, ScalarType};
 use crate::state::StateType;
+use crate::transact::fs::BlockData;
 
 use super::{io_err, CacheBlock, File};
 
@@ -39,9 +42,9 @@ pub enum FileEntry {
 }
 
 impl FileEntry {
-    async fn new<C>(cache: freqfs::DirLock<CacheBlock>, class: C) -> TCResult<Self>
+    fn new<ST>(cache: freqfs::DirLock<CacheBlock>, class: ST) -> TCResult<Self>
     where
-        StateType: From<C>,
+        StateType: From<ST>,
     {
         fn err<T: fmt::Display>(class: T) -> TCError {
             TCError::bad_request("cannot create file for", class)
@@ -49,24 +52,28 @@ impl FileEntry {
 
         match StateType::from(class) {
             StateType::Collection(ct) => match ct {
-                CollectionType::BTree(_) => File::new(cache).map_ok(Self::BTree).await,
+                CollectionType::BTree(_) => File::new(cache).map(Self::BTree),
                 CollectionType::Table(tt) => Err(err(tt)),
 
                 #[cfg(feature = "tensor")]
                 CollectionType::Tensor(tt) => match tt {
-                    TensorType::Dense => File::new(cache).map_ok(Self::Tensor).await,
+                    TensorType::Dense => File::new(cache).map(Self::Tensor),
                     TensorType::Sparse => Err(err(TensorType::Sparse)),
                 },
             },
-            StateType::Chain(_) => File::new(cache).map_ok(Self::Chain).await,
-            StateType::Scalar(_) => File::new(cache).map_ok(Self::Scalar).await,
+            StateType::Chain(_) => File::new(cache).map(Self::Chain),
+            StateType::Scalar(_) => File::new(cache).map(Self::Scalar),
             other => Err(err(other)),
         }
     }
 
-    async fn load<C>(cache: freqfs::DirLock<CacheBlock>, class: C, txn_id: TxnId) -> TCResult<Self>
+    async fn load<ST>(
+        cache: freqfs::DirLock<CacheBlock>,
+        class: ST,
+        txn_id: TxnId,
+    ) -> TCResult<Self>
     where
-        StateType: From<C>,
+        StateType: From<ST>,
     {
         fn err<T: fmt::Display>(class: T) -> TCError {
             TCError::bad_request("cannot load file for", class)
@@ -235,7 +242,7 @@ impl fmt::Display for FileEntry {
 }
 
 #[derive(Clone)]
-enum DirEntry {
+pub enum DirEntry {
     Dir(Dir),
     File(FileEntry),
 }
@@ -249,57 +256,155 @@ impl fmt::Display for DirEntry {
     }
 }
 
-#[derive(Clone)]
-struct Contents {
-    inner: HashMap<PathSegment, DirEntry>,
+type Contents = HashMap<PathSegment, DirEntry>;
+
+pub struct DirGuard<C, L> {
+    cache: C,
+    contents: L,
 }
 
-impl PartialEq for Contents {
-    fn eq(&self, other: &Self) -> bool {
-        if self.len() == other.len() {
-            self.keys().zip(other.keys()).all(|(l, r)| l == r)
-        } else {
-            false
+impl<C, L> fs::DirRead for DirGuard<C, L>
+where
+    C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: Deref<Target = Contents> + Send + Sync,
+{
+    type FileEntry = FileEntry;
+    type Lock = Dir;
+
+    fn contains(&self, name: &PathSegment) -> bool {
+        self.contents.get(name).is_some()
+    }
+
+    fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>> {
+        match self.contents.get(name) {
+            Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
+            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
+            None => Ok(None),
         }
     }
-}
 
-impl Eq for Contents {}
+    fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
+    where
+        Self::FileEntry: AsType<F>,
+        B: BlockData,
+        F: fs::File<B>,
+    {
+        match self.contents.get(name) {
+            Some(DirEntry::File(file)) => file
+                .clone()
+                .into_type()
+                .map(Some)
+                .ok_or_else(|| TCError::bad_request("unexpected file type", file)),
 
-impl Deref for Contents {
-    type Target = HashMap<PathSegment, DirEntry>;
+            Some(other) => Err(TCError::bad_request("expected a file, not", other)),
+            None => Ok(None),
+        }
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+    fn is_empty(&self) -> bool {
+        self.contents.is_empty()
     }
 }
 
-impl DerefMut for Contents {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+impl<C, L> fs::DirWrite for DirGuard<C, L>
+where
+    C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: DerefMut<Target = Contents> + Send + Sync,
+{
+    type FileClass = StateType;
+
+    fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
+        if self.contents.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "filesystem entry already exists",
+                name,
+            ));
+        }
+
+        let dir = self
+            .cache
+            .create_dir(name.to_string())
+            .map(Dir::new)
+            .map_err(io_err)?;
+        self.contents.insert(name, DirEntry::Dir(dir.clone()));
+        Ok(dir)
+    }
+
+    fn create_dir_unique(&mut self) -> TCResult<Self::Lock> {
+        let name: PathSegment = loop {
+            let name = Uuid::new_v4().into();
+            if !self.contents.contains_key(&name) {
+                break name;
+            }
+        };
+
+        self.create_dir(name)
+    }
+
+    fn create_file<ST, F, B>(&mut self, name: Id, class: ST) -> TCResult<F>
+    where
+        Self::FileEntry: AsType<F>,
+        StateType: From<ST>,
+        ST: Copy + Send + Display,
+        B: BlockData,
+        F: fs::File<B>,
+    {
+        if self.contents.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "filesystem entry already exists",
+                name,
+            ));
+        }
+
+        let file = self
+            .cache
+            .create_dir(name.to_string())
+            .map_err(io_err)
+            .and_then(|cache| FileEntry::new(cache, class))?;
+
+        self.contents.insert(name, DirEntry::File(file.clone()));
+        file.as_type()
+            .cloned()
+            .ok_or_else(|| TCError::internal(format!("wrong file type for {}: {}", file, class)))
+    }
+
+    fn create_file_unique<ST, F, B>(&mut self, class: ST) -> TCResult<F>
+    where
+        Self::FileEntry: AsType<F>,
+        StateType: From<ST>,
+        ST: Copy + Send + Display,
+        B: BlockData,
+        F: fs::File<B>,
+    {
+        let name: PathSegment = loop {
+            let name = Uuid::new_v4().into();
+            if !self.contents.contains_key(&name) {
+                break name;
+            }
+        };
+
+        self.create_file(name, class)
     }
 }
 
-impl From<HashMap<PathSegment, DirEntry>> for Contents {
-    fn from(inner: HashMap<PathSegment, DirEntry>) -> Self {
-        Self { inner }
-    }
-}
+pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, OwnedRwLockReadGuard<Contents>>;
+pub type DirWriteGuard =
+    DirGuard<freqfs::DirWriteGuard<CacheBlock>, OwnedRwLockWriteGuard<Contents>>;
 
-/// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    listing: TxnLock<Contents>,
+    canon: Arc<RwLock<Contents>>,
+    versions: Arc<Mutex<HashMap<TxnId, Arc<RwLock<Contents>>>>>,
 }
 
 impl Dir {
+    /// Create a new [`Dir`].
     pub fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
-        let lock_name = "contents of a transactional filesystem directory";
-
         Self {
             cache,
-            listing: TxnLock::new(lock_name, Contents::from(HashMap::new())),
+            canon: Arc::new(RwLock::new(HashMap::new())),
+            versions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -345,14 +450,10 @@ impl Dir {
                 listing.insert(name, entry);
             }
 
-            #[cfg(debug_assertions)]
-            let lock_name = format!("contents of {:?}", &*fs_dir);
-            #[cfg(not(debug_assertions))]
-            let lock_name = "contents of transactional filesystem directory";
-
             Ok(Self {
                 cache,
-                listing: TxnLock::new(lock_name, Contents::from(listing)),
+                canon: Arc::new(RwLock::new(listing)),
+                versions: Arc::new(Mutex::new(HashMap::new())),
             })
         })
     }
@@ -362,86 +463,48 @@ impl Dir {
     }
 }
 
-pub struct DirGuard<L> {
-    lock: L,
-}
-
-#[async_trait]
-impl<L> fs::DirRead for DirGuard<L>
-where
-    L: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-{
-    type FileEntry = FileEntry;
-    type FileClass = StateType;
-    type Lock = Dir;
-
-    async fn contains(&self, name: &PathSegment) -> TCResult<bool> {
-        todo!()
-    }
-
-    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>> {
-        todo!()
-    }
-
-    async fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
-    where
-        Self::FileEntry: AsType<F>,
-        B: fs::BlockData,
-        F: fs::File<B>,
-    {
-        todo!()
-    }
-
-    async fn is_empty(&self) -> bool {
-        todo!()
-    }
-}
-
-#[async_trait]
-impl<L> fs::DirWrite for DirGuard<L>
-where
-    L: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-{
-    async fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
-        todo!()
-    }
-
-    async fn create_dir_unique(&mut self) -> TCResult<Self::Lock> {
-        todo!()
-    }
-
-    async fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
-    where
-        Self::FileEntry: AsType<F>,
-        C: Copy + Send + Display,
-        B: fs::BlockData,
-        F: fs::File<B>,
-    {
-        todo!()
-    }
-
-    async fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
-    where
-        Self::FileEntry: AsType<F>,
-        C: Copy + Send + Display,
-        B: fs::BlockData,
-        F: fs::File<B>,
-    {
-        todo!()
-    }
-}
-
 #[async_trait]
 impl fs::Dir for Dir {
-    type Read = DirGuard<freqfs::DirReadGuard<CacheBlock>>;
-    type Write = DirGuard<freqfs::DirWriteGuard<CacheBlock>>;
+    type Read = DirReadGuard;
+    type Write = DirWriteGuard;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
-        todo!()
+        // TODO: support versioning on the filesystem itself
+
+        let mut versions = self.versions.lock().await;
+        match versions.entry(txn_id) {
+            Entry::Occupied(entry) => {
+                let (cache, contents) = join!(self.cache.read(), entry.get().clone().read_owned());
+                Ok(DirGuard { cache, contents })
+            }
+            Entry::Vacant(mut entry) => {
+                let (cache, canon) = join!(self.cache.read(), self.canon.read());
+                let version = Arc::new(RwLock::new((*canon).clone()));
+                let contents = version.clone().try_read_owned().expect("dir version");
+                entry.insert(version);
+                Ok(DirGuard { cache, contents })
+            }
+        }
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
-        todo!()
+        // TODO: support versioning on the filesystem itself
+
+        let mut versions = self.versions.lock().await;
+        match versions.entry(txn_id) {
+            Entry::Occupied(entry) => {
+                let (cache, contents) =
+                    join!(self.cache.write(), entry.get().clone().write_owned());
+                Ok(DirGuard { cache, contents })
+            }
+            Entry::Vacant(mut entry) => {
+                let (cache, canon) = join!(self.cache.write(), self.canon.read());
+                let version = Arc::new(RwLock::new((*canon).clone()));
+                let contents = version.clone().try_write_owned().expect("dir version");
+                entry.insert(version);
+                Ok(DirGuard { cache, contents })
+            }
+        }
     }
 }
 

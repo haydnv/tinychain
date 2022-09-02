@@ -133,15 +133,14 @@ impl Persist<fs::Dir> for SyncChain {
 
         let txn_id = *txn.id();
         let mut dir_lock = dir.write(txn_id).await?;
-        let is_new = dir_lock.is_empty().await;
+        let is_new = dir_lock.is_empty();
 
         let (store, pending, committed) = if is_new {
             let store = dir_lock
                 .create_dir(STORE.into())
-                .map_ok(super::data::Store::new)
-                .await?;
+                .map(super::data::Store::new)?;
 
-            let blocks_dir = dir_lock.create_dir(BLOCKS.into()).await?;
+            let blocks_dir = dir_lock.create_dir(BLOCKS.into())?;
             let mut blocks_dir = blocks_dir.into_inner().write().await;
 
             let pending = blocks_dir
@@ -164,8 +163,7 @@ impl Persist<fs::Dir> for SyncChain {
         } else {
             let store = dir_lock
                 .get_or_create_dir(STORE.into())
-                .map_ok(super::data::Store::new)
-                .await?;
+                .map(super::data::Store::new)?;
 
             let dir = dir.into_inner().read().await;
             let blocks_dir = dir
@@ -282,14 +280,10 @@ impl de::Visitor for ChainVisitor {
 
         let store = dir
             .create_dir(STORE.into())
-            .map_ok(super::data::Store::new)
-            .map_err(de::Error::custom)
-            .await?;
+            .map(super::data::Store::new)
+            .map_err(de::Error::custom)?;
 
-        let blocks_dir = dir
-            .create_dir(BLOCKS.into())
-            .map_err(de::Error::custom)
-            .await?;
+        let blocks_dir = dir.create_dir(BLOCKS.into()).map_err(de::Error::custom)?;
 
         let mut blocks_dir = blocks_dir.into_inner().write().await;
 

@@ -8,9 +8,9 @@ use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::AsType;
 
-use tc_btree::{BTreeFile, BTreeInstance, Node};
+use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, TCBoxTryStream};
@@ -187,6 +187,7 @@ where
     F: File<Node>,
     D: Dir,
     Txn: Transaction<D>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -249,6 +250,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Limited<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
@@ -267,6 +269,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Limited<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -306,6 +309,7 @@ pub enum MergeSource<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn bounds(&'_ self) -> &'_ Bounds {
@@ -373,6 +377,7 @@ pub struct Merged<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     /// Create a new merge of the given `IndexSlice` with the given `MergeSource`.
@@ -423,6 +428,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Merged<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
@@ -447,6 +453,7 @@ where
 #[async_trait]
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Merged<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -480,6 +487,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Merged<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Self;
@@ -510,6 +518,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for Merged<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Self;
@@ -696,6 +705,7 @@ where
     Txn: Transaction<D>,
     T: TableStream,
     Table<F, D, Txn>: From<Self>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -752,6 +762,7 @@ pub struct TableSlice<F, D, Txn> {
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     pub fn new(table: TableIndex<F, D, Txn>, bounds: Bounds) -> TCResult<TableSlice<F, D, Txn>> {
@@ -806,6 +817,7 @@ where
     F: File<Node>,
     D: Dir,
     Txn: Transaction<D>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
@@ -826,6 +838,7 @@ where
     F: File<Node>,
     D: Dir,
     Txn: Transaction<D>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Merged<F, D, Txn>;
@@ -855,6 +868,7 @@ where
     F: File<Node>,
     D: Dir,
     Txn: Transaction<D>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Limited<F, D, Txn>;
@@ -879,6 +893,7 @@ where
 
 impl<F: File<Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for TableSlice<F, D, Txn>
 where
+    <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Merged<F, D, Txn>;

@@ -13,7 +13,7 @@ use safecast::*;
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
 use tcgeneric::{
@@ -592,7 +592,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     /// Get the [`Schema`] of this [`Tensor`]
     pub fn schema(&self) -> Schema {
@@ -621,7 +621,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         match self {
@@ -659,7 +659,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Dense = Self;
     type Sparse = Self;
@@ -686,7 +686,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -720,7 +720,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -754,7 +754,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Compare = Self;
     type Dense = Self;
@@ -809,7 +809,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Compare = Self;
 
@@ -864,7 +864,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
 {
     type Txn = T;
@@ -886,7 +886,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -922,7 +922,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -944,7 +944,7 @@ where
     D: Dir,
     T: Transaction<D>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type Index = Self;
@@ -971,7 +971,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -1026,7 +1026,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -1081,7 +1081,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type Reduce = Self;
@@ -1150,7 +1150,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Broadcast = Self;
     type Cast = Self;
@@ -1252,7 +1252,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Unary = Self;
 
@@ -1280,7 +1280,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type Unary = Self;
@@ -1343,7 +1343,7 @@ where
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn from(dense: DenseTensor<FD, FS, D, T, B>) -> Self {
         Self::Dense(dense.into_inner().accessor().into())
@@ -1358,7 +1358,7 @@ where
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     A: SparseAccess<FD, FS, D, T>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn from(sparse: SparseTensor<FD, FS, D, T, A>) -> Self {
         Self::Sparse(sparse.into_inner().accessor().into())
@@ -1374,7 +1374,7 @@ where
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
-    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = T;
 
@@ -1410,7 +1410,7 @@ where
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
-    <D::Read as DirRead>::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = Tensor<FD, FS, D, T>;
 
@@ -1450,7 +1450,7 @@ where
     FD: File<Array>,
     FS: File<Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type View = TensorView<'en>;
@@ -1485,7 +1485,7 @@ where
     D: Dir,
     T: Transaction<D>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
@@ -1499,7 +1499,7 @@ where
     D: Dir,
     T: Transaction<D>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Read as DirRead>::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

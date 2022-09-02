@@ -295,9 +295,7 @@ impl Persist<fs::Dir> for History {
         // so just create a new one
         let store = {
             let mut dir = dir.write(*txn_id).await?;
-            dir.get_or_create_dir(STORE.into())
-                .map_ok(Store::new)
-                .await?
+            dir.get_or_create_dir(STORE.into()).map(Store::new)?
         };
 
         let file = {
@@ -499,9 +497,8 @@ impl de::Visitor for HistoryVisitor {
         let store = {
             let mut dir = dir.write(txn_id).map_err(de::Error::custom).await?;
             dir.create_dir(STORE.into())
-                .map_ok(Store::new)
-                .map_err(de::Error::custom)
-                .await?
+                .map(Store::new)
+                .map_err(de::Error::custom)?
         };
 
         let file = {
