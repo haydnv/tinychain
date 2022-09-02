@@ -366,10 +366,7 @@ async fn put(
         SubjectCollection::from_collection(collection)?
     };
 
-    let block: TCResult<freqfs::FileReadGuard<fs::CacheBlock, Scalar>> =
-        schema.read_block(&id).await;
-
-    match block {
+    match schema.read_block(&id).await {
         Ok(block) if &*block == &collection.schema().cast_into() => {}
         Ok(block) => {
             return Err(TCError::unsupported(format!(

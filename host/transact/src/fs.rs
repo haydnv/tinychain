@@ -241,7 +241,6 @@ pub trait Dir: Store + Send + Sized + 'static {
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
-#[async_trait]
 pub trait Store: Clone + Send + Sync {}
 
 /// Defines how to load a persistent data structure from the filesystem.
