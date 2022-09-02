@@ -243,7 +243,7 @@ where
     /// Create a new `BTreeFile`.
     pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
         let mut file_contents = file.write(txn_id).await?;
-        if !file_contents.is_empty().await {
+        if !file_contents.is_empty() {
             return Err(TCError::internal(
                 "Tried to create a new BTree without a new File",
             ));
@@ -730,15 +730,15 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
 
         let txn_id = *txn.id();
         let mut root = None;
-        for block_id in file_contents.block_ids().await? {
+        for block_id in file_contents.block_ids() {
             debug!("BTreeFile::load block {}", block_id);
 
-            let block = file.read_block(txn_id, &block_id).await?;
+            let block = file.read_block(txn_id, block_id).await?;
 
             debug!("BTreeFile::loaded block {}", block_id);
 
             if block.parent.is_none() {
-                root = Some(block_id);
+                root = Some(block_id.clone());
                 break;
             }
         }

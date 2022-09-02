@@ -23,7 +23,7 @@ use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
 
 use crate::collection::Collection;
 use crate::fs;
-use crate::fs::{CacheBlock, FileGuard};
+use crate::fs::FileReadGuard;
 use crate::scalar::{Scalar, ScalarType};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -90,7 +90,7 @@ impl SubjectMap {
         Box::pin(async move {
             let txn_id = *txn.id();
 
-            let file: FileGuard<freqfs::DirReadGuard<CacheBlock>> = {
+            let file: fs::FileReadGuard<Scalar> = {
                 let dir = dir.read(txn_id).await?;
                 let file = dir.get_file(&DYNAMIC.into())?;
                 let file: fs::File<Scalar> = file.ok_or_else(|| {
@@ -101,8 +101,8 @@ impl SubjectMap {
             };
 
             let mut map = Map::new();
-            for id in FileRead::<Scalar>::block_ids(&file).await? {
-                let schema = file.read_block(id.clone()).await?;
+            for id in FileReadGuard::<Scalar>::block_ids(&file) {
+                let schema = file.read_block(id).await?;
                 let schema = Scalar::clone(&*schema);
                 let schema = schema.try_cast_into(|s| {
                     TCError::internal(format!("invalid schema for dynamic Chain subject: {}", s))
@@ -111,7 +111,7 @@ impl SubjectMap {
                 let schema = CollectionSchema::from_scalar(schema)?;
                 let subject = SubjectCollection::load(txn, schema, &dir, id.clone()).await?;
 
-                map.insert(id, subject);
+                map.insert(id.clone(), subject);
             }
 
             Ok(Self {
@@ -269,7 +269,7 @@ impl de::Visitor for SubjectMapVisitor {
         let txn_id = *self.txn.id();
         let mut collections = Map::new();
 
-        let mut file: fs::FileGuard<freqfs::DirWriteGuard<CacheBlock>> = {
+        let mut file: fs::FileWriteGuard<Scalar> = {
             let file: fs::File<Scalar> = {
                 let mut dir = self
                     .txn
@@ -366,7 +366,8 @@ async fn put(
         SubjectCollection::from_collection(collection)?
     };
 
-    let block: TCResult<freqfs::FileReadGuard<CacheBlock, Scalar>> = schema.read_block(&id).await;
+    let block: TCResult<freqfs::FileReadGuard<fs::CacheBlock, Scalar>> =
+        schema.read_block(&id).await;
 
     match block {
         Ok(block) if &*block == &collection.schema().cast_into() => {}

@@ -38,10 +38,10 @@ pub trait FileRead<B: Clone>: Send + Sync {
     type Write: DerefMut<Target = B> + Send;
 
     /// Get the set of all [`BlockId`]s in this [`File`].
-    async fn block_ids(&self) -> TCResult<HashSet<BlockId>>;
+    fn block_ids(&self) -> HashSet<&BlockId>;
 
     /// Return `true` if there are no blocks in this [`File`].
-    async fn is_empty(&self) -> bool;
+    fn is_empty(&self) -> bool;
 
     /// Convenience method to lock the block at `name` for reading.
     async fn read_block<I>(&self, name: I) -> TCResult<Self::Read>
@@ -108,7 +108,11 @@ pub trait File<B: BlockData>: Store + 'static {
         name: I,
     ) -> TCResult<<Self::Read as FileRead<B>>::Read>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        I: Borrow<BlockId> + Send + Sync,
+    {
+        let file = self.read(txn_id).await?;
+        file.read_block(name).await
+    }
 
     /// Convenience method to lock the block at `name` for reading, without borrowing.
     async fn read_block_owned<I>(
@@ -117,7 +121,11 @@ pub trait File<B: BlockData>: Store + 'static {
         name: I,
     ) -> TCResult<<Self::Read as FileRead<B>>::Read>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        I: Borrow<BlockId> + Send + Sync,
+    {
+        let file = self.read(txn_id).await?;
+        file.read_block(name).await
+    }
 
     /// Convenience method to lock the block at `name` for writing.
     async fn write_block<I>(
@@ -126,7 +134,11 @@ pub trait File<B: BlockData>: Store + 'static {
         name: I,
     ) -> TCResult<<Self::Read as FileRead<B>>::Write>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        I: Borrow<BlockId> + Send + Sync,
+    {
+        let file = self.read(txn_id).await?;
+        file.write_block(name).await
+    }
 }
 
 /// A read lock on a [`Dir`]
