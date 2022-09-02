@@ -234,6 +234,46 @@ class ComplexDenseTensorOpsTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self._expectDense(actual, (x / n))
 
+    def testSumRealTensorComplexNumber(self):
+        n = 2 + 2j
+        shape = (3, 6)
+        x = np.ones(shape)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.F64) + n
+        actual = self.host.post(ENDPOINT, cxt)
+        self._expectDense(actual, x + n)
+
+    def testSubRealTensorComplexNumber(self):
+        n = 2 + 2j
+        shape = (3, 6)
+        x = np.ones(shape)
+        
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.F64) - n
+        actual = self.host.post(ENDPOINT, cxt)
+        self._expectDense(actual, x - n)
+
+    def testProdRealTensorComplexNumber(self):
+        n = 2 + 2j
+        shape = (3, 6)
+        x = np.ones(shape)
+        
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.F64) * n
+        actual = self.host.post(ENDPOINT, cxt)
+        self._expectDense(actual, x * n)
+
+    def testDivRealTensorComplexNumber(self):
+        n = 2 + 2j
+        shape = (3, 6)
+        x = np.ones(shape)
+        
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.F32) / n
+        actual = self.host.post(ENDPOINT, cxt)
+        self._expectDense(actual, (x / n))
+
     def testSumComplexTensorComplexTensor(self):
         shape = (3, 6)
         x1 = np.ones(shape) + np.ones(shape)*1j
@@ -313,6 +353,15 @@ class ComplexDenseTensorOpsTests(ClientTest):
         cxt.x = load_dense(x1, tc.C64) / load_dense(x2, tc.I64)
         actual = self.host.post(ENDPOINT, cxt)
         self._expectDense(actual, x1 / x2)
+
+    def testExpComplexTensor(self):
+        n = 10
+        x1 = 2j * np.arange(n)
+
+        cxt = tc.Context()
+        cxt.x = (tc.C32(2j) * tc.tensor.Dense.arange([n], 0, n)).exp()
+        actual = self.host.post(ENDPOINT, cxt)
+        self._expectDense(actual, np.exp(x1))
 
     def _expectDense(self, actual, expected):
         ((shape, dtype), actual) = actual[str(tc.URI(tc.tensor.Dense))]
