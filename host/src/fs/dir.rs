@@ -1,13 +1,13 @@
 //! A transactional filesystem directory.
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::future::{join_all, TryFutureExt};
 use futures::join;
 use log::debug;
 use safecast::AsType;
@@ -18,9 +18,9 @@ use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
+use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
-use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::chain::{ChainBlock, ChainType};
 use crate::collection::CollectionType;
@@ -256,7 +256,42 @@ impl fmt::Display for DirEntry {
     }
 }
 
-type Contents = HashMap<PathSegment, DirEntry>;
+#[derive(Clone)]
+pub struct Contents {
+    inner: HashMap<PathSegment, DirEntry>,
+}
+
+impl PartialEq for Contents {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() == other.len() {
+            self.keys().zip(other.keys()).all(|(l, r)| l == r)
+        } else {
+            false
+        }
+    }
+}
+
+impl Eq for Contents {}
+
+impl Deref for Contents {
+    type Target = HashMap<PathSegment, DirEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Contents {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl From<HashMap<PathSegment, DirEntry>> for Contents {
+    fn from(inner: HashMap<PathSegment, DirEntry>) -> Self {
+        Self { inner }
+    }
+}
 
 pub struct DirGuard<C, L> {
     cache: C,
@@ -326,7 +361,9 @@ where
             .create_dir(name.to_string())
             .map(Dir::new)
             .map_err(io_err)?;
+
         self.contents.insert(name, DirEntry::Dir(dir.clone()));
+
         Ok(dir)
     }
 
@@ -363,6 +400,7 @@ where
             .and_then(|cache| FileEntry::new(cache, class))?;
 
         self.contents.insert(name, DirEntry::File(file.clone()));
+
         file.as_type()
             .cloned()
             .ok_or_else(|| TCError::internal(format!("wrong file type for {}: {}", file, class)))
@@ -387,24 +425,23 @@ where
     }
 }
 
-pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, OwnedRwLockReadGuard<Contents>>;
-pub type DirWriteGuard =
-    DirGuard<freqfs::DirWriteGuard<CacheBlock>, OwnedRwLockWriteGuard<Contents>>;
+pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnLockReadGuard<Contents>>;
+pub type DirWriteGuard = DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnLockWriteGuard<Contents>>;
 
+/// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    canon: Arc<RwLock<Contents>>,
-    versions: Arc<Mutex<HashMap<TxnId, Arc<RwLock<Contents>>>>>,
+    listing: TxnLock<Contents>,
 }
 
 impl Dir {
-    /// Create a new [`Dir`].
     pub fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+        let lock_name = "contents of a transactional filesystem directory";
+
         Self {
             cache,
-            canon: Arc::new(RwLock::new(HashMap::new())),
-            versions: Arc::new(Mutex::new(HashMap::new())),
+            listing: TxnLock::new(lock_name, Contents::from(HashMap::new())),
         }
     }
 
@@ -450,10 +487,14 @@ impl Dir {
                 listing.insert(name, entry);
             }
 
+            #[cfg(debug_assertions)]
+            let lock_name = format!("contents of {:?}", &*fs_dir);
+            #[cfg(not(debug_assertions))]
+            let lock_name = "contents of transactional filesystem directory";
+
             Ok(Self {
                 cache,
-                canon: Arc::new(RwLock::new(listing)),
-                versions: Arc::new(Mutex::new(HashMap::new())),
+                listing: TxnLock::new(lock_name, Contents::from(listing)),
             })
         })
     }
@@ -469,42 +510,17 @@ impl fs::Dir for Dir {
     type Write = DirWriteGuard;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
+        let contents = self.listing.read(txn_id).await?;
         // TODO: support versioning on the filesystem itself
-
-        let mut versions = self.versions.lock().await;
-        match versions.entry(txn_id) {
-            Entry::Occupied(entry) => {
-                let (cache, contents) = join!(self.cache.read(), entry.get().clone().read_owned());
-                Ok(DirGuard { cache, contents })
-            }
-            Entry::Vacant(mut entry) => {
-                let (cache, canon) = join!(self.cache.read(), self.canon.read());
-                let version = Arc::new(RwLock::new((*canon).clone()));
-                let contents = version.clone().try_read_owned().expect("dir version");
-                entry.insert(version);
-                Ok(DirGuard { cache, contents })
-            }
-        }
+        let cache = self.cache.read().await;
+        Ok(DirGuard { cache, contents })
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
+        let contents = self.listing.write(txn_id).await?;
         // TODO: support versioning on the filesystem itself
-
-        let mut versions = self.versions.lock().await;
-        match versions.entry(txn_id) {
-            Entry::Occupied(entry) => {
-                let (cache, contents) =
-                    join!(self.cache.write(), entry.get().clone().write_owned());
-                Ok(DirGuard { cache, contents })
-            }
-            Entry::Vacant(mut entry) => {
-                let (cache, canon) = join!(self.cache.write(), self.canon.read());
-                let version = Arc::new(RwLock::new((*canon).clone()));
-                let contents = version.clone().try_write_owned().expect("dir version");
-                entry.insert(version);
-                Ok(DirGuard { cache, contents })
-            }
-        }
+        let cache = self.cache.write().await;
+        Ok(DirGuard { cache, contents })
     }
 }
 
@@ -514,11 +530,43 @@ impl fs::Store for Dir {}
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        todo!()
+        self.listing.commit(txn_id).await;
+
+        let listing = self.listing.read(*txn_id).await.expect("dir listing");
+
+        join_all(listing.values().map(|entry| match entry {
+            DirEntry::Dir(dir) => dir.commit(txn_id),
+            DirEntry::File(file) => match file {
+                FileEntry::BTree(file) => file.commit(txn_id),
+                FileEntry::Chain(file) => file.commit(txn_id),
+                FileEntry::Scalar(file) => file.commit(txn_id),
+
+                #[cfg(feature = "tensor")]
+                FileEntry::Tensor(file) => file.commit(txn_id),
+            },
+        }))
+        .await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        todo!()
+        self.listing.finalize(txn_id).await;
+
+        {
+            let listing = self.listing.read(*txn_id).await.expect("dir listing");
+
+            join_all(listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.finalize(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.finalize(txn_id),
+                    FileEntry::Chain(file) => file.finalize(txn_id),
+                    FileEntry::Scalar(file) => file.finalize(txn_id),
+
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.finalize(txn_id),
+                },
+            }))
+            .await;
+        }
     }
 }
 
