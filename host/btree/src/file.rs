@@ -416,14 +416,14 @@ where
                     this._slice(txn_id, node, range_clone)
                 });
 
-                selected.push(Box::pin(selection));
+                selected.push_back(Box::pin(selection));
 
                 if !node.keys[i].deleted {
                     let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
                     let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
-                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                    selected.push_back(Box::pin(future::ready(Ok(key_at_i))));
                 }
             }
 
@@ -433,7 +433,7 @@ where
                 let node = self.inner.file.read_block(txn_id, &last_child_id).await?;
                 self._slice(txn_id, node, range)
             });
-            selected.push(Box::pin(selection));
+            selected.push_back(Box::pin(selection));
 
             Ok(Box::pin(selected.try_flatten()))
         }
@@ -473,7 +473,7 @@ where
                 let node = this.inner.file.read_block(txn_id, &last_child).await?;
                 this._slice_reverse(txn_id, node, range_clone)
             });
-            selected.push(Box::pin(selection));
+            selected.push_back(Box::pin(selection));
 
             for i in (l..r).rev() {
                 let child_id = node.children[i].clone();
@@ -490,10 +490,10 @@ where
                     let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
-                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                    selected.push_back(Box::pin(future::ready(Ok(key_at_i))));
                 }
 
-                selected.push(Box::pin(selection));
+                selected.push_back(Box::pin(selection));
             }
 
             Ok(Box::pin(selected.try_flatten()))

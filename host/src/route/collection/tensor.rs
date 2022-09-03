@@ -90,39 +90,6 @@ impl<T> From<T> for ArgmaxHandler<T> {
     }
 }
 
-struct ArgsortHandler<B> {
-    tensor: DenseTensor<B>,
-}
-
-impl<'a, B> Handler<'a> for ArgsortHandler<B>
-where
-    B: DenseAccess<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::not_implemented("argmax with axis"));
-                }
-
-                let indices = tc_tensor::arg_sort(self.tensor.into_inner(), txn.clone()).await?;
-                Ok(State::Collection(
-                    Tensor::Dense(indices.accessor().into()).into(),
-                ))
-            })
-        }))
-    }
-}
-
-impl<B> From<DenseTensor<B>> for ArgsortHandler<B> {
-    fn from(tensor: DenseTensor<B>) -> Self {
-        Self { tensor }
-    }
-}
-
 struct BroadcastHandler<T> {
     tensor: T,
 }
@@ -1878,10 +1845,6 @@ where
 
             // indexing
             "argmax" => Some(Box::new(ArgmaxHandler::from(tensor))),
-            "argsort" => match Tensor::from(tensor) {
-                Tensor::Dense(dense) => Some(Box::new(ArgsortHandler::from(dense))),
-                _ => None, // TODO: implement argsort for SparseTensor
-            },
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),

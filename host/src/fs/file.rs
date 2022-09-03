@@ -339,8 +339,8 @@ where
     }
 
     #[cfg(not(debug_assertions))]
-    fn lock_name(fs_dir: &freqfs::Dir<CacheBlock>) -> String {
-        "block list of transactional file"
+    fn lock_name(_fs_dir: &freqfs::Dir<CacheBlock>) -> String {
+        "block list of transactional file".to_string()
     }
 
     pub fn new(canon: freqfs::DirLock<CacheBlock>) -> TCResult<Self> {
