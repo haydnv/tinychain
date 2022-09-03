@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use futures::{FutureExt, TryFutureExt};
 use safecast::AsType;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, FileRead, FileWrite, Store};
@@ -233,11 +234,37 @@ where
 {
     async fn create_block(
         &mut self,
-        name: BlockId,
+        block_id: BlockId,
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<Self::Write> {
-        todo!()
+        if self.listing.contains(&block_id) {
+            return Err(TCError::bad_request("block already exists", block_id));
+        }
+
+        let (block, modified) = {
+            let mut modified = self.file.modified.write().await;
+            let mut version = self.file.version_write(&self.txn_id).await?;
+
+            let lock = TxnLock::new(format!("block {}", block_id), self.txn_id);
+            let write_lock = lock.try_write(self.txn_id).expect("block last modified");
+            modified.insert(block_id.clone(), lock);
+
+            let name = format!("{}.{}", block_id, B::ext());
+            let block = version
+                .create_file(name, initial_value, Some(size_hint))
+                .map_err(io_err)?;
+
+            self.listing.insert(block_id);
+
+            (block, write_lock)
+        };
+
+        block
+            .write()
+            .map_ok(move |cache| BlockWriteGuard { cache, modified })
+            .map_err(io_err)
+            .await
     }
 
     async fn create_block_unique(
@@ -245,7 +272,16 @@ where
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<(BlockId, Self::Write)> {
-        todo!()
+        let block_id: BlockId = loop {
+            let name = Uuid::new_v4().into();
+            if !self.listing.contains(&name) {
+                break name;
+            }
+        };
+
+        self.create_block(block_id.clone(), initial_value, size_hint)
+            .map_ok(move |block| (block_id, block))
+            .await
     }
 
     async fn delete_block(&mut self, name: BlockId) -> TCResult<()> {
