@@ -284,12 +284,31 @@ where
             .await
     }
 
-    async fn delete_block(&mut self, name: BlockId) -> TCResult<()> {
-        todo!()
+    async fn delete_block(&mut self, block_id: BlockId) -> TCResult<()> {
+        let mut modified = self.file.modified.write().await;
+        if let Some(last_mutation) = modified.get_mut(&block_id) {
+            *last_mutation.write(self.txn_id).await? = self.txn_id;
+
+            // keep the version directory in sync in case create_block is called later
+            // with the same block_id
+            self.file
+                .with_version_write(&self.txn_id, |mut version| {
+                    version.delete(Self::file_name(&block_id))
+                })
+                .await?;
+        }
+
+        self.listing.remove(&block_id);
+        Ok(())
     }
 
     async fn truncate(&mut self) -> TCResult<()> {
-        todo!()
+        let mut version = self.file.version_write(&self.txn_id).await?;
+        for block_id in self.listing.drain() {
+            version.delete(Self::file_name(&block_id));
+        }
+
+        Ok(())
     }
 }
 
