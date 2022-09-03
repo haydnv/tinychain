@@ -313,17 +313,14 @@ where
     }
 
     fn _insert(
-        &self,
+        file: F::Write,
+        order: usize,
+        collator: &ValueCollator,
         txn_id: TxnId,
         mut node: <F::Read as FileRead<Node>>::Write,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
-            let collator = &self.inner.collator;
-            // TODO: this should be a read lock with an upgrade method
-            let file = self.inner.file.write(txn_id).await?;
-            let order = self.inner.order;
-
             let i = collator.bisect_left(&node.keys, &key);
 
             #[cfg(debug_assertions)]
@@ -358,10 +355,12 @@ where
                 if child.keys.len() == (2 * order) - 1 {
                     let child_id = node.children[i].clone();
                     let (file, mut node) =
-                        Self::split_child(self.inner.order, file, node, child_id, child, i).await?;
+                        Self::split_child(order, file, node, child_id, child, i).await?;
 
                     match collator.compare_slice(&key, &node.keys[i]) {
-                        Ordering::Less => self._insert(txn_id, node, key).await,
+                        Ordering::Less => {
+                            Self::_insert(file, order, collator, txn_id, node, key).await
+                        }
                         Ordering::Equal => {
                             if node.keys[i].deleted {
                                 node.keys[i].deleted = false;
@@ -372,11 +371,11 @@ where
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
                             let child = file.write_block(&child_id).await?;
-                            self._insert(txn_id, child, key).await
+                            Self::_insert(file, order, collator, txn_id, child, key).await
                         }
                     }
                 } else {
-                    self._insert(txn_id, child, key).await
+                    Self::_insert(file, order, collator, txn_id, child, key).await
                 }
             }
         })
@@ -684,12 +683,12 @@ where
 
             (*root_id) = new_root_id;
 
-            let (_file, new_root) =
+            let (file, new_root) =
                 Self::split_child(self.inner.order, file, new_root, old_root_id, root, 0).await?;
 
-            self._insert(txn_id, new_root, key).await
+            Self::_insert(file, order, self.collator(), txn_id, new_root, key).await
         } else {
-            self._insert(txn_id, root, key).await
+            Self::_insert(file, order, self.collator(), txn_id, root, key).await
         }
     }
 }
