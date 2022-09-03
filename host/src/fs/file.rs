@@ -26,10 +26,9 @@ type Listing = HashSet<BlockId>;
 pub type FileReadGuard<B> = FileGuard<B, TxnLockReadGuard<Listing>>;
 pub type FileWriteGuard<B> = FileGuard<B, TxnLockWriteGuard<Listing>>;
 
-struct Wake;
-
 pub struct BlockReadGuard<B> {
     cache: freqfs::FileReadGuard<CacheBlock, B>,
+    #[allow(unused)]
     modified: TxnLockReadGuard<TxnId>,
 }
 
@@ -44,6 +43,7 @@ impl<B> Deref for BlockReadGuard<B> {
 pub struct BlockWriteGuard<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     modified: TxnLockWriteGuard<TxnId>,
+    txn_id: TxnId,
 }
 
 impl<B> Deref for BlockWriteGuard<B> {
@@ -56,6 +56,7 @@ impl<B> Deref for BlockWriteGuard<B> {
 
 impl<B> DerefMut for BlockWriteGuard<B> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        (*self.modified) = self.txn_id;
         self.cache.deref_mut()
     }
 }
@@ -158,7 +159,9 @@ where
             return Err(TCError::not_found(block_id.borrow()));
         }
 
-        let mut modified = {
+        let txn_id = self.txn_id;
+
+        let modified = {
             {
                 let block = {
                     let blocks = self.file.modified.read().await;
@@ -169,22 +172,24 @@ where
                         .clone()
                 };
 
-                block.write(self.txn_id).await?
+                block.write(txn_id).await?
             }
         };
-
-        *modified = self.txn_id;
 
         let name = file_name::<B>(block_id.borrow());
 
         if let Some(block) = self
             .file
-            .with_version_read(&self.txn_id, |version| version.get_file(&name))
+            .with_version_read(&txn_id, |version| version.get_file(&name))
             .await?
         {
             return block
                 .write()
-                .map_ok(move |cache| BlockWriteGuard { cache, modified })
+                .map_ok(move |cache| BlockWriteGuard {
+                    cache,
+                    modified,
+                    txn_id,
+                })
                 .map_err(io_err)
                 .await;
         }
@@ -205,14 +210,18 @@ where
 
         let block = self
             .file
-            .with_version_write(&self.txn_id, |mut version| {
+            .with_version_write(&txn_id, |mut version| {
                 version.create_file(name, value, size_hint).map_err(io_err)
             })
             .await??;
 
         block
             .write()
-            .map_ok(move |cache| BlockWriteGuard { cache, modified })
+            .map_ok(move |cache| BlockWriteGuard {
+                cache,
+                modified,
+                txn_id,
+            })
             .map_err(io_err)
             .await
     }
@@ -235,12 +244,14 @@ where
             return Err(TCError::bad_request("block already exists", block_id));
         }
 
+        let txn_id = self.txn_id;
+
         let (block, modified) = {
             let mut modified = self.file.modified.write().await;
-            let mut version = self.file.version_write(&self.txn_id).await?;
+            let mut version = self.file.version_write(&txn_id).await?;
 
-            let lock = TxnLock::new(format!("block {}", block_id), self.txn_id);
-            let write_lock = lock.try_write(self.txn_id).expect("block last modified");
+            let lock = TxnLock::new(format!("block {}", block_id), txn_id);
+            let write_lock = lock.try_write(txn_id).expect("block last modified");
             modified.insert(block_id.clone(), lock);
 
             let name = format!("{}.{}", block_id, B::ext());
@@ -255,7 +266,11 @@ where
 
         block
             .write()
-            .map_ok(move |cache| BlockWriteGuard { cache, modified })
+            .map_ok(move |cache| BlockWriteGuard {
+                cache,
+                modified,
+                txn_id,
+            })
             .map_err(io_err)
             .await
     }
@@ -466,7 +481,7 @@ where
 
         for block_id in source.block_ids() {
             // TODO: provide a better size hint
-            let block = source
+            source
                 .read_block(block_id)
                 .and_then(|block| dest.create_block(block_id.clone(), (*block).clone(), 0))
                 .await?;
@@ -508,7 +523,7 @@ where
     async fn commit(&self, txn_id: &TxnId) {
         debug!("File::commit");
 
-        let mut modified = self.modified.write().await;
+        let modified = self.modified.read().await;
 
         self.listing.commit(txn_id).await;
         trace!("File::commit committed block listing");
