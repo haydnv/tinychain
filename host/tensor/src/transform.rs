@@ -418,7 +418,9 @@ impl Reduce {
 
     pub fn invert_coords(&self, coords: Coords) -> Coords {
         if self.shape.len() == self.source_shape.len() {
-            coords.contract_dim(self.axis).expand(&self.source_shape, self.axis)
+            coords
+                .contract_dim(self.axis)
+                .expand(&self.source_shape, self.axis)
         } else {
             coords.expand(&self.source_shape, self.axis)
         }

@@ -44,13 +44,13 @@ serde_json = { version = "1.0" }
 sha2 = "0.10"
 structopt = "0.3"
 tbon = "~0.3.5"
-tc-btree = "0.6"
+tc-btree = { path = "btree" }
 tc-error = "0.6"
-tc-math = { version = "0.4", optional = true }
-tc-tensor = { version = "0.6", optional = true }
-tc-transact = { version = "0.13", features = ["tensor"] }
-tc-value = "0.6"  # TODO: bump version to require number-general >= 0.8.2
-tc-table = "0.5"
+tc-math = { path = "math", optional = true }
+tc-tensor = { path = "tensor", optional = true }
+tc-transact = { path = "transact", features = ["tensor"] }
+tc-value = { path = "value" }
+tc-table = { path = "table" }
 tcgeneric = "0.5"
 tokio = { version = "1.18", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
