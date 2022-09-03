@@ -156,11 +156,71 @@ where
             .await
     }
 
-    async fn write_block<I>(&self, name: I) -> TCResult<Self::Write>
+    async fn write_block<I>(&self, block_id: I) -> TCResult<Self::Write>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
-        todo!()
+        if !self.listing.contains(block_id.borrow()) {
+            return Err(TCError::not_found(block_id.borrow()));
+        }
+
+        let mut modified = {
+            {
+                let block = {
+                    let blocks = self.file.modified.read().await;
+
+                    blocks
+                        .get(block_id.borrow())
+                        .expect("block last mutation ID")
+                        .clone()
+                };
+
+                block.write(self.txn_id).await?
+            }
+        };
+
+        *modified = self.txn_id;
+
+        let name = Self::file_name(block_id.borrow());
+
+        if let Some(block) = self
+            .file
+            .with_version_read(&self.txn_id, |version| version.get_file(&name))
+            .await?
+        {
+            return block
+                .write()
+                .map_ok(move |cache| BlockWriteGuard { cache, modified })
+                .map_err(io_err)
+                .await;
+        }
+
+        // a write can only happen before a commit
+        // therefore the canonical version must be current
+
+        let block_canon = {
+            let canon = self.file.canon.read().await;
+            canon.get_file(&name).expect("canonical block")
+        };
+
+        let size_hint = block_canon.size_hint().await;
+        let value = {
+            let value = block_canon.read().map_err(io_err).await?;
+            B::clone(&*value)
+        };
+
+        let block = self
+            .file
+            .with_version_write(&self.txn_id, |mut version| {
+                version.create_file(name, value, size_hint).map_err(io_err)
+            })
+            .await??;
+
+        block
+            .write()
+            .map_ok(move |cache| BlockWriteGuard { cache, modified })
+            .map_err(io_err)
+            .await
     }
 }
 
