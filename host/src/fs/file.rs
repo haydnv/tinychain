@@ -8,10 +8,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
-use log::{debug, trace};
+use futures::{FutureExt, TryFutureExt};
 use safecast::AsType;
-use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, BlockId, FileRead, FileWrite, Store};
@@ -21,8 +20,8 @@ use tc_transact::{Transact, TxnId};
 use super::{io_err, CacheBlock, VERSION};
 
 type Listing = HashSet<BlockId>;
-pub type FileReadGuard<B> = FileGuard<B, OwnedRwLockReadGuard<Listing>>;
-pub type FileWriteGuard<B> = FileGuard<B, OwnedRwLockWriteGuard<Listing>>;
+pub type FileReadGuard<B> = FileGuard<B, TxnLockReadGuard<Listing>>;
+pub type FileWriteGuard<B> = FileGuard<B, TxnLockWriteGuard<Listing>>;
 
 struct Wake;
 
@@ -60,7 +59,17 @@ impl<B> DerefMut for BlockWriteGuard<B> {
 
 pub struct FileGuard<B, L> {
     file: File<B>,
+    txn_id: TxnId,
     listing: L,
+}
+
+impl<B, L> FileGuard<B, L>
+where
+    B: BlockData,
+{
+    fn file_name(block_id: &BlockId) -> String {
+        format!("{}.{}", block_id, B::ext())
+    }
 }
 
 #[async_trait]
@@ -68,6 +77,7 @@ impl<B, L> FileRead<B> for FileGuard<B, L>
 where
     B: BlockData,
     L: Deref<Target = Listing> + Send + Sync,
+    CacheBlock: AsType<B>,
 {
     type Read = BlockReadGuard<B>;
     type Write = BlockWriteGuard<B>;
@@ -80,11 +90,70 @@ where
         todo!()
     }
 
-    async fn read_block<I>(&self, name: I) -> TCResult<Self::Read>
+    async fn read_block<I>(&self, block_id: I) -> TCResult<Self::Read>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
-        todo!()
+        if !self.listing.contains(block_id.borrow()) {
+            return Err(TCError::not_found(block_id.borrow()));
+        }
+
+        let modified = {
+            let block = {
+                let modified = self.file.modified.read().await;
+                modified
+                    .get(block_id.borrow())
+                    .expect("block last mutation ID")
+                    .clone()
+            };
+
+            block.read(self.txn_id).await?
+        };
+
+        let name = Self::file_name(block_id.borrow());
+        if let Some(block) = self
+            .file
+            .with_version_read(&self.txn_id, |version| version.get_file(&name))
+            .await?
+        {
+            return block
+                .read()
+                .map_ok(|cache| BlockReadGuard { cache, modified })
+                .map_err(io_err)
+                .await;
+        }
+
+        assert!(*modified < self.txn_id);
+
+        let (size_hint, value) = {
+            let block_version = self
+                .file
+                .with_version_read(&modified, |version| version.get_file(&name))
+                .await?
+                .expect("block prior value");
+
+            let size_hint = block_version.size_hint().await;
+
+            let value = {
+                let value = block_version.read().map_err(io_err).await?;
+                B::clone(&*value)
+            };
+
+            (size_hint, value)
+        };
+
+        let block = self
+            .file
+            .with_version_write(&self.txn_id, |mut version| {
+                version.create_file(name, value, size_hint).map_err(io_err)
+            })
+            .await??;
+
+        block
+            .read()
+            .map_ok(move |cache| BlockReadGuard { cache, modified })
+            .map_err(io_err)
+            .await
     }
 
     async fn write_block<I>(&self, name: I) -> TCResult<Self::Write>
@@ -100,6 +169,7 @@ impl<B, L> FileWrite<B> for FileGuard<B, L>
 where
     B: BlockData,
     L: DerefMut<Target = Listing> + Send + Sync,
+    CacheBlock: AsType<B>,
 {
     async fn create_block(
         &mut self,
@@ -186,7 +256,6 @@ where
 
         for (name, block) in fs_dir.iter() {
             if name.starts_with('.') {
-                debug!("File::load skipping hidden filesystem entry");
                 continue;
             }
 
@@ -238,10 +307,45 @@ where
             phantom: Default::default(),
         })
     }
+
+    async fn version(&self, txn_id: &TxnId) -> TCResult<freqfs::DirLock<CacheBlock>> {
+        let mut versions = self.versions.write().await;
+        versions
+            .get_or_create_dir(txn_id.to_string())
+            .map_err(io_err)
+    }
+
+    async fn version_read(&self, txn_id: &TxnId) -> TCResult<freqfs::DirReadGuard<CacheBlock>> {
+        let version = self.version(txn_id).await?;
+        version.read().map(Ok).await
+    }
+
+    async fn version_write(&self, txn_id: &TxnId) -> TCResult<freqfs::DirWriteGuard<CacheBlock>> {
+        let version = self.version(txn_id).await?;
+        version.write().map(Ok).await
+    }
+
+    async fn with_version_read<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
+    where
+        F: FnOnce(freqfs::DirReadGuard<CacheBlock>) -> T,
+    {
+        self.version_read(txn_id).map_ok(then).await
+    }
+
+    async fn with_version_write<F, T>(&self, txn_id: &TxnId, then: F) -> TCResult<T>
+    where
+        F: FnOnce(freqfs::DirWriteGuard<CacheBlock>) -> T,
+    {
+        self.version_write(txn_id).map_ok(then).await
+    }
 }
 
 #[async_trait]
-impl<B: BlockData> tc_transact::fs::File<B> for File<B> {
+impl<B> tc_transact::fs::File<B> for File<B>
+where
+    B: BlockData,
+    CacheBlock: AsType<B>,
+{
     type Read = FileReadGuard<B>;
     type Write = FileWriteGuard<B>;
 
@@ -250,11 +354,25 @@ impl<B: BlockData> tc_transact::fs::File<B> for File<B> {
     }
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
-        todo!()
+        self.listing
+            .read(txn_id)
+            .map_ok(move |listing| FileGuard {
+                file: self.clone(),
+                txn_id,
+                listing,
+            })
+            .await
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
-        todo!()
+        self.listing
+            .write(txn_id)
+            .map_ok(move |listing| FileGuard {
+                file: self.clone(),
+                txn_id,
+                listing,
+            })
+            .await
     }
 }
 
