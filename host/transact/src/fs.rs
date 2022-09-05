@@ -83,7 +83,7 @@ pub trait FileWrite<B: Clone>: FileRead<B> {
 #[async_trait]
 pub trait File<B: BlockData>: Store + 'static {
     /// The type of read guard used by this `File`
-    type Read: FileRead<B>;
+    type Read: FileRead<B> + Clone;
 
     /// The type of write guard used by this `File`
     type Write: FileWrite<

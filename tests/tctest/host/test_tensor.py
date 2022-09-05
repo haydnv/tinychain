@@ -408,19 +408,6 @@ class DenseTests(HostTest):
         self.assertEqual(actual_am0, expect_dense(tc.U64, [3, 4], np.argmax(x, 0).flatten().tolist()))
         self.assertEqual(actual_am1, expect_dense(tc.U64, [2, 4], np.argmax(x, 1).flatten().tolist()))
 
-    def testArgsort(self):
-        shape = [2, 3]
-        size = np.product(shape)
-        x = np.random.random(size).reshape(shape)
-
-        cxt = tc.Context()
-        cxt.x = load_dense(x)
-        cxt.indices = cxt.x.argsort()
-
-        actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_dense(tc.U64, [size], np.argsort(x, None).flatten().tolist())
-        self.assertEqual(actual, expected)
-
 
 class SparseTests(HostTest):
     def testCreate(self):

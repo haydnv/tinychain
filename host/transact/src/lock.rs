@@ -33,6 +33,38 @@ impl<T> TxnLockReadGuard<T> {
     }
 }
 
+impl<T: Clone + PartialEq> Clone for TxnLockReadGuard<T> {
+    fn clone(&self) -> Self {
+        trace!("TxnLockReadGuard::clone {}", self.lock.inner.name);
+
+        let mut lock_state = self
+            .lock
+            .inner
+            .state
+            .lock()
+            .expect("TxnLockReadGuard::clone");
+
+        let num_readers = lock_state
+            .readers
+            .get_mut(&self.txn_id)
+            .expect("read lock count");
+
+        *num_readers += 1;
+
+        let guard = lock_state
+            .versions
+            .get(self.txn_id)
+            .try_read_owned()
+            .expect("transaction version read guard");
+
+        Self {
+            lock: self.lock.clone(),
+            txn_id: self.txn_id,
+            guard,
+        }
+    }
+}
+
 impl<T> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
@@ -52,7 +84,9 @@ impl<T> Drop for TxnLockReadGuard<T> {
             .lock()
             .expect("TxnLockReadGuard::drop");
 
-        assert_ne!(lock_state.writer, Some(self.txn_id));
+        if let Some(writer) = &lock_state.writer {
+            assert!(writer < &self.txn_id);
+        }
 
         let num_readers = lock_state
             .readers
@@ -319,9 +353,23 @@ impl<T> TxnLock<T> {
     }
 
     fn wake(&self) -> usize {
+        trace!(
+            "TxnLock {} waking {} subscribers",
+            self.inner.name,
+            self.inner.tx.receiver_count()
+        );
+
         match self.inner.tx.send(Wake) {
             Err(broadcast::error::SendError(_)) => 0,
-            Ok(num_subscribed) => num_subscribed,
+            Ok(num_subscribed) => {
+                trace!(
+                    "TxnLock {} woke {} subscribers",
+                    self.inner.name,
+                    num_subscribed
+                );
+
+                num_subscribed
+            }
         }
     }
 }
@@ -329,7 +377,7 @@ impl<T> TxnLock<T> {
 impl<T: Clone + PartialEq> TxnLock<T> {
     /// Lock this value for reading.
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
-        debug!("read {} at {}", self.inner.name, txn_id);
+        debug!("locking {} for reading at {}...", self.inner.name, txn_id);
 
         let version = {
             let mut rx = self.inner.tx.subscribe();
@@ -348,7 +396,9 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         };
 
         let guard = version.read_owned().await;
-        Ok(TxnLockReadGuard::new(self.clone(), txn_id, guard))
+        let guard = TxnLockReadGuard::new(self.clone(), txn_id, guard);
+        debug!("locked {} for reading at {}", self.inner.name, txn_id);
+        Ok(guard)
     }
 
     /// Try to acquire a write lock synchronously, if possible.
@@ -373,7 +423,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
 
     /// Lock this value for writing.
     pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
-        debug!("write {} at {}", self.inner.name, txn_id);
+        debug!("locking {} for writing at {}...", self.inner.name, txn_id);
 
         let version = {
             let mut rx = self.inner.tx.subscribe();
@@ -392,7 +442,9 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         };
 
         let guard = version.write_owned().await;
-        Ok(TxnLockWriteGuard::new(self.clone(), txn_id, guard))
+        let guard = TxnLockWriteGuard::new(self.clone(), txn_id, guard);
+        debug!("locked {} for writing at {}", self.inner.name, txn_id);
+        Ok(guard)
     }
 }
 

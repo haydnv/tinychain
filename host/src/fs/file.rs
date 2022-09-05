@@ -61,6 +61,7 @@ impl<B> DerefMut for BlockWriteGuard<B> {
     }
 }
 
+#[derive(Clone)]
 pub struct FileGuard<B, L> {
     file: File<B>,
     txn_id: TxnId,
@@ -93,6 +94,8 @@ where
             return Err(TCError::not_found(block_id.borrow()));
         }
 
+        trace!("locking block {} for reading...", block_id.borrow());
+
         let modified = {
             let block = {
                 let modified = self.file.modified.read().await;
@@ -111,11 +114,28 @@ where
             .with_version_read(&self.txn_id, |version| version.get_file(&name))
             .await?
         {
-            return block
-                .read()
-                .map_ok(|cache| BlockReadGuard { cache, modified })
-                .map_err(io_err)
-                .await;
+            trace!(
+                "block {} already has a version at {}",
+                block_id.borrow(),
+                self.txn_id
+            );
+
+            let cache = block.read().map_err(io_err).await?;
+            let guard = BlockReadGuard { cache, modified };
+
+            trace!(
+                "locked block {} for writing at {}",
+                block_id.borrow(),
+                self.txn_id
+            );
+
+            return Ok(guard);
+        } else {
+            trace!(
+                "creating new version of block {} at {}...",
+                block_id.borrow(),
+                self.txn_id
+            );
         }
 
         assert!(*modified < self.txn_id);
@@ -134,6 +154,12 @@ where
                 B::clone(&*value)
             };
 
+            trace!(
+                "got canonical version of block {} to copy at {}...",
+                block_id.borrow(),
+                self.txn_id
+            );
+
             (size_hint, value)
         };
 
@@ -144,11 +170,15 @@ where
             })
             .await??;
 
-        block
-            .read()
-            .map_ok(move |cache| BlockReadGuard { cache, modified })
-            .map_err(io_err)
-            .await
+        trace!(
+            "created new version of block {} at {}",
+            block_id.borrow(),
+            self.txn_id
+        );
+
+        let cache = block.read().map_err(io_err).await?;
+        trace!("locked block {} for reading...", block_id.borrow());
+        Ok(BlockReadGuard { cache, modified })
     }
 
     async fn write_block<I>(&self, block_id: I) -> TCResult<Self::Write>
@@ -160,6 +190,12 @@ where
         }
 
         let txn_id = self.txn_id;
+
+        trace!(
+            "locking block {} for writing at {}...",
+            block_id.borrow(),
+            txn_id
+        );
 
         let modified = {
             {
@@ -176,6 +212,12 @@ where
             }
         };
 
+        trace!(
+            "block {} was last modified at {}...",
+            block_id.borrow(),
+            *modified
+        );
+
         let name = file_name::<B>(block_id.borrow());
 
         if let Some(block) = self
@@ -183,15 +225,26 @@ where
             .with_version_read(&txn_id, |version| version.get_file(&name))
             .await?
         {
-            return block
-                .write()
-                .map_ok(move |cache| BlockWriteGuard {
-                    cache,
-                    modified,
-                    txn_id,
-                })
-                .map_err(io_err)
-                .await;
+            trace!(
+                "block {} already has a version at {}",
+                block_id.borrow(),
+                txn_id
+            );
+
+            let cache = block.write().map_err(io_err).await?;
+            let guard = BlockWriteGuard {
+                cache,
+                modified,
+                txn_id,
+            };
+
+            trace!(
+                "locked block {} for writing at {}",
+                block_id.borrow(),
+                txn_id
+            );
+
+            return Ok(guard);
         }
 
         // a write can only happen before a commit
@@ -208,6 +261,12 @@ where
             B::clone(&*value)
         };
 
+        trace!(
+            "got canonical version of block {} to copy at {}",
+            block_id.borrow(),
+            txn_id
+        );
+
         let block = self
             .file
             .with_version_write(&txn_id, |mut version| {
@@ -215,15 +274,20 @@ where
             })
             .await??;
 
-        block
-            .write()
-            .map_ok(move |cache| BlockWriteGuard {
-                cache,
-                modified,
-                txn_id,
-            })
-            .map_err(io_err)
-            .await
+        let cache = block.write().map_err(io_err).await?;
+        let guard = BlockWriteGuard {
+            cache,
+            modified,
+            txn_id,
+        };
+
+        trace!(
+            "locked block {} for writing at {}",
+            block_id.borrow(),
+            txn_id
+        );
+
+        Ok(guard)
     }
 }
 
@@ -491,23 +555,35 @@ where
     }
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
+        debug!("File::read");
+
         self.listing
             .read(txn_id)
-            .map_ok(move |listing| FileGuard {
-                file: self.clone(),
-                txn_id,
-                listing,
+            .map_ok(move |listing| {
+                trace!("locked file for reading at {}", txn_id);
+
+                FileGuard {
+                    file: self.clone(),
+                    txn_id,
+                    listing,
+                }
             })
             .await
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
+        debug!("File::write");
+
         self.listing
             .write(txn_id)
-            .map_ok(move |listing| FileGuard {
-                file: self.clone(),
-                txn_id,
-                listing,
+            .map_ok(move |listing| {
+                trace!("locked file for writing at {}", txn_id);
+
+                FileGuard {
+                    file: self.clone(),
+                    txn_id,
+                    listing,
+                }
             })
             .await
     }
@@ -587,6 +663,8 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("File::finalize");
+
         {
             let modified = self.modified.read().await;
             join_all(

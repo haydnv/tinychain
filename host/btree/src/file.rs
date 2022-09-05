@@ -12,7 +12,7 @@ use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
-use futures::{join, try_join};
+use futures::join;
 use log::debug;
 use uuid::Uuid;
 
@@ -260,23 +260,18 @@ where
         Ok(BTreeFile::new(file, schema, order, root))
     }
 
-    // TODO: this should hold a read lock on self.inner.file
     fn _delete_range<'a>(
-        &'a self,
-        txn_id: TxnId,
+        file: &'a F::Read,
+        schema: &'a RowSchema,
+        collator: &'a ValueCollator,
         node_id: NodeId,
         range: &'a Range,
     ) -> TCBoxTryFuture<'a, ()> {
-        debug_assert!(range.len() <= self.inner.schema.len());
-
         Box::pin(async move {
-            let collator = &self.inner.collator;
-            let file = &self.inner.file;
-
-            let mut node = file.write_block(txn_id, &node_id).await?;
+            let mut node = file.write_block(&node_id).await?;
 
             #[cfg(debug_assertions)]
-            node.validate(&self.inner.schema, range);
+            node.validate(&schema, range);
 
             let (l, r) = collator.bisect(&node.keys, range);
 
@@ -301,13 +296,13 @@ where
                 let deletes: FuturesUnordered<_> = node.children[l..(r + 1)]
                     .iter()
                     .cloned()
-                    .map(|child_id| self._delete_range(txn_id, child_id, range))
+                    .map(|child_id| Self::_delete_range(file, schema, collator, child_id, range))
                     .collect();
 
                 deletes.try_fold((), |(), ()| future::ready(Ok(()))).await
             } else {
                 let child_id = node.children[r].clone();
-                self._delete_range(txn_id, child_id, range).await
+                Self::_delete_range(file, schema, collator, child_id, range).await
             }
         })
     }
@@ -328,14 +323,13 @@ where
 
             if node.leaf {
                 let key = NodeKey::new(key);
+                #[cfg(debug_assertions)]
+                debug!("insert key {} into {} at {}", key, *node, i);
 
                 if i == node.keys.len() {
                     node.keys.insert(i, key);
                     return Ok(());
                 }
-
-                #[cfg(debug_assertions)]
-                debug!("insert key {} into {} at {}", key, *node, i);
 
                 match collator.compare_slice(&key, &node.keys[i]) {
                     Ordering::Less => node.keys.insert(i, key),
@@ -350,6 +344,7 @@ where
                 Ok(())
             } else {
                 let child_id = node.children[i].clone();
+                debug!("locking child node {} for writing...", child_id);
                 let child = file.write_block(&child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
@@ -382,15 +377,15 @@ where
     }
 
     fn _slice<'a, B: Deref<Target = Node>>(
-        self,
-        txn_id: TxnId,
+        file: F::Read,
+        collator: ValueCollator,
         node: B,
         range: Range,
     ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
-        let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
+        let (l, r) = collator.bisect(&node.keys[..], &range);
 
         #[cfg(debug_assertions)]
         debug!("_slice {} from {} to {} ({:?})", *node, l, r, range);
@@ -410,10 +405,11 @@ where
                 let child_id = node.children[i].clone();
                 let range_clone = range.clone();
 
-                let this = self.clone();
+                let file = file.clone();
+                let collator = collator.clone();
                 let selection = Box::pin(async move {
-                    let node = this.inner.file.read_block(txn_id, &child_id).await?;
-                    this._slice(txn_id, node, range_clone)
+                    let node = file.read_block(&child_id).await?;
+                    Self::_slice(file, collator, node, range_clone)
                 });
 
                 selected.push_back(Box::pin(selection));
@@ -430,8 +426,8 @@ where
             let last_child_id = node.children[r].clone();
 
             let selection = Box::pin(async move {
-                let node = self.inner.file.read_block(txn_id, &last_child_id).await?;
-                self._slice(txn_id, node, range)
+                let node = file.read_block(&last_child_id).await?;
+                Self::_slice(file, collator, node, range)
             });
             selected.push_back(Box::pin(selection));
 
@@ -440,15 +436,15 @@ where
     }
 
     fn _slice_reverse<'a, B: Deref<Target = Node>>(
-        self,
-        txn_id: TxnId,
+        file: F::Read,
+        collator: ValueCollator,
         node: B,
         range: Range,
     ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
-        let (l, r) = self.inner.collator.bisect(&node.keys, &range);
+        let (l, r) = collator.bisect(&node.keys, &range);
 
         #[cfg(debug_assertions)]
         debug!("_slice_reverse {} from {} to {} ({:?})", *node, r, l, range);
@@ -468,10 +464,11 @@ where
 
             let last_child = node.children[r].clone();
             let range_clone = range.clone();
-            let this = self.clone();
+            let file_clone = file.clone();
+            let collator_clone = collator.clone();
             let selection = Box::pin(async move {
-                let node = this.inner.file.read_block(txn_id, &last_child).await?;
-                this._slice_reverse(txn_id, node, range_clone)
+                let node = file_clone.read_block(&last_child).await?;
+                Self::_slice_reverse(file_clone, collator_clone, node, range_clone)
             });
             selected.push_back(Box::pin(selection));
 
@@ -479,10 +476,12 @@ where
                 let child_id = node.children[i].clone();
                 let range_clone = range.clone();
 
-                let this = self.clone();
+                let file = file.clone();
+                let collator = collator.clone();
+                let file = file.clone();
                 let selection = Box::pin(async move {
-                    let node = this.inner.file.read_block(txn_id, &child_id).await?;
-                    this._slice_reverse(txn_id, node, range_clone)
+                    let node = file.read_block(&child_id).await?;
+                    Self::_slice_reverse(file, collator, node, range_clone)
                 });
 
                 if !node.keys[i].deleted {
@@ -509,14 +508,16 @@ where
     where
         Self: 'a,
     {
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
 
-        let root = self.inner.file.read_block(txn_id, &*root_id).await?;
+        let root = file.read_block(&*root_id).await?;
+        let collator = self.collator().clone();
 
         if reverse {
-            self._slice_reverse(txn_id, root, range)
+            Self::_slice_reverse(file, collator, root, range)
         } else {
-            self._slice(txn_id, root, range)
+            Self::_slice(file, collator, root, range)
         }
     }
 
@@ -592,8 +593,9 @@ where
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
-        let root = self.inner.file.read_block(txn_id, &*root_id).await?;
+        let root = file.read_block(&*root_id).await?;
         Ok(root.keys.is_empty())
     }
 
@@ -624,33 +626,36 @@ where
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() {
-            let (mut root, mut file) =
-                try_join!(self.inner.root.write(txn_id), self.inner.file.write(txn_id))?;
+            let mut file = self.inner.file.write(txn_id).await?;
+            let mut root = self.inner.root.write(txn_id).await?;
 
             file.truncate().await?;
 
-            *root = Uuid::new_v4().into();
             let node = Node::new(true, None);
-            file.create_block((*root).clone(), node, DEFAULT_BLOCK_SIZE)
-                .await?;
+            let (new_root_id, _) = file.create_block_unique(node, DEFAULT_BLOCK_SIZE).await?;
+            *root = new_root_id;
 
             return Ok(());
         }
 
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
-        self._delete_range(txn_id, (*root_id).clone(), &range).await
+        let schema = &self.inner.schema;
+
+        Self::_delete_range(&file, schema, self.collator(), (*root_id).clone(), &range).await
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = self.validate_key(key)?;
 
-        let mut file = self.inner.file.write(txn_id).await?;
-        let order = self.inner.order;
-
         // get a write lock on the root_id while we check if a split_child is needed,
-        // to avoid getting out of sync in the case of a concurrent insert in the same txn
+        // to prevent getting out of sync in the case of a concurrent insert in the same txn
+        let mut file = self.inner.file.write(txn_id).await?;
         let mut root_id = self.inner.root.write(txn_id).await?;
+
         debug!("insert into BTree with root node ID {}", *root_id);
+
+        let order = self.inner.order;
 
         let root = file.write_block(&*root_id).await?;
 
