@@ -30,7 +30,7 @@ impl BlockData for afarray::Array {
 
 /// A read lock on a [`File`]
 #[async_trait]
-pub trait FileRead<B: Clone>: Send + Sync {
+pub trait FileRead<B: Clone>: Sized + Send + Sync {
     /// A read lock on a block in this file.
     type Read: Deref<Target = B> + Send;
 
@@ -43,10 +43,18 @@ pub trait FileRead<B: Clone>: Send + Sync {
     /// Return `true` if there are no blocks in this [`File`].
     fn is_empty(&self) -> bool;
 
-    /// Convenience method to lock the block at `name` for reading.
+    /// Lock the block at `name` for reading.
     async fn read_block<I>(&self, name: I) -> TCResult<Self::Read>
     where
         I: Borrow<BlockId> + Send + Sync;
+
+    /// Lock the block at `name` for reading, without borrowing.
+    async fn read_block_owned<I>(self, name: I) -> TCResult<Self::Read>
+    where
+        I: Borrow<BlockId> + Send + Sync,
+    {
+        self.read_block(name).await
+    }
 
     /// Convenience method to lock the block at `name` for writing.
     async fn write_block<I>(&self, name: I) -> TCResult<Self::Write>
@@ -104,19 +112,6 @@ pub trait File<B: BlockData>: Store + 'static {
     /// Convenience method to lock the block at `name` for reading.
     async fn read_block<I>(
         &self,
-        txn_id: TxnId,
-        name: I,
-    ) -> TCResult<<Self::Read as FileRead<B>>::Read>
-    where
-        I: Borrow<BlockId> + Send + Sync,
-    {
-        let file = self.read(txn_id).await?;
-        file.read_block(name).await
-    }
-
-    /// Convenience method to lock the block at `name` for reading, without borrowing.
-    async fn read_block_owned<I>(
-        self,
         txn_id: TxnId,
         name: I,
     ) -> TCResult<<Self::Read as FileRead<B>>::Read>

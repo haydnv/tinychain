@@ -365,11 +365,12 @@ where
             }
 
             let txn_id = *txn.id();
+            let file = self.file.read(txn_id).await?;
 
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
+                    .then(move |block_id| file.clone().read_block_owned(block_id))
                     .map_ok(|block| (*block).clone()),
             );
 
@@ -388,6 +389,8 @@ where
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
         let txn_id = *txn.id();
+        let file = self.file.read(txn_id).await?;
+
         let per_block = ArrayExt::from(&[PER_BLOCK as u64][..]);
 
         let offsets = coords.to_offsets(self.shape());
@@ -404,9 +407,8 @@ where
                 (block_id, mask.into(), indices.into())
             })
             .map(move |(block_id, mask, indices)| {
-                self.file
-                    .clone()
-                    .read_block_owned(txn_id, BlockId::from(block_id))
+                file.clone()
+                    .read_block_owned(BlockId::from(block_id))
                     .map_ok(move |block| block.get(&indices))
                     .map_ok(move |block_values| &block_values * &mask)
             })
