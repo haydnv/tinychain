@@ -366,25 +366,23 @@ async fn put(
         SubjectCollection::from_collection(collection)?
     };
 
-    match schema.read_block(&id).await {
-        Ok(block) if &*block == &collection.schema().cast_into() => {}
-        Ok(block) => {
+    if schema.contains(&id) {
+        let block = schema.read_block(&id).await?;
+        if &*block != &collection.schema().cast_into() {
             return Err(TCError::unsupported(format!(
                 "cannot change schema of {} from {}",
                 collection, &*block
-            )))
+            )));
         }
-        Err(err) if err.code() == ErrorType::NotFound => {
-            schema
-                .create_block(
-                    id.clone(),
-                    Scalar::cast_from(collection.schema()),
-                    BLOCK_SIZE_HINT,
-                )
-                .await?;
-        }
-        Err(cause) => return Err(cause),
-    };
+    } else {
+        schema
+            .create_block(
+                id.clone(),
+                Scalar::cast_from(collection.schema()),
+                BLOCK_SIZE_HINT,
+            )
+            .await?;
+    }
 
     collections.insert(id, collection);
     Ok(())

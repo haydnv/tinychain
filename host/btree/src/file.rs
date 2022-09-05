@@ -740,7 +740,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
     async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
 
-        let file_contents = file.write(*txn.id()).await?;
+        let file_contents = file.read(*txn.id()).await?;
 
         let order = validate_schema(&schema)?;
 

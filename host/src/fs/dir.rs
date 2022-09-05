@@ -348,10 +348,7 @@ where
 
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "filesystem entry already exists",
-                name,
-            ));
+            return Err(TCError::bad_request("directory already exists", name));
         }
 
         let dir = self
@@ -385,15 +382,12 @@ where
         F: fs::File<B>,
     {
         if self.contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "filesystem entry already exists",
-                name,
-            ));
+            return Err(TCError::bad_request("file already exists", name));
         }
 
         let file = self
             .cache
-            .create_dir(name.to_string())
+            .create_dir(format!("{}.{}", name, B::ext()))
             .map_err(io_err)
             .and_then(|cache| FileEntry::new(cache, class))?;
 

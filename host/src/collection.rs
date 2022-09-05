@@ -15,7 +15,7 @@ use tc_error::*;
 use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorView};
-use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite};
+use tc_transact::fs::{CopyFrom, Dir, DirWrite};
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
     path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
@@ -158,13 +158,6 @@ impl Collection {
     ) -> TCResult<Collection> {
         let txn_id = *txn.id();
         let mut lock = container.write(txn_id).await?;
-
-        if !lock.is_empty() {
-            return Err(TCError::bad_request(
-                "cannot copy into a non-empty directory",
-                container,
-            ));
-        }
 
         match source {
             Collection::BTree(source) => {

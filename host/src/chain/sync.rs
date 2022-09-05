@@ -22,7 +22,7 @@ use crate::txn::Txn;
 
 use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
 
-const BLOCKS: Label = label("blocks");
+const BLOCKS: Label = label("blocks.chain_block");
 const COMMITTED: &str = "committed.chain_block";
 const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
