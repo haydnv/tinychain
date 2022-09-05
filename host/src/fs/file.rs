@@ -82,6 +82,10 @@ where
         self.listing.iter().collect()
     }
 
+    fn contains(&self, block_id: &BlockId) -> bool {
+        self.listing.contains(block_id)
+    }
+
     fn is_empty(&self) -> bool {
         self.listing.is_empty()
     }
@@ -90,17 +94,23 @@ where
     where
         I: Borrow<BlockId> + Send + Sync,
     {
-        if !self.listing.contains(block_id.borrow()) {
-            return Err(TCError::not_found(block_id.borrow()));
+        let block_id = block_id.borrow();
+
+        if !self.listing.contains(block_id) {
+            #[cfg(debug_assertions)]
+            panic!("{} is missing block: {}", self.file, block_id);
+
+            #[cfg(not(debug_assertions))]
+            return Err(TCError::not_found(block_id));
         }
 
-        trace!("locking block {} for reading...", block_id.borrow());
+        trace!("locking block {} for reading...", block_id);
 
         let modified = {
             let block = {
                 let modified = self.file.modified.read().await;
                 modified
-                    .get(block_id.borrow())
+                    .get(block_id)
                     .expect("block last mutation ID")
                     .clone()
             };
@@ -108,7 +118,7 @@ where
             block.read(self.txn_id).await?
         };
 
-        let name = file_name::<B>(block_id.borrow());
+        let name = file_name::<B>(block_id);
         if let Some(block) = self
             .file
             .with_version_read(&self.txn_id, |version| version.get_file(&name))
@@ -116,24 +126,20 @@ where
         {
             trace!(
                 "block {} already has a version at {}",
-                block_id.borrow(),
+                block_id,
                 self.txn_id
             );
 
             let cache = block.read().map_err(io_err).await?;
             let guard = BlockReadGuard { cache, modified };
 
-            trace!(
-                "locked block {} for writing at {}",
-                block_id.borrow(),
-                self.txn_id
-            );
+            trace!("locked block {} for writing at {}", block_id, self.txn_id);
 
             return Ok(guard);
         } else {
             trace!(
                 "creating new version of block {} at {}...",
-                block_id.borrow(),
+                block_id,
                 self.txn_id
             );
         }
@@ -156,7 +162,7 @@ where
 
             trace!(
                 "got canonical version of block {} to copy at {}...",
-                block_id.borrow(),
+                block_id,
                 self.txn_id
             );
 
@@ -172,12 +178,12 @@ where
 
         trace!(
             "created new version of block {} at {}",
-            block_id.borrow(),
+            block_id,
             self.txn_id
         );
 
         let cache = block.read().map_err(io_err).await?;
-        trace!("locked block {} for reading...", block_id.borrow());
+        trace!("locked block {} for reading...", block_id);
         Ok(BlockReadGuard { cache, modified })
     }
 
@@ -185,17 +191,19 @@ where
     where
         I: Borrow<BlockId> + Send + Sync,
     {
-        if !self.listing.contains(block_id.borrow()) {
-            return Err(TCError::not_found(block_id.borrow()));
+        let block_id = block_id.borrow();
+
+        if !self.listing.contains(block_id) {
+            #[cfg(debug_assertions)]
+            panic!("{} is missing block: {}", self.file, block_id);
+
+            #[cfg(not(debug_assertions))]
+            return Err(TCError::not_found(block_id));
         }
 
         let txn_id = self.txn_id;
 
-        trace!(
-            "locking block {} for writing at {}...",
-            block_id.borrow(),
-            txn_id
-        );
+        trace!("locking block {} for writing at {}...", block_id, txn_id);
 
         let modified = {
             {
@@ -203,7 +211,7 @@ where
                     let blocks = self.file.modified.read().await;
 
                     blocks
-                        .get(block_id.borrow())
+                        .get(block_id)
                         .expect("block last mutation ID")
                         .clone()
                 };
@@ -212,24 +220,16 @@ where
             }
         };
 
-        trace!(
-            "block {} was last modified at {}...",
-            block_id.borrow(),
-            *modified
-        );
+        trace!("block {} was last modified at {}...", block_id, *modified);
 
-        let name = file_name::<B>(block_id.borrow());
+        let name = file_name::<B>(block_id);
 
         if let Some(block) = self
             .file
             .with_version_read(&txn_id, |version| version.get_file(&name))
             .await?
         {
-            trace!(
-                "block {} already has a version at {}",
-                block_id.borrow(),
-                txn_id
-            );
+            trace!("block {} already has a version at {}", block_id, txn_id);
 
             let cache = block.write().map_err(io_err).await?;
             let guard = BlockWriteGuard {
@@ -238,11 +238,7 @@ where
                 txn_id,
             };
 
-            trace!(
-                "locked block {} for writing at {}",
-                block_id.borrow(),
-                txn_id
-            );
+            trace!("locked block {} for writing at {}", block_id, txn_id);
 
             return Ok(guard);
         }
@@ -263,7 +259,7 @@ where
 
         trace!(
             "got canonical version of block {} to copy at {}",
-            block_id.borrow(),
+            block_id,
             txn_id
         );
 
@@ -281,11 +277,7 @@ where
             txn_id,
         };
 
-        trace!(
-            "locked block {} for writing at {}",
-            block_id.borrow(),
-            txn_id
-        );
+        trace!("locked block {} for writing at {}", block_id, txn_id);
 
         Ok(guard)
     }
@@ -631,6 +623,7 @@ where
                         if let Some(version) = version.get_file(&name) {
                             let block: freqfs::FileReadGuard<CacheBlock, B> =
                                 version.read().await.expect("block version");
+
                             let canon = if let Some(canon) = canon.get_file(&name) {
                                 *canon.write().await.expect("canonical block") = (*block).clone();
                                 canon

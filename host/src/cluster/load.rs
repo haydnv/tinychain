@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use log::debug;
+use log::{debug, trace};
 use tokio::sync::RwLock;
 
 use tc_error::*;
@@ -110,6 +110,8 @@ pub async fn instantiate(
         dir.write(txn_id).await?
     };
 
+    trace!("Cluster::load got write lock on data directory");
+
     let mut replicas = HashSet::new();
     replicas.insert((host, link.path().clone()).into());
 
@@ -119,6 +121,8 @@ pub async fn instantiate(
 
         let dir = dir.get_or_create_dir(id.clone())?;
         let chain = chain::load(txn, class, schema, dir).await?;
+        trace!("loaded chain {}", id);
+
         chains.insert(id, chain);
     }
 

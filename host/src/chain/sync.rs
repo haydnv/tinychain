@@ -3,15 +3,15 @@
 
 use async_trait::async_trait;
 use destream::de;
-use freqfs::{FileLock, FileReadGuard, FileWriteGuard};
+use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
-use log::debug;
+use log::{debug, trace};
 use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, DirWrite, Persist};
+use tc_transact::fs::{Dir, DirWrite, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label, TCPathBuf};
@@ -22,7 +22,7 @@ use crate::txn::Txn;
 
 use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
 
-const BLOCKS: Label = label("blocks.chain_block");
+const BLOCKS: Label = label("blocks");
 const COMMITTED: &str = "committed.chain_block";
 const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
@@ -129,65 +129,40 @@ impl Persist<fs::Dir> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        debug!("SyncChain::load");
+
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
+        trace!("SyncChain::load loaded {}", subject);
+
         let txn_id = *txn.id();
-        let mut dir_lock = dir.write(txn_id).await?;
-        let is_new = dir_lock.is_empty();
+        let store = {
+            let mut dir = dir.write(txn_id).await?;
+            dir.get_or_create_dir(STORE.into()).map(super::data::Store::new)?
+        };
 
-        let (store, pending, committed) = if is_new {
-            let store = dir_lock
-                .create_dir(STORE.into())
-                .map(super::data::Store::new)?;
+        let mut blocks_dir = {
+            let mut dir = dir.write(txn_id).await?;
+            let blocks_dir = dir.get_or_create_dir(BLOCKS.into())?;
+            blocks_dir.into_inner().write().await
+        };
 
-            let blocks_dir = dir_lock.create_dir(BLOCKS.into())?;
-            let mut blocks_dir = blocks_dir.into_inner().write().await;
-
-            let pending = blocks_dir
-                .create_file(
-                    PENDING.to_string(),
-                    ChainBlock::with_txn(null_hash().to_vec(), txn_id),
-                    Some(0),
-                )
-                .map_err(fs::io_err)?;
-
-            let committed = blocks_dir
-                .create_file(
-                    COMMITTED.to_string(),
-                    ChainBlock::new(null_hash().to_vec()),
-                    Some(0),
-                )
-                .map_err(fs::io_err)?;
-
-            (store, pending, committed)
+        let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
+            file
         } else {
-            let store = dir_lock
-                .get_or_create_dir(STORE.into())
-                .map(super::data::Store::new)?;
+            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+            blocks_dir
+                .create_file(PENDING.to_string(), block, Some(0))
+                .map_err(fs::io_err)?
+        };
 
-            let dir = dir.into_inner().read().await;
-            let blocks_dir = dir
-                .get_dir(&BLOCKS.to_string())
-                .ok_or_else(|| TCError::not_found(BLOCKS))?;
-
-            let blocks_dir = blocks_dir.read().await;
-
-            let pending = blocks_dir
-                .get_file(PENDING)
-                .ok_or_else(|| TCError::not_found(PENDING))?;
-
-            let committed = blocks_dir
-                .get_file(COMMITTED)
-                .ok_or_else(|| TCError::not_found(PENDING))?;
-
-            let last_block: FileReadGuard<_, ChainBlock> =
-                committed.read().map_err(fs::io_err).await?;
-
-            for (past_txn_id, mutations) in &last_block.mutations {
-                super::data::replay_all(&subject, past_txn_id, mutations, txn, &store).await?;
-            }
-
-            (store, pending, committed)
+        let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
+            file
+        } else {
+            let block = ChainBlock::new(null_hash().to_vec());
+            blocks_dir
+                .create_file(COMMITTED.to_string(), block, Some(0))
+                .map_err(fs::io_err)?
         };
 
         Ok(SyncChain {

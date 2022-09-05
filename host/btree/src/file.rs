@@ -11,9 +11,9 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
-use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use futures::join;
-use log::debug;
+use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
+use log::{debug, trace};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -242,7 +242,11 @@ where
 
     /// Create a new `BTreeFile`.
     pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
+        debug!("BTreeFile::create");
+
         let mut file_contents = file.write(txn_id).await?;
+        trace!("BTreeFile::create got file write lock");
+
         if !file_contents.is_empty() {
             return Err(TCError::internal(
                 "Tried to create a new BTree without a new File",
@@ -256,6 +260,8 @@ where
         file_contents
             .create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
             .await?;
+
+        assert!(file_contents.contains(&root));
 
         Ok(BTreeFile::new(file, schema, order, root))
     }
@@ -510,6 +516,7 @@ where
     {
         let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        assert!(file.contains(&*root_id));
 
         let root = file.read_block(&*root_id).await?;
         let collator = self.collator().clone();
@@ -595,6 +602,7 @@ where
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        assert!(file.contains(&*root_id));
         let root = file.read_block(&*root_id).await?;
         Ok(root.keys.is_empty())
     }
@@ -627,19 +635,22 @@ where
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() {
             let mut file = self.inner.file.write(txn_id).await?;
-            let mut root = self.inner.root.write(txn_id).await?;
+            let mut root_id = self.inner.root.write(txn_id).await?;
+            assert!(file.contains(&*root_id));
 
             file.truncate().await?;
 
             let node = Node::new(true, None);
             let (new_root_id, _) = file.create_block_unique(node, DEFAULT_BLOCK_SIZE).await?;
-            *root = new_root_id;
+            *root_id = new_root_id;
 
             return Ok(());
         }
 
         let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        assert!(file.contains(&*root_id));
+
         let schema = &self.inner.schema;
 
         Self::_delete_range(&file, schema, self.collator(), (*root_id).clone(), &range).await
@@ -652,6 +663,7 @@ where
         // to prevent getting out of sync in the case of a concurrent insert in the same txn
         let mut file = self.inner.file.write(txn_id).await?;
         let mut root_id = self.inner.root.write(txn_id).await?;
+        assert!(file.contains(&*root_id));
 
         debug!("insert into BTree with root node ID {}", *root_id);
 
@@ -743,13 +755,17 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
 
             if block.parent.is_none() {
                 root = Some(block_id.clone());
-                break;
             }
         }
 
-        let root = root.ok_or_else(|| TCError::internal("BTree corrupted (missing root block)"))?;
+        let root =
+            root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
 
-        Ok(BTreeFile::new(file, schema, order, root))
+        if file_contents.contains(&root) {
+            Ok(BTreeFile::new(file, schema, order, root))
+        } else {
+            Err(TCError::internal("BTree corrupted (missing root block)"))
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use async_hash::hash_try_stream;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
-use log::debug;
+use log::{debug, trace};
 use sha2::digest::Output;
 use sha2::Sha256;
 
@@ -79,7 +79,10 @@ impl SubjectCollection {
         name: Id,
     ) -> TCBoxTryFuture<Self> {
         Box::pin(async move {
+            debug!("SubjectCollection::create {}", schema);
+
             let mut dir = dir.write(txn_id).await?;
+            trace!("SubjectCollection::create got dir write lock");
 
             match schema {
                 #[cfg(feature = "tensor")]
@@ -119,14 +122,20 @@ impl SubjectCollection {
         name: Id,
     ) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
+            debug!("SubjectCollection::load");
+
             let txn_id = *txn.id();
             let container = dir.read(txn_id).await?;
+
+            trace!("SubjectCollection::load got read lock on container dir");
 
             match schema {
                 CollectionSchema::BTree(schema) => {
                     if let Some(file) = container.get_file(&name)? {
+                        trace!("SubjectCollection::load loading BTree from existing file");
                         BTreeFile::load(txn, schema, file).map_ok(Self::BTree).await
                     } else {
+                        trace!("SubjectCollection::load creating new BTree");
                         std::mem::drop(container);
                         Self::create(CollectionSchema::BTree(schema), dir, txn_id, name).await
                     }

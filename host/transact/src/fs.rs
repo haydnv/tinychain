@@ -40,6 +40,9 @@ pub trait FileRead<B: Clone>: Sized + Send + Sync {
     /// Get the set of all [`BlockId`]s in this [`File`].
     fn block_ids(&self) -> HashSet<&BlockId>;
 
+    /// Return `true` if this [`File`] contains the given `block_id`.
+    fn contains(&self, block_id: &BlockId) -> bool;
+
     /// Return `true` if there are no blocks in this [`File`].
     fn is_empty(&self) -> bool;
 

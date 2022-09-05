@@ -1108,6 +1108,7 @@ impl StateVisitor {
                     .subcontext_unique()
                     .map_err(de::Error::custom)
                     .await?;
+
                 let state = access.next_value(txn).await?;
                 ObjectVisitor::new()
                     .visit_map_value(ot, state)

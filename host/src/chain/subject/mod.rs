@@ -7,7 +7,7 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de;
 use futures::future::{join_all, try_join_all, TryFutureExt};
-use log::debug;
+use log::{debug, trace};
 use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
@@ -120,16 +120,22 @@ impl Subject {
         dir: &'a fs::Dir,
     ) -> TCBoxTryFuture<'a, Self> {
         Box::pin(async move {
+            debug!("Subject::load");
+
             let txn_id = *txn.id();
 
             match schema {
                 Schema::Collection(schema) => {
+                    trace!("load collection {}", schema);
+
                     SubjectCollection::load(txn, schema, dir, SUBJECT.into())
                         .map_ok(Self::Collection)
                         .await
                 }
 
                 Schema::Map(schema) if schema.is_empty() => {
+                    trace!("load map {}", schema);
+
                     let mut container = dir.write(txn_id).await?;
                     if let Some(dir) = container.get_dir(&DYNAMIC.into())? {
                         SubjectMap::load(txn, dir).map_ok(Self::Dynamic).await
@@ -139,6 +145,8 @@ impl Subject {
                     }
                 }
                 Schema::Map(schema) => {
+                    trace!("load map {}", schema);
+
                     let mut container = dir.write(txn_id).await?;
                     let mut subjects = Map::new();
 
@@ -157,6 +165,8 @@ impl Subject {
                 }
 
                 Schema::Tuple(schema) => {
+                    trace!("load tuple {}", schema);
+
                     let mut container = dir.write(txn_id).await?;
                     let mut subjects = Vec::with_capacity(schema.len());
 
