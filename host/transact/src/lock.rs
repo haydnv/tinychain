@@ -327,27 +327,6 @@ impl<T> TxnLock<T> {
 }
 
 impl<T: Clone + PartialEq> TxnLock<T> {
-    /// Try to acquire a read lock synchronously, if possible.
-    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
-        let version = {
-            let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
-            if let Some(versions) = lock_state.try_read(&txn_id)? {
-                versions.get(txn_id)
-            } else {
-                return Err(TCError::unsupported(
-                    "could not acquire transactional read lock",
-                ));
-            }
-        };
-
-        version
-            .try_read_owned()
-            .map(|guard| TxnLockReadGuard::new(self.clone(), txn_id, guard))
-            .map_err(|cause| {
-                TCError::bad_request("could not accquire transactional read lock", cause)
-            })
-    }
-
     /// Lock this value for reading.
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
         debug!("read {} at {}", self.inner.name, txn_id);
@@ -374,23 +353,22 @@ impl<T: Clone + PartialEq> TxnLock<T> {
 
     /// Try to acquire a write lock synchronously, if possible.
     pub fn try_write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
+        const ERR: &str = "could not acquire transactional read lock";
+
         let version = {
             let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
-            if let Some(versions) = lock_state.try_read(&txn_id)? {
+            if let Some(versions) = lock_state.try_write(&txn_id)? {
                 versions.get(txn_id)
             } else {
-                return Err(TCError::unsupported(
-                    "could not acquire transactional read lock",
-                ));
+                return Err(TCError::conflict(ERR));
             }
         };
 
-        version
+        let guard = version
             .try_write_owned()
-            .map(|guard| TxnLockWriteGuard::new(self.clone(), txn_id, guard))
-            .map_err(|cause| {
-                TCError::bad_request("could not accquire transactional read lock", cause)
-            })
+            .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
+
+        Ok(TxnLockWriteGuard::new(self.clone(), txn_id, guard))
     }
 
     /// Lock this value for writing.
