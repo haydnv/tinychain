@@ -87,6 +87,9 @@ pub trait FileWrite<B: Clone>: FileRead<B> {
     async fn delete_block(&mut self, name: BlockId) -> TCResult<()>;
 
     /// Delete all of this `File`'s blocks.
+    async fn copy_from<O: FileRead<B>>(&mut self, other: &O, truncate: bool) -> TCResult<()>;
+
+    /// Delete all of this `File`'s blocks.
     async fn truncate(&mut self) -> TCResult<()>;
 }
 
@@ -102,9 +105,6 @@ pub trait File<B: BlockData>: Store + 'static {
         Read = <Self::Read as FileRead<B>>::Read,
         Write = <Self::Read as FileRead<B>>::Write,
     >;
-
-    /// Copy all blocks from the source [`File`] into this [`File`].
-    async fn copy_from(&self, txn_id: TxnId, other: &Self, truncate: bool) -> TCResult<()>;
 
     /// Lock the contents of this file for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;

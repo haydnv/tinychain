@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
-use futures::join;
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
+use futures::{join, try_join};
 use log::{debug, trace};
 use uuid::Uuid;
 
@@ -778,10 +778,20 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T>
             ));
         }
 
-        self.inner
-            .file
-            .copy_from(txn_id, &backup.inner.file, true)
-            .await
+        let (mut file, source) = try_join!(
+            self.inner.file.write(txn_id),
+            backup.inner.file.read(txn_id)
+        )?;
+
+        let (mut root_id, new_root_id) = try_join!(
+            self.inner.root.write(txn_id),
+            backup.inner.root.read(txn_id)
+        )?;
+
+        file.copy_from(&source, true).await?;
+        *root_id = (*new_root_id).clone();
+
+        Ok(())
     }
 }
 

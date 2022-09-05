@@ -138,7 +138,8 @@ impl Persist<fs::Dir> for SyncChain {
         let txn_id = *txn.id();
         let store = {
             let mut dir = dir.write(txn_id).await?;
-            dir.get_or_create_dir(STORE.into()).map(super::data::Store::new)?
+            dir.get_or_create_dir(STORE.into())
+                .map(super::data::Store::new)?
         };
 
         let mut blocks_dir = {

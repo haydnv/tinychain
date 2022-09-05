@@ -665,7 +665,8 @@ where
             ));
         }
 
-        self.file.copy_from(txn_id, &backup.file, false).await
+        let (mut file, backup) = try_join!(self.file.write(txn_id), backup.file.read(txn_id))?;
+        file.copy_from(&backup, false).await
     }
 }
 

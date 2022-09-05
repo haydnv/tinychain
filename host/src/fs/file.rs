@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
-use futures::try_join;
 use log::{debug, trace};
 use safecast::AsType;
 use tokio::sync::RwLock;
@@ -366,6 +365,22 @@ where
         Ok(())
     }
 
+    async fn copy_from<O: FileRead<B>>(&mut self, other: &O, truncate: bool) -> TCResult<()> {
+        if truncate {
+            self.truncate().await?;
+        }
+
+        for block_id in other.block_ids() {
+            // TODO: provide a better size hint
+            other
+                .read_block(block_id)
+                .and_then(|block| self.create_block(block_id.clone(), (*block).clone(), 0))
+                .await?;
+        }
+
+        Ok(())
+    }
+
     async fn truncate(&mut self) -> TCResult<()> {
         let mut version = self.file.version_write(&self.txn_id).await?;
         for block_id in self.listing.drain() {
@@ -527,24 +542,6 @@ where
 {
     type Read = FileReadGuard<B>;
     type Write = FileWriteGuard<B>;
-
-    async fn copy_from(&self, txn_id: TxnId, other: &Self, truncate: bool) -> TCResult<()> {
-        let (mut dest, source) = try_join!(self.write(txn_id), other.read(txn_id))?;
-
-        if truncate {
-            dest.truncate().await?;
-        }
-
-        for block_id in source.block_ids() {
-            // TODO: provide a better size hint
-            source
-                .read_block(block_id)
-                .and_then(|block| dest.create_block(block_id.clone(), (*block).clone(), 0))
-                .await?;
-        }
-
-        Ok(())
-    }
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         debug!("File::read");
