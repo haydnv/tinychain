@@ -296,6 +296,10 @@ where
         size_hint: usize,
     ) -> TCResult<Self::Write> {
         if self.listing.contains(&block_id) {
+            #[cfg(debug_assertions)]
+            panic!("{} already has a block with ID {}", self.file, block_id);
+
+            #[cfg(not(debug_assertions))]
             return Err(TCError::bad_request("block already exists", block_id));
         }
 
@@ -372,10 +376,13 @@ where
 
         for block_id in other.block_ids() {
             // TODO: provide a better size hint
-            other
-                .read_block(block_id)
-                .and_then(|block| self.create_block(block_id.clone(), (*block).clone(), 0))
-                .await?;
+            let block = other.read_block(block_id).map_ok(|b| (*b).clone()).await?;
+            if self.contains(block_id) {
+                let mut dest = self.write_block(block_id).await?;
+                *dest = block;
+            } else {
+                self.create_block(block_id.clone(), block, 0).await?;
+            }
         }
 
         Ok(())
