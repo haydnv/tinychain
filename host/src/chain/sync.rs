@@ -20,9 +20,9 @@ use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
+use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
 
-const BLOCKS: Label = label("blocks.chain_block");
+const BLOCKS: Label = label("blocks");
 const COMMITTED: &str = "committed.chain_block";
 const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
@@ -144,8 +144,10 @@ impl Persist<fs::Dir> for SyncChain {
 
         let mut blocks_dir = {
             let mut dir = dir.write(txn_id).await?;
-            let blocks_dir = dir.get_or_create_dir(BLOCKS.into())?;
-            blocks_dir.into_inner().write().await
+            let file: fs::File<ChainBlock> =
+                dir.get_or_create_file(BLOCKS.into(), ChainType::Sync)?;
+
+            file.into_inner().write().await
         };
 
         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
@@ -259,9 +261,13 @@ impl de::Visitor for ChainVisitor {
             .map(super::data::Store::new)
             .map_err(de::Error::custom)?;
 
-        let blocks_dir = dir.create_dir(BLOCKS.into()).map_err(de::Error::custom)?;
+        let mut blocks_dir = {
+            let file: fs::File<ChainBlock> = dir
+                .create_file(BLOCKS.into(), ChainType::Sync)
+                .map_err(de::Error::custom)?;
 
-        let mut blocks_dir = blocks_dir.into_inner().write().await;
+            file.into_inner().write().await
+        };
 
         let committed = blocks_dir
             .create_file(

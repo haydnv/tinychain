@@ -441,6 +441,9 @@ where
 
     pub(super) async fn load(canon: freqfs::DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
         let mut fs_dir = canon.write().await;
+
+        debug!("File::load {:?}", &*fs_dir);
+
         let versions = fs_dir
             .get_or_create_dir(VERSION.to_string())
             .map_err(io_err)?;
@@ -507,6 +510,10 @@ where
             modified: Arc::new(RwLock::new(blocks)),
             phantom: Default::default(),
         })
+    }
+
+    pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
+        self.canon
     }
 
     async fn version(&self, txn_id: &TxnId) -> TCResult<freqfs::DirLock<CacheBlock>> {

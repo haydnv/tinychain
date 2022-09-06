@@ -201,6 +201,22 @@ pub trait DirWrite: DirRead {
             self.create_dir(name)
         }
     }
+
+    /// Get the [`File`] with the given `name` and create a new one if none exists.
+    fn get_or_create_file<C, F, B>(&mut self, name: PathSegment, class: C) -> TCResult<F>
+    where
+        Self::FileClass: From<C>,
+        Self::FileEntry: AsType<F>,
+        C: Copy + Send + fmt::Display,
+        B: BlockData,
+        F: File<B>,
+    {
+        if let Some(file) = self.get_file(&name)? {
+            Ok(file)
+        } else {
+            self.create_file(name, class)
+        }
+    }
 }
 
 /// A transactional directory
