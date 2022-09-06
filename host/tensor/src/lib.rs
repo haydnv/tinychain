@@ -44,7 +44,7 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 pub const EXT: &str = "array";
 
 /// The schema of a [`Tensor`]
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     pub shape: Shape,
     pub dtype: NumberType,

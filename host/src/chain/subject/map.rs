@@ -10,7 +10,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use futures::TryStreamExt;
 use futures::{join, try_join};
 use log::{debug, warn};
-use safecast::{CastFrom, CastInto, TryCastInto};
+use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
@@ -24,7 +24,7 @@ use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
 use crate::collection::Collection;
 use crate::fs;
 use crate::fs::FileReadGuard;
-use crate::scalar::{Scalar, ScalarType};
+use crate::scalar::{Scalar, ScalarType, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -368,10 +368,15 @@ async fn put(
 
     if schema.contains(&id) {
         let block = schema.read_block(&id).await?;
-        if &*block != &collection.schema().cast_into() {
+        let tc_ref = TCRef::try_cast_from((*block).clone(), |block| {
+            TCError::internal(format!("bad schema for subject map collection: {}", block))
+        })?;
+
+        let actual = CollectionSchema::from_scalar(tc_ref)?;
+        if collection.schema() != actual {
             return Err(TCError::unsupported(format!(
-                "cannot change schema of {} from {}",
-                collection, &*block
+                "cannot change schema of {} from {} to {}",
+                collection, collection, actual
             )));
         }
     } else {
