@@ -85,7 +85,7 @@ impl<T> Drop for TxnLockReadGuard<T> {
             .expect("TxnLockReadGuard::drop");
 
         if let Some(writer) = &lock_state.writer {
-            assert!(writer < &self.txn_id);
+            assert_ne!(writer, &self.txn_id);
         }
 
         let num_readers = lock_state
@@ -150,10 +150,6 @@ impl<T: Clone + PartialEq> Drop for TxnLockWriteGuard<T> {
 
         if let Some(readers) = lock_state.readers.get(&self.txn_id) {
             assert_eq!(readers, &0);
-        }
-
-        if &lock_state.versions.canon == self.guard.deref() {
-            lock_state.pending_writes.remove(&self.txn_id);
         }
 
         lock_state.writer = None;

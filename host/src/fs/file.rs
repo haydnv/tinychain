@@ -41,8 +41,8 @@ impl<B> Deref for BlockReadGuard<B> {
 
 pub struct BlockWriteGuard<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
+    #[allow(unused)]
     modified: TxnLockWriteGuard<TxnId>,
-    txn_id: TxnId,
 }
 
 impl<B> Deref for BlockWriteGuard<B> {
@@ -55,7 +55,6 @@ impl<B> Deref for BlockWriteGuard<B> {
 
 impl<B> DerefMut for BlockWriteGuard<B> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        (*self.modified) = self.txn_id;
         self.cache.deref_mut()
     }
 }
@@ -204,7 +203,7 @@ where
 
         trace!("locking block {} for writing at {}...", block_id, txn_id);
 
-        let modified = {
+        let mut modified = {
             {
                 let block = {
                     let blocks = self.file.modified.read().await;
@@ -220,6 +219,7 @@ where
         };
 
         trace!("block {} was last modified at {}...", block_id, *modified);
+        (*modified) = self.txn_id;
 
         let name = file_name::<B>(block_id);
 
@@ -231,11 +231,7 @@ where
             trace!("block {} already has a version at {}", block_id, txn_id);
 
             let cache = block.write().map_err(io_err).await?;
-            let guard = BlockWriteGuard {
-                cache,
-                modified,
-                txn_id,
-            };
+            let guard = BlockWriteGuard { cache, modified };
 
             trace!("locked block {} for writing at {}", block_id, txn_id);
 
@@ -270,11 +266,7 @@ where
             .await??;
 
         let cache = block.write().map_err(io_err).await?;
-        let guard = BlockWriteGuard {
-            cache,
-            modified,
-            txn_id,
-        };
+        let guard = BlockWriteGuard { cache, modified };
 
         trace!("locked block {} for writing at {}", block_id, txn_id);
 
@@ -325,11 +317,7 @@ where
 
         block
             .write()
-            .map_ok(move |cache| BlockWriteGuard {
-                cache,
-                modified,
-                txn_id,
-            })
+            .map_ok(move |cache| BlockWriteGuard { cache, modified })
             .map_err(io_err)
             .await
     }
