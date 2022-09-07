@@ -1,3 +1,5 @@
+import shutil
+
 import aiohttp
 import argparse
 import asyncio
@@ -12,6 +14,8 @@ from .process import start_local_host
 
 DEFAULT_CACHE_SIZE = "8G"
 DEFAULT_CONCURRENCY = 5
+WORKSPACE = "/tmp/tc/tmp"
+
 BACKOFF = 0.01
 TIMEOUT = aiohttp.ClientTimeout(total=86400)
 
@@ -127,6 +131,7 @@ async def main(benchmarks):
     parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
     parser.add_argument('--cache_size', type=str, default=DEFAULT_CACHE_SIZE, help="host cache size")
     parser.add_argument('--concurrency', type=int, default=DEFAULT_CONCURRENCY, help="concurrent batch size")
+    parser.add_argument('--workspace', type=str, default=WORKSPACE, help="workspace directory")
     parser.add_argument(
         '--num_users', type=int, nargs='+', action='append',
         help="number of unique users to simulate (repeat this flag for multiple runs)")
@@ -137,6 +142,10 @@ async def main(benchmarks):
     scales = [n for [n] in args.num_users] if args.num_users else None
     concurrency = args.concurrency
     cache_size = args.cache_size
+    workspace = args.workspace
+
+    # clean the workspace before running any benchmarks
+    shutil.rmtree(WORKSPACE)
 
     for benchmark in benchmarks:
         print(f"running {benchmark}")
@@ -145,7 +154,7 @@ async def main(benchmarks):
         for test in benchmark:
             if pattern is None or pattern in test.__name__:
                 if not started:
-                    benchmark.start(cache_size=cache_size)
+                    benchmark.start(cache_size=cache_size, workspace=workspace)
                     started = True
                     print()
 
@@ -156,3 +165,5 @@ async def main(benchmarks):
 
         if started:
             benchmark.stop()
+            # clean the workspace again after running a benchmark
+            shutil.rmtree(WORKSPACE)
