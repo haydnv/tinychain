@@ -190,7 +190,8 @@ class ReplicationBenchmarks(benchmark.Benchmark):
             port = default_port + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}/")
             host = start_local_host(
-                "benchmark_load", DataStructures(tc.chain.Block), overwrite=True, host_uri=host_uri, **flags)
+                "benchmark_load", DataStructures(tc.chain.Block),
+                overwrite=True, host_uri=host_uri, wait_time=5, **flags)
 
             self.hosts.append(benchmark.Host(host))
 

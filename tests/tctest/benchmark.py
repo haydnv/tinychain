@@ -10,6 +10,7 @@ import tinychain as tc
 
 from .process import start_local_host
 
+DEFAULT_CACHE_SIZE = "8G"
 DEFAULT_CONCURRENCY = 5
 BACKOFF = 0.01
 TIMEOUT = aiohttp.ClientTimeout(total=86400)
@@ -124,11 +125,11 @@ async def main(benchmarks):
 
     parser = argparse.ArgumentParser(description="Run benchmarks")
     parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
-    parser.add_argument('--cache_size', type=str, default="2G", help="host cache size")
-    parser.add_argument('--concurrency', type=int, default=1, help="batch size for concurrent requests")
+    parser.add_argument('--cache_size', type=str, default=DEFAULT_CACHE_SIZE, help="host cache size")
+    parser.add_argument('--concurrency', type=int, default=DEFAULT_CONCURRENCY, help="concurrent batch size")
     parser.add_argument(
         '--num_users', type=int, nargs='+', action='append',
-        help="number of unique users to simulate (this flag can be repeated)")
+        help="number of unique users to simulate (repeat this flag for multiple runs)")
 
     args = parser.parse_args()
 
