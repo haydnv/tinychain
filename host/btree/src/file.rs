@@ -318,7 +318,7 @@ where
         order: usize,
         collator: &ValueCollator,
         txn_id: TxnId,
-        mut node: F::BlockWrite,
+        node: F::BlockReadExclusive,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
@@ -328,6 +328,7 @@ where
             debug!("insert at index {} into {}", i, *node);
 
             if node.leaf {
+                let mut node = node.upgrade();
                 let key = NodeKey::new(key);
                 #[cfg(debug_assertions)]
                 debug!("insert key {} into {} at {}", key, *node, i);
@@ -351,10 +352,12 @@ where
             } else {
                 let child_id = node.children[i].clone();
                 debug!("locking child node {} for writing...", child_id);
-                let child = file.write_block(&child_id).await?;
+                let child = file.read_block_exclusive(&child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
                     let file = file.upgrade();
+                    let node = node.upgrade();
+                    let child = child.upgrade();
                     let child_id = node.children[i].clone();
                     let (file, mut node) =
                         Self::split_child(order, file, node, child_id, child, i).await?;
@@ -362,6 +365,7 @@ where
                     let file = file.downgrade();
                     match collator.compare_slice(&key, &node.keys[i]) {
                         Ordering::Less => {
+                            let node = node.downgrade();
                             Self::_insert(file, order, collator, txn_id, node, key).await
                         }
                         Ordering::Equal => {
@@ -373,7 +377,7 @@ where
                         }
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
-                            let child = file.write_block(&child_id).await?;
+                            let child = file.read_block_exclusive(&child_id).await?;
                             Self::_insert(file, order, collator, txn_id, child, key).await
                         }
                     }
@@ -669,7 +673,7 @@ where
 
         let order = self.inner.order;
 
-        let root = file.write_block(&*root_id).await?;
+        let root = file.read_block_exclusive(&*root_id).await?;
 
         #[cfg(debug_assertions)]
         debug!(
@@ -691,6 +695,7 @@ where
 
             let mut file = file.upgrade();
             let mut root_id = root_id.upgrade();
+            let root = root.upgrade();
 
             let old_root_id = (*root_id).clone();
 
@@ -707,6 +712,7 @@ where
                 Self::split_child(self.inner.order, file, new_root, old_root_id, root, 0).await?;
 
             let file = file.downgrade();
+            let new_root = new_root.downgrade();
             Self::_insert(file, order, self.collator(), txn_id, new_root, key).await
         } else {
             Self::_insert(file, order, self.collator(), txn_id, root, key).await

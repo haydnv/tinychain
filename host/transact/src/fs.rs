@@ -13,10 +13,10 @@ use tcgeneric::{Id, PathSegment};
 
 use super::{Transaction, TxnId};
 
-/// An alias for [`Id`] used for code clarity.
+/// An alias for [`Id`] used for code clarity
 pub type BlockId = PathSegment;
 
-/// The data contained by a single block on the filesystem.
+/// The data contained by a single block on the filesystem
 pub trait BlockData: Clone + Send + Sync + 'static {
     fn ext() -> &'static str;
 }
@@ -26,6 +26,25 @@ impl BlockData for afarray::Array {
     fn ext() -> &'static str {
         "array"
     }
+}
+
+/// A read lock on a block
+pub trait BlockRead<B: BlockData>: Deref<Target = B> + Send {}
+
+/// An exclusive read lock on a block
+pub trait BlockReadExclusive<B: BlockData>: Deref<Target = B> + Send {
+    /// The type of [`File`] that this block is part of
+    type File: File<B>;
+
+    fn upgrade(self) -> <Self::File as File<B>>::BlockWrite;
+}
+
+/// A write lock on a block
+pub trait BlockWrite<B: BlockData>: DerefMut<Target = B> + Send {
+    /// The type of [`File`] that this block is part of
+    type File: File<B>;
+
+    fn downgrade(self) -> <Self::File as File<B>>::BlockReadExclusive;
 }
 
 /// A read lock on a [`File`]
@@ -45,6 +64,15 @@ pub trait FileRead<B: BlockData>: Sized + Send + Sync {
 
     /// Lock the block at `name` for reading.
     async fn read_block<I>(&self, name: I) -> TCResult<<Self::File as File<B>>::BlockRead>
+    where
+        I: Borrow<BlockId> + Send + Sync;
+
+    /// Lock the block at `name` for reading exclusively,
+    /// i.e. prevent any more read locks being aquired while this one is active.
+    async fn read_block_exclusive<I>(
+        &self,
+        name: I,
+    ) -> TCResult<<Self::File as File<B>>::BlockReadExclusive>
     where
         I: Borrow<BlockId> + Send + Sync;
 
@@ -112,10 +140,13 @@ pub trait File<B: BlockData>: Store + 'static {
     type Write: FileWrite<B, File = Self>;
 
     /// A read lock on a block in this file.
-    type BlockRead: Deref<Target = B> + Send;
+    type BlockRead: BlockRead<B>;
+
+    /// An exclusive read lock on a block in this file.
+    type BlockReadExclusive: BlockReadExclusive<B, File = Self>;
 
     /// A write lock on a block in this file.
-    type BlockWrite: DerefMut<Target = B> + Send;
+    type BlockWrite: BlockWrite<B, File = Self>;
 
     /// Lock the contents of this file for reading at the given `txn_id`.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;

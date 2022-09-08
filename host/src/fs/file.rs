@@ -15,7 +15,10 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, FileRead, FileReadExclusive, FileWrite, Store};
+use tc_transact::fs::{
+    BlockData, BlockId, BlockRead, BlockReadExclusive, BlockWrite, FileRead, FileReadExclusive,
+    FileWrite, Store,
+};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 
@@ -40,6 +43,36 @@ impl<B> Deref for BlockReadGuard<B> {
     }
 }
 
+impl<B: BlockData> BlockRead<B> for BlockReadGuard<B> {}
+
+pub struct BlockReadGuardExclusive<B> {
+    cache: freqfs::FileWriteGuard<CacheBlock, B>,
+    #[allow(unused)]
+    modified: TxnLockReadGuardExclusive<TxnId>,
+}
+
+impl<B> Deref for BlockReadGuardExclusive<B> {
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+impl<B: BlockData> BlockReadExclusive<B> for BlockReadGuardExclusive<B>
+where
+    CacheBlock: AsType<B>,
+{
+    type File = File<B>;
+
+    fn upgrade(self) -> <Self::File as tc_transact::fs::File<B>>::BlockWrite {
+        BlockWriteGuard {
+            cache: self.cache,
+            modified: self.modified.upgrade(),
+        }
+    }
+}
+
 pub struct BlockWriteGuard<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     #[allow(unused)]
@@ -57,6 +90,20 @@ impl<B> Deref for BlockWriteGuard<B> {
 impl<B> DerefMut for BlockWriteGuard<B> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cache.deref_mut()
+    }
+}
+
+impl<B: BlockData> BlockWrite<B> for BlockWriteGuard<B>
+where
+    CacheBlock: AsType<B>,
+{
+    type File = File<B>;
+
+    fn downgrade(self) -> <Self::File as tc_transact::fs::File<B>>::BlockReadExclusive {
+        BlockReadGuardExclusive {
+            cache: self.cache,
+            modified: self.modified.downgrade(),
+        }
     }
 }
 
@@ -183,6 +230,106 @@ where
         let cache = block.read().map_err(io_err).await?;
         trace!("locked block {} for reading...", block_id);
         Ok(BlockReadGuard { cache, modified })
+    }
+
+    async fn read_block_exclusive<I>(
+        &self,
+        block_id: I,
+    ) -> TCResult<<Self::File as tc_transact::fs::File<B>>::BlockReadExclusive>
+    where
+        I: Borrow<BlockId> + Send + Sync,
+    {
+        let block_id = block_id.borrow();
+
+        if !self.listing.contains(block_id) {
+            #[cfg(debug_assertions)]
+            panic!("{} is missing block: {}", self.file, block_id);
+
+            #[cfg(not(debug_assertions))]
+            return Err(TCError::not_found(block_id));
+        }
+
+        trace!("locking block {} for reading...", block_id);
+
+        let modified = {
+            let block = {
+                let modified = self.file.modified.read().await;
+                modified
+                    .get(block_id)
+                    .expect("block last mutation ID")
+                    .clone()
+            };
+
+            block.read_exclusive(self.txn_id).await?
+        };
+
+        let name = file_name::<B>(block_id);
+        if let Some(block) = self
+            .file
+            .with_version_read(&self.txn_id, |version| version.get_file(&name))
+            .await?
+        {
+            trace!(
+                "block {} already has a version at {}",
+                block_id,
+                self.txn_id
+            );
+
+            let cache = block.write().map_err(io_err).await?;
+            let guard = BlockReadGuardExclusive { cache, modified };
+
+            trace!("locked block {} for writing at {}", block_id, self.txn_id);
+
+            return Ok(guard);
+        } else {
+            trace!(
+                "creating new version of block {} at {}...",
+                block_id,
+                self.txn_id
+            );
+        }
+
+        assert!(*modified < self.txn_id);
+
+        let (size_hint, value) = {
+            let block_version = self
+                .file
+                .with_version_read(&modified, |version| version.get_file(&name))
+                .await?
+                .expect("block prior value");
+
+            let size_hint = block_version.size_hint().await;
+
+            let value = {
+                let value = block_version.read().map_err(io_err).await?;
+                B::clone(&*value)
+            };
+
+            trace!(
+                "got canonical version of block {} to copy at {}...",
+                block_id,
+                self.txn_id
+            );
+
+            (size_hint, value)
+        };
+
+        let block = self
+            .file
+            .with_version_write(&self.txn_id, |mut version| {
+                version.create_file(name, value, size_hint).map_err(io_err)
+            })
+            .await??;
+
+        trace!(
+            "created new version of block {} at {}",
+            block_id,
+            self.txn_id
+        );
+
+        let cache = block.write().map_err(io_err).await?;
+        trace!("locked block {} for reading...", block_id);
+        Ok(BlockReadGuardExclusive { cache, modified })
     }
 
     async fn write_block<I>(&self, block_id: I) -> TCResult<BlockWriteGuard<B>>
@@ -567,6 +714,7 @@ where
     type ReadExclusive = FileReadGuardExclusive<B>;
     type Write = FileWriteGuard<B>;
     type BlockRead = BlockReadGuard<B>;
+    type BlockReadExclusive = BlockReadGuardExclusive<B>;
     type BlockWrite = BlockWriteGuard<B>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
