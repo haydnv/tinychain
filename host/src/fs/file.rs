@@ -47,6 +47,7 @@ impl<B: BlockData> BlockRead<B> for BlockReadGuard<B> {}
 
 pub struct BlockReadGuardExclusive<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
+    txn_id: TxnId,
     #[allow(unused)]
     modified: TxnLockReadGuardExclusive<TxnId>,
 }
@@ -66,16 +67,21 @@ where
     type File = File<B>;
 
     fn upgrade(self) -> <Self::File as tc_transact::fs::File<B>>::BlockWrite {
+        let mut modified = self.modified.upgrade();
+        assert!(*modified <= self.txn_id);
+        *modified = self.txn_id;
+
         BlockWriteGuard {
             cache: self.cache,
-            modified: self.modified.upgrade(),
+            txn_id: self.txn_id,
+            modified,
         }
     }
 }
 
 pub struct BlockWriteGuard<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
-    #[allow(unused)]
+    txn_id: TxnId,
     modified: TxnLockWriteGuard<TxnId>,
 }
 
@@ -102,6 +108,7 @@ where
     fn downgrade(self) -> <Self::File as tc_transact::fs::File<B>>::BlockReadExclusive {
         BlockReadGuardExclusive {
             cache: self.cache,
+            txn_id: self.txn_id,
             modified: self.modified.downgrade(),
         }
     }
@@ -251,17 +258,24 @@ where
         I: Borrow<BlockId> + Send + Sync,
     {
         let block_id = block_id.borrow();
+        let txn_id = self.txn_id;
+
         debug!("FileGuard::read_block {}", block_id);
 
         let modified = {
             let modified = self.last_modified(block_id).await?;
-            modified.read_exclusive(self.txn_id).await?
+            modified.read_exclusive(txn_id).await?
         };
 
         let block = self.block_version(&modified, block_id).await?;
         let cache = block.write().map_err(io_err).await?;
         trace!("locked block {} for reading...", block_id);
-        Ok(BlockReadGuardExclusive { cache, modified })
+
+        Ok(BlockReadGuardExclusive {
+            cache,
+            txn_id,
+            modified,
+        })
     }
 
     async fn write_block<I>(&self, block_id: I) -> TCResult<BlockWriteGuard<B>>
@@ -289,7 +303,11 @@ where
             trace!("block {} already has a version at {}", block_id, txn_id);
 
             let cache = block.write().map_err(io_err).await?;
-            let guard = BlockWriteGuard { cache, modified };
+            let guard = BlockWriteGuard {
+                cache,
+                txn_id,
+                modified,
+            };
 
             trace!("locked block {} for writing at {}", block_id, txn_id);
 
@@ -324,7 +342,11 @@ where
             .await??;
 
         let cache = block.write().map_err(io_err).await?;
-        let guard = BlockWriteGuard { cache, modified };
+        let guard = BlockWriteGuard {
+            cache,
+            txn_id,
+            modified,
+        };
 
         trace!("locked block {} for writing at {}", block_id, txn_id);
 
@@ -396,7 +418,11 @@ where
 
         block
             .write()
-            .map_ok(move |cache| BlockWriteGuard { cache, modified })
+            .map_ok(move |cache| BlockWriteGuard {
+                cache,
+                txn_id,
+                modified,
+            })
             .map_err(io_err)
             .await
     }
