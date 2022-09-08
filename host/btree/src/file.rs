@@ -314,11 +314,11 @@ where
     }
 
     fn _insert(
-        file: F::Write,
+        file: F::ReadExclusive,
         order: usize,
         collator: &ValueCollator,
         txn_id: TxnId,
-        mut node: <F::Read as FileRead<Node>>::Write,
+        mut node: F::BlockWrite,
         key: Key,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
@@ -354,10 +354,12 @@ where
                 let child = file.write_block(&child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
+                    let file = file.upgrade();
                     let child_id = node.children[i].clone();
                     let (file, mut node) =
                         Self::split_child(order, file, node, child_id, child, i).await?;
 
+                    let file = file.downgrade();
                     match collator.compare_slice(&key, &node.keys[i]) {
                         Ordering::Less => {
                             Self::_insert(file, order, collator, txn_id, node, key).await
@@ -531,11 +533,11 @@ where
     async fn split_child(
         order: usize,
         mut file: F::Write,
-        mut node: <F::Read as FileRead<Node>>::Write,
+        mut node: F::BlockWrite,
         node_id: NodeId,
-        mut child: <F::Read as FileRead<Node>>::Write,
+        mut child: F::BlockWrite,
         i: usize,
-    ) -> TCResult<(F::Write, <F::Read as FileRead<Node>>::Write)> {
+    ) -> TCResult<(F::Write, F::BlockWrite)> {
         debug!("BTree::split_child");
 
         assert_eq!(node_id, node.children[i].clone());
@@ -659,9 +661,7 @@ where
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = self.validate_key(key)?;
 
-        // get a write lock on the root_id while we check if a split_child is needed,
-        // to prevent getting out of sync in the case of a concurrent insert in the same txn
-        let mut file = self.inner.file.write(txn_id).await?;
+        let file = self.inner.file.read_exclusive(txn_id).await?;
         let root_id = self.inner.root.read_exclusive(txn_id).await?;
         assert!(file.contains(&*root_id));
 
@@ -689,6 +689,7 @@ where
         if root.keys.len() == (2 * order) - 1 {
             debug!("split root node");
 
+            let mut file = file.upgrade();
             let mut root_id = root_id.upgrade();
 
             let old_root_id = (*root_id).clone();
@@ -705,6 +706,7 @@ where
             let (file, new_root) =
                 Self::split_child(self.inner.order, file, new_root, old_root_id, root, 0).await?;
 
+            let file = file.downgrade();
             Self::_insert(file, order, self.collator(), txn_id, new_root, key).await
         } else {
             Self::_insert(file, order, self.collator(), txn_id, root, key).await

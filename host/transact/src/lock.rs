@@ -136,6 +136,29 @@ pub struct TxnLockWriteGuard<T: Clone + PartialEq> {
     lock: TxnLock<T>,
     txn_id: TxnId,
     guard: OwnedRwLockWriteGuard<T>,
+    pending_downgrade: bool,
+}
+
+impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
+    fn new(lock: TxnLock<T>, txn_id: TxnId, guard: OwnedRwLockWriteGuard<T>) -> Self {
+        Self {
+            lock,
+            txn_id,
+            guard,
+            pending_downgrade: false,
+        }
+    }
+
+    pub fn downgrade(mut self) -> TxnLockReadGuardExclusive<T> {
+        let lock = self.lock.clone();
+        let txn_id = self.txn_id;
+
+        self.pending_downgrade = true;
+        std::mem::drop(self);
+
+        lock.try_read_exclusive(txn_id)
+            .expect("downgrade write lock")
+    }
 }
 
 impl<T: Clone + PartialEq> Deref for TxnLockWriteGuard<T> {
@@ -156,20 +179,24 @@ impl<T: Clone + PartialEq> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         trace!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
 
-        let mut lock_state = self
-            .lock
-            .inner
-            .state
-            .lock()
-            .expect("TxnLockWriteGuard::drop");
+        {
+            let mut lock_state = self
+                .lock
+                .inner
+                .state
+                .lock()
+                .expect("TxnLockWriteGuard::drop");
 
-        if let Some(readers) = lock_state.readers.get(&self.txn_id) {
-            assert_eq!(readers, &0);
+            if let Some(readers) = lock_state.readers.get(&self.txn_id) {
+                assert_eq!(readers, &0);
+            }
+
+            lock_state.writer = None;
         }
 
-        lock_state.writer = None;
-
-        self.lock.wake();
+        if !self.pending_downgrade {
+            self.lock.wake();
+        }
     }
 }
 
@@ -414,7 +441,7 @@ impl<T> TxnLock<T> {
 impl<T: Clone + PartialEq> TxnLock<T> {
     /// Lock this value for reading at the given `txn_id`.
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
-        debug!("locking {} for reading at {}...", self.inner.name, txn_id);
+        debug!("lock {} to read at {}...", self.inner.name, txn_id);
 
         let version = {
             let mut rx = self.inner.tx.subscribe();
@@ -445,7 +472,10 @@ impl<T: Clone + PartialEq> TxnLock<T> {
 
     /// Lock this value exclusively for reading at the given `txn_id`.
     pub async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuardExclusive<T>> {
-        debug!("locking {} for reading at {}...", self.inner.name, txn_id);
+        debug!(
+            "lock {} exclusively to read at {}...",
+            self.inner.name, txn_id
+        );
 
         let version = {
             let mut rx = self.inner.tx.subscribe();
@@ -475,6 +505,39 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         Ok(guard)
     }
 
+    /// Lock this value exclusively for reading at the given `txn_id`, if possible.
+    pub fn try_read_exclusive(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuardExclusive<T>> {
+        debug!(
+            "try to lock {} exclusively to read at {}...",
+            self.inner.name, txn_id
+        );
+
+        const ERR: &str = "could not acquire transactional exclusive-read lock";
+
+        let version = {
+            let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+            if let Some(version) = lock_state.try_read(&txn_id, true)? {
+                Ok(version)
+            } else {
+                Err(TCError::conflict(ERR))
+            }
+        }?;
+
+        let guard = version
+            .try_write_owned()
+            .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
+
+        let guard = TxnLockReadGuardExclusive {
+            lock: self.clone(),
+            txn_id,
+            guard,
+            pending_upgrade: false,
+        };
+
+        debug!("locked {} for reading at {}", self.inner.name, txn_id);
+        Ok(guard)
+    }
+
     /// Try to acquire a write lock synchronously, if possible.
     pub fn try_write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
         const ERR: &str = "could not acquire transactional read lock";
@@ -492,11 +555,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
             .try_write_owned()
             .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
 
-        Ok(TxnLockWriteGuard {
-            lock: self.clone(),
-            txn_id,
-            guard,
-        })
+        Ok(TxnLockWriteGuard::new(self.clone(), txn_id, guard))
     }
 
     /// Lock this value for writing.
@@ -520,11 +579,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         };
 
         let guard = version.write_owned().await;
-        let guard = TxnLockWriteGuard {
-            lock: self.clone(),
-            txn_id,
-            guard,
-        };
+        let guard = TxnLockWriteGuard::new(self.clone(), txn_id, guard);
 
         debug!("locked {} for writing at {}", self.inner.name, txn_id);
         Ok(guard)

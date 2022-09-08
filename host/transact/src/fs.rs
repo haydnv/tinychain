@@ -30,12 +30,9 @@ impl BlockData for afarray::Array {
 
 /// A read lock on a [`File`]
 #[async_trait]
-pub trait FileRead<B: Clone>: Sized + Send + Sync {
-    /// A read lock on a block in this file.
-    type Read: Deref<Target = B> + Send;
-
-    /// A write lock on a block in this file.
-    type Write: DerefMut<Target = B> + Send;
+pub trait FileRead<B: BlockData>: Sized + Send + Sync {
+    /// The type of this [`File`]
+    type File: File<B>;
 
     /// Get the set of all [`BlockId`]s in this [`File`].
     fn block_ids(&self) -> HashSet<&BlockId>;
@@ -47,12 +44,12 @@ pub trait FileRead<B: Clone>: Sized + Send + Sync {
     fn is_empty(&self) -> bool;
 
     /// Lock the block at `name` for reading.
-    async fn read_block<I>(&self, name: I) -> TCResult<Self::Read>
+    async fn read_block<I>(&self, name: I) -> TCResult<<Self::File as File<B>>::BlockRead>
     where
         I: Borrow<BlockId> + Send + Sync;
 
     /// Lock the block at `name` for reading, without borrowing.
-    async fn read_block_owned<I>(self, name: I) -> TCResult<Self::Read>
+    async fn read_block_owned<I>(self, name: I) -> TCResult<<Self::File as File<B>>::BlockRead>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
@@ -60,28 +57,37 @@ pub trait FileRead<B: Clone>: Sized + Send + Sync {
     }
 
     /// Convenience method to lock the block at `name` for writing.
-    async fn write_block<I>(&self, name: I) -> TCResult<Self::Write>
+    async fn write_block<I>(&self, name: I) -> TCResult<<Self::File as File<B>>::BlockWrite>
     where
         I: Borrow<BlockId> + Send + Sync;
 }
 
+/// An exclusive read lock on a [`File`]
+pub trait FileReadExclusive<B: BlockData>: FileRead<B> {
+    /// Upgrade this read lock to a write lock
+    fn upgrade(self) -> <Self::File as File<B>>::Write;
+}
+
 /// A write lock on a [`File`]
 #[async_trait]
-pub trait FileWrite<B: Clone>: FileRead<B> {
+pub trait FileWrite<B: BlockData>: FileRead<B> {
+    /// Downgrade this write lock to an exclusive read lock.
+    fn downgrade(self) -> <Self::File as File<B>>::ReadExclusive;
+
     /// Create a new block.
     async fn create_block(
         &mut self,
         name: BlockId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<Self::Write>;
+    ) -> TCResult<<Self::File as File<B>>::BlockWrite>;
 
     /// Create a new block.
     async fn create_block_unique(
         &mut self,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(BlockId, Self::Write)>;
+    ) -> TCResult<(BlockId, <Self::File as File<B>>::BlockWrite)>;
 
     /// Delete the block with the given ID.
     async fn delete_block(&mut self, name: BlockId) -> TCResult<()>;
@@ -97,27 +103,32 @@ pub trait FileWrite<B: Clone>: FileRead<B> {
 #[async_trait]
 pub trait File<B: BlockData>: Store + 'static {
     /// The type of read guard used by this `File`
-    type Read: FileRead<B> + Clone;
+    type Read: FileRead<B, File = Self> + Clone;
+
+    /// The type of exclusive read guard used by this `File`
+    type ReadExclusive: FileReadExclusive<B, File = Self>;
 
     /// The type of write guard used by this `File`
-    type Write: FileWrite<
-        B,
-        Read = <Self::Read as FileRead<B>>::Read,
-        Write = <Self::Read as FileRead<B>>::Write,
-    >;
+    type Write: FileWrite<B, File = Self>;
 
-    /// Lock the contents of this file for reading.
+    /// A read lock on a block in this file.
+    type BlockRead: Deref<Target = B> + Send;
+
+    /// A write lock on a block in this file.
+    type BlockWrite: DerefMut<Target = B> + Send;
+
+    /// Lock the contents of this file for reading at the given `txn_id`.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
+
+    /// Lock the contents of this file for reading at the given `txn_id`, exclusively,
+    /// i.e. don't allow any more read locks while this one is active.
+    async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<Self::ReadExclusive>;
 
     /// Lock the contents of this file for writing.
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
 
     /// Convenience method to lock the block at `name` for reading.
-    async fn read_block<I>(
-        &self,
-        txn_id: TxnId,
-        name: I,
-    ) -> TCResult<<Self::Read as FileRead<B>>::Read>
+    async fn read_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockRead>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
@@ -126,11 +137,7 @@ pub trait File<B: BlockData>: Store + 'static {
     }
 
     /// Convenience method to lock the block at `name` for writing.
-    async fn write_block<I>(
-        &self,
-        txn_id: TxnId,
-        name: I,
-    ) -> TCResult<<Self::Read as FileRead<B>>::Write>
+    async fn write_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockWrite>
     where
         I: Borrow<BlockId> + Send + Sync,
     {

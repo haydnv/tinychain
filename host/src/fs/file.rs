@@ -15,14 +15,15 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, BlockId, FileRead, FileWrite, Store};
-use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
+use tc_transact::fs::{BlockData, BlockId, FileRead, FileReadExclusive, FileWrite, Store};
+use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
 use tc_transact::{Transact, TxnId};
 
 use super::{io_err, CacheBlock, VERSION};
 
 type Listing = HashSet<BlockId>;
 pub type FileReadGuard<B> = FileGuard<B, TxnLockReadGuard<Listing>>;
+pub type FileReadGuardExclusive<B> = FileGuard<B, TxnLockReadGuardExclusive<Listing>>;
 pub type FileWriteGuard<B> = FileGuard<B, TxnLockWriteGuard<Listing>>;
 
 pub struct BlockReadGuard<B> {
@@ -73,8 +74,7 @@ where
     L: Deref<Target = Listing> + Send + Sync,
     CacheBlock: AsType<B>,
 {
-    type Read = BlockReadGuard<B>;
-    type Write = BlockWriteGuard<B>;
+    type File = File<B>;
 
     fn block_ids(&self) -> HashSet<&BlockId> {
         self.listing.iter().collect()
@@ -88,7 +88,7 @@ where
         self.listing.is_empty()
     }
 
-    async fn read_block<I>(&self, block_id: I) -> TCResult<Self::Read>
+    async fn read_block<I>(&self, block_id: I) -> TCResult<BlockReadGuard<B>>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
@@ -185,7 +185,7 @@ where
         Ok(BlockReadGuard { cache, modified })
     }
 
-    async fn write_block<I>(&self, block_id: I) -> TCResult<Self::Write>
+    async fn write_block<I>(&self, block_id: I) -> TCResult<BlockWriteGuard<B>>
     where
         I: Borrow<BlockId> + Send + Sync,
     {
@@ -274,19 +274,40 @@ where
     }
 }
 
-#[async_trait]
-impl<B, L> FileWrite<B> for FileGuard<B, L>
+impl<B> FileReadExclusive<B> for FileReadGuardExclusive<B>
 where
     B: BlockData,
-    L: DerefMut<Target = Listing> + Send + Sync,
     CacheBlock: AsType<B>,
 {
+    fn upgrade(self) -> <Self::File as tc_transact::fs::File<B>>::Write {
+        FileGuard {
+            file: self.file,
+            txn_id: self.txn_id,
+            listing: self.listing.upgrade(),
+        }
+    }
+}
+
+#[async_trait]
+impl<B> FileWrite<B> for FileWriteGuard<B>
+where
+    B: BlockData,
+    CacheBlock: AsType<B>,
+{
+    fn downgrade(self) -> <Self::File as tc_transact::fs::File<B>>::ReadExclusive {
+        FileGuard {
+            file: self.file,
+            txn_id: self.txn_id,
+            listing: self.listing.downgrade(),
+        }
+    }
+
     async fn create_block(
         &mut self,
         block_id: BlockId,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<Self::Write> {
+    ) -> TCResult<BlockWriteGuard<B>> {
         if self.listing.contains(&block_id) {
             #[cfg(debug_assertions)]
             panic!("{} already has a block with ID {}", self.file, block_id);
@@ -326,7 +347,7 @@ where
         &mut self,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(BlockId, Self::Write)> {
+    ) -> TCResult<(BlockId, BlockWriteGuard<B>)> {
         let block_id: BlockId = loop {
             let name = Uuid::new_v4().into();
             if !self.listing.contains(&name) {
@@ -543,13 +564,33 @@ where
     CacheBlock: AsType<B>,
 {
     type Read = FileReadGuard<B>;
+    type ReadExclusive = FileReadGuardExclusive<B>;
     type Write = FileWriteGuard<B>;
+    type BlockRead = BlockReadGuard<B>;
+    type BlockWrite = BlockWriteGuard<B>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         debug!("File::read");
 
         self.listing
             .read(txn_id)
+            .map_ok(move |listing| {
+                trace!("locked file for reading at {}", txn_id);
+
+                FileGuard {
+                    file: self.clone(),
+                    txn_id,
+                    listing,
+                }
+            })
+            .await
+    }
+
+    async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<Self::ReadExclusive> {
+        debug!("File::read_exclusive");
+
+        self.listing
+            .read_exclusive(txn_id)
             .map_ok(move |listing| {
                 trace!("locked file for reading at {}", txn_id);
 
