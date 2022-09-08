@@ -3,7 +3,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Sub};
 
-use afarray::{Array, ArrayInstance, CoordBlocks};
+use afarray::{Array, ArrayExt, ArrayInstance, Complex as _Complex, CoordBlocks};
 use arrayfire as af;
 use async_trait::async_trait;
 use collate::Collate;
@@ -18,7 +18,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
-    Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
+    ComplexType, Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
     Trigonometry, UIntType,
 };
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
@@ -1195,6 +1195,10 @@ where
     }
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        if self.dtype().is_complex() && dtype.is_real() {
+            return Err(TCError::unsupported("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
+        }
+
         let blocks = BlockListCast::new(self.blocks, dtype);
         Ok(DenseTensor::from(blocks))
     }
@@ -1289,16 +1293,23 @@ where
 
     fn exp(&self) -> TCResult<Self::Unary> {
         fn exp(n: Number) -> Number {
-            let n = f64::cast_from(n);
-            n.exp().into()
+            match n {
+                Number::Complex(n) => n.exp().into(),
+                Number::Float(n) => n.exp().into(),
+                n => f64::cast_from(n).exp().into(),
+            }
         }
 
-        let blocks = BlockListUnary::new(
-            self.blocks.clone(),
-            Array::exp,
-            exp,
-            NumberType::Float(FloatType::F64),
-        );
+        debug!("{} is complex? {}", self.dtype(), self.dtype().is_complex());
+
+        let dtype = if self.dtype().is_complex() {
+            NumberType::Complex(ComplexType::C64)
+        } else {
+            NumberType::Float(FloatType::F64)
+        };
+
+        debug!("e**{} will have dtype {}", self, dtype);
+        let blocks = BlockListUnary::new(self.blocks.clone(), Array::exp, exp, dtype);
 
         Ok(DenseTensor::from(blocks))
     }
@@ -1480,7 +1491,12 @@ where
     B: DenseAccess<FD, FS, D, T>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a dense Tensor with shape {}", self.shape())
+        write!(
+            f,
+            "a dense Tensor with dtype {} and shape {}",
+            self.dtype(),
+            self.shape()
+        )
     }
 }
 
@@ -1593,9 +1609,13 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
             ComplexType as CT, FloatType as FT, IntType as IT, NumberType as NT, UIntType as UT,
         };
 
-        fn encodable<'en, T: af::HasAfEnum + Clone + Default + 'en>(
-            blocks: TCBoxTryStream<'en, Array>,
-        ) -> impl Stream<Item = Vec<T>> + 'en {
+        debug!("stream Tensor with dtype {}", self.dtype);
+
+        fn encodable<'en, T>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = Vec<T>> + 'en
+        where
+            T: af::HasAfEnum + Clone + Default + 'en,
+            Array: AsType<ArrayExt<T>>,
+        {
             // an error can't be encoded within an array
             // so in case of a read error, let the receiver figure out that the tensor
             // doesn't have enough elements
@@ -1604,11 +1624,26 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
             {
                 blocks
                     .take_while(|r| future::ready(r.is_ok()))
-                    .map(|r| r.expect("tensor block").type_cast().to_vec())
+                    .map(|r| r.expect("tensor block"))
+                    // TODO: explicitly catalog ArrayFire return types to avoid this cast
+                    .map(|arr| arr.cast_into())
+                    .map(|arr: ArrayExt<T>| arr.to_vec())
             }
 
             #[cfg(debug_assertions)]
-            blocks.map(|r| r.expect("tensor block").type_cast().to_vec())
+            blocks
+                .inspect_ok(|arr| {
+                    debug!(
+                        "{} is expected to have type {} but really has type {}",
+                        arr,
+                        std::any::type_name::<T>(),
+                        arr.dtype(),
+                    )
+                })
+                .map(|r| r.expect("tensor block"))
+                // TODO: explicitly catalog ArrayFire return types to avoid this cast
+                .map(|arr| arr.cast_into())
+                .map(|arr: ArrayExt<T>| arr.to_vec())
         }
 
         match self.dtype {
@@ -1643,11 +1678,13 @@ impl<'en> en::IntoStream<'en> for BlockStreamView<'en> {
 fn encodable_c32<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = Vec<f32>> + 'en {
     blocks
         .take_while(|r| future::ready(r.is_ok()))
-        .map(|block| block.expect("tensor block"))
-        .map(|arr| {
-            let source = arr.type_cast::<afarray::Complex<f32>>();
+        .map(|r| r.expect("tensor block"))
+        .map(|arr| arr.type_cast())
+        .map(|source: ArrayExt<_Complex<f32>>| {
             let re = source.re();
+            assert_eq!(source.len(), re.len());
             let im = source.im();
+            assert_eq!(source.len(), im.len());
 
             let mut i = 0;
             let mut dest = vec![0.; source.len() * 2];
@@ -1664,11 +1701,13 @@ fn encodable_c32<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = 
 fn encodable_c64<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = Vec<f64>> + 'en {
     blocks
         .take_while(|r| future::ready(r.is_ok()))
-        .map(|block| block.expect("tensor block"))
-        .map(|arr| {
-            let source = arr.type_cast::<afarray::Complex<f64>>();
+        .map(|r| r.expect("tensor block"))
+        .map(|arr| arr.type_cast())
+        .map(|source: ArrayExt<_Complex<f64>>| {
             let re = source.re();
+            assert_eq!(source.len(), re.len());
             let im = source.im();
+            assert_eq!(source.len(), im.len());
 
             let mut i = 0;
             let mut dest = vec![0.; source.len() * 2];

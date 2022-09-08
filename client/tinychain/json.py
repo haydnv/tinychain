@@ -33,5 +33,8 @@ def to_json(state_or_ref):
         return [to_json(i) for i in state_or_ref]
     elif isinstance(state_or_ref, dict):
         return {str(k): to_json(v) for k, v in state_or_ref.items()}
+    elif isinstance(state_or_ref, complex):  # TODO: should this case be more general? like if is_literal(state_or_ref)?
+        from .context import autobox
+        return to_json(autobox(state_or_ref))
     else:
         return state_or_ref

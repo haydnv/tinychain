@@ -16,7 +16,8 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
-    Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry, UIntType,
+    ComplexType, Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
+    UIntType,
 };
 use tcgeneric::{Instance, TCBoxTryFuture};
 
@@ -1124,6 +1125,10 @@ where
     }
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        if self.dtype().is_complex() && dtype.is_real() {
+            return Err(TCError::unsupported("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
+        }
+
         let accessor = SparseCast::new(self.accessor, dtype);
         Ok(accessor.into())
     }
@@ -1215,11 +1220,19 @@ where
 
     fn exp(&self) -> TCResult<Self::Unary> {
         fn exp(n: Number) -> Number {
-            let n = f64::cast_from(n);
-            n.exp().into()
+            match n {
+                Number::Complex(n) => n.exp().into(),
+                Number::Float(n) => n.exp().into(),
+                n => f64::cast_from(n).exp().into(),
+            }
         }
 
-        let dtype = NumberType::Float(FloatType::F64);
+        let dtype = if self.dtype().is_complex() {
+            NumberType::Complex(ComplexType::C64)
+        } else {
+            NumberType::Float(FloatType::F64)
+        };
+
         let source = self.accessor.clone().accessor();
         let accessor = SparseUnary::new(source, exp, dtype);
         Ok(SparseTensor::from(accessor))
@@ -1354,9 +1367,21 @@ impl<FD, FS, D, T, A> From<A> for SparseTensor<FD, FS, D, T, A> {
     }
 }
 
-impl<FD, FS, D, T, A> fmt::Display for SparseTensor<FD, FS, D, T, A> {
+impl<FD, FS, D, T, A> fmt::Display for SparseTensor<FD, FS, D, T, A>
+where
+    FD: File<Array>,
+    FS: File<Node>,
+    D: Dir,
+    T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T>,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a sparse Tensor")
+        write!(
+            f,
+            "a Sparse tensor with dtype {} and shape {}",
+            self.dtype(),
+            self.shape()
+        )
     }
 }
 
