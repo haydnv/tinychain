@@ -888,7 +888,7 @@ def simplify(state):
 
 
 def shape_of(numeric):
-    if isinstance(numeric, (bool, float, int)):
+    if isinstance(numeric, (bool, complex, float, int)):
         from ..shape import Shape
         return Shape(tuple())
     elif isinstance(numeric, Numeric):

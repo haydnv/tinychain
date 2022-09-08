@@ -171,6 +171,7 @@ impl Route for Number {
                     Ok(*self / other)
                 }
             })),
+            "exp" => Box::new(Unary::new("exp", move || self.exp())),
             "ln" => Box::new(Unary::new("ln", move || self.ln())),
             "log" => Box::new(Log::new(*self)),
             "mod" => Box::new(Dual::new(move |other| Ok(*self % other))),
@@ -203,6 +204,16 @@ impl Route for Number {
             "tan" => Box::new(Unary::new("tan", move || self.tan())),
             "atanh" => Box::new(Unary::new("atanh", move || self.atanh())),
             "tanh" => Box::new(Unary::new("tanh", move || self.tanh())),
+
+            // complex
+            "imag" => match self {
+                Number::Complex(c) => Box::new(Unary::new("imag", move || c.im().into())),
+                _real => Box::new(Unary::new("imag", || Number::from(0.0f32))),
+            },
+            "real" => match self {
+                Number::Complex(c) => Box::new(Unary::new("real", move || c.re().into())),
+                real => Box::new(Unary::new("real", move || *real)),
+            },
 
             _ => return None,
         };
