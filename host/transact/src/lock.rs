@@ -258,18 +258,6 @@ impl<T> LockState<T> {
             }
         }
 
-        if let Some(writer) = &self.writer {
-            // if there's an active write lock, wait it out
-            debug!("TxnLock has an active write lock at {}", writer);
-            return Ok(None);
-        } else if let Some(readers) = self.readers.get(&txn_id) {
-            // if there's an active read lock for this txn_id, wait it out
-            if readers > &0 {
-                debug!("TxnLock has {} active readers at {}", readers, txn_id);
-                return Ok(None);
-            }
-        }
-
         for pending in self.pending_writes.iter().rev() {
             if pending > &txn_id {
                 // can't write-lock the past
@@ -284,6 +272,19 @@ impl<T> LockState<T> {
                     pending
                 );
 
+                return Ok(None);
+            }
+        }
+
+        if let Some(writer) = &self.writer {
+            assert!(writer <= txn_id);
+            // if there's an active write lock, wait it out
+            debug!("TxnLock has an active write lock at {}", writer);
+            return Ok(None);
+        } else if let Some(readers) = self.readers.get(&txn_id) {
+            // if there's an active read lock for this txn_id, wait it out
+            if readers > &0 {
+                debug!("TxnLock has {} active readers at {}", readers, txn_id);
                 return Ok(None);
             }
         }

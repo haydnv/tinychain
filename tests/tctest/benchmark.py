@@ -1,3 +1,4 @@
+import os.path
 import shutil
 
 import aiohttp
@@ -145,7 +146,8 @@ async def main(benchmarks):
     workspace = args.workspace
 
     # clean the workspace before running any benchmarks
-    shutil.rmtree(WORKSPACE)
+    if os.path.exists(WORKSPACE):
+        shutil.rmtree(WORKSPACE)
 
     for benchmark in benchmarks:
         print(f"running {benchmark}")
