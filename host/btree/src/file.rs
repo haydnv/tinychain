@@ -662,7 +662,7 @@ where
         // get a write lock on the root_id while we check if a split_child is needed,
         // to prevent getting out of sync in the case of a concurrent insert in the same txn
         let mut file = self.inner.file.write(txn_id).await?;
-        let mut root_id = self.inner.root.write(txn_id).await?;
+        let root_id = self.inner.root.read_exclusive(txn_id).await?;
         assert!(file.contains(&*root_id));
 
         debug!("insert into BTree with root node ID {}", *root_id);
@@ -688,6 +688,8 @@ where
 
         if root.keys.len() == (2 * order) - 1 {
             debug!("split root node");
+
+            let mut root_id = root_id.upgrade();
 
             let old_root_id = (*root_id).clone();
 
