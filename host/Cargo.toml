@@ -49,7 +49,7 @@ tc-error = "0.6"
 tc-math = { path = "math", optional = true }
 tc-tensor = { path = "tensor", optional = true }
 tc-transact = { path = "transact", features = ["tensor"] }
-tc-value = "0.6"
+tc-value = { path = "value" }
 tc-table = { path = "table" }
 tcgeneric = "0.5"
 tokio = { version = "1.21", features = ["rt-multi-thread", "signal"] }

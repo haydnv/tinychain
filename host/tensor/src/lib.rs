@@ -15,7 +15,10 @@ use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType, Value, ValueType};
+use tc_value::{
+    ComplexType, FloatType, IntType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
+    UIntType, Value, ValueType,
+};
 use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, Tuple,
@@ -529,17 +532,7 @@ pub trait TensorTrig {
 }
 
 fn trig_dtype(dtype: NumberType) -> NumberType {
-    match dtype {
-        NumberType::Int(it) => match it {
-            IntType::I64 => FloatType::F64.into(),
-            _ => FloatType::F32.into(),
-        },
-        NumberType::UInt(ut) => match ut {
-            UIntType::U64 => FloatType::F64.into(),
-            _ => FloatType::F32.into(),
-        },
-        other => other,
-    }
+    dtype.one().sin().class()
 }
 
 /// The [`Class`] of [`Tensor`]

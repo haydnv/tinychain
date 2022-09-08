@@ -17,7 +17,7 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 tc-btree = { path = "../btree" }
 tc-error = "0.6"
 tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = "0.6"
+tc-value = { path = "../value" }
 # TODO: remove
 tc-table = { path = "../table" }
 tc-tensor = { path = "../tensor" }
