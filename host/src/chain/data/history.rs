@@ -11,7 +11,7 @@ use log::{debug, error};
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File, Persist};
+use tc_transact::fs::{BlockData, Dir, DirWrite, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
@@ -19,6 +19,7 @@ use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple
 
 use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::route::Public;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -82,7 +83,7 @@ impl History {
     async fn read_block(
         &self,
         block_id: u64,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(block_id))
@@ -94,7 +95,7 @@ impl History {
     async fn write_block(
         &self,
         block_id: u64,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
+    ) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(block_id))
@@ -106,7 +107,7 @@ impl History {
     pub async fn read_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.read_block(*latest).await
     }
@@ -114,12 +115,12 @@ impl History {
     pub async fn write_latest(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Write> {
+    ) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
         let latest = self.latest.read(txn_id).await?;
         self.write_block(*latest).await
     }
 
-    pub async fn read_log(&self) -> TCResult<<fs::File<ChainBlock> as File<ChainBlock>>::Read> {
+    pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
         let log = {
             let file = self.file.read().await;
             file.get_file(&block_name(WRITE_AHEAD))
@@ -292,10 +293,10 @@ impl Persist<fs::Dir> for History {
 
         // if there's no data in the data dir, it may not have been sync'd to the filesystem
         // so just create a new one
-        let store = dir
-            .get_or_create_dir(*txn_id, STORE.into())
-            .map_ok(Store::new)
-            .await?;
+        let store = {
+            let mut dir = dir.write(*txn_id).await?;
+            dir.get_or_create_dir(STORE.into()).map(Store::new)?
+        };
 
         let file = {
             let mut dir = dir.into_inner().write().await;
@@ -375,17 +376,6 @@ impl Transact for History {
 
         // assume `self.store` has already been committed by calling `write_ahead`
 
-        let (mut latest, mut cutoff) =
-            try_join!(self.latest.write(*txn_id), self.cutoff.write(*txn_id))
-                .expect("BlockChain state");
-
-        assert!(
-            txn_id >= &cutoff,
-            "cannot commit transaction {} since a block has already been committed at {}",
-            txn_id,
-            *cutoff
-        );
-
         let mut file = self.file.write().await;
         let write_ahead = file
             .get_file(&block_name(WRITE_AHEAD))
@@ -396,6 +386,12 @@ impl Transact for History {
                 write_ahead.write().await.expect("write-ahead lock");
 
             if let Some(mutations) = write_ahead.mutations.remove(txn_id) {
+                let mut latest = self
+                    .latest
+                    .write(*txn_id)
+                    .await
+                    .expect("latest block ordinal");
+
                 let latest_block = file.get_file(&block_name(*latest)).expect("latest block");
 
                 {
@@ -405,6 +401,15 @@ impl Transact for History {
                     latest_block.mutations.insert(*txn_id, mutations);
 
                     if latest_block.size().await.expect("block size") > BLOCK_SIZE {
+                        let mut cutoff = self.cutoff.write(*txn_id).await.expect("block cutoff id");
+
+                        assert!(
+                            txn_id >= &cutoff,
+                            "cannot commit transaction {} since a block has already been committed at {}",
+                            txn_id,
+                            *cutoff
+                        );
+
                         *cutoff = *txn_id;
 
                         let hash = latest_block.hash();
@@ -440,9 +445,6 @@ impl Transact for History {
                 .await
                 .expect("sync write-ahead log after commit");
         }
-
-        std::mem::drop(latest);
-        std::mem::drop(cutoff);
 
         join!(self.latest.commit(txn_id), self.cutoff.commit(txn_id));
     }
@@ -492,11 +494,12 @@ impl de::Visitor for HistoryVisitor {
         let txn_id = *self.txn.id();
         let dir = self.txn.context().clone();
 
-        let store = dir
-            .create_dir(txn_id, STORE.into())
-            .map_ok(Store::new)
-            .map_err(de::Error::custom)
-            .await?;
+        let store = {
+            let mut dir = dir.write(txn_id).map_err(de::Error::custom).await?;
+            dir.create_dir(STORE.into())
+                .map(Store::new)
+                .map_err(de::Error::custom)?
+        };
 
         let file = {
             let mut dir = dir.into_inner().write().await;

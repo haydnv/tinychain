@@ -10,6 +10,7 @@ import tinychain as tc
 
 CONFIG = "config"
 DEFAULT_PORT = 8702
+DEFAULT_WORKSPACE = "/tmp/tc/tmp"
 DOCKERFILE = os.getenv("TC_DOCKER", "tests/tctest/Dockerfile")
 DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "host")
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
@@ -194,9 +195,15 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
     if "log_level" not in flags:
         flags["log_level"] = "debug"
 
+    if "workspace" in flags:
+        workspace = flags["workspace"] + f"/{port}/{name}"
+        del flags["workspace"]
+    else:
+        workspace = DEFAULT_WORKSPACE + f"/{port}/{name}"
+
     process = Local(
         TC_PATH,
-        workspace=f"/tmp/tc/tmp/{port}/{name}",
+        workspace=workspace,
         libs=app_configs,
         force_create=True,
         data_dir=data_dir,

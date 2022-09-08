@@ -9,7 +9,7 @@ use futures::future::TryFutureExt;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
+use tc_transact::fs::{Dir, DirWrite};
 use tc_transact::Transaction;
 use tc_value::{Link, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
@@ -268,12 +268,11 @@ impl Transaction<fs::Dir> for Txn {
         &self.dir
     }
 
-    fn into_context(self) -> fs::Dir {
-        self.dir
-    }
-
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let dir = self.dir.create_dir(*self.request.txn_id(), id).await?;
+        let dir = {
+            let mut dir = self.dir.write(*self.request.txn_id()).await?;
+            dir.create_dir(id)?
+        };
 
         Ok(Txn {
             active: self.active.clone(),
@@ -283,8 +282,7 @@ impl Transaction<fs::Dir> for Txn {
         })
     }
 
-    // TODO: rename to subcontext_unique
-    async fn subcontext_tmp(&self) -> TCResult<Self> {
+    async fn subcontext_unique(&self) -> TCResult<Self> {
         self.dir
             .create_dir_unique(*self.id())
             .map_ok(|dir| Self {

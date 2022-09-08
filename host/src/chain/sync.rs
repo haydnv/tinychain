@@ -3,15 +3,15 @@
 
 use async_trait::async_trait;
 use destream::de;
-use freqfs::{FileLock, FileReadGuard, FileWriteGuard};
+use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
-use log::debug;
+use log::{debug, trace};
 use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist, Store};
+use tc_transact::fs::{Dir, DirWrite, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label, TCPathBuf};
@@ -20,9 +20,9 @@ use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
+use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
 
-const BLOCKS: Label = label("blocks.chain_block");
+const BLOCKS: Label = label("blocks");
 const COMMITTED: &str = "committed.chain_block";
 const PENDING: &str = "pending.chain_block";
 const STORE: Label = label("store");
@@ -129,66 +129,43 @@ impl Persist<fs::Dir> for SyncChain {
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let txn_id = *txn.id();
-        let is_new = dir.is_empty(txn_id).await?;
+        debug!("SyncChain::load");
 
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
 
-        let (store, pending, committed) = if is_new {
-            let store = dir
-                .create_dir(txn_id, STORE.into())
-                .map_ok(super::data::Store::new)
-                .await?;
+        trace!("SyncChain::load loaded {}", subject);
 
-            let blocks_dir = dir.create_dir(txn_id, BLOCKS.into()).await?;
-            let mut blocks_dir = blocks_dir.into_inner().write().await;
+        let txn_id = *txn.id();
+        let store = {
+            let mut dir = dir.write(txn_id).await?;
+            dir.get_or_create_dir(STORE.into())
+                .map(super::data::Store::new)?
+        };
 
-            let pending = blocks_dir
-                .create_file(
-                    PENDING.to_string(),
-                    ChainBlock::with_txn(null_hash().to_vec(), txn_id),
-                    Some(0),
-                )
-                .map_err(fs::io_err)?;
+        let mut blocks_dir = {
+            let mut dir = dir.write(txn_id).await?;
+            let file: fs::File<ChainBlock> =
+                dir.get_or_create_file(BLOCKS.into(), ChainType::Sync)?;
 
-            let committed = blocks_dir
-                .create_file(
-                    COMMITTED.to_string(),
-                    ChainBlock::new(null_hash().to_vec()),
-                    Some(0),
-                )
-                .map_err(fs::io_err)?;
+            file.into_inner().write().await
+        };
 
-            (store, pending, committed)
+        let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
+            file
         } else {
-            let store = dir
-                .get_or_create_dir(txn_id, STORE.into())
-                .map_ok(super::data::Store::new)
-                .await?;
+            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+            blocks_dir
+                .create_file(PENDING.to_string(), block, Some(0))
+                .map_err(fs::io_err)?
+        };
 
-            let dir = dir.into_inner().read().await;
-            let blocks_dir = dir
-                .get_dir(&BLOCKS.to_string())
-                .ok_or_else(|| TCError::not_found(BLOCKS))?;
-
-            let blocks_dir = blocks_dir.read().await;
-
-            let pending = blocks_dir
-                .get_file(PENDING)
-                .ok_or_else(|| TCError::not_found(PENDING))?;
-
-            let committed = blocks_dir
-                .get_file(COMMITTED)
-                .ok_or_else(|| TCError::not_found(PENDING))?;
-
-            let last_block: FileReadGuard<_, ChainBlock> =
-                committed.read().map_err(fs::io_err).await?;
-
-            for (past_txn_id, mutations) in &last_block.mutations {
-                super::data::replay_all(&subject, past_txn_id, mutations, txn, &store).await?;
-            }
-
-            (store, pending, committed)
+        let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
+            file
+        } else {
+            let block = ChainBlock::new(null_hash().to_vec());
+            blocks_dir
+                .create_file(COMMITTED.to_string(), block, Some(0))
+                .map_err(fs::io_err)?
         };
 
         Ok(SyncChain {
@@ -258,12 +235,16 @@ impl de::Visitor for ChainVisitor {
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let null_hash = null_hash();
         let txn_id = *self.txn.id();
-        let dir = self
-            .txn
-            .context()
-            .create_dir_unique(txn_id)
-            .map_err(de::Error::custom)
-            .await?;
+        let mut dir = {
+            let dir = self
+                .txn
+                .context()
+                .create_dir_unique(txn_id)
+                .map_err(de::Error::custom)
+                .await?;
+
+            dir.write(txn_id).map_err(de::Error::custom).await?
+        };
 
         let schema = seq
             .next_element(())
@@ -276,17 +257,17 @@ impl de::Visitor for ChainVisitor {
             .ok_or_else(|| de::Error::invalid_length(1, "the subject of a SyncChain"))?;
 
         let store = dir
-            .create_dir(txn_id, STORE.into())
-            .map_ok(super::data::Store::new)
-            .map_err(de::Error::custom)
-            .await?;
+            .create_dir(STORE.into())
+            .map(super::data::Store::new)
+            .map_err(de::Error::custom)?;
 
-        let blocks_dir = dir
-            .create_dir(txn_id, BLOCKS.into())
-            .map_err(de::Error::custom)
-            .await?;
+        let mut blocks_dir = {
+            let file: fs::File<ChainBlock> = dir
+                .create_file(BLOCKS.into(), ChainType::Sync)
+                .map_err(de::Error::custom)?;
 
-        let mut blocks_dir = blocks_dir.into_inner().write().await;
+            file.into_inner().write().await
+        };
 
         let committed = blocks_dir
             .create_file(

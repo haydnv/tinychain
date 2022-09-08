@@ -57,6 +57,10 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
         for host in hosts:
             self.assertEqual(host.get("/test/btree/tree/count"), n)
 
-
 def expected(rows):
     return {str(tc.URI(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}
+
+
+def printlines(n):
+    for _ in range(n):
+        print()

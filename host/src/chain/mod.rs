@@ -43,7 +43,7 @@ const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 /// The schema of a [`Chain`] whose [`Subject`] is a `Collection`.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum CollectionSchema {
     BTree(tc_btree::RowSchema),
     Table(tc_table::TableSchema),

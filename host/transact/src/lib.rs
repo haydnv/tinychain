@@ -44,12 +44,9 @@ pub trait Transaction<D: fs::Dir>: Clone + Sized + Send + Sync + 'static {
     /// Borrow the [`fs::Dir`] of this transaction context.
     fn context(&'_ self) -> &'_ D;
 
-    /// Consume this `Txn` and return its [`fs::Dir`].
-    fn into_context(self) -> D;
-
     /// Return a transaction subcontext with its own [`fs::Dir`].
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
 
     /// Return a transaction subcontext with its own unique [`fs::Dir`].
-    async fn subcontext_tmp(&self) -> TCResult<Self>;
+    async fn subcontext_unique(&self) -> TCResult<Self>;
 }

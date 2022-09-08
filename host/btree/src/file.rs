@@ -11,9 +11,9 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
-use futures::join;
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
-use log::debug;
+use futures::{join, try_join};
+use log::{debug, trace};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -242,7 +242,12 @@ where
 
     /// Create a new `BTreeFile`.
     pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
-        if !file.is_empty(txn_id).await? {
+        debug!("BTreeFile::create");
+
+        let mut file_contents = file.write(txn_id).await?;
+        trace!("BTreeFile::create got file write lock");
+
+        if !file_contents.is_empty() {
             return Err(TCError::internal(
                 "Tried to create a new BTree without a new File",
             ));
@@ -252,29 +257,27 @@ where
 
         let root: BlockId = Uuid::new_v4().into();
         let node = Node::new(true, None);
-        file.clone()
-            .create_block(txn_id, root.clone(), node, DEFAULT_BLOCK_SIZE)
+        file_contents
+            .create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
             .await?;
+
+        assert!(file_contents.contains(&root));
 
         Ok(BTreeFile::new(file, schema, order, root))
     }
 
     fn _delete_range<'a>(
-        &'a self,
-        txn_id: TxnId,
+        file: &'a F::Read,
+        schema: &'a RowSchema,
+        collator: &'a ValueCollator,
         node_id: NodeId,
         range: &'a Range,
     ) -> TCBoxTryFuture<'a, ()> {
-        debug_assert!(range.len() <= self.inner.schema.len());
-
         Box::pin(async move {
-            let collator = &self.inner.collator;
-            let file = &self.inner.file;
-
-            let mut node = file.write_block(txn_id, node_id).await?;
+            let mut node = file.write_block(&node_id).await?;
 
             #[cfg(debug_assertions)]
-            node.validate(&self.inner.schema, range);
+            node.validate(&schema, range);
 
             let (l, r) = collator.bisect(&node.keys, range);
 
@@ -285,6 +288,7 @@ where
                 for i in l..r {
                     node.keys[i].deleted = true;
                 }
+
                 node.rebalance = true;
 
                 Ok(())
@@ -298,38 +302,41 @@ where
                 let deletes: FuturesUnordered<_> = node.children[l..(r + 1)]
                     .iter()
                     .cloned()
-                    .map(|child_id| self._delete_range(txn_id, child_id, range))
+                    .map(|child_id| Self::_delete_range(file, schema, collator, child_id, range))
                     .collect();
 
                 deletes.try_fold((), |(), ()| future::ready(Ok(()))).await
             } else {
                 let child_id = node.children[r].clone();
-                self._delete_range(txn_id, child_id, range).await
+                Self::_delete_range(file, schema, collator, child_id, range).await
             }
         })
     }
 
-    fn _insert(&self, txn_id: TxnId, mut node: F::Write, key: Key) -> TCBoxTryFuture<()> {
+    fn _insert(
+        file: F::ReadExclusive,
+        order: usize,
+        collator: &ValueCollator,
+        txn_id: TxnId,
+        node: F::BlockReadExclusive,
+        key: Key,
+    ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
-            let collator = &self.inner.collator;
-            let file = &self.inner.file;
-            let order = self.inner.order;
-
             let i = collator.bisect_left(&node.keys, &key);
 
             #[cfg(debug_assertions)]
             debug!("insert at index {} into {}", i, *node);
 
             if node.leaf {
+                let mut node = node.upgrade();
                 let key = NodeKey::new(key);
+                #[cfg(debug_assertions)]
+                debug!("insert key {} into {} at {}", key, *node, i);
 
                 if i == node.keys.len() {
                     node.keys.insert(i, key);
                     return Ok(());
                 }
-
-                #[cfg(debug_assertions)]
-                debug!("insert key {} into {} at {}", key, *node, i);
 
                 match collator.compare_slice(&key, &node.keys[i]) {
                     Ordering::Less => node.keys.insert(i, key),
@@ -344,14 +351,23 @@ where
                 Ok(())
             } else {
                 let child_id = node.children[i].clone();
-                let child = file.write_block(txn_id, child_id).await?;
+                debug!("locking child node {} for writing...", child_id);
+                let child = file.read_block_exclusive(&child_id).await?;
 
                 if child.keys.len() == (2 * order) - 1 {
+                    let file = file.upgrade();
+                    let node = node.upgrade();
+                    let child = child.upgrade();
                     let child_id = node.children[i].clone();
-                    let mut node = self.split_child(txn_id, node, child_id, child, i).await?;
+                    let (file, mut node) =
+                        Self::split_child(order, file, node, child_id, child, i).await?;
 
+                    let file = file.downgrade();
                     match collator.compare_slice(&key, &node.keys[i]) {
-                        Ordering::Less => self._insert(txn_id, node, key).await,
+                        Ordering::Less => {
+                            let node = node.downgrade();
+                            Self::_insert(file, order, collator, txn_id, node, key).await
+                        }
                         Ordering::Equal => {
                             if node.keys[i].deleted {
                                 node.keys[i].deleted = false;
@@ -361,28 +377,27 @@ where
                         }
                         Ordering::Greater => {
                             let child_id = node.children[i + 1].clone();
-
-                            let child = file.write_block(txn_id, child_id).await?;
-                            self._insert(txn_id, child, key).await
+                            let child = file.read_block_exclusive(&child_id).await?;
+                            Self::_insert(file, order, collator, txn_id, child, key).await
                         }
                     }
                 } else {
-                    self._insert(txn_id, child, key).await
+                    Self::_insert(file, order, collator, txn_id, child, key).await
                 }
             }
         })
     }
 
     fn _slice<'a, B: Deref<Target = Node>>(
-        self,
-        txn_id: TxnId,
+        file: F::Read,
+        collator: ValueCollator,
         node: B,
         range: Range,
     ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
-        let (l, r) = self.inner.collator.bisect(&node.keys[..], &range);
+        let (l, r) = collator.bisect(&node.keys[..], &range);
 
         #[cfg(debug_assertions)]
         debug!("_slice {} from {} to {} ({:?})", *node, l, r, range);
@@ -402,44 +417,46 @@ where
                 let child_id = node.children[i].clone();
                 let range_clone = range.clone();
 
-                let this = self.clone();
+                let file = file.clone();
+                let collator = collator.clone();
                 let selection = Box::pin(async move {
-                    let node = this.inner.file.read_block(txn_id, child_id).await?;
-                    this._slice(txn_id, node, range_clone)
+                    let node = file.read_block(&child_id).await?;
+                    Self::_slice(file, collator, node, range_clone)
                 });
-                selected.push(Box::pin(selection));
+
+                selected.push_back(Box::pin(selection));
 
                 if !node.keys[i].deleted {
                     let key_at_i = TCResult::Ok(node.keys[i].value.to_vec());
                     let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
-                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                    selected.push_back(Box::pin(future::ready(Ok(key_at_i))));
                 }
             }
 
             let last_child_id = node.children[r].clone();
 
             let selection = Box::pin(async move {
-                let node = self.inner.file.read_block(txn_id, last_child_id).await?;
-                self._slice(txn_id, node, range)
+                let node = file.read_block(&last_child_id).await?;
+                Self::_slice(file, collator, node, range)
             });
-            selected.push(Box::pin(selection));
+            selected.push_back(Box::pin(selection));
 
             Ok(Box::pin(selected.try_flatten()))
         }
     }
 
     fn _slice_reverse<'a, B: Deref<Target = Node>>(
-        self,
-        txn_id: TxnId,
+        file: F::Read,
+        collator: ValueCollator,
         node: B,
         range: Range,
     ) -> TCResult<TCBoxTryStream<'a, Key>>
     where
         Self: 'a,
     {
-        let (l, r) = self.inner.collator.bisect(&node.keys, &range);
+        let (l, r) = collator.bisect(&node.keys, &range);
 
         #[cfg(debug_assertions)]
         debug!("_slice_reverse {} from {} to {} ({:?})", *node, r, l, range);
@@ -459,21 +476,24 @@ where
 
             let last_child = node.children[r].clone();
             let range_clone = range.clone();
-            let this = self.clone();
+            let file_clone = file.clone();
+            let collator_clone = collator.clone();
             let selection = Box::pin(async move {
-                let node = this.inner.file.read_block(txn_id, last_child).await?;
-                this._slice_reverse(txn_id, node, range_clone)
+                let node = file_clone.read_block(&last_child).await?;
+                Self::_slice_reverse(file_clone, collator_clone, node, range_clone)
             });
-            selected.push(Box::pin(selection));
+            selected.push_back(Box::pin(selection));
 
             for i in (l..r).rev() {
                 let child_id = node.children[i].clone();
                 let range_clone = range.clone();
 
-                let this = self.clone();
+                let file = file.clone();
+                let collator = collator.clone();
+                let file = file.clone();
                 let selection = Box::pin(async move {
-                    let node = this.inner.file.read_block(txn_id, child_id).await?;
-                    this._slice_reverse(txn_id, node, range_clone)
+                    let node = file.read_block(&child_id).await?;
+                    Self::_slice_reverse(file, collator, node, range_clone)
                 });
 
                 if !node.keys[i].deleted {
@@ -481,10 +501,10 @@ where
                     let key_at_i: TCBoxTryStream<Key> =
                         Box::pin(stream::once(future::ready(key_at_i)));
 
-                    selected.push(Box::pin(future::ready(Ok(key_at_i))));
+                    selected.push_back(Box::pin(future::ready(Ok(key_at_i))));
                 }
 
-                selected.push(Box::pin(selection));
+                selected.push_back(Box::pin(selection));
             }
 
             Ok(Box::pin(selected.try_flatten()))
@@ -500,33 +520,29 @@ where
     where
         Self: 'a,
     {
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        assert!(file.contains(&*root_id));
 
-        let root = self
-            .inner
-            .file
-            .read_block(txn_id, (*root_id).clone())
-            .await?;
+        let root = file.read_block(&*root_id).await?;
+        let collator = self.collator().clone();
 
         if reverse {
-            self._slice_reverse(txn_id, root, range)
+            Self::_slice_reverse(file, collator, root, range)
         } else {
-            self._slice(txn_id, root, range)
+            Self::_slice(file, collator, root, range)
         }
     }
 
     async fn split_child(
-        &self,
-        txn_id: TxnId,
-        mut node: F::Write,
+        order: usize,
+        mut file: F::Write,
+        mut node: F::BlockWrite,
         node_id: NodeId,
-        mut child: F::Write,
+        mut child: F::BlockWrite,
         i: usize,
-    ) -> TCResult<F::Write> {
+    ) -> TCResult<(F::Write, F::BlockWrite)> {
         debug!("BTree::split_child");
-
-        let file = &self.inner.file;
-        let order = self.inner.order;
 
         assert_eq!(node_id, node.children[i].clone());
 
@@ -538,7 +554,7 @@ where
 
         let new_node = Node::new(child.leaf, Some(node_id));
         let (new_node_id, mut new_node) = file
-            .create_block_unique(txn_id, new_node, DEFAULT_BLOCK_SIZE)
+            .create_block_unique(new_node, DEFAULT_BLOCK_SIZE)
             .await?;
 
         debug!("BTree::split_child created new node {}", new_node_id);
@@ -554,7 +570,7 @@ where
             new_node.children = child.children.drain(order..).collect();
         }
 
-        Ok(node)
+        Ok((file, node))
     }
 }
 
@@ -590,13 +606,10 @@ where
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
-        let root = self
-            .inner
-            .file
-            .read_block(txn_id, (*root_id).clone())
-            .await?;
-
+        assert!(file.contains(&*root_id));
+        let root = file.read_block(&*root_id).await?;
         Ok(root.keys.is_empty())
     }
 
@@ -627,36 +640,40 @@ where
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() {
-            let mut root = self.inner.root.write(txn_id).await?;
+            let mut file = self.inner.file.write(txn_id).await?;
+            let mut root_id = self.inner.root.write(txn_id).await?;
+            assert!(file.contains(&*root_id));
 
-            self.inner.file.truncate(txn_id).await?;
+            file.truncate().await?;
 
-            *root = Uuid::new_v4().into();
             let node = Node::new(true, None);
-            self.inner
-                .file
-                .create_block(txn_id, (*root).clone(), node, DEFAULT_BLOCK_SIZE)
-                .await?;
+            let (new_root_id, _) = file.create_block_unique(node, DEFAULT_BLOCK_SIZE).await?;
+            *root_id = new_root_id;
 
             return Ok(());
         }
 
+        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
-        self._delete_range(txn_id, (*root_id).clone(), &range).await
+        assert!(file.contains(&*root_id));
+
+        let schema = &self.inner.schema;
+
+        Self::_delete_range(&file, schema, self.collator(), (*root_id).clone(), &range).await
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = self.validate_key(key)?;
 
-        let file = &self.inner.file;
-        let order = self.inner.order;
+        let file = self.inner.file.read_exclusive(txn_id).await?;
+        let root_id = self.inner.root.read_exclusive(txn_id).await?;
+        assert!(file.contains(&*root_id));
 
-        // get a write lock on the root_id while we check if a split_child is needed,
-        // to avoid getting out of sync in the case of a concurrent insert in the same txn
-        let mut root_id = self.inner.root.write(txn_id).await?;
         debug!("insert into BTree with root node ID {}", *root_id);
 
-        let root = file.write_block(txn_id, (*root_id).clone()).await?;
+        let order = self.inner.order;
+
+        let root = file.read_block_exclusive(&*root_id).await?;
 
         #[cfg(debug_assertions)]
         debug!(
@@ -676,24 +693,29 @@ where
         if root.keys.len() == (2 * order) - 1 {
             debug!("split root node");
 
+            let mut file = file.upgrade();
+            let mut root_id = root_id.upgrade();
+            let root = root.upgrade();
+
             let old_root_id = (*root_id).clone();
 
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
 
             let (new_root_id, new_root) = file
-                .create_block_unique(txn_id, new_root, DEFAULT_BLOCK_SIZE)
+                .create_block_unique(new_root, DEFAULT_BLOCK_SIZE)
                 .await?;
 
             (*root_id) = new_root_id;
 
-            let new_root = self
-                .split_child(txn_id, new_root, old_root_id, root, 0)
-                .await?;
+            let (file, new_root) =
+                Self::split_child(self.inner.order, file, new_root, old_root_id, root, 0).await?;
 
-            self._insert(txn_id, new_root, key).await
+            let file = file.downgrade();
+            let new_root = new_root.downgrade();
+            Self::_insert(file, order, self.collator(), txn_id, new_root, key).await
         } else {
-            self._insert(txn_id, root, key).await
+            Self::_insert(file, order, self.collator(), txn_id, root, key).await
         }
     }
 }
@@ -728,26 +750,32 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
     async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
 
+        let file_contents = file.read(*txn.id()).await?;
+
         let order = validate_schema(&schema)?;
 
         let txn_id = *txn.id();
         let mut root = None;
-        for block_id in file.block_ids(txn_id).await? {
+        for block_id in file_contents.block_ids() {
             debug!("BTreeFile::load block {}", block_id);
 
-            let block = file.read_block(txn_id, block_id.clone()).await?;
+            let block = file.read_block(txn_id, block_id).await?;
 
             debug!("BTreeFile::loaded block {}", block_id);
 
             if block.parent.is_none() {
-                root = Some(block_id);
-                break;
+                root = Some(block_id.clone());
             }
         }
 
-        let root = root.ok_or_else(|| TCError::internal("BTree corrupted (missing root block)"))?;
+        let root =
+            root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
 
-        Ok(BTreeFile::new(file, schema, order, root))
+        if file_contents.contains(&root) {
+            Ok(BTreeFile::new(file, schema, order, root))
+        } else {
+            Err(TCError::internal("BTree corrupted (missing root block)"))
+        }
     }
 }
 
@@ -760,10 +788,20 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T>
             ));
         }
 
-        let mut root_id = self.inner.root.write(txn_id).await?;
-        self.inner.file.truncate(txn_id).await?;
-        *root_id = backup.inner.root.read(txn_id).await?.clone();
-        self.inner.file.copy_from(&backup.inner.file, txn_id).await
+        let (mut file, source) = try_join!(
+            self.inner.file.write(txn_id),
+            backup.inner.file.read(txn_id)
+        )?;
+
+        let (mut root_id, new_root_id) = try_join!(
+            self.inner.root.write(txn_id),
+            backup.inner.root.read(txn_id)
+        )?;
+
+        file.copy_from(&source, true).await?;
+        *root_id = (*new_root_id).clone();
+
+        Ok(())
     }
 }
 

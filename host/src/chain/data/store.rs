@@ -53,22 +53,21 @@ impl Store {
 
         debug!("computed hash of {}: {}", state, hash);
 
+        let txn_id = *txn.id();
+        let mut dir = self.dir.write(txn_id).await?;
+
         // TODO: it should be possible to lock the directory listing,
         // to combine the calls to `self.dir.contains` with `self.dir.create...`
-        let txn_id = *txn.id();
         match state {
             State::Collection(collection) => match collection {
                 Collection::BTree(btree) => {
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
 
-                    if self.dir.contains(txn_id, &hash).await? {
+                    if dir.contains(&hash) {
                         debug!("BTree with hash {} is already saved", hash);
                     } else {
-                        let file = self
-                            .dir
-                            .create_file(txn_id, hash.clone(), btree.class())
-                            .await?;
+                        let file = dir.create_file(hash.clone(), btree.class())?;
 
                         BTreeFile::copy_from(btree, file, txn).await?;
                         debug!("saved BTree with hash {}", hash);
@@ -85,10 +84,10 @@ impl Store {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
 
-                    if self.dir.contains(txn_id, &hash).await? {
+                    if dir.contains(&hash) {
                         debug!("Table with hash {} is already saved", hash);
                     } else {
-                        let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
+                        let dir = dir.create_dir(hash.clone())?;
                         TableIndex::copy_from(table, dir, txn).await?;
                         debug!("saved Table with hash {}", hash);
                     }
@@ -109,7 +108,7 @@ impl Store {
                     let schema = tc_tensor::Schema { shape, dtype };
                     let classpath = tensor.class().path();
 
-                    if self.dir.contains(txn_id, &hash).await? {
+                    if dir.contains(&hash) {
                         debug!("Tensor with hash {} is already saved", tensor);
                     } else {
                         match tensor {
@@ -119,17 +118,14 @@ impl Store {
                                     dense
                                 );
 
-                                let file = self
-                                    .dir
-                                    .create_file(txn_id, hash.clone(), TensorType::Dense)
-                                    .await?;
+                                let file = dir.create_file(hash.clone(), TensorType::Dense)?;
 
                                 debug!("chain data store created destination file for {}", dense);
                                 DenseTensor::copy_from(dense, file, txn).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
                             Tensor::Sparse(sparse) => {
-                                let dir = self.dir.create_dir(txn_id, hash.clone()).await?;
+                                let dir = dir.create_dir(hash.clone())?;
                                 SparseTensor::copy_from(sparse, dir, txn).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
@@ -185,6 +181,8 @@ impl Store {
     ) -> TCResult<Collection> {
         debug!("resolve historical collection value of type {}", class);
 
+        let dir = self.dir.read(*txn.id()).await?;
+
         match class {
             CollectionType::BTree(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
@@ -197,7 +195,7 @@ impl Store {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let file = self.dir.get_file(*txn.id(), &hash).await?.ok_or_else(|| {
+                let file = dir.get_file(&hash)?.ok_or_else(|| {
                     TCError::internal(format!("Chain is missing historical state {}", hash))
                 })?;
 
@@ -216,7 +214,7 @@ impl Store {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let dir = self.dir.get_dir(*txn.id(), &hash).await?;
+                let dir = dir.get_dir(&hash)?;
                 let dir = dir.ok_or_else(|| {
                     TCError::internal(format!("missing historical Chain state {}", hash))
                 })?;
@@ -236,7 +234,7 @@ impl Store {
 
                 match tt {
                     TensorType::Dense => {
-                        let file = self.dir.get_file(*txn.id(), &hash).await?;
+                        let file = dir.get_file(&hash)?;
                         let file = file.ok_or_else(|| {
                             TCError::internal(format!("missing historical Chain state {}", hash))
                         })?;
@@ -245,7 +243,7 @@ impl Store {
                         Ok(Collection::Tensor(tensor.into()))
                     }
                     TensorType::Sparse => {
-                        let dir = self.dir.get_dir(*txn.id(), &hash).await?;
+                        let dir = dir.get_dir(&hash)?;
                         let dir = dir.ok_or_else(|| {
                             TCError::internal(format!("missing historical Chain state {}", hash))
                         })?;

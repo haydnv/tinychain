@@ -13,7 +13,7 @@ use safecast::{AsType, CastFrom, CastInto};
 
 use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
@@ -157,8 +157,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     /// Create a new `SparseTensor` with the given schema
     pub async fn create(dir: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
@@ -284,8 +284,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
@@ -347,8 +347,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
@@ -410,8 +410,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Compare = Tensor<FD, FS, D, T>;
@@ -520,8 +520,8 @@ where
     FD: File<Array>,
     FS: File<Node>,
     A: SparseAccess<FD, FS, D, T>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
 {
     type Txn = T;
@@ -582,8 +582,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseWrite<FD, FS, D, T>,
 {
     type Txn = T;
@@ -626,8 +626,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseWrite<FD, FS, D, T>,
 {
     type Txn = T;
@@ -649,7 +649,6 @@ where
             Tensor::Dense(other) => {
                 let dir = txn.context().create_dir_unique(*txn.id()).await?;
                 let other = SparseTensor::copy_from(other.into_sparse(), dir, &txn).await?;
-
                 self.write(txn, bounds, other.into_sparse()).await
             }
             Tensor::Sparse(other) => match other.accessor {
@@ -674,8 +673,8 @@ where
     D: Dir,
     T: Transaction<D>,
     A: SparseWrite<FD, FS, D, T>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
     type Index = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
@@ -702,6 +701,7 @@ where
 
         let txn_id = *txn.id();
         let dir = txn.context().create_dir_unique(txn_id).await?;
+
         let table = SparseTable::create(&dir, schema, txn_id).await?;
 
         let dim = self.shape()[axis];
@@ -898,8 +898,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Combine = Tensor<FD, FS, D, T>;
@@ -1009,8 +1009,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
     Self: TensorInstance,
     <Self as TensorInstance>::Dense: TensorReduce<D, Txn = T> + Send + Sync,
@@ -1103,8 +1103,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Broadcast = SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
@@ -1288,8 +1288,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     async fn copy_from(
@@ -1310,8 +1310,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Schema = Schema;
     type Store = D;
@@ -1335,8 +1335,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.accessor.restore(&backup.accessor, txn_id).await
@@ -1392,8 +1392,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1417,8 +1417,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Context = T;
 
@@ -1452,8 +1452,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<BTreeType> + From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Value = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
 

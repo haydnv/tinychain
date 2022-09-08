@@ -72,10 +72,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T>
-where
-    BTreeFile<F, D, T>: Clone + 'static,
-{
+impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T> {
     type Slice = Self;
 
     fn collator(&'_ self) -> &'_ ValueCollator {

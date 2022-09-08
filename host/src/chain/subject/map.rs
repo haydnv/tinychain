@@ -10,20 +10,21 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use futures::TryStreamExt;
 use futures::{join, try_join};
 use log::{debug, warn};
-use safecast::{CastFrom, CastInto, TryCastInto};
+use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Store};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File, FileRead, FileWrite};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
 
 use crate::collection::Collection;
 use crate::fs;
-use crate::scalar::{Scalar, ScalarType};
+use crate::fs::FileReadGuard;
+use crate::scalar::{Scalar, ScalarType, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -67,15 +68,16 @@ impl SubjectMap {
     }
 
     pub async fn create(dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
-        if !dir.is_empty(txn_id).await? {
+        let mut dir_lock = dir.write(txn_id).await?;
+
+        if !dir_lock.is_empty() {
             return Err(TCError::internal(
                 "tried to create a new dynamic Chain with a non-empty directory",
             ));
         }
 
-        let _file: fs::File<Scalar> = dir
-            .create_file(txn_id, DYNAMIC.into(), ScalarType::default())
-            .await?;
+        let _file: fs::File<Scalar> =
+            dir_lock.create_file(DYNAMIC.into(), ScalarType::default())?;
 
         Ok(Self {
             dir,
@@ -88,14 +90,19 @@ impl SubjectMap {
         Box::pin(async move {
             let txn_id = *txn.id();
 
-            let file = dir.get_file(txn_id, &DYNAMIC.into()).await?;
-            let file: fs::File<Scalar> = file.ok_or_else(|| {
-                TCError::internal(format!("dynamic Chain is missing its schema file"))
-            })?;
+            let file: fs::FileReadGuard<Scalar> = {
+                let dir = dir.read(txn_id).await?;
+                let file = dir.get_file(&DYNAMIC.into())?;
+                let file: fs::File<Scalar> = file.ok_or_else(|| {
+                    TCError::internal(format!("dynamic Chain is missing its schema file"))
+                })?;
+
+                file.read(txn_id).await?
+            };
 
             let mut map = Map::new();
-            for id in file.block_ids(txn_id).await? {
-                let schema = file.read_block(txn_id, id.clone()).await?;
+            for id in FileReadGuard::<Scalar>::block_ids(&file) {
+                let schema = file.read_block(id).await?;
                 let schema = Scalar::clone(&*schema);
                 let schema = schema.try_cast_into(|s| {
                     TCError::internal(format!("invalid schema for dynamic Chain subject: {}", s))
@@ -104,7 +111,7 @@ impl SubjectMap {
                 let schema = CollectionSchema::from_scalar(schema)?;
                 let subject = SubjectCollection::load(txn, schema, &dir, id.clone()).await?;
 
-                map.insert(id, subject);
+                map.insert(id.clone(), subject);
             }
 
             Ok(Self {
@@ -121,11 +128,7 @@ impl SubjectMap {
         backups: Map<Collection>,
     ) -> TCBoxTryFuture<()> {
         Box::pin(async move {
-            let txn_id = *txn.id();
             let container = self.dir.clone();
-            let schema = container.get_file(txn_id, &DYNAMIC.into()).await?;
-            let schema: fs::File<Scalar> =
-                schema.ok_or_else(|| TCError::internal("missing schema file"))?;
 
             let (mut ids, mut collections) = self.clone().write(*txn.id()).await?;
 
@@ -143,7 +146,7 @@ impl SubjectMap {
                 } else {
                     // TODO: parallelize
                     ids.insert(id.clone());
-                    put(txn, &schema, &container, &mut collections, id, backup).await?;
+                    put(txn, &container, &mut collections, id, backup).await?;
                 }
             }
 
@@ -167,14 +170,8 @@ impl SubjectMap {
     }
 
     pub async fn put(self, txn: &Txn, id: Id, collection: Collection) -> TCResult<()> {
-        let container = self.dir.clone();
         let txn_id = *txn.id();
-        let file = self
-            .dir
-            .get_file::<fs::File<Scalar>, Scalar>(txn_id, &DYNAMIC.into())
-            .await?;
-
-        let file = file.ok_or_else(|| TCError::internal("dynamic Chain missing schema file"))?;
+        let container = self.dir.clone();
 
         let (mut ids, mut collections) = self.write(txn_id).await?;
 
@@ -188,11 +185,11 @@ impl SubjectMap {
             if existing_hash == collection_hash {
                 Ok(())
             } else {
-                put(txn, &file, &container, &mut collections, id, collection).await
+                put(txn, &container, &mut collections, id, collection).await
             }
         } else {
             ids.insert(id.clone());
-            put(txn, &file, &container, &mut collections, id, collection).await
+            put(txn, &container, &mut collections, id, collection).await
         }
     }
 
@@ -272,11 +269,21 @@ impl de::Visitor for SubjectMapVisitor {
         let txn_id = *self.txn.id();
         let mut collections = Map::new();
 
-        let dir = self.txn.context().clone();
-        let file: fs::File<Scalar> = dir
-            .create_file(txn_id, DYNAMIC.into(), ScalarType::default())
-            .map_err(de::Error::custom)
-            .await?;
+        let mut file: fs::FileWriteGuard<Scalar> = {
+            let file: fs::File<Scalar> = {
+                let mut dir = self
+                    .txn
+                    .context()
+                    .write(txn_id)
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                dir.create_file(DYNAMIC.into(), ScalarType::default())
+                    .map_err(de::Error::custom)?
+            };
+
+            file.write(txn_id).map_err(de::Error::custom).await?
+        };
 
         while let Some(key) = map.next_key::<Id>(()).await? {
             let txn = self
@@ -288,7 +295,7 @@ impl de::Visitor for SubjectMapVisitor {
             let collection: SubjectCollection = map.next_value(txn).await?;
 
             let schema = Scalar::cast_from(collection.schema());
-            file.create_block(txn_id, key.clone(), schema, BLOCK_SIZE_HINT)
+            file.create_block(key.clone(), schema, BLOCK_SIZE_HINT)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -296,7 +303,7 @@ impl de::Visitor for SubjectMapVisitor {
         }
 
         Ok(SubjectMap {
-            dir,
+            dir: self.txn.context().clone(),
             ids: TxnLock::new(LOCK_NAME, collections.keys().cloned().collect()),
             collections: Arc::new(RwLock::new(collections)),
         })
@@ -338,13 +345,18 @@ impl fmt::Display for SubjectMap {
 
 async fn put(
     txn: &Txn,
-    schema: &fs::File<Scalar>,
     container: &fs::Dir,
     collections: &mut Map<SubjectCollection>,
     id: Id,
     collection: Collection,
 ) -> TCResult<()> {
     let txn_id = *txn.id();
+    let mut schema = {
+        let container = container.read(txn_id).await?;
+        let schema: Option<fs::File<Scalar>> = container.get_file(&DYNAMIC.into())?;
+        let schema = schema.ok_or_else(|| TCError::internal("missing schema file"))?;
+        schema.write(txn_id).await?
+    };
 
     let collection = if let Some(existing) = collections.get(&id) {
         existing.restore(txn, collection).await?;
@@ -354,12 +366,24 @@ async fn put(
         SubjectCollection::from_collection(collection)?
     };
 
-    if !schema.contains_block(txn_id, &id).await? {
+    if schema.contains(&id) {
+        let block = schema.read_block(&id).await?;
+        let tc_ref = TCRef::try_cast_from((*block).clone(), |block| {
+            TCError::internal(format!("bad schema for subject map collection: {}", block))
+        })?;
+
+        let actual = CollectionSchema::from_scalar(tc_ref)?;
+        if collection.schema() != actual {
+            return Err(TCError::unsupported(format!(
+                "cannot change schema of {} from {} to {}",
+                collection, collection, actual
+            )));
+        }
+    } else {
         schema
             .create_block(
-                txn_id,
                 id.clone(),
-                collection.schema().cast_into(),
+                Scalar::cast_from(collection.schema()),
                 BLOCK_SIZE_HINT,
             )
             .await?;

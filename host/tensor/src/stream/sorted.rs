@@ -5,14 +5,14 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
 use crate::dense::{BlockListFile, PER_BLOCK};
-use crate::{Coord, Shape, TensorAccess, TensorType};
+use crate::{Coord, DenseAccess, Shape, TensorAccess, TensorType};
 
 use super::ReadValueAt;
 
@@ -26,8 +26,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
@@ -40,9 +40,8 @@ where
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
     debug!("sorted coords");
 
-    let offsets = offsets
-        .into_stream(txn_id)
-        .map_ok(|array| array.type_cast());
+    let offsets = offsets.block_stream(txn.clone()).await?;
+    let offsets = offsets.map_ok(|array| array.type_cast());
 
     let coords = offsets_to_coords(shape.clone(), offsets);
     let coords = CoordUnique::new(coords, shape.to_vec(), PER_BLOCK);
@@ -59,8 +58,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
 {

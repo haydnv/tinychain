@@ -13,10 +13,12 @@ categories = ["algorithms", "concurrency", "mathematics", "science"]
 
 [dependencies]
 log = { version = "0.4", features = ["release_max_level_warn"] }
-tc-btree = "0.6"
+# TODO: remove
+tc-btree = { path = "../btree" }
 tc-error = "0.6"
 tc-transact = { path = "../transact", features = ["tensor"] }
 tc-value = { path = "../value" }
+# TODO: remove
 tc-table = { path = "../table" }
 tc-tensor = { path = "../tensor" }
 tcgeneric = "0.5"

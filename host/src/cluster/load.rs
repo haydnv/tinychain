@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use log::debug;
+use log::{debug, trace};
 use tokio::sync::RwLock;
 
 use tc_error::*;
+use tc_transact::fs::{Dir, DirWrite};
 use tc_transact::lock::TxnLock;
 use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};
@@ -104,7 +105,13 @@ pub async fn instantiate(
     }
 
     let txn_id = *txn.id();
-    let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
+    let mut dir = {
+        let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
+        dir.write(txn_id).await?
+    };
+
+    trace!("Cluster::load got write lock on data directory");
+
     let mut replicas = HashSet::new();
     replicas.insert((host, link.path().clone()).into());
 
@@ -112,8 +119,10 @@ pub async fn instantiate(
     for (id, (class, schema)) in chain_schema.into_iter() {
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
-        let dir = dir.get_or_create_dir(txn_id, id.clone()).await?;
+        let dir = dir.get_or_create_dir(id.clone())?;
         let chain = chain::load(txn, class, schema, dir).await?;
+        trace!("loaded chain {}", id);
+
         chains.insert(id, chain);
     }
 
@@ -140,7 +149,10 @@ async fn get_or_create_dir(
 ) -> TCResult<fs::Dir> {
     let mut dir = data_dir;
     for name in path {
-        dir = dir.get_or_create_dir(txn_id, name.clone()).await?;
+        dir = {
+            let mut dir = dir.write(txn_id).await?;
+            dir.get_or_create_dir(name.clone())?
+        }
     }
 
     Ok(dir)

@@ -8,9 +8,9 @@ use futures::try_join;
 use log::{debug, trace};
 use safecast::AsType;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -118,8 +118,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         dispatch!(self, this, this.dtype())
@@ -145,8 +145,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = Self;
 
@@ -190,8 +190,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
@@ -207,8 +207,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -261,9 +261,9 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
-    D::FileClass: From<TensorType>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = DenseToSparse<FD, FS, D, T, B::Slice>;
 
@@ -414,8 +414,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     pub fn new(source: A, shape: Shape) -> TCResult<Self> {
@@ -463,8 +463,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -612,8 +612,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -685,8 +685,8 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -878,8 +878,8 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
@@ -1057,8 +1057,8 @@ where
     FD: File<Array>,
     FS: File<Node>,
     D: Dir,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
@@ -1245,8 +1245,8 @@ where
     FS: File<Node>,
     D: Dir,
     T: Transaction<D>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
 {
@@ -1441,8 +1441,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -1668,8 +1668,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
@@ -1805,8 +1805,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     pub fn new(
         source: SparseAccessor<FD, FS, D, T>,
@@ -1828,8 +1828,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -1855,8 +1855,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = SparseReduce<FD, FS, D, T>;
 
@@ -1980,8 +1980,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -2059,8 +2059,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
 {
     type Slice = SparseTable<FD, FS, D, T>;
@@ -2213,8 +2213,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
     A::Slice: SparseAccess<FD, FS, D, T>,
 {
@@ -2364,8 +2364,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     fn dtype(&self) -> NumberType {
         self.dtype
@@ -2391,8 +2391,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = Self;
 
@@ -2453,8 +2453,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 

@@ -13,9 +13,11 @@ use log::debug;
 use safecast::AsType;
 use strided::Stride;
 
-use tc_btree::Node;
+use tc_btree::{BTreeType, Node};
 use tc_error::*;
-use tc_transact::fs::{BlockId, CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::fs::{
+    BlockId, CopyFrom, Dir, DirRead, DirWrite, File, FileRead, FileWrite, Persist, Restore,
+};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
@@ -111,12 +113,6 @@ where
     where
         G: Fn(usize) -> Array + Send + Copy,
     {
-        if !file.is_empty(txn_id).await? {
-            return Err(TCError::unsupported(
-                "cannot create new tensor: file is not empty",
-            ));
-        }
-
         let size = shape.size();
 
         let blocks = (0..(size / PER_BLOCK as u64)).map(move |_| Ok(generator(PER_BLOCK)));
@@ -136,20 +132,22 @@ where
         txn_id: TxnId,
         shape: Option<Shape>,
         dtype: NumberType,
-        blocks: S,
+        mut blocks: S,
     ) -> TCResult<Self> {
+        let mut file_lock = file.write(txn_id).await?;
+
         let bytes_per_element = dtype.size();
-        let size = blocks
-            .enumerate()
-            .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
-            .map_ok(|(id, block)| {
-                let len = block.len();
-                file.create_block(txn_id, id, block, len * bytes_per_element)
-                    .map_ok(move |_| len as u64)
-            })
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold(0u64, |block_len, size| future::ready(Ok(size + block_len)))
-            .await?;
+        let mut i = 0u64;
+        let mut size = 0u64;
+        // TODO: can this be parallelized?
+        while let Some(block) = blocks.try_next().await? {
+            let len = block.len();
+            file_lock
+                .create_block(i.into(), block, len * bytes_per_element)
+                .await?;
+            size += len as u64;
+            i += 1;
+        }
 
         let shape = if let Some(shape) = shape {
             if shape.size() < size {
@@ -189,13 +187,15 @@ where
         let mut i = 0u64;
         let mut size = 0u64;
         let mut values = values.chunks(PER_BLOCK);
+
+        let mut file_lock = file.write(txn_id).await?;
         while let Some(chunk) = values.next().await {
             let chunk = chunk.into_iter().collect::<TCResult<Vec<Number>>>()?;
             size += chunk.len() as u64;
+
             let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
-            file.create_block(txn_id, block_id, block, BLOCK_SIZE)
-                .await?;
+            file_lock.create_block(block_id, block, BLOCK_SIZE).await?;
 
             i += 1;
         }
@@ -236,32 +236,16 @@ where
         Self::from_values(file, txn_id, shape, dtype, values).await
     }
 
-    /// Consume this `BlockListFile` handle and return a `Stream` of `Array` blocks.
-    pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
-        let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
-
-        let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
-            .map(move |block_id| self.file.clone().read_block_owned(txn_id, block_id))
-            .buffered(num_cpus::get())
-            .map_ok(|block| (*block).clone());
-
-        Box::pin(blocks)
-    }
-
-    /// Borrow this `BlockListFile`'s underlying `File`.
-    pub(super) fn file(&self) -> &FD {
-        &self.file
-    }
-
     /// Sort the elements in this `BlockListFile`.
     pub async fn merge_sort(&self, txn_id: TxnId) -> TCResult<()> {
+        let file = self.file.write(txn_id).await?;
+
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         if num_blocks == 0 {
             return Ok(());
         } else if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
-            let mut block = self.file.write_block(txn_id, block_id).await?;
-
+            let mut block = file.write_block(block_id).await?;
             block.sort(true).map_err(array_err)?;
             return Ok(());
         }
@@ -272,10 +256,8 @@ where
                 let next_block_id = BlockId::from(block_id + 1);
                 let block_id = BlockId::from(block_id);
 
-                let left = self.file.write_block(txn_id, block_id);
-
-                let right = self.file.write_block(txn_id, next_block_id);
-
+                let left = file.write_block(block_id);
+                let right = file.write_block(&next_block_id);
                 let (mut left, mut right) = try_join!(left, right)?;
 
                 let mut block = Array::concatenate(&left, &right);
@@ -325,19 +307,17 @@ where
         }
 
         let txn_id = *txn.id();
-        let num_blocks = div_ceil(value.size(), PER_BLOCK as u64);
-        let contents = value.block_stream(txn).await?;
-        stream::iter((0..num_blocks).map(BlockId::from))
-            .zip(contents)
-            .map(|(block_id, r)| r.map(|array| (block_id, array)))
-            .map_ok(|(block_id, array)| async {
-                let mut block = self.file.write_block(txn_id, block_id).await?;
-                *block = array;
-                Ok(())
-            })
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+        let (file, mut contents) = try_join!(self.file.read(txn_id), value.block_stream(txn))?;
+
+        let mut block_id = 0u64;
+        while let Some(array) = contents.try_next().await? {
+            // TODO: can this be parallelized?
+            let mut block = file.write_block(BlockId::from(block_id)).await?;
+            *block = array;
+            block_id += 1;
+        }
+
+        Ok(())
     }
 }
 
@@ -366,8 +346,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -384,11 +364,13 @@ where
                 return Ok(blocks);
             }
 
-            let file = self.file;
+            let txn_id = *txn.id();
+            let file = self.file.read(txn_id).await?;
+
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| file.clone().read_block_owned(*txn.id(), block_id))
+                    .then(move |block_id| file.clone().read_block_owned(block_id))
                     .map_ok(|block| (*block).clone()),
             );
 
@@ -407,6 +389,8 @@ where
 
     async fn read_values(self, txn: Self::Txn, coords: Coords) -> TCResult<Array> {
         let txn_id = *txn.id();
+        let file = self.file.read(txn_id).await?;
+
         let per_block = ArrayExt::from(&[PER_BLOCK as u64][..]);
 
         let offsets = coords.to_offsets(self.shape());
@@ -414,7 +398,7 @@ where
         let block_ids = block_offsets.unique(false).to_vec();
 
         let values = Array::constant(self.dtype().zero(), coords.len());
-        let file = self.file;
+
         stream::iter(block_ids)
             .map(|block_id| {
                 let af_block_id = af::Array::new(&[block_id], af::Dim4::new(&[1, 1, 1, 1]));
@@ -422,8 +406,9 @@ where
                 let indices = (&offsets % &per_block).deref() * mask.deref();
                 (block_id, mask.into(), indices.into())
             })
-            .map(|(block_id, mask, indices)| {
-                file.read_block(txn_id, block_id.into())
+            .map(move |(block_id, mask, indices)| {
+                file.clone()
+                    .read_block_owned(BlockId::from(block_id))
                     .map_ok(move |block| block.get(&indices))
                     .map_ok(move |block_values| &block_values * &mask)
             })
@@ -442,8 +427,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     async fn write<B: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -466,9 +451,9 @@ where
             )));
         }
 
+        let txn_id = *txn.id();
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
         let size = rebase.size();
-        let txn_id = *txn.id();
         let offsets = (0..size)
             .step_by(PER_BLOCK)
             .map(|start| {
@@ -488,7 +473,7 @@ where
         stream::iter(offsets)
             .zip(blocks)
             .map(|(offsets, r)| r.map(|array| (offsets, array)))
-            .map_ok(|(offsets, array)| {
+            .map_ok(move |(offsets, array)| {
                 let af_per_block = af_per_block.clone();
 
                 async move {
@@ -503,11 +488,15 @@ where
                         let af_block_id = ArrayExt::from(&[block_id][..]);
                         let (len, _) =
                             af::sum_all(&af::eq(&block_offsets, af_block_id.deref(), true));
+
                         let end = start + len as usize;
                         let indices = indices.slice(start, end);
                         let array = array.slice(start, end).map_err(array_err)?;
 
-                        let mut block = self.file.write_block(txn_id, block_id.into()).await?;
+                        let mut block = self
+                            .file
+                            .write_block(txn_id, BlockId::from(block_id))
+                            .await?;
 
                         block.set(&indices, &array).map_err(array_err)?;
 
@@ -532,14 +521,13 @@ where
 
         bounds.normalize(self.shape());
 
+        let file = &self.file.read(txn_id).await?;
         let coords = stream::iter(bounds.affected().map(TCResult::Ok));
         CoordBlocks::new(coords, bounds.len(), PER_BLOCK)
             .map_ok(|coords| {
                 let (block_ids, af_indices, af_offsets) = coord_block(coords, self.shape());
 
-                let file = &self.file;
                 let value = value.clone();
-                let txn_id = txn_id;
 
                 async move {
                     let mut start = 0;
@@ -549,7 +537,7 @@ where
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
                         let block_id = BlockId::from(block_id);
-                        let mut block = file.write_block(txn_id, block_id).await?;
+                        let mut block = file.write_block(block_id).await?;
 
                         let value = Array::constant(value, (new_start - start) as usize);
                         (*block)
@@ -574,8 +562,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 
@@ -591,7 +579,6 @@ where
 
             let block_id = BlockId::from(offset / PER_BLOCK as u64);
             let block = self.file.read_block(*txn.id(), block_id).await?;
-
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
             Ok((coord, value))
@@ -678,8 +665,8 @@ where
             ));
         }
 
-        self.file.truncate(txn_id).await?;
-        self.file.copy_from(&backup.file, txn_id).await
+        let (mut file, backup) = try_join!(self.file.write(txn_id), backup.file.read(txn_id))?;
+        file.copy_from(&backup, false).await
     }
 }
 
@@ -774,22 +761,6 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
     fn new(txn_id: TxnId, file: &'a F) -> Self {
         Self { txn_id, file }
     }
-
-    async fn create_block<T: af::HasAfEnum, E: de::Error>(
-        &self,
-        block_id: u64,
-        block: ArrayExt<T>,
-    ) -> Result<F::Write, E>
-    where
-        Array: From<ArrayExt<T>>,
-    {
-        debug!("BlockListVisitor::create_block {}", block_id);
-
-        self.file
-            .create_block(self.txn_id, block_id.into(), block.into(), BLOCK_SIZE)
-            .map_err(de::Error::custom)
-            .await
-    }
 }
 
 impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
@@ -813,6 +784,12 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
         let mut size = 0u64;
         let mut block_id = 0u64;
 
+        let mut file = self
+            .file
+            .write(self.txn_id)
+            .map_err(de::Error::custom)
+            .await?;
+
         loop {
             let block_size = access.buffer(&mut buf).await?;
 
@@ -820,7 +797,9 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
                 break;
             } else {
                 let block = ArrayExt::from(&buf[..block_size]);
-                self.create_block(block_id, block).await?;
+                file.create_block(block_id.into(), block.into(), BLOCK_SIZE)
+                    .map_err(de::Error::custom)
+                    .await?;
                 size += block_size as u64;
                 block_id += 1;
             }
@@ -939,6 +918,13 @@ impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
         let mut size = 0u64;
         let mut block_id = 0u64;
 
+        let mut file = self
+            .visitor
+            .file
+            .write(self.visitor.txn_id)
+            .map_err(de::Error::custom)
+            .await?;
+
         loop {
             let block_size = access.buffer(&mut buf).await?;
 
@@ -949,7 +935,9 @@ impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
                 let re = ArrayExt::<T>::from_iter(re.iter().cloned());
                 let im = ArrayExt::<T>::from_iter(im.iter().cloned());
                 let block = ArrayExt::from((re, im));
-                self.visitor.create_block(block_id, block).await?;
+                file.create_block(block_id.into(), block.into(), BLOCK_SIZE)
+                    .map_err(de::Error::custom)
+                    .await?;
 
                 size += block_size as u64;
                 block_id += 1;
@@ -1043,8 +1031,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Slice = Self;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1059,37 +1047,41 @@ where
             return Box::pin(future::ready(Ok(blocks)));
         }
 
-        let txn_id = *txn.id();
-        let file = self.source.file;
-        let shape = self.source.schema.shape;
-        let mut bounds = self.rebase.bounds().clone();
-        bounds.normalize(&shape);
+        Box::pin(async move {
+            let txn_id = *txn.id();
+            let file = self.source.file.clone();
+            let shape = self.source.schema.shape;
+            let mut bounds = self.rebase.bounds().clone();
+            bounds.normalize(&shape);
 
-        let ndim = bounds.len();
-        let coords = stream::iter(bounds.affected().map(TCResult::Ok));
-        let values = CoordBlocks::new(coords, ndim, PER_BLOCK).and_then(move |coords| {
-            let file_clone = file.clone();
-            let (block_ids, af_indices, af_offsets) = coord_block(coords, &shape);
+            let ndim = bounds.len();
+            let coords = stream::iter(bounds.affected().map(TCResult::Ok));
+            let blocks = CoordBlocks::new(coords, ndim, PER_BLOCK).and_then(move |coords| {
+                let (block_ids, af_indices, af_offsets) = coord_block(coords, &shape);
+                let file_clone = file.clone();
 
-            Box::pin(async move {
-                let mut start = 0;
-                let mut values = vec![];
-                for block_id in block_ids {
-                    let (block_offsets, new_start) =
-                        block_offsets(&af_indices, &af_offsets, start, block_id);
+                Box::pin(async move {
+                    let mut start = 0;
+                    let mut values = vec![];
+                    for block_id in block_ids {
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                    let block = file_clone.read_block(txn_id, block_id.into()).await?;
+                        let block = file_clone
+                            .read_block(txn_id, BlockId::from(block_id))
+                            .await?;
 
-                    values.extend(block.get(&block_offsets.into()).to_vec());
-                    start = new_start;
-                }
+                        values.extend(block.get(&block_offsets.into()).to_vec());
+                        start = new_start;
+                    }
 
-                Ok(Array::from(values))
-            })
-        });
+                    Ok(Array::from(values))
+                })
+            });
 
-        let blocks: TCBoxTryStream<Array> = Box::pin(values);
-        Box::pin(future::ready(Ok(blocks)))
+            let blocks: TCBoxTryStream<Array> = Box::pin(blocks);
+            Ok(blocks)
+        })
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -1114,8 +1106,8 @@ where
     T: Transaction<D>,
     FD: File<Array>,
     FS: File<Node>,
-    D::File: AsType<FD> + AsType<FS>,
-    D::FileClass: From<TensorType>,
+    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
     type Txn = T;
 

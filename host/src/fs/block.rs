@@ -84,6 +84,7 @@ impl freqfs::FileLoad for CacheBlock {
     }
 }
 
+// TODO: use a macro to generate this code
 impl AsType<Node> for CacheBlock {
     fn as_type(&self) -> Option<&Node> {
         if let Self::BTree(node) = self {
