@@ -75,7 +75,7 @@ impl<T: Clone + PartialEq> Drop for TxnLockReadGuard<T> {
                 .lock()
                 .expect("TxnLockReadGuard::drop");
 
-            lock_state.drop_read(&self.txn_id)
+            lock_state.drop_read(&self.txn_id, false)
         };
 
         if num_readers == 0 {
@@ -123,10 +123,13 @@ impl<T: Clone + PartialEq> Drop for TxnLockReadGuardExclusive<T> {
                 .lock()
                 .expect("TxnLockReadGuardExclusive::drop");
 
-            lock_state.drop_read(&self.txn_id)
+            lock_state.drop_read(&self.txn_id, true)
         };
 
-        if num_readers == 0 && !self.pending_upgrade {
+        if self.pending_upgrade {
+            trace!("TxnLockReadGuardExclusive::drop pending upgrade, not waking subscribers...");
+        } else if num_readers == 0 {
+            trace!("TxnLockReadGuardExclusive::drop waking subscribers...");
             self.lock.wake();
         }
     }
@@ -243,13 +246,14 @@ impl<T: Clone + PartialEq<T>> Versions<T> {
 struct LockState<T> {
     versions: Versions<T>,
     readers: BTreeMap<TxnId, usize>,
+    exclusive: BTreeSet<TxnId>,
     writer: Option<TxnId>,
     pending_writes: BTreeSet<TxnId>,
     last_commit: TxnId,
 }
 
 impl<T: Clone + PartialEq> LockState<T> {
-    fn drop_read(&mut self, txn_id: &TxnId) -> usize {
+    fn drop_read(&mut self, txn_id: &TxnId, exclusive: bool) -> usize {
         if let Some(writer) = &self.writer {
             assert_ne!(writer, txn_id);
         }
@@ -262,10 +266,20 @@ impl<T: Clone + PartialEq> LockState<T> {
             num_readers
         );
 
+        if exclusive {
+            assert_eq!(*num_readers, 0);
+            self.exclusive.remove(txn_id);
+        }
+
         *num_readers
     }
 
     fn try_read(&mut self, txn_id: &TxnId, exclusive: bool) -> TCResult<Option<Arc<RwLock<T>>>> {
+        if self.exclusive.contains(txn_id) {
+            debug!("TxnLock is locked exclusively for reading");
+            return Ok(None);
+        }
+
         for reserved in self.pending_writes.iter().rev() {
             debug_assert!(reserved <= &txn_id);
 
@@ -295,8 +309,10 @@ impl<T: Clone + PartialEq> LockState<T> {
         let num_readers = self.readers.entry(*txn_id).or_insert(0);
 
         if exclusive {
-            if *num_readers > 0 {
-                debug!("TxnLock is locked exclusively for reading");
+            if *num_readers == 0 {
+                self.exclusive.insert(*txn_id);
+            } else {
+                trace!("TxnLock is locked non-exclusively for reading");
                 return Ok(None);
             }
         }
@@ -402,6 +418,7 @@ impl<T> TxnLock<T> {
         let state = LockState {
             versions,
             readers: BTreeMap::new(),
+            exclusive: BTreeSet::new(),
             writer: None,
             pending_writes: BTreeSet::new(),
             last_commit: MIN_ID,

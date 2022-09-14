@@ -139,7 +139,7 @@ async def main(benchmarks):
 
     args = parser.parse_args()
 
-    pattern = args.k
+    patterns = set(pattern.strip() for pattern in args.k.split(',')) if args.k else None
     scales = [n for [n] in args.num_users] if args.num_users else None
     concurrency = args.concurrency
     cache_size = args.cache_size
@@ -154,7 +154,7 @@ async def main(benchmarks):
 
         started = False
         for test in benchmark:
-            if pattern is None or pattern in test.__name__:
+            if patterns is None or any(pattern in test.__name__ for pattern in patterns):
                 if not started:
                     benchmark.start(cache_size=cache_size, workspace=workspace)
                     started = True
