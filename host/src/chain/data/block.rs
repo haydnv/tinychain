@@ -146,7 +146,7 @@ impl ChainBlock {
     }
 
     /// Append a [`Mutation`] to this [`ChainBlock`]
-    pub fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
+    pub(super) fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
         match self.mutations.entry(txn_id) {
             Entry::Vacant(entry) => {
                 entry.insert(vec![mutation]);

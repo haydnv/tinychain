@@ -191,7 +191,7 @@ pub trait DirRead: Send + Sync {
     /// Look up a subdirectory of this `Dir`.
     fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
 
-    /// Get a [`Self::File`] in this `Dir`.
+    /// Get a [`File`] in this `Dir`.
     fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
         Self::FileEntry: AsType<F>,
@@ -213,7 +213,7 @@ pub trait DirWrite: DirRead {
     /// Create a new `Dir` with a new unique ID.
     fn create_dir_unique(&mut self) -> TCResult<Self::Lock>;
 
-    /// Create a new [`Self::File`].
+    /// Create a new [`File`].
     fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
         Self::FileClass: From<C>,
@@ -222,7 +222,7 @@ pub trait DirWrite: DirRead {
         B: BlockData,
         F: File<B>;
 
-    /// Create a new [`Self::File`] with a new unique ID.
+    /// Create a new [`File`] with a new unique ID.
     fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
     where
         Self::FileClass: From<C>,

@@ -239,6 +239,7 @@ impl fmt::Display for FileEntry {
     }
 }
 
+/// An entry in a [`Dir`]
 #[derive(Clone)]
 pub enum DirEntry {
     Dir(Dir),
@@ -254,6 +255,7 @@ impl fmt::Display for DirEntry {
     }
 }
 
+/// The contents of a [`Dir`]
 #[derive(Clone)]
 pub struct Contents {
     inner: HashMap<PathSegment, DirEntry>,
@@ -291,6 +293,7 @@ impl From<HashMap<PathSegment, DirEntry>> for Contents {
     }
 }
 
+/// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
     cache: C,
     contents: L,
@@ -428,7 +431,7 @@ pub struct Dir {
 }
 
 impl Dir {
-    pub fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+    pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
         let lock_name = "contents of a transactional filesystem directory";
 
         Self {
@@ -491,6 +494,9 @@ impl Dir {
         })
     }
 
+    /// Get this [`Dir`]'s underlying [`freqfs::DirLock`].
+    ///
+    /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
     pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
         self.cache
     }

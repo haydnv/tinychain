@@ -57,7 +57,7 @@ pub type SparseTensor<A> =
 pub type SparseTable =
     tc_tensor::SparseTable<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
 
-pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
+pub(crate) const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
 /// The [`Class`] of a [`Collection`].
 #[derive(Clone, Copy, Eq, PartialEq)]

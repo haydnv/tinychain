@@ -29,6 +29,7 @@ pub type FileReadGuard<B> = FileGuard<B, TxnLockReadGuard<Listing>>;
 pub type FileReadGuardExclusive<B> = FileGuard<B, TxnLockReadGuardExclusive<Listing>>;
 pub type FileWriteGuard<B> = FileGuard<B, TxnLockWriteGuard<Listing>>;
 
+/// A read lock guard for a block in a [`File`]
 pub struct BlockReadGuard<B> {
     cache: freqfs::FileReadGuard<CacheBlock, B>,
     #[allow(unused)]
@@ -45,6 +46,7 @@ impl<B> Deref for BlockReadGuard<B> {
 
 impl<B: BlockData> BlockRead<B> for BlockReadGuard<B> {}
 
+/// An exclusive read lock guard for a block in a [`File`]
 pub struct BlockReadGuardExclusive<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     txn_id: TxnId,
@@ -79,6 +81,7 @@ where
     }
 }
 
+/// A write lock guard for a block in a [`File`]
 pub struct BlockWriteGuard<B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     txn_id: TxnId,
@@ -114,6 +117,7 @@ where
     }
 }
 
+/// A lock guard for the contents (i.e. block listing) of a [`File`]
 #[derive(Clone)]
 pub struct FileGuard<B, L> {
     file: File<B>,
@@ -491,6 +495,7 @@ where
     }
 }
 
+/// A transactional file
 #[derive(Clone)]
 pub struct File<B> {
     canon: freqfs::DirLock<CacheBlock>,
