@@ -5,8 +5,8 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
-use tc_btree::{BTreeType, Node};
 use tc_error::*;
+use tc_table::{BTreeType, Node};
 use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};

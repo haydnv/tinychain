@@ -20,7 +20,7 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 num_cpus = "1.13"
 safecast = "0.1"
 tc-error = "0.6"
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
+tc-transact = "0.14"
+tc-value = "0.7"
 tcgeneric = "0.5"
 uuid = { version = "1.1", features=["v4"] }

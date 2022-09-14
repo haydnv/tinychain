@@ -11,8 +11,8 @@ use itertools::Itertools;
 use log::debug;
 use safecast::*;
 
-use tc_btree::{BTreeType, Node};
 use tc_error::*;
+use tc_table::{BTreeType, Node};
 use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{

@@ -13,8 +13,8 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use log::{debug, warn};
 use safecast::{AsType, CastFrom, CastInto};
 
-use tc_btree::{BTreeType, Node};
 use tc_error::*;
+use tc_table::{BTreeType, Node};
 use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{

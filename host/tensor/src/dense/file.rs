@@ -13,8 +13,8 @@ use log::debug;
 use safecast::AsType;
 use strided::Stride;
 
-use tc_btree::{BTreeType, Node};
 use tc_error::*;
+use tc_table::{BTreeType, Node};
 use tc_transact::fs::{
     BlockId, CopyFrom, Dir, DirRead, DirWrite, File, FileRead, FileWrite, Persist, Restore,
 };

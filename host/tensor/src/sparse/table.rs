@@ -11,10 +11,10 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
-use tc_btree::{BTreeType, Node};
 use tc_error::*;
 use tc_table::{
-    Column, ColumnBound, Merged, TableIndex, TableSchema, TableSlice, TableStream, TableWrite,
+    BTreeType, Column, ColumnBound, Merged, Node, TableIndex, TableSchema, TableSlice, TableStream,
+    TableWrite,
 };
 use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
