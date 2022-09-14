@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
 use futures::{TryFutureExt, TryStreamExt};
-use safecast::AsType;
+use safecast::{as_type, AsType};
 use tokio::fs;
 use tokio_util::io::StreamReader;
 
@@ -84,136 +84,11 @@ impl freqfs::FileLoad for CacheBlock {
     }
 }
 
-// TODO: use a macro to generate this code
-impl AsType<Node> for CacheBlock {
-    fn as_type(&self) -> Option<&Node> {
-        if let Self::BTree(node) = self {
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut Node> {
-        if let Self::BTree(node) = self {
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<Node> {
-        if let Self::BTree(node) = self {
-            Some(node)
-        } else {
-            None
-        }
-    }
-}
-
-impl AsType<ChainBlock> for CacheBlock {
-    fn as_type(&self) -> Option<&ChainBlock> {
-        if let Self::Chain(block) = self {
-            Some(block)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut ChainBlock> {
-        if let Self::Chain(block) = self {
-            Some(block)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<ChainBlock> {
-        if let Self::Chain(block) = self {
-            Some(block)
-        } else {
-            None
-        }
-    }
-}
-
+as_type!(CacheBlock, BTree, Node);
+as_type!(CacheBlock, Chain, ChainBlock);
+as_type!(CacheBlock, Scalar, Scalar);
 #[cfg(feature = "tensor")]
-impl AsType<Array> for CacheBlock {
-    fn as_type(&self) -> Option<&Array> {
-        if let Self::Tensor(array) = self {
-            Some(array)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut Array> {
-        if let Self::Tensor(array) = self {
-            Some(array)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<Array> {
-        if let Self::Tensor(array) = self {
-            Some(array)
-        } else {
-            None
-        }
-    }
-}
-
-impl AsType<Scalar> for CacheBlock {
-    fn as_type(&self) -> Option<&Scalar> {
-        if let Self::Scalar(scalar) = self {
-            Some(scalar)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut Scalar> {
-        if let Self::Scalar(scalar) = self {
-            Some(scalar)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<Scalar> {
-        if let Self::Scalar(scalar) = self {
-            Some(scalar)
-        } else {
-            None
-        }
-    }
-}
-
-impl From<Node> for CacheBlock {
-    fn from(node: Node) -> Self {
-        Self::BTree(node)
-    }
-}
-
-impl From<ChainBlock> for CacheBlock {
-    fn from(block: ChainBlock) -> Self {
-        Self::Chain(block)
-    }
-}
-
-#[cfg(feature = "tensor")]
-impl From<Array> for CacheBlock {
-    fn from(array: Array) -> Self {
-        Self::Tensor(array)
-    }
-}
-
-impl From<Scalar> for CacheBlock {
-    fn from(scalar: Scalar) -> Self {
-        Self::Scalar(scalar)
-    }
-}
+as_type!(CacheBlock, Tensor, Array);
 
 async fn persist<'en, T: en::ToStream<'en>>(
     data: &'en T,

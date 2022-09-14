@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
 use log::debug;
-use safecast::AsType;
+use safecast::{as_type, AsType};
 use uuid::Uuid;
 
 use tc_btree::{BTreeType, Node};
@@ -95,136 +95,11 @@ impl FileEntry {
     }
 }
 
-// TODO: generate this with a macro
-impl AsType<File<Node>> for FileEntry {
-    fn as_type(&self) -> Option<&File<Node>> {
-        if let Self::BTree(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut File<Node>> {
-        if let Self::BTree(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<File<Node>> {
-        if let Self::BTree(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-}
-
-impl AsType<File<ChainBlock>> for FileEntry {
-    fn as_type(&self) -> Option<&File<ChainBlock>> {
-        if let Self::Chain(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut File<ChainBlock>> {
-        if let Self::Chain(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<File<ChainBlock>> {
-        if let Self::Chain(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-}
-
+as_type!(FileEntry, BTree, File<Node>);
+as_type!(FileEntry, Chain, File<ChainBlock>);
+as_type!(FileEntry, Scalar, File<Scalar>);
 #[cfg(feature = "tensor")]
-impl AsType<File<Array>> for FileEntry {
-    fn as_type(&self) -> Option<&File<Array>> {
-        if let Self::Tensor(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut File<Array>> {
-        if let Self::Tensor(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<File<Array>> {
-        if let Self::Tensor(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-}
-
-impl AsType<File<Scalar>> for FileEntry {
-    fn as_type(&self) -> Option<&File<Scalar>> {
-        if let Self::Scalar(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn as_type_mut(&mut self) -> Option<&mut File<Scalar>> {
-        if let Self::Scalar(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-
-    fn into_type(self) -> Option<File<Scalar>> {
-        if let Self::Scalar(file) = self {
-            Some(file)
-        } else {
-            None
-        }
-    }
-}
-
-impl From<File<Node>> for FileEntry {
-    fn from(file: File<Node>) -> Self {
-        Self::BTree(file)
-    }
-}
-
-impl From<File<ChainBlock>> for FileEntry {
-    fn from(file: File<ChainBlock>) -> Self {
-        Self::Chain(file)
-    }
-}
-
-#[cfg(feature = "tensor")]
-impl From<File<Array>> for FileEntry {
-    fn from(file: File<Array>) -> Self {
-        Self::Tensor(file)
-    }
-}
-
-impl From<File<Scalar>> for FileEntry {
-    fn from(file: File<Scalar>) -> Self {
-        Self::Scalar(file)
-    }
-}
+as_type!(FileEntry, Tensor, File<Array>);
 
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -239,6 +114,7 @@ impl fmt::Display for FileEntry {
     }
 }
 
+/// An entry in a [`Dir`]
 #[derive(Clone)]
 pub enum DirEntry {
     Dir(Dir),
@@ -254,6 +130,7 @@ impl fmt::Display for DirEntry {
     }
 }
 
+/// The contents of a [`Dir`]
 #[derive(Clone)]
 pub struct Contents {
     inner: HashMap<PathSegment, DirEntry>,
@@ -291,6 +168,7 @@ impl From<HashMap<PathSegment, DirEntry>> for Contents {
     }
 }
 
+/// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
     cache: C,
     contents: L,
@@ -428,7 +306,7 @@ pub struct Dir {
 }
 
 impl Dir {
-    pub fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+    pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
         let lock_name = "contents of a transactional filesystem directory";
 
         Self {
@@ -491,6 +369,9 @@ impl Dir {
         })
     }
 
+    /// Get this [`Dir`]'s underlying [`freqfs::DirLock`].
+    ///
+    /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
     pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
         self.cache
     }
