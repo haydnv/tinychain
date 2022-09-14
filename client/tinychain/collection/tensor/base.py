@@ -22,7 +22,8 @@ from ...uri import URI
 
 from ..base import Collection
 
-from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Flip, Norm, Read, Reshape, Slice, Sum, Transpose
+from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Flip, Read, Reshape, Slice, Transpose
+from .operator import Max, Min, Norm, Product, Sum
 
 
 DType = typing.TypeVar("DType", bound=type[Number])
@@ -409,6 +410,22 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
         return self._post("lte", {"r": other}, Tensor)
 
+    def max(self, axis=None, keepdims=False):
+        """
+        Return the maximum value of this `Tensor` along the given `axis`, or the overall maximum if no axis is given.
+        """
+
+        rtype = Number if axis is None else Tensor
+        return rtype(Max(self, axis, keepdims))
+
+    def min(self, axis=None, keepdims=False):
+        """
+        Return the minimum value of this `Tensor` along the given `axis`, or the overal minimum if no axis is given.
+        """
+
+        rtype = Number if axis is None else Tensor
+        return rtype(Min(self, axis, keepdims))
+
     def mul(self, other):
         if ref.same_as(other, 1):
             return self
@@ -434,6 +451,12 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
             return self
 
         return Tensor(form=Pow(self, other))
+
+    def product(self, axis=None, keepdims=False):
+        """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
+
+        rtype = Number if axis is None else Tensor
+        return rtype(Product(self, axis, keepdims))
 
     def reshape(self, shape, copy=True):
         """Return a view of this `Tensor` with the given `shape`."""
