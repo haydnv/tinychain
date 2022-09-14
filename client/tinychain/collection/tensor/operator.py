@@ -165,6 +165,22 @@ class Reduce(Operator):
     def shape(self):
         return Shape.reduce(self.subject.shape, **self.args)
 
+    def gradients(self, loss):
+        if not is_literal(self.subject.ndim):
+            raise RuntimeError(f"gradients of Reduce require a literal number of dimensions, not {self.subject.ndim}")
+
+        # here we explicitly backpropagate the loss to the subject of this op
+        # so we know it will be multiplied by its derivative there; here we just need to set the correct shape
+
+        if self.args.get("axis") is None:
+            from .base import Dense
+            loss = loss * Dense.ones([1] * deref(self.subject.ndim))
+            return gradients(self.subject, loss)
+        elif not self.args.get("keepdims"):
+            return gradients(self.subject, loss.expand_dims(self.args["axis"]))
+        else:
+            return gradients(self.subject, loss)
+
 
 class Norm(Operator):
     def __init__(self, tensor, axis=None, keepdims=False):
@@ -197,6 +213,72 @@ class Norm(Operator):
         return gradients(self.subject, loss * self.backward())
 
 
+class Max(Reduce):
+    def __repr__(self):
+        if "axis" in self.args:
+            return f"max({self.subject}[{self.args['axis']}])"
+        else:
+            return f"max({self.subject})"
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.max(self.subject, **self.args)
+
+    def backward(self, variable=None):
+        from .base import NDArray
+
+        subject = derivative_of(self.subject, variable)
+
+        if isinstance(subject, NDArray):
+            return subject.max(**self.args)
+        else:
+            return subject
+
+
+class Min(Reduce):
+    def __repr__(self):
+        if "axis" in self.args:
+            return f"min({self.subject}[{self.args['axis']}])"
+        else:
+            return f"min({self.subject})"
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.min(self.subject, **self.args)
+
+    def backward(self, variable=None):
+        from .base import NDArray
+
+        subject = derivative_of(self.subject, variable)
+
+        if isinstance(subject, NDArray):
+            return subject.min(**self.args)
+        else:
+            return subject
+
+
+class Product(Reduce):
+    def __repr__(self):
+        if "axis" in self.args:
+            return f"product({self.subject}[{self.args['axis']}])"
+        else:
+            return f"product({self.subject})"
+
+    def forward(self):
+        from .base import NDArray
+        return NDArray.product(self.subject, **self.args)
+
+    def backward(self, variable=None):
+        from .base import NDArray
+
+        subject = derivative_of(self.subject, variable)
+
+        if isinstance(subject, NDArray):
+            return subject.product(**self.args)
+        else:
+            return subject
+
+
 class Sum(Reduce):
     def __repr__(self):
         if "axis" in self.args:
@@ -217,22 +299,6 @@ class Sum(Reduce):
             return subject.sum(**self.args)
         else:
             return subject
-
-    def gradients(self, loss):
-        if not is_literal(self.subject.ndim):
-            raise RuntimeError(f"gradients of Sum require a literal number of dimensions, not {self.subject.ndim}")
-
-        # here we explicitly backpropagate the loss to the subject of this op
-        # so we know it will be multiplied by its derivative there; here we just need to set the correct shape
-
-        if self.args.get("axis") is None:
-            from .base import Dense
-            loss = loss * Dense.ones([1] * deref(self.subject.ndim))
-            return gradients(self.subject, loss)
-        elif not self.args.get("keepdims"):
-            return gradients(self.subject, loss.expand_dims(self.args["axis"]))
-        else:
-            return gradients(self.subject, loss)
 
 
 class Transform(Operator):
