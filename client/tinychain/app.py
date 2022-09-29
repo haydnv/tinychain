@@ -2,7 +2,6 @@
 
 import inspect
 import logging
-import typing
 
 from .chain import Chain
 from .collection import Collection, Column
@@ -20,14 +19,13 @@ from .state import hash_of, Class, Instance, Object, State
 from .uri import URI
 
 
-def class_name(object_):
-    """A snake case representation of the class name. You can pass a Class or object as
-    an argument.
-    """
-    if isinstance(object_, type):
-        name = object_.__name__
+def class_name(class_or_instance):
+    """A snake case representation of the class name. Accepts a Class or instance as an argument."""
+
+    if isinstance(class_or_instance, type):
+        name = class_or_instance.__name__
     else:
-        name = object_.__class__.__name__
+        name = class_or_instance.__class__.__name__
 
     return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
 
@@ -113,10 +111,7 @@ class Dynamic(Instance):
             if name.startswith('_'):
                 continue
 
-            if hasattr(attr, "hidden") and attr.hidden:
-                # TODO: remove this obsolete case
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+            if inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
 
@@ -364,7 +359,7 @@ def dependencies(lib_or_model):
 
 
 def write_config(lib, config_path, overwrite=False):
-    """Write the configuration of the given :class:`tc.App` or :class:`Library` to the given path."""
+    """Write the configuration of the given :class:`App` or :class:`Library` to the given path."""
 
     if inspect.isclass(lib):
         raise ValueError(f"write_app expects an instance of Library, not a class: {lib}")

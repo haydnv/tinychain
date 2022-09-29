@@ -18,28 +18,24 @@ class User(tc.app.Model):
         self.last_name = last_name
 
 
-class TestApp(tc.graph.Graph):
+class TestApp(tc.app.App):
     __uri__ = URI
 
+    User = User
+
     @tc.post
-    def create_user(self, first_name: tc.String, last_name: tc.String):
-        # TODO: change method signature to (self, new_user: User) on completion of #175
-        user_id = self.user.max_id() + 1
-        return tc.after(self.user.insert([user_id], [first_name, last_name]), user_id)
+    def create_user(self, _first_name: tc.String, _last_name: tc.String):
+        return tc.error.NotImplemented("create user")
 
 
 class UserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_lib", [TestApp.autogenerate([User])])
+        cls.host = start_host("test_lib", [TestApp()])
 
     def testCreateUser(self):
-        count = self.host.get(URI.append("user/count"))
-        user_id = self.host.post(
-            URI.append("create_user"), {"first_name": "First", "last_name": "Last"}
-        )
-        self.assertEqual(self.host.get(URI.append("user/count")), count + 1)
-        self.assertEqual(self.host.get(URI.append("user"), [user_id]), [user_id, "First", "Last"])
+        # TODO
+        pass
 
     @classmethod
     def tearDownClass(cls) -> None:

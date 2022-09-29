@@ -221,6 +221,7 @@ class Context(object):
             raise ValueError(f"cannot rename {state} from {self._ns.key(state)} to {name}")
 
         state = autobox(state)
+
         self.deanonymize(state, name)
         self._ns[name] = state
         self._names.append(name)
@@ -244,27 +245,16 @@ class Context(object):
         state = autobox(state)
         name_hint = str(name_hint[1:]) if name_hint.startswith('$') else str(name_hint)
 
-        if isinstance(state, dict):
-            for key in state:
-                self.assign(state[key], f"{name_hint}.{key}")
-            return
-        elif isinstance(state, (list, tuple)):
-            for i in range(len(state)):
-                self.assign(state[i], f"{name_hint}.{i}")
-            return
+        if name_hint in self:
+            i = 1
+            while f"{name_hint}_{i}" in self:
+                i += 1
 
-        if name_hint not in self:
-            self._ns[name_hint] = state
-            self._deps.append(name_hint)
-            return
+            name_hint = f"{name_hint}_{i}"
 
-        i = 1
-        while f"{name_hint}_{i}" in self:
-            i += 1
-
-        name_hint = f"{name_hint}_{i}"
         self._ns[name_hint] = state
         self._deps.append(name_hint)
+        assert self._ns.key(state) == name_hint
 
     def deanonymize(self, state, name_hint):
         """Assign auto-generated names based on the given `name_hint` to the dependencies of the given `state`."""

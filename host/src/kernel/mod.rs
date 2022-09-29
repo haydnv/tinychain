@@ -296,7 +296,7 @@ impl fmt::Display for Kernel {
 
 fn execute<
     'a,
-    R: Send,
+    R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a InstanceExt<Cluster>) -> Fut + Send + 'a,
 >(
@@ -326,12 +326,15 @@ fn execute<
             let txn = cluster.claim(&txn).await?;
             let result = handler(txn.clone(), cluster).await;
 
-            if result.is_ok() {
-                debug!("commit {}", cluster);
-                cluster.distribute_commit(&txn).await?;
-            } else {
-                debug!("rollback {}", cluster);
-                cluster.distribute_rollback(&txn).await;
+            match &result {
+                Ok(_) => {
+                    debug!("commit {}", cluster);
+                    cluster.distribute_commit(&txn).await?;
+                }
+                Err(cause) => {
+                    debug!("rollback {} due to {}", cluster, cause);
+                    cluster.distribute_rollback(&txn).await;
+                }
             }
 
             result
