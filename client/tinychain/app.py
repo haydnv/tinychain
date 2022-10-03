@@ -31,6 +31,51 @@ def class_name(class_or_instance):
     return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
 
 
+class _Inspector(object):
+    def __init__(self, hidden=lambda name: name.startswith('_'), parent=None, filter_classes=[], filter_instances=[]):
+        assert all(inspect.isclass(cls) for cls in filter_classes)
+        assert all(inspect.isclass(cls) for cls in filter_instances)
+
+        self.filter_classes = filter_classes
+        self.filter_instances = filter_instances
+        self.hidden = hidden
+        self.parent = parent
+
+    def attributes(self, instance):
+        parent_members = dict(inspect.getmembers(self.parent)) if self.parent else {}
+        members = dict(inspect.getmembers(instance))
+
+        for name in sorted(members.keys()):
+            if self.hidden(name):
+                continue
+
+            attr = members[name]
+
+            if name in parent_members:
+                if attr is parent_members[name] or attr == parent_members[name]:
+                    continue
+                elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
+                    if attr.__code__ is parent_members[name].__code__:
+                        continue
+            elif inspect.ismethod(attr) and inspect.isclass(attr.__self__):
+                # it's a @classmethod
+                continue
+            elif inspect.isclass(attr):
+                if any(issubclass(attr, cls) for cls in self.filter_classes):
+                    continue
+            elif any(isinstance(attr, cls) for cls in self.filter_instances):
+                continue
+
+            form = attr
+            while isinstance(form, State):
+                form = form_of(form)
+
+            if any(isinstance(form, cls) for cls in self.filter_instances):
+                continue
+
+            yield name, attr
+
+
 class Meta(type):
     """The metaclass of a :class:`Model` which provides support for `form_of` and `to_json`."""
 
@@ -45,41 +90,14 @@ class Meta(type):
 
     def __form__(cls):
         parents = [c for c in cls.parents() if not issubclass(c, Model)]
-        parent_members = dict(inspect.getmembers(parents[0](form=URI("self")))) if parents else {}
 
         instance = cls(form=URI("self"))
         instance_header = get_ref(instance, "self")
 
         form = {}
-        for name, attr in inspect.getmembers(instance):
-            if name.startswith('_') or isinstance(attr, URI):
-                continue
-            elif hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif name in parent_members:
-                if attr is parent_members[name] or attr == parent_members[name]:
-                    logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
-                    continue
-                elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
-                    if attr.__code__ is parent_members[name].__code__:
-                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {cls}")
-                        continue
-
-                logging.info(f"{attr} ({name}) overrides a parent method and will be explicitly defined in {cls}")
-            elif inspect.ismethod(attr) and inspect.isclass(attr.__self__):
-                # it's a @classmethod
-                continue
-
-            if isinstance(attr, State):
-                while isinstance(attr, State):
-                    attr = form_of(attr)
-
-                if isinstance(attr, URI):
-                    continue
-
-                form[name] = attr
+        inspector = _Inspector(parent=parents[0], filter_instances=[URI]) if parents else _Inspector()
+        for name, attr in inspector.attributes(instance):
             if isinstance(attr, MethodStub):
-                # TODO: resolve these in alphabetical order
                 for method_name, method in attr.expand(instance_header, name):
                     form[method_name] = to_json(method)
             else:
@@ -97,6 +115,8 @@ class Meta(type):
 
 
 class Model(Object, metaclass=Meta):
+    """A data model used by an :class:`App`"""
+
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
@@ -160,6 +180,8 @@ class _Header(object):
 
 
 class Dynamic(Instance):
+    """A dynamic :class:`Model` whose methods can be defined according to its compile-time state"""
+
     def __init__(self, form=None):
         if form is not None:
             raise ValueError(f"Dynamic model {self.__class__.__name__} does not support instantiation by reference")
@@ -167,46 +189,16 @@ class Dynamic(Instance):
         if not isinstance(self, Model):
             raise TypeError(f"{self.__class__} must be a subclass of Model")
 
-        # TODO: deduplicate with Meta.__form__
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-
-            if inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-
+        for name, attr in _Inspector().attributes(self):
             if isinstance(attr, MethodStub):
                 for method_name, method in attr.expand(self, name):
                     setattr(self, method_name, method)
 
-    # TODO: deduplicate with Meta.__form__
     def __form__(self):
-        parent_members = dict(inspect.getmembers(Instance))
-
         header = ModelRef(self, "self")
 
         form = {}
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-            elif hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif isinstance(attr, Library):
-                # it's an external dependency
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-            elif name in parent_members:
-                if attr is parent_members[name] or attr == parent_members[name]:
-                    continue
-                elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
-                    if attr.__code__ is parent_members[name].__code__:
-                        logging.debug(f"{attr} is identical to its parent, won't be defined explicitly in {self}")
-                        continue
-
-            # TODO: resolve these in alphabetical order
+        for name, attr in _Inspector(parent=Instance, filter_instances=[Library]).attributes(self):
             if hasattr(self.__class__, name) and isinstance(getattr(self.__class__, name), MethodStub):
                 stub = getattr(self.__class__, name)
                 for method_name, method in stub.expand(header, name):
@@ -231,6 +223,8 @@ class Dynamic(Instance):
 
 
 class ModelRef(Ref):
+    """A reference to a :class:`Model`."""
+
     def __init__(self, instance, name):
         name = name if isinstance(name, URI) else URI(name)
 
@@ -240,17 +234,8 @@ class ModelRef(Ref):
         self.instance = instance
         self.__uri__ = name if isinstance(name, URI) else URI(name)
 
-        # TODO: deduplicate with Meta.__form__
-        for name, attr in inspect.getmembers(self.instance):
-            if name.startswith('__'):
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-            elif hasattr(self.__class__, name) and attr is getattr(self.__class__, name):
-                # it's a class attribute
-                pass
-            elif hasattr(attr, "__ref__"):
+        for name, attr in _Inspector(lambda name: name.startswith("__"), type(self)).attributes(self.instance):
+            if hasattr(attr, "__ref__"):
                 setattr(self, name, get_ref(attr, self.__uri__.append(name)))
             else:
                 setattr(self, name, attr)
@@ -296,6 +281,8 @@ def _model(cls):
 
 
 class Library(object):
+    """A stateless set of related functions"""
+
     def __init__(self):
         self._methods = {}
 
@@ -311,25 +298,10 @@ class Library(object):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.__uri__})"
 
-    # TODO: deduplicate with Meta.__json__
     def __json__(self):
         form = {}
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-
-            if inspect.isclass(attr):
-                if issubclass(attr, Library) or issubclass(attr, Dynamic):
-                    continue
-            elif isinstance(attr, Library):
-                continue
-
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-            elif _is_mutable(attr):
+        for name, attr in _Inspector(filter_classes=[Library, Dynamic], filter_instances=[Library]).attributes(self):
+            if _is_mutable(attr):
                 raise RuntimeError(f"{self.__class__.__name__} is a Library and must not contain mutable state")
             else:
                 form[name] = to_json(attr)
@@ -338,6 +310,8 @@ class Library(object):
 
 
 class App(Library):
+    """A set of related methods responsible for managing associated state"""
+
     def __init__(self):
         Library.__init__(self)
 
@@ -361,25 +335,9 @@ class App(Library):
             else:
                 setattr(header, name, attr)
 
-        # TODO: deduplicate with Library.__json__ and Meta.__json__
         form = {}
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-
-            if inspect.isclass(attr):
-                if issubclass(attr, Library) or issubclass(attr, Dynamic):
-                    continue
-            elif isinstance(attr, Library):
-                continue
-
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-
-            elif name in self._methods:
+        for name, attr in _Inspector(filter_classes=[Library, Dynamic], filter_instances=[Library]).attributes(self):
+            if name in self._methods:
                 for method_name, method in self._methods[name].expand(header, name):
                     form[method_name] = to_json(method)
 
