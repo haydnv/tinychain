@@ -16,8 +16,8 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 4
     NAME = "tensor"
 
-    def app(self, chain_type):
-        class Persistent(tc.app.App):
+    def service(self, chain_type):
+        class Persistent(tc.service.Service):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
 
             def __init__(self):
@@ -25,7 +25,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
                 self.dense = chain_type(tc.tensor.Dense(schema))
                 self.sparse = chain_type(tc.tensor.Sparse(schema))
 
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
             @tc.put
             def overwrite(self, txn):

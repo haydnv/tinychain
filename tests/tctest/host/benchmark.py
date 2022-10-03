@@ -14,7 +14,7 @@ from .. import benchmark
 from ..process import start_local_host
 
 
-class DataStructures(tc.app.App):
+class DataStructures(tc.service.Service):
     __uri__ = tc.URI("http://127.0.0.1:8702") + "/app/benchmark/data_structures"
 
     ml = tc.ml.service.ML
@@ -28,7 +28,7 @@ class DataStructures(tc.app.App):
         self.tensor1 = chain_type(tc.tensor.Dense(([100, 50], tc.F32)))
         self.tensor2 = chain_type(tc.tensor.Dense(([50, 1], tc.F32)))
 
-        tc.app.App.__init__(self)
+        tc.service.Service.__init__(self)
 
     @tc.put
     def btree_insert(self, value: tc.UInt):

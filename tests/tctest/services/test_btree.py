@@ -12,13 +12,13 @@ SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.Stri
 class BTreeChainTests(PersistenceTest, unittest.TestCase):
     NAME = "btree"
 
-    def app(self, chain_type):
-        class Persistent(tc.app.App):
+    def service(self, chain_type):
+        class Persistent(tc.service.Service):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/btree")
 
             def __init__(self):
                 self.tree = chain_type(tc.btree.BTree(SCHEMA))
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
         return Persistent()
 

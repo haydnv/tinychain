@@ -8,7 +8,7 @@ from ..models import Order, Product, User
 logger = logging.getLogger("test_table")
 
 
-class Arbitrary(tc.app.Model):
+class Arbitrary(tc.service.Model):
     """Dummy Model for the purpose of testing."""
 
     arbitrary_attribute = None
@@ -21,10 +21,12 @@ class TableCreateSchemaTests(unittest.TestCase):
     """Tests for the `create_schema` function."""
 
     def test_createSchema_withArbitraryValues(self):
-        """Test that creating a schema ignores arbitrary attributes. Only
-        values of Column or Model are recognised.
         """
-        schema = tc.table.create_schema(Arbitrary)
+        Test that creating a schema ignores arbitrary attributes.
+
+        Only values of Column or Model are recognised.
+        """
+        schema = tc.service.create_schema(Arbitrary)
         expected = tc.table.Schema([tc.Column("arbitrary_id", tc.U32)], [])
         self.assertIsInstance(schema, tc.table.Schema)
         self.assertEqual(
@@ -33,7 +35,8 @@ class TableCreateSchemaTests(unittest.TestCase):
 
     def test_createSchema_simple(self):
         """Test that creating a schema works using a basic Model."""
-        schema = tc.table.create_schema(User)
+
+        schema = tc.service.create_schema(User)
         expected = tc.table.Schema(
             [tc.Column("user_id", tc.U32)],
             [
@@ -48,7 +51,7 @@ class TableCreateSchemaTests(unittest.TestCase):
 
     def test_createSchema_complex(self):
         """Test that creating a schema works using a complex Model."""
-        schema = tc.table.create_schema(Order)
+        schema = tc.service.create_schema(Order)
         expected = (
             tc.table.Schema(
                 [tc.Column("order_id", tc.U32)],

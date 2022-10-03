@@ -9,7 +9,7 @@ class PersistenceTest(object):
     NUM_HOSTS = 4
     NAME = "persistence"
 
-    def app(self, chain_type):
+    def service(self, chain_type):
         raise NotImplementedError
 
     def execute(self, hosts):
@@ -24,13 +24,13 @@ class PersistenceTest(object):
     def _execute(self, chain_type):
         name = self.NAME
 
-        app = self.app(chain_type)
+        service = self.service(chain_type)
 
         hosts = []
         for i in range(self.NUM_HOSTS):
             port = DEFAULT_PORT + i
-            host_uri = f"http://127.0.0.1:{port}" + tc.URI(app).path()
-            host = start_host(f"test_{name}_{i}", [app], host_uri=host_uri, cache_size=self.CACHE_SIZE)
+            host_uri = f"http://127.0.0.1:{port}" + tc.URI(service).path()
+            host = start_host(f"test_{name}_{i}", [service], host_uri=host_uri, cache_size=self.CACHE_SIZE)
             hosts.append(host)
 
         time.sleep(1)

@@ -1,5 +1,5 @@
 from .. import error
-from ..app import Dynamic, Model
+from ..service import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..math.operator import constant, derivative_of, is_constant

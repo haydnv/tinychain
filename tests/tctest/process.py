@@ -85,11 +85,11 @@ def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_ti
 
     app_configs = []
 
-    deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
+    deps = tc.service.dependencies(app_or_library) if isinstance(app_or_library, tc.service.Library) else app_or_library
 
     for lib in deps:
         lib_path = tc.URI(lib).path()
-        tc.app.write_config(lib, f"{config_dir}{lib_path}", overwrite)
+        tc.service.write_config(lib, f"{config_dir}{lib_path}", overwrite)
         app_configs.append(lib_path)
 
     process = Docker(config_dir, app_configs, http_port=port, **flags)
@@ -164,12 +164,12 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
+def start_local_host(name, services=[], overwrite=True, host_uri=None, wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"
         raise RuntimeError(f"invalid executable path: {TC_PATH} ({hint})")
 
-    deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
+    deps = tc.service.dependencies(services) if isinstance(services, tc.service.Library) else services
 
     port = DEFAULT_PORT
     if host_uri is not None and host_uri.port():
@@ -185,7 +185,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
     for dep in deps:
         app_path = tc.URI(dep).path()
         app_path = f"{config_dir}{app_path}"
-        tc.app.write_config(dep, app_path, overwrite)
+        tc.service.write_config(dep, app_path, overwrite)
         app_configs.append(app_path)
 
     data_dir = f"/tmp/tc/tmp/{port}/{name}"

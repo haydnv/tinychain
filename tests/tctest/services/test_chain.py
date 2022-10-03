@@ -8,13 +8,13 @@ from ..process import DEFAULT_PORT
 class MapChainTests(PersistenceTest, unittest.TestCase):
     NAME = "chain"
 
-    def app(self, chain_type):
-        class Persistent(tc.app.App):
+    def service(self, chain_type):
+        class Persistent(tc.service.Service):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/chain")
 
             def __init__(self):
                 self.map = chain_type(tc.Map({}))
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
         return Persistent()
 

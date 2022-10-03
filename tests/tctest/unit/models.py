@@ -1,10 +1,11 @@
 """Representation of a models directory. Used only for testing purposes."""
+
 import tinychain as tc
 
 URI = tc.URI("/test/tctest/unit/models")
 
 
-class Product(tc.app.Model):
+class Product(tc.service.Model):
     __uri__ = URI.append("Product")
 
     price = tc.Column("price", tc.I32)
@@ -16,7 +17,7 @@ class Product(tc.app.Model):
         self.name = name
 
 
-class User(tc.app.Model):
+class User(tc.service.Model):
     __uri__ = URI.append("User")
 
     first_name = tc.Column("first_name", tc.String, 100)
@@ -27,7 +28,7 @@ class User(tc.app.Model):
         self.last_name = last_name
 
 
-class Order(tc.app.Model):
+class Order(tc.service.Model):
     __uri__ = URI.append("Product")
 
     quantity = tc.Column("quantity", tc.I32)

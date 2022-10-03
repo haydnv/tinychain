@@ -5,7 +5,7 @@ import unittest
 from ..process import DEFAULT_PORT, start_host
 
 
-class Database(tc.app.App):
+class Database(tc.service.Service):
     __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/db")
 
     def __init__(self):
@@ -15,7 +15,7 @@ class Database(tc.app.App):
 
         self.movies = tc.chain.Block(tc.table.Table(schema))
 
-        tc.app.App.__init__(self)
+        tc.service.Service.__init__(self)
 
     @tc.post
     def add_movie(self, name: tc.String, year: tc.U32, description: tc.String):
@@ -26,7 +26,7 @@ class Database(tc.app.App):
         return self.movies.contains([name])
 
 
-class Web(tc.app.App):
+class Web(tc.service.Service):
     __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/app/web")
 
     db = Database()
@@ -34,7 +34,7 @@ class Web(tc.app.App):
     def __init__(self):
         schema = tc.btree.Schema((tc.Column("name", tc.String, 100), tc.Column("views", tc.UInt)))
         self.cache = tc.chain.Sync(tc.btree.BTree(schema))
-        tc.app.App.__init__(self)
+        tc.service.Service.__init__(self)
 
     @tc.get
     def views(self, name: tc.String) -> tc.UInt:

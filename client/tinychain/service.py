@@ -1,4 +1,4 @@
-"""A hosted :class:`App` or :class:`Library`."""
+"""A hosted :class:`Library` or :class:`Service`."""
 
 import inspect
 import logging
@@ -18,17 +18,6 @@ from .scalar.ref import Ref, form_of, get_ref
 from .scalar.value import Nil
 from .state import hash_of, Class, Instance, Object, State
 from .uri import URI
-
-
-def class_name(class_or_instance):
-    """A snake case representation of the class name. Accepts a class or instance as an argument."""
-
-    if isinstance(class_or_instance, type):
-        name = class_or_instance.__name__
-    else:
-        name = class_or_instance.__class__.__name__
-
-    return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
 
 
 class _Inspector(object):
@@ -115,7 +104,7 @@ class Meta(type):
 
 
 class Model(Object, metaclass=Meta):
-    """A data model used by an :class:`App`"""
+    """A data model used by a :class:`Service`"""
 
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
@@ -309,7 +298,7 @@ class Library(object):
         return {str(self.__uri__): form}
 
 
-class App(Library):
+class Service(Library):
     """A set of related methods responsible for managing associated state"""
 
     def __init__(self):
@@ -324,7 +313,7 @@ class App(Library):
     def __json__(self):
         if not hasattr(self, "_methods"):
             name = self.__class__.__name__
-            raise RuntimeError(f"{name} has not reflected over its methods--did you forget to call App.__init__?")
+            raise RuntimeError(f"{name} has not reflected over its methods--did you forget to call Service.__init__?")
 
         header = _Header()
         for name, attr in inspect.getmembers(self):
@@ -360,6 +349,17 @@ class App(Library):
         return {str(self.__uri__): form}
 
 
+def class_name(class_or_instance):
+    """A snake case representation of the class name. Accepts a class or instance as an argument."""
+
+    if isinstance(class_or_instance, type):
+        name = class_or_instance.__name__
+    else:
+        name = class_or_instance.__class__.__name__
+
+    return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
+
+
 def create_schema(modelclass: typing.Type[Model]) -> TableSchema:
     """
     Create a table schema for the given model.
@@ -382,7 +382,7 @@ def create_schema(modelclass: typing.Type[Model]) -> TableSchema:
         attr = getattr(modelclass, f)
         if isinstance(attr, Column):
             values.append(attr)
-        else:
+        elif inspect.isclass(attr):
             assert issubclass(attr, Model)
             values.append(key(attr))
             indices.append((class_name(attr), [key(attr).name]))
@@ -411,11 +411,12 @@ def dependencies(lib_or_model):
     return deps
 
 
+# TODO: delete
 def write_config(lib, config_path, overwrite=False):
-    """Write the configuration of the given :class:`App` or :class:`Library` to the given path."""
+    """Write the configuration of the given :class:`Library` or :class:`Service` to the given path."""
 
     if inspect.isclass(lib):
-        raise ValueError(f"write_app expects an instance of Library, not a class: {lib}")
+        raise ValueError(f"write_config expects an instance of Library, not a class: {lib}")
 
     import json
     import pathlib

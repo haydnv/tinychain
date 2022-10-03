@@ -9,7 +9,7 @@ URI = tc.URI("/test/ml/optimizer")
 BATCH_SIZE = 20
 
 
-class OptimizerTester(tc.app.Library):
+class OptimizerTester(tc.service.Library):
     __uri__ = URI
 
     ml = tc.ml.service.ML()

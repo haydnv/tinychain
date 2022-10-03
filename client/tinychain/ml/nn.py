@@ -4,7 +4,7 @@ import inspect
 import logging
 import typing
 
-from ..app import Dynamic, Model
+from ..service import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..context import Context
 from ..decorators import differentiable, post, reflect

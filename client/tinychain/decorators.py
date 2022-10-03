@@ -56,7 +56,7 @@ def delete(form):
 
 
 def differentiable(form):
-    """Annotation for a callable method specifying that it returns a type of differentiable :class:`Operator`."""
+    """Annotation for a callable method specifying that it defines a type of differentiable :class:`Operator`."""
 
     return StateFunctionStub(NativeStateFunction, form) if _is_method(form) else NativeFunction(form)
 

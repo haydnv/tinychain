@@ -16,19 +16,8 @@ class ModelTests(unittest.TestCase):
         cases = [
             (User, "user"),
             (User(1, "first", "last"), "user"),
-            (type("HiAA", (tc.app.Model,), {}), "hi_a_a"),
+            (type("HiAA", (tc.service.Model,), {}), "hi_a_a"),
         ]
         for c, e in cases:
             with self.subTest(c=c, e=e):
-                self.assertEqual(tc.app.class_name(c), e)
-
-    def test_key(self):
-        """Parameterized unit test for the `key` function."""
-        cases = [
-            (User, [tc.Column("user_id", tc.U32)]),
-            (Order, [tc.Column("order_id", tc.U32)]),
-            (Product, [tc.Column("product_id", tc.U32)]),
-        ]
-        for c, e in cases:
-            with self.subTest(c=c, e=e):
-                self.assertEqual(c.key(), e)
+                self.assertEqual(tc.service.class_name(c), e)

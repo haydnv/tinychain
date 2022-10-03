@@ -1,4 +1,4 @@
-from .test_app import UserTests
+from .test_service import UserTests
 from .test_btree import BTreeChainTests
 from .test_chain import MapChainTests
 from .test_inheritance import InheritanceTests

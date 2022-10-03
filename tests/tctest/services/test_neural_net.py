@@ -8,7 +8,7 @@ URI = tc.URI("/test/ml/app")
 BATCH_SIZE = 20
 
 
-class NeuralNetTester(tc.app.Library):
+class NeuralNetTester(tc.service.Library):
     __uri__ = URI
 
     ml = tc.ml.service.ML()

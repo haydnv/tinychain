@@ -8,7 +8,7 @@ from ..process import start_host
 URI = tc.URI("/test/lib")
 
 
-class Foo(tc.app.Model):
+class Foo(tc.service.Model):
     __uri__ = URI.append("Foo")
 
     name = tc.String
@@ -29,18 +29,18 @@ class Bar(Foo):
         return tc.String("their name is {{name}}").render(name=self.name)
 
 
-class Baz(Bar, tc.app.Dynamic):
+class Baz(Bar, tc.service.Dynamic):
     def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
         Bar.__init__(self, name)
         self.greetings = greetings
-        tc.app.Dynamic.__init__(self)
+        tc.service.Dynamic.__init__(self)
 
     @tc.get
     def greet(self):
         return tc.String("hello {{name}} x{{number}}").render(name=self.name, number=len(self.greetings))
 
 
-class TestLib(tc.app.Library):
+class TestLib(tc.service.Library):
     __uri__ = URI
 
     Foo = Foo
@@ -68,7 +68,7 @@ class InheritanceTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = start_host("test_inheritance", [TestLib()])
 
-    def testApp(self):
+    def testService(self):
         expected = "my name is foo"
         actual = self.host.get("/test/lib/check_foo")
         self.assertEqual(expected, actual)

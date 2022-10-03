@@ -15,13 +15,13 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
     NAME = "table"
     NUM_HOSTS = 4
 
-    def app(self, chain_type):
-        class Persistent(tc.app.App):
+    def service(self, chain_type):
+        class Persistent(tc.service.Service):
             __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/table")
 
             def __init__(self):
                 self.table = chain_type(tc.table.Table(SCHEMA))
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
             @tc.delete
             def truncate(self):
@@ -76,12 +76,12 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
 
 class TableErrorTest(unittest.TestCase):
     def setUp(self):
-        class Persistent(tc.app.App):
+        class Persistent(tc.service.Service):
             __uri__ = tc.URI(f"/test/table")
 
             def __init__(self):
                 self.table = tc.chain.Block(tc.table.Table(SCHEMA))
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
         self.host = start_host("test_table_error", [Persistent()])
 

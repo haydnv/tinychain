@@ -1,6 +1,6 @@
 import typing
 
-from ..app import Library
+from ..service import Library
 from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get as get_op, post
 from ..error import BadRequest

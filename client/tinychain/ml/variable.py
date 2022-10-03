@@ -1,7 +1,7 @@
 import inspect
 import typing
 
-from ..app import Model, ModelRef
+from ..service import Model, ModelRef
 from ..collection import tensor
 from ..generic import Map, Tuple
 from ..scalar.number import Number

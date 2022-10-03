@@ -1,4 +1,4 @@
-from ..app import Library
+from ..service import Library
 
 from .constants import LIB_URI
 from .nn import ConvLayer, DNN, Layer, Linear, NeuralNet, Sequential

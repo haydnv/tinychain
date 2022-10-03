@@ -7,7 +7,7 @@ from ..process import start_host
 URI = tc.URI("/test/app")
 
 
-class User(tc.app.Model):
+class User(tc.service.Model):
     __uri__ = URI.append("user")
 
     first_name = tc.Column("first_name", tc.String, 100)
@@ -18,7 +18,7 @@ class User(tc.app.Model):
         self.last_name = last_name
 
 
-class TestApp(tc.app.App):
+class TestService(tc.service.Service):
     __uri__ = URI
 
     User = User
@@ -31,7 +31,7 @@ class TestApp(tc.app.App):
 class UserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_lib", [TestApp()])
+        cls.host = start_host("test_lib", [TestService()])
 
     def testCreateUser(self):
         self.assertRaises(tc.error.NotImplemented, lambda: self.host.post("/test/app/create_user"))
