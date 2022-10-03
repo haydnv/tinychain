@@ -34,8 +34,7 @@ class UserTests(unittest.TestCase):
         cls.host = start_host("test_lib", [TestApp()])
 
     def testCreateUser(self):
-        # TODO
-        pass
+        self.assertRaises(tc.error.NotImplemented, lambda: self.host.post("/test/app/create_user"))
 
     @classmethod
     def tearDownClass(cls) -> None:

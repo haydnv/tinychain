@@ -14,7 +14,6 @@ from tinychain.decorators import closure, delete, differentiable, get, post, put
 from tinychain.generic import Map, Tuple
 from tinychain.interface import Equality, Interface, Order
 from tinychain.json import print_json, to_json
-from tinychain.reflect import Meta
 from tinychain.scalar.number import (
     C32,
     C64,
