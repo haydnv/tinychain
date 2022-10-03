@@ -2,9 +2,11 @@
 
 import inspect
 import logging
+import typing
 
 from .chain import Chain
 from .collection import Collection, Column
+from .collection.table import Schema as TableSchema
 from .generic import Map, Tuple
 from .interface import Interface
 from .json import to_json
@@ -151,11 +153,6 @@ class Model(Object, metaclass=Meta):
 
     def __ref__(self, name):
         return ModelRef(self, name)
-
-    @classmethod
-    def key(cls):
-        """A Column object which will be used as the key for a given model."""
-        return [Column(class_name(cls) + "_id", U32)]
 
 
 class _Header(object):
@@ -403,6 +400,40 @@ class App(Library):
                 form[name] = to_json(attr)
 
         return {str(self.__uri__): form}
+
+
+def create_schema(modelclass: typing.Type[Model]) -> TableSchema:
+    """
+    Create a table schema for the given model.
+
+    A key for the table is generated using the `class_name` function, then suffixed with '_id'.
+    Each attribute of the model will be interpreted as a column if it is of type :class:`Column` or :class:`Model`.
+    """
+
+    def key(cls):
+        return Column(class_name(cls) + "_id", U32)
+
+    values = []
+    indices = []
+    base_attributes = set()
+
+    for b in modelclass.__bases__:
+        base_attributes |= set(dir(b))
+
+    for f in base_attributes ^ set(dir(modelclass)):
+        attr = getattr(modelclass, f)
+        if isinstance(attr, Column):
+            values.append(attr)
+        else:
+            assert issubclass(attr, Model)
+            values.append(key(attr))
+            indices.append((class_name(attr), [key(attr).name]))
+
+    schema = TableSchema([key(modelclass)], values)
+    for i in indices:
+        schema.create_index(*i)
+
+    return schema
 
 
 def dependencies(lib_or_model):
