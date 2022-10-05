@@ -5,7 +5,7 @@ use log::{debug, info};
 
 use tcgeneric::{label, Label, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Legacy};
 use crate::object::InstanceExt;
 
 const RESERVED: [Label; 57] = [
@@ -75,7 +75,7 @@ struct HostedNode {
 
 pub struct Hosted {
     root: HostedNode,
-    hosted: HashMap<TCPathBuf, InstanceExt<Cluster>>,
+    hosted: HashMap<TCPathBuf, InstanceExt<Legacy>>,
 }
 
 impl Hosted {
@@ -88,14 +88,14 @@ impl Hosted {
         }
     }
 
-    pub fn clusters(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+    pub fn clusters(&self) -> impl Iterator<Item = &InstanceExt<Legacy>> {
         self.hosted.values()
     }
 
     pub fn get<'a>(
         &self,
         path: &'a [PathSegment],
-    ) -> Option<(&'a [PathSegment], &InstanceExt<Cluster>)> {
+    ) -> Option<(&'a [PathSegment], &InstanceExt<Legacy>)> {
         debug!("checking for hosted cluster {}", TCPath::from(path));
 
         let mut node = &self.root;
@@ -118,7 +118,7 @@ impl Hosted {
         }
     }
 
-    fn push(&mut self, cluster: InstanceExt<Cluster>) {
+    fn push(&mut self, cluster: InstanceExt<Legacy>) {
         if cluster.path().is_empty() {
             panic!("Cannot host a cluster at /");
         } else {
@@ -141,8 +141,8 @@ impl Hosted {
     }
 }
 
-impl FromIterator<InstanceExt<Cluster>> for Hosted {
-    fn from_iter<I: IntoIterator<Item = InstanceExt<Cluster>>>(iter: I) -> Self {
+impl FromIterator<InstanceExt<Legacy>> for Hosted {
+    fn from_iter<I: IntoIterator<Item = InstanceExt<Legacy>>>(iter: I) -> Self {
         let mut hosted = Hosted::new();
 
         for cluster in iter.into_iter() {

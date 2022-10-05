@@ -11,7 +11,7 @@ use tc_error::*;
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Legacy};
 use crate::object::{InstanceClass, InstanceExt};
 use crate::route::{Public, Static};
 use crate::scalar::{OpRefType, Scalar, ScalarType};
@@ -31,7 +31,7 @@ pub struct Kernel {
 
 impl Kernel {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
+    pub fn new<I: IntoIterator<Item = InstanceExt<Legacy>>>(clusters: I) -> Self {
         Self {
             hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
@@ -39,7 +39,7 @@ impl Kernel {
     }
 
     /// Return a list of hosted clusters
-    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Legacy>> {
         self.hosted.clusters()
     }
 
@@ -298,10 +298,10 @@ fn execute<
     'a,
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
-    F: FnOnce(Txn, &'a InstanceExt<Cluster>) -> Fut + Send + 'a,
+    F: FnOnce(Txn, &'a InstanceExt<Legacy>) -> Fut + Send + 'a,
 >(
     txn: Txn,
-    cluster: &'a InstanceExt<Cluster>,
+    cluster: &'a InstanceExt<Legacy>,
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
@@ -342,7 +342,7 @@ fn execute<
     })
 }
 
-async fn maybe_claim_leadership(cluster: &Cluster, txn: &Txn) -> TCResult<Txn> {
+async fn maybe_claim_leadership(cluster: &Legacy, txn: &Txn) -> TCResult<Txn> {
     if txn.has_owner() && !txn.has_leader(cluster.path()) {
         cluster.lead(txn.clone()).await
     } else {

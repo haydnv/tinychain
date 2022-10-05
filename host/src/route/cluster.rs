@@ -1,7 +1,5 @@
-use std::iter::FromIterator;
-
 use bytes::Bytes;
-use futures::future;
+use futures::{future, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -10,12 +8,12 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{Id, Tuple};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Legacy};
 use crate::route::*;
 use crate::state::State;
 
 pub struct ClusterHandler<'a> {
-    cluster: &'a Cluster,
+    cluster: &'a Legacy,
 }
 
 impl<'a> ClusterHandler<'a> {
@@ -111,14 +109,14 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
+impl<'a> From<&'a Legacy> for ClusterHandler<'a> {
+    fn from(cluster: &'a Legacy) -> Self {
         Self { cluster }
     }
 }
 
 struct ReplicaHandler<'a> {
-    cluster: &'a Cluster,
+    cluster: &'a Legacy,
 }
 
 impl<'a> Handler<'a> for ReplicaHandler<'a> {
@@ -130,9 +128,11 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
             Box::pin(async move {
                 key.expect_none()?;
 
-                let replicas = self.cluster.replicas(*txn.id()).await?;
-                assert!(replicas.contains(&txn.link(self.cluster.link().path().clone())));
-                Ok(Value::from_iter(replicas).into())
+                self.cluster
+                    .replicas(*txn.id())
+                    .map_ok(|replicas| Value::Tuple(replicas.iter().cloned().collect()))
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -170,13 +170,13 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Cluster> for ReplicaHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
+impl<'a> From<&'a Legacy> for ReplicaHandler<'a> {
+    fn from(cluster: &'a Legacy) -> Self {
         Self { cluster }
     }
 }
 
-impl Route for Cluster {
+impl Route for Legacy {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             Some(Box::new(ClusterHandler::from(self)))
