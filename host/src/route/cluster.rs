@@ -4,21 +4,21 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
-use crate::cluster::{Cluster, Legacy};
+use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
 use crate::route::*;
 use crate::state::State;
 
-pub struct ClusterHandler<'a, C> {
-    cluster: &'a C,
+pub struct ClusterHandler<'a, T> {
+    cluster: &'a Cluster<T>,
 }
 
-impl<'a, C> Handler<'a> for ClusterHandler<'a, C>
+impl<'a, T> Handler<'a> for ClusterHandler<'a, T>
 where
-    C: Cluster,
+    T: Transact + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -97,19 +97,19 @@ where
     }
 }
 
-impl<'a> From<&'a Legacy> for ClusterHandler<'a, Legacy> {
-    fn from(cluster: &'a Legacy) -> Self {
+impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
+    fn from(cluster: &'a Cluster<T>) -> Self {
         Self { cluster }
     }
 }
 
-struct ReplicaHandler<'a, C> {
-    cluster: &'a C,
+struct ReplicaHandler<'a, T> {
+    cluster: &'a Cluster<T>,
 }
 
-impl<'a, C> Handler<'a> for ReplicaHandler<'a, C>
+impl<'a, T> Handler<'a> for ReplicaHandler<'a, T>
 where
-    C: Cluster,
+    T: Replica + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -161,27 +161,33 @@ where
     }
 }
 
-impl<'a> From<&'a Legacy> for ReplicaHandler<'a, Legacy> {
-    fn from(cluster: &'a Legacy) -> Self {
+impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
+    fn from(cluster: &'a Cluster<T>) -> Self {
         Self { cluster }
+    }
+}
+
+impl<T> Route for Cluster<T>
+where
+    T: Replica + Route,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
+        }
     }
 }
 
 impl Route for Legacy {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(ClusterHandler::from(self)))
-        } else if let Some(chain) = self.chain(&path[0]) {
-            debug!("Cluster has a Chain at {}", &path[0]);
+        if let Some(chain) = self.chain(&path[0]) {
+            debug!("Legacy cluster has a Chain at {}", &path[0]);
             chain.route(&path[1..])
         } else if let Some(class) = self.class(&path[0]) {
-            debug!("Cluster has a Class at {}", &path[0]);
+            debug!("Legacy cluster has a Class at {}", &path[0]);
             class.route(&path[1..])
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "replicas" => Some(Box::new(ReplicaHandler::from(self))),
-                _ => None,
-            }
         } else {
             None
         }

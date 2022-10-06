@@ -15,7 +15,6 @@ use tc_error::*;
 use tc_value::{Link, LinkHost, LinkProtocol, Value};
 use tcgeneric::{NetworkTime, TCBoxTryFuture, TCPathBuf};
 
-use crate::cluster::Cluster;
 use crate::http;
 use crate::kernel::Kernel;
 use crate::state::State;

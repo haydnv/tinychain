@@ -25,13 +25,13 @@ mod hosted; // TODO: delete
 
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
-    hosted: Hosted<Legacy>,
+    hosted: Hosted,
     hypothetical: Hypothetical,
 }
 
 impl Kernel {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I: IntoIterator<Item = InstanceExt<Legacy>>>(clusters: I) -> Self {
+    pub fn new<I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>>(clusters: I) -> Self {
         Self {
             hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
@@ -40,7 +40,7 @@ impl Kernel {
 
     /// Return a list of hosted clusters
     // TODO: delete
-    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Legacy>> {
+    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster<Legacy>>> {
         self.hosted.clusters()
     }
 
@@ -303,10 +303,10 @@ fn execute<
     'a,
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
-    F: FnOnce(Txn, &'a InstanceExt<Legacy>) -> Fut + Send + 'a,
+    F: FnOnce(Txn, &'a InstanceExt<Cluster<Legacy>>) -> Fut + Send + 'a,
 >(
     txn: Txn,
-    cluster: &'a InstanceExt<Legacy>,
+    cluster: &'a InstanceExt<Cluster<Legacy>>,
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
@@ -347,7 +347,7 @@ fn execute<
     })
 }
 
-async fn maybe_claim_leadership(cluster: &Legacy, txn: &Txn) -> TCResult<Txn> {
+async fn maybe_claim_leadership(cluster: &Cluster<Legacy>, txn: &Txn) -> TCResult<Txn> {
     if txn.has_owner() && !txn.has_leader(cluster.path()) {
         cluster.lead(txn.clone()).await
     } else {
