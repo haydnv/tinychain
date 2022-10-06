@@ -3,9 +3,9 @@ use std::iter::FromIterator;
 
 use log::{debug, info};
 
-use tcgeneric::{label, Label, PathSegment, TCPath, TCPathBuf};
+use tcgeneric::{label, Instance, Label, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{Cluster, Legacy};
+use crate::cluster::Cluster;
 use crate::object::InstanceExt;
 
 const RESERVED: [Label; 57] = [
@@ -73,13 +73,16 @@ struct HostedNode {
     children: HashMap<PathSegment, HostedNode>,
 }
 
-pub struct Hosted {
+pub struct Hosted<C: Instance> {
     root: HostedNode,
-    hosted: HashMap<TCPathBuf, InstanceExt<Legacy>>,
+    hosted: HashMap<TCPathBuf, InstanceExt<C>>,
 }
 
-impl Hosted {
-    fn new() -> Hosted {
+impl<C> Hosted<C>
+where
+    C: Cluster,
+{
+    fn new() -> Hosted<C> {
         Hosted {
             root: HostedNode {
                 children: HashMap::new(),
@@ -88,14 +91,12 @@ impl Hosted {
         }
     }
 
-    pub fn clusters(&self) -> impl Iterator<Item = &InstanceExt<Legacy>> {
+    // TODO: delete
+    pub fn clusters(&self) -> impl Iterator<Item = &InstanceExt<C>> {
         self.hosted.values()
     }
 
-    pub fn get<'a>(
-        &self,
-        path: &'a [PathSegment],
-    ) -> Option<(&'a [PathSegment], &InstanceExt<Legacy>)> {
+    pub fn get<'a>(&self, path: &'a [PathSegment]) -> Option<(&'a [PathSegment], &InstanceExt<C>)> {
         debug!("checking for hosted cluster {}", TCPath::from(path));
 
         let mut node = &self.root;
@@ -118,7 +119,7 @@ impl Hosted {
         }
     }
 
-    fn push(&mut self, cluster: InstanceExt<Legacy>) {
+    fn push(&mut self, cluster: InstanceExt<C>) {
         if cluster.path().is_empty() {
             panic!("Cannot host a cluster at /");
         } else {
@@ -141,8 +142,11 @@ impl Hosted {
     }
 }
 
-impl FromIterator<InstanceExt<Legacy>> for Hosted {
-    fn from_iter<I: IntoIterator<Item = InstanceExt<Legacy>>>(iter: I) -> Self {
+impl<C> FromIterator<InstanceExt<C>> for Hosted<C>
+where
+    C: Cluster,
+{
+    fn from_iter<I: IntoIterator<Item = InstanceExt<C>>>(iter: I) -> Self {
         let mut hosted = Hosted::new();
 
         for cluster in iter.into_iter() {

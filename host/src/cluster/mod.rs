@@ -21,6 +21,7 @@ use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
+use crate::route::Public;
 use crate::scalar::Scalar;
 use crate::state::{State, ToState};
 use crate::txn::{Actor, Txn, TxnId};
@@ -49,7 +50,7 @@ impl fmt::Display for ClusterType {
 
 /// Methods responsible for maintaining consensus per-transaction across the network.
 #[async_trait]
-pub trait Cluster {
+pub trait Cluster: Instance + Public + Transact + fmt::Display {
     /// Borrow the canonical [`Link`] to this cluster (probably not on this host).
     fn link(&self) -> &Link;
 
@@ -91,7 +92,7 @@ pub trait Cluster {
 }
 
 /// The data structure responsible for maintaining consensus per-transaction.
-/// TODO: delete and replace with `Service`
+// TODO: delete and replace with `Service`
 pub struct Legacy {
     link: Link,
     actor: Arc<Actor>,

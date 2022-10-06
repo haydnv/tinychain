@@ -223,6 +223,7 @@ impl Gateway {
         })
     }
 
+    // TODO: delete
     async fn replicate(self: Arc<Self>) -> Result<(), Error> {
         let result = async move {
             for cluster in self.kernel.hosted() {

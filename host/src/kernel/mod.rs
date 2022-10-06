@@ -1,4 +1,4 @@
-//! The host kernel, responsible for dispatching requests to the local host
+//! The host [`Kernel`], responsible for dispatching requests to the local host
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -21,11 +21,11 @@ use crate::txn::{hypothetical, Txn};
 use crate::txn::hypothetical::Hypothetical;
 use hosted::Hosted;
 
-mod hosted;
+mod hosted; // TODO: delete
 
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
-    hosted: Hosted,
+    hosted: Hosted<Legacy>,
     hypothetical: Hypothetical,
 }
 
@@ -39,6 +39,7 @@ impl Kernel {
     }
 
     /// Return a list of hosted clusters
+    // TODO: delete
     pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Legacy>> {
         self.hosted.clusters()
     }
@@ -46,11 +47,15 @@ impl Kernel {
     /// Route a GET request.
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path.is_empty() {
-            Err(TCError::not_found(format!(
-                "{} at {}",
-                key,
-                TCPath::from(path)
-            )))
+            if key.is_some() {
+                Err(TCError::not_found(format!(
+                    "{} at {}",
+                    key,
+                    TCPath::from(path)
+                )))
+            } else {
+                Err(TCError::unauthorized("access to /"))
+            }
         } else if let Some(class) = ScalarType::from_path(path) {
             let err = format!("cannot cast into an instance of {} from {}", class, key);
             Scalar::from(key)

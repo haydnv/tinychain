@@ -4,43 +4,32 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction};
+use tc_transact::Transaction;
 use tc_value::{Link, Value};
-use tcgeneric::{Id, Tuple};
+use tcgeneric::Tuple;
 
 use crate::cluster::{Cluster, Legacy};
 use crate::route::*;
 use crate::state::State;
 
-pub struct ClusterHandler<'a> {
-    cluster: &'a Legacy,
+pub struct ClusterHandler<'a, C> {
+    cluster: &'a C,
 }
 
-impl<'a> ClusterHandler<'a> {
-    fn handle_get(self, key: Value) -> TCResult<State> {
-        debug!("Cluster::get {}", key);
-
-        if key.is_some() {
-            let key: Id = key.try_cast_into(|v| TCError::bad_request("invalid ID", v))?;
-            self.cluster
-                .chain(&key)
-                .cloned()
-                .map(State::from)
-                .ok_or_else(|| TCError::not_found(format!("{} member {}", self.cluster, key)))
-        } else {
-            let public_key = Bytes::from(self.cluster.public_key().to_vec());
-            Ok(Value::from(public_key).into())
-        }
-    }
-}
-
-impl<'a> Handler<'a> for ClusterHandler<'a> {
+impl<'a, C> Handler<'a> for ClusterHandler<'a, C>
+where
+    C: Cluster,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key| {
-            Box::pin(future::ready(self.handle_get(key)))
+        Some(Box::new(move |_txn, key| {
+            Box::pin(future::ready((|key: Value| {
+                key.expect_none()?;
+                let public_key = Bytes::from(self.cluster.public_key().to_vec());
+                Ok(Value::from(public_key).into())
+            })(key)))
         }))
     }
 
@@ -108,17 +97,20 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Legacy> for ClusterHandler<'a> {
+impl<'a> From<&'a Legacy> for ClusterHandler<'a, Legacy> {
     fn from(cluster: &'a Legacy) -> Self {
         Self { cluster }
     }
 }
 
-struct ReplicaHandler<'a> {
-    cluster: &'a Legacy,
+struct ReplicaHandler<'a, C> {
+    cluster: &'a C,
 }
 
-impl<'a> Handler<'a> for ReplicaHandler<'a> {
+impl<'a, C> Handler<'a> for ReplicaHandler<'a, C>
+where
+    C: Cluster,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -169,7 +161,7 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Legacy> for ReplicaHandler<'a> {
+impl<'a> From<&'a Legacy> for ReplicaHandler<'a, Legacy> {
     fn from(cluster: &'a Legacy) -> Self {
         Self { cluster }
     }
