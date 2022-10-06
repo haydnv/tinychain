@@ -88,10 +88,6 @@ pub trait Cluster {
     where
         F: Future<Output = TCResult<()>> + Send,
         W: Fn(Link) -> F + Send;
-
-    /// Write any mutations in the current transaction to the write-ahead log.
-    /// TODO: move this out of [`Cluster`] and make it private to [`Legacy`]
-    async fn write_ahead(&self, txn_id: &TxnId);
 }
 
 /// The data structure responsible for maintaining consensus per-transaction.
@@ -132,6 +128,10 @@ impl Legacy {
         try_join_all(replication).await?;
 
         Ok(())
+    }
+
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.write_ahead(txn_id))).await;
     }
 }
 
@@ -175,17 +175,15 @@ impl Cluster for Legacy {
             owner.commit(txn).await?;
         }
 
-        self.write_ahead(txn.id()).await;
-
         let self_link = txn.link(self.link.path().clone());
         let mut replica_commits: FuturesUnordered<_> = replicas
-                .iter()
-                .filter(|replica| *replica != &self_link)
-                .map(|replica| {
-                    debug!("commit replica {}...", replica);
-                    txn.post(replica.clone(), State::Map(Map::default()))
-                })
-                .collect();
+            .iter()
+            .filter(|replica| *replica != &self_link)
+            .map(|replica| {
+                debug!("commit replica {}...", replica);
+                txn.post(replica.clone(), State::Map(Map::default()))
+            })
+            .collect();
 
         while let Some(result) = replica_commits.next().await {
             match result {
@@ -368,10 +366,6 @@ impl Cluster for Legacy {
 
         Ok(())
     }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.write_ahead(txn_id))).await;
-    }
 }
 
 impl Instance for Legacy {
@@ -385,6 +379,8 @@ impl Instance for Legacy {
 #[async_trait]
 impl Transact for Legacy {
     async fn commit(&self, txn_id: &TxnId) {
+        self.write_ahead(txn_id).await;
+
         join_all(self.chains.iter().map(|(name, chain)| {
             debug!("cluster {} committing chain {}", self.link, name);
             chain.commit(txn_id)

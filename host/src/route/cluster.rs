@@ -80,7 +80,6 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                 if txn.is_leader(self.cluster.path()) {
                     self.cluster.distribute_commit(txn).await?;
                 } else {
-                    self.cluster.write_ahead(txn.id()).await;
                     self.cluster.commit(txn.id()).await;
                 }
 
