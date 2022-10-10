@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 
 use crate::TxnId;
 
+mod map;
 mod scalar;
 
 pub use scalar::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
@@ -18,6 +19,15 @@ struct Wake;
 struct Versions<T> {
     canon: T,
     versions: HashMap<TxnId, Arc<RwLock<T>>>,
+}
+
+impl<T> Versions<T> {
+    pub fn new(canon: T) -> Self {
+        Self {
+            canon,
+            versions: HashMap::new(),
+        }
+    }
 }
 
 impl<T: Clone + PartialEq<T>> Versions<T> {

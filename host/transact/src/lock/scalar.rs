@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use tokio::sync::broadcast::{self, Sender};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
@@ -369,10 +369,7 @@ impl<T> TxnLock<T> {
     pub fn new<I: fmt::Display>(name: I, canon: T) -> Self {
         let (tx, _) = broadcast::channel(16);
 
-        let versions = Versions {
-            canon,
-            versions: HashMap::new(),
-        };
+        let versions = Versions::new(canon);
 
         let state = LockState {
             versions,
@@ -423,14 +420,14 @@ impl<T: Clone + PartialEq> TxnLock<T> {
             let mut rx = self.inner.tx.subscribe();
             loop {
                 {
-                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+                    let mut lock_state = self.inner.state.lock().expect("TxnLock state to read");
                     if let Some(version) = lock_state.try_read(&txn_id, false)? {
                         break version;
                     }
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
@@ -457,14 +454,19 @@ impl<T: Clone + PartialEq> TxnLock<T> {
             let mut rx = self.inner.tx.subscribe();
             loop {
                 {
-                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+                    let mut lock_state = self
+                        .inner
+                        .state
+                        .lock()
+                        .expect("TxnLock state to read exclusively");
+
                     if let Some(version) = lock_state.try_read(&txn_id, true)? {
                         break version;
                     }
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
@@ -491,7 +493,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         const ERR: &str = "could not acquire transactional exclusive-read lock";
 
         let version = {
-            let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+            let mut lock_state = self.inner.state.lock().expect("TxnLock state to write");
             if let Some(version) = lock_state.try_read(&txn_id, true)? {
                 Ok(version)
             } else {
@@ -549,7 +551,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
