@@ -536,7 +536,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         Ok(TxnLockWriteGuard::new(self.clone(), txn_id, guard))
     }
 
-    /// Lock this value for writing.
+    /// Lock this value for writing at the given `txn_id`.
     pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
         debug!("locking {} for writing at {}...", self.inner.name, txn_id);
 
