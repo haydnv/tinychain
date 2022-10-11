@@ -1,6 +1,7 @@
 //! A [`TxnMapLock`] to support transaction-specific versioning of a collection of states.
 
 use std::borrow::Borrow;
+use std::collections::hash_map::{Entry, HashMap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -22,9 +23,13 @@ pub struct TxnMapLockReadGuard<T> {
     guard: OwnedRwLockReadGuard<BTreeSet<Id>>,
 }
 
-impl<T> TxnMapLockReadGuard<T> {
-    pub fn get<K: Borrow<Id>>(&self, txn_id: TxnId, key: &Id) -> TCResult<Option<T>> {
-        unimplemented!()
+impl<T: Clone> TxnMapLockReadGuard<T> {
+    pub fn get<K: Borrow<Id>>(&self, key: &Id) -> Option<T> {
+        let mut lock_state = self.lock.inner.state.lock().expect("TxnMapLock state");
+        let version = lock_state.values.get_mut(key)?;
+
+        version.read(self.txn_id);
+        Some(version.get(&self.txn_id))
     }
 }
 
@@ -55,17 +60,36 @@ pub struct TxnMapLockWriteGuard<T> {
     guard: OwnedRwLockWriteGuard<BTreeSet<Id>>,
 }
 
-impl<T> TxnMapLockWriteGuard<T> {
-    pub fn get<K: Borrow<Id>>(&self, key: &Id) -> TCResult<Option<T>> {
-        unimplemented!()
+impl<T: Clone> TxnMapLockWriteGuard<T> {
+    pub fn get<K: Borrow<Id>>(&self, key: &Id) -> Option<T> {
+        if !self.guard.contains(key) {
+            return None;
+        }
+
+        let mut lock_state = self.lock.inner.state.lock().expect("TxnMapLock state");
+        let version = lock_state.values.get_mut(key)?;
+
+        version.read(self.txn_id);
+        Some(version.get(&self.txn_id))
     }
 
-    pub fn insert(&self, key: Id, value: T) -> TCResult<bool> {
-        unimplemented!()
+    pub fn insert(&mut self, key: Id, value: T) -> bool {
+        let mut lock_state = self.lock.inner.state.lock().expect("TxnMapLock state");
+
+        if self.guard.insert(key.clone()) {
+            lock_state
+                .values
+                .insert(key, Value::version(self.txn_id, value));
+            false
+        } else {
+            let version = lock_state.values.get_mut(&key).expect("value version");
+            version.write(self.txn_id, value);
+            true
+        }
     }
 
-    pub fn remove(&self, key: Id) -> TCResult<Option<T>> {
-        unimplemented!()
+    pub fn remove(&mut self, key: &Id) -> bool {
+        self.guard.remove(key)
     }
 }
 
@@ -92,9 +116,57 @@ impl<T> Drop for TxnMapLockWriteGuard<T> {
     }
 }
 
+struct Value<T> {
+    canon: Option<T>,
+    versions: HashMap<TxnId, T>,
+}
+
+impl<T> Value<T> {
+    fn canon(canon: T) -> Self {
+        Self {
+            canon: Some(canon),
+            versions: HashMap::new(),
+        }
+    }
+
+    fn version(txn_id: TxnId, version: T) -> Self {
+        let mut versions = HashMap::new();
+        versions.insert(txn_id, version);
+
+        Self {
+            canon: None,
+            versions,
+        }
+    }
+}
+
+impl<T: Clone> Value<T> {
+    fn get(&self, txn_id: &TxnId) -> T {
+        self.versions.get(txn_id).expect("value version").clone()
+    }
+
+    fn read(&mut self, txn_id: TxnId) {
+        if !self.versions.contains_key(&txn_id) {
+            let value = self.canon.clone().expect("canonical value");
+            self.versions.insert(txn_id, value);
+        }
+    }
+
+    fn write(&mut self, txn_id: TxnId, value: T) {
+        match self.versions.entry(txn_id) {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() = value;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+        }
+    }
+}
+
 struct LockState<T> {
     keys: Versions<BTreeSet<Id>>,
-    values: BTreeMap<Id, Versions<T>>,
+    values: BTreeMap<Id, Value<T>>,
     readers: BTreeMap<TxnId, usize>,
     writer: Option<TxnId>,
     pending_writes: BTreeSet<TxnId>,
@@ -102,7 +174,7 @@ struct LockState<T> {
 }
 
 impl<T> LockState<T> {
-    fn new(keys: BTreeSet<Id>, values: BTreeMap<Id, Versions<T>>) -> Self {
+    fn new(keys: BTreeSet<Id>, values: BTreeMap<Id, Value<T>>) -> Self {
         Self {
             keys: Versions::new(keys),
             values,
@@ -250,7 +322,7 @@ impl<T> TxnMapLock<T> {
         let mut values = BTreeMap::new();
         for (k, v) in contents.into_iter() {
             keys.insert(k.clone());
-            values.insert(k, Versions::new(v));
+            values.insert(k, Value::canon(v));
         }
 
         Self {
