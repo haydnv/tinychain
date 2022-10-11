@@ -464,6 +464,35 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         Ok(guard)
     }
 
+    /// Lock this value for reading at the given `txn_id`, if possible.
+    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
+        debug!("try to lock {} to read at {}...", self.inner.name, txn_id);
+
+        const ERR: &str = "could not acquire transactional read lock";
+
+        let version = {
+            let mut lock_state = self.inner.state.lock().expect("TxnLock state to read");
+            if let Some(version) = lock_state.try_read(&txn_id, false)? {
+                Ok(version)
+            } else {
+                Err(TCError::conflict(ERR))
+            }
+        }?;
+
+        let guard = version
+            .try_read_owned()
+            .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
+
+        let guard = TxnLockReadGuard {
+            lock: self.clone(),
+            txn_id,
+            guard,
+        };
+
+        debug!("locked {} for reading at {}", self.inner.name, txn_id);
+        Ok(guard)
+    }
+
     /// Lock this value exclusively for reading at the given `txn_id`.
     pub async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuardExclusive<T>> {
         debug!(

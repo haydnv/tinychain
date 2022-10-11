@@ -15,17 +15,66 @@ use tcgeneric::{Id, Map};
 use crate::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::{Transact, TxnId};
 
+pub struct Iter<'a, T> {
+    txn_id: TxnId,
+    keys: std::collections::btree_set::Iter<'a, Id>,
+    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+}
+
+impl<'a, T: Clone> Iterator for Iter<'a, T> {
+    type Item = (&'a Id, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let key = self.keys.next()?;
+        let mut values = self.values.lock().expect("TxnMapLock state");
+        let value = values.get_mut(key)?;
+        Some((key, value.read(self.txn_id)))
+    }
+}
+
+pub trait TxnMapRead<T> {
+    fn contains_key<K: Borrow<Id>>(&self, key: K) -> bool;
+
+    fn get<K: Borrow<Id>>(&self, key: K) -> Option<T>;
+
+    fn iter(&self) -> Iter<T>;
+
+    fn is_empty(&self) -> bool;
+}
+
+pub trait TxnMapWrite<T>: TxnMapRead<T> {
+    fn insert(&mut self, key: Id, value: T) -> bool;
+
+    fn remove<K: Borrow<Id>>(&mut self, key: K) -> bool;
+}
+
 pub struct TxnMapLockReadGuard<T> {
     lock: TxnMapLock<T>,
     guard: TxnLockReadGuard<BTreeSet<Id>>,
 }
 
-impl<T: Clone> TxnMapLockReadGuard<T> {
-    pub fn get<K: Borrow<Id>>(&self, key: &Id) -> Option<T> {
-        let mut values = self.lock.inner.values.lock().expect("TxnMapLock state");
-        let version = values.get_mut(key)?;
+impl<T: Clone> TxnMapRead<T> for TxnMapLockReadGuard<T> {
+    fn contains_key<K: Borrow<Id>>(&self, key: K) -> bool {
+        self.guard.contains(key.borrow())
+    }
+
+    fn get<K: Borrow<Id>>(&self, key: K) -> Option<T> {
+        let mut values = self.lock.values.lock().expect("TxnMapLock state");
+        let version = values.get_mut(key.borrow())?;
 
         Some(version.read(*self.guard.id()))
+    }
+
+    fn iter(&self) -> Iter<T> {
+        Iter {
+            txn_id: *self.guard.id(),
+            keys: self.guard.iter(),
+            values: self.lock.values.clone(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.guard.is_empty()
     }
 }
 
@@ -34,20 +83,38 @@ pub struct TxnMapLockWriteGuard<T> {
     guard: TxnLockWriteGuard<BTreeSet<Id>>,
 }
 
-impl<T: Clone> TxnMapLockWriteGuard<T> {
-    pub fn get<K: Borrow<Id>>(&self, key: &Id) -> Option<T> {
-        if !self.guard.contains(key) {
+impl<T: Clone> TxnMapRead<T> for TxnMapLockWriteGuard<T> {
+    fn contains_key<K: Borrow<Id>>(&self, key: K) -> bool {
+        self.guard.contains(key.borrow())
+    }
+
+    fn get<K: Borrow<Id>>(&self, key: K) -> Option<T> {
+        if !self.guard.contains(key.borrow()) {
             return None;
         }
 
-        let mut values = self.lock.inner.values.lock().expect("TxnMapLock state");
-        let version = values.get_mut(key)?;
+        let mut values = self.lock.values.lock().expect("TxnMapLock state");
+        let version = values.get_mut(key.borrow())?;
 
         Some(version.read(*self.guard.id()))
     }
 
-    pub fn insert(&mut self, key: Id, value: T) -> bool {
-        let mut values = self.lock.inner.values.lock().expect("TxnMapLock state");
+    fn iter(&self) -> Iter<T> {
+        Iter {
+            txn_id: *self.guard.id(),
+            keys: self.guard.iter(),
+            values: self.lock.values.clone(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.guard.is_empty()
+    }
+}
+
+impl<T: Clone> TxnMapWrite<T> for TxnMapLockWriteGuard<T> {
+    fn insert(&mut self, key: Id, value: T) -> bool {
+        let mut values = self.lock.values.lock().expect("TxnMapLock state");
 
         if self.guard.insert(key.clone()) {
             values.insert(key, Value::version(*self.guard.id(), value));
@@ -59,8 +126,8 @@ impl<T: Clone> TxnMapLockWriteGuard<T> {
         }
     }
 
-    pub fn remove(&mut self, key: &Id) -> bool {
-        self.guard.remove(key)
+    fn remove<K: Borrow<Id>>(&mut self, key: K) -> bool {
+        self.guard.remove(key.borrow())
     }
 }
 
@@ -121,25 +188,19 @@ impl<T: Clone> Value<T> {
     }
 }
 
-struct Inner<T> {
-    name: String,
-    keys: TxnLock<BTreeSet<Id>>,
-    values: Mutex<BTreeMap<Id, Value<T>>>,
-}
-
 #[derive(Clone)]
 pub struct TxnMapLock<T> {
-    inner: Arc<Inner<T>>,
+    name: Arc<String>,
+    keys: TxnLock<BTreeSet<Id>>,
+    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
 }
 
 impl<T> TxnMapLock<T> {
     pub fn new<I: fmt::Display>(name: I) -> Self {
         Self {
-            inner: Arc::new(Inner {
-                name: name.to_string(),
-                keys: TxnLock::new(format!("{} keys", name), BTreeSet::new()),
-                values: Mutex::new(BTreeMap::new()),
-            }),
+            name: Arc::new(name.to_string()),
+            keys: TxnLock::new(format!("{} keys", name), BTreeSet::new()),
+            values: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -152,11 +213,9 @@ impl<T> TxnMapLock<T> {
         }
 
         Self {
-            inner: Arc::new(Inner {
-                name: name.to_string(),
-                keys: TxnLock::new(format!("{} keys", name), BTreeSet::new()),
-                values: Mutex::new(values),
-            }),
+            name: Arc::new(name.to_string()),
+            keys: TxnLock::new(format!("{} keys", name), keys),
+            values: Arc::new(Mutex::new(values)),
         }
     }
 }
@@ -164,40 +223,54 @@ impl<T> TxnMapLock<T> {
 impl<T: Clone> TxnMapLock<T> {
     /// Lock this map for reading at the given `txn_id`.
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<T>> {
-        debug!("lock map {} to read at {}...", self.inner.name, txn_id);
+        debug!("lock map {} to read at {}...", self.name, txn_id);
 
-        let guard = self.inner.keys.read(txn_id).await?;
+        let guard = self.keys.read(txn_id).await?;
         let guard = TxnMapLockReadGuard {
             lock: self.clone(),
             guard,
         };
 
-        debug!("locked map {} for reading at {}", self.inner.name, txn_id);
+        debug!("locked map {} for reading at {}", self.name, txn_id);
+        Ok(guard)
+    }
+
+    /// Lock this map for reading at the given `txn_id`, if possible.
+    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<T>> {
+        debug!("lock map {} to read at {}...", self.name, txn_id);
+
+        let guard = self.keys.try_read(txn_id)?;
+        let guard = TxnMapLockReadGuard {
+            lock: self.clone(),
+            guard,
+        };
+
+        debug!("locked map {} for reading at {}", self.name, txn_id);
         Ok(guard)
     }
 
     /// Lock this map for writing at the given `txn_id`.
     pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnMapLockWriteGuard<T>> {
-        debug!("lock map {} for writing at {}...", self.inner.name, txn_id);
+        debug!("lock map {} for writing at {}...", self.name, txn_id);
 
-        let guard = self.inner.keys.write(txn_id).await?;
+        let guard = self.keys.write(txn_id).await?;
         let guard = TxnMapLockWriteGuard {
             lock: self.clone(),
             guard,
         };
 
-        debug!("locked {} for writing at {}", self.inner.name, txn_id);
+        debug!("locked {} for writing at {}", self.name, txn_id);
         Ok(guard)
     }
 }
 
 #[async_trait]
-impl<T: Eq + Clone + Send + Sync> Transact for TxnMapLock<T> {
+impl<T: Clone + Send + Sync> Transact for TxnMapLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("commit map {} at {}", self.inner.name, txn_id);
+        debug!("commit map {} at {}", self.name, txn_id);
 
-        self.inner.keys.commit_dep(txn_id, |keys| {
-            let mut values = self.inner.values.lock().expect("transactional map values");
+        self.keys.commit_dep(txn_id, |keys| {
+            let mut values = self.values.lock().expect("transactional map values");
 
             for key in keys {
                 let value = values.get_mut(key).expect("transactional map value");
@@ -207,16 +280,15 @@ impl<T: Eq + Clone + Send + Sync> Transact for TxnMapLock<T> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("finalize map {} at {}", self.inner.name, txn_id);
+        debug!("finalize map {} at {}", self.name, txn_id);
 
         {
             let keys = self
-                .inner
                 .keys
                 .try_read_exclusive(*txn_id)
                 .expect("transactional map keys");
 
-            let mut values = self.inner.values.lock().expect("transactional map values");
+            let mut values = self.values.lock().expect("transactional map values");
 
             let mut to_delete = Vec::with_capacity(values.len());
             for (key, value) in values.iter_mut() {
@@ -238,6 +310,6 @@ impl<T: Eq + Clone + Send + Sync> Transact for TxnMapLock<T> {
             }
         }
 
-        self.inner.keys.finalize(txn_id).await;
+        self.keys.finalize(txn_id).await;
     }
 }

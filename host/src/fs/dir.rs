@@ -1,6 +1,5 @@
 //! A transactional filesystem directory.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
@@ -16,9 +15,9 @@ use tc_error::*;
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
-use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
+use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
-use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
+use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 
 use crate::chain::{ChainBlock, ChainType};
 use crate::collection::CollectionType;
@@ -130,44 +129,6 @@ impl fmt::Display for DirEntry {
     }
 }
 
-/// The contents of a [`Dir`]
-#[derive(Clone)]
-pub struct Contents {
-    inner: HashMap<PathSegment, DirEntry>,
-}
-
-impl PartialEq for Contents {
-    fn eq(&self, other: &Self) -> bool {
-        if self.len() == other.len() {
-            self.keys().zip(other.keys()).all(|(l, r)| l == r)
-        } else {
-            false
-        }
-    }
-}
-
-impl Eq for Contents {}
-
-impl Deref for Contents {
-    type Target = HashMap<PathSegment, DirEntry>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Contents {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl From<HashMap<PathSegment, DirEntry>> for Contents {
-    fn from(inner: HashMap<PathSegment, DirEntry>) -> Self {
-        Self { inner }
-    }
-}
-
 /// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
     cache: C,
@@ -177,7 +138,7 @@ pub struct DirGuard<C, L> {
 impl<C, L> fs::DirRead for DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: Deref<Target = Contents> + Send + Sync,
+    L: TxnMapRead<DirEntry> + Send + Sync,
 {
     type FileEntry = FileEntry;
     type Lock = Dir;
@@ -220,7 +181,7 @@ where
 impl<C, L> fs::DirWrite for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: DerefMut<Target = Contents> + Send + Sync,
+    L: TxnMapWrite<DirEntry> + Send + Sync,
 {
     type FileClass = StateType;
 
@@ -295,14 +256,15 @@ where
     }
 }
 
-pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnLockReadGuard<Contents>>;
-pub type DirWriteGuard = DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnLockWriteGuard<Contents>>;
+pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<DirEntry>>;
+pub type DirWriteGuard =
+    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<DirEntry>>;
 
 /// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    listing: TxnLock<Contents>,
+    listing: TxnMapLock<DirEntry>,
 }
 
 impl Dir {
@@ -311,7 +273,7 @@ impl Dir {
 
         Self {
             cache,
-            listing: TxnLock::new(lock_name, Contents::from(HashMap::new())),
+            listing: TxnMapLock::new(lock_name),
         }
     }
 
@@ -322,7 +284,7 @@ impl Dir {
 
             debug!("Dir::load {:?}", &*fs_dir);
 
-            let mut listing = HashMap::new();
+            let mut listing = Map::new();
             for (name, fs_cache) in fs_dir.iter() {
                 if name.starts_with('.') {
                     debug!("Dir::load skipping hidden filesystem entry {}", name);
@@ -364,7 +326,7 @@ impl Dir {
 
             Ok(Self {
                 cache,
-                listing: TxnLock::new(lock_name, Contents::from(listing)),
+                listing: TxnMapLock::with_contents(lock_name, listing),
             })
         })
     }
@@ -384,14 +346,12 @@ impl fs::Dir for Dir {
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;
-        // TODO: support versioning on the filesystem itself
         let cache = self.cache.read().await;
         Ok(DirGuard { cache, contents })
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
         let contents = self.listing.write(txn_id).await?;
-        // TODO: support versioning on the filesystem itself
         let cache = self.cache.write().await;
         Ok(DirGuard { cache, contents })
     }
@@ -405,41 +365,43 @@ impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
         self.listing.commit(txn_id).await;
 
-        let listing = self.listing.read(*txn_id).await.expect("dir listing");
+        let listing = self.listing.try_read(*txn_id).expect("dir iterator");
 
-        join_all(listing.values().map(|entry| match entry {
-            DirEntry::Dir(dir) => dir.commit(txn_id),
-            DirEntry::File(file) => match file {
-                FileEntry::BTree(file) => file.commit(txn_id),
-                FileEntry::Chain(file) => file.commit(txn_id),
-                FileEntry::Scalar(file) => file.commit(txn_id),
-
-                #[cfg(feature = "tensor")]
-                FileEntry::Tensor(file) => file.commit(txn_id),
-            },
+        join_all(listing.iter().map(|(_, entry)| async move {
+            match entry {
+                DirEntry::Dir(dir) => dir.commit(txn_id).await,
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.commit(txn_id).await,
+                    FileEntry::Chain(file) => file.commit(txn_id).await,
+                    FileEntry::Scalar(file) => file.commit(txn_id).await,
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.commit(txn_id).await,
+                },
+            }
         }))
         .await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.listing.finalize(txn_id).await;
-
         {
-            let listing = self.listing.read(*txn_id).await.expect("dir listing");
+            let listing = self.listing.try_read(*txn_id).expect("dir listing");
 
-            join_all(listing.values().map(|entry| match entry {
-                DirEntry::Dir(dir) => dir.finalize(txn_id),
-                DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.finalize(txn_id),
-                    FileEntry::Chain(file) => file.finalize(txn_id),
-                    FileEntry::Scalar(file) => file.finalize(txn_id),
-
-                    #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.finalize(txn_id),
-                },
+            join_all(listing.iter().map(|(_, entry)| async move {
+                match entry {
+                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
+                    DirEntry::File(file) => match file {
+                        FileEntry::BTree(file) => file.finalize(txn_id).await,
+                        FileEntry::Chain(file) => file.finalize(txn_id).await,
+                        FileEntry::Scalar(file) => file.finalize(txn_id).await,
+                        #[cfg(feature = "tensor")]
+                        FileEntry::Tensor(file) => file.finalize(txn_id).await,
+                    },
+                }
             }))
             .await;
         }
+
+        self.listing.finalize(txn_id).await;
     }
 }
 
