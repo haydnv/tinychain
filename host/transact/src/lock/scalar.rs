@@ -22,6 +22,13 @@ pub struct TxnLockReadGuard<T: Clone + PartialEq> {
     guard: OwnedRwLockReadGuard<T>,
 }
 
+impl<T: Clone + PartialEq> TxnLockReadGuard<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
+}
+
 impl<T: Clone + PartialEq> Clone for TxnLockReadGuard<T> {
     fn clone(&self) -> Self {
         trace!("TxnLockReadGuard::clone {}", self.lock.inner.name);
@@ -91,6 +98,13 @@ pub struct TxnLockReadGuardExclusive<T: Clone + PartialEq> {
 }
 
 impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
+}
+
+impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
     pub fn upgrade(mut self) -> TxnLockWriteGuard<T> {
         let lock = self.lock.clone();
         let txn_id = self.txn_id;
@@ -139,6 +153,13 @@ pub struct TxnLockWriteGuard<T: Clone + PartialEq> {
     txn_id: TxnId,
     guard: OwnedRwLockWriteGuard<T>,
     pending_downgrade: bool,
+}
+
+impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
 }
 
 impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
