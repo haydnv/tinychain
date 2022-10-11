@@ -6,13 +6,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use log::{debug, trace, warn};
+use async_trait::async_trait;
+use log::debug;
 
 use tc_error::*;
 use tcgeneric::{Id, Map};
 
 use crate::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
-use crate::{TxnId, MIN_ID};
+use crate::{Transact, TxnId};
 
 pub struct TxnMapLockReadGuard<T> {
     lock: TxnMapLock<T>,
@@ -24,8 +25,7 @@ impl<T: Clone> TxnMapLockReadGuard<T> {
         let mut values = self.lock.inner.values.lock().expect("TxnMapLock state");
         let version = values.get_mut(key)?;
 
-        version.read(*self.guard.id());
-        Some(version.get(self.guard.id()))
+        Some(version.read(*self.guard.id()))
     }
 }
 
@@ -43,8 +43,7 @@ impl<T: Clone> TxnMapLockWriteGuard<T> {
         let mut values = self.lock.inner.values.lock().expect("TxnMapLock state");
         let version = values.get_mut(key)?;
 
-        version.read(*self.guard.id());
-        Some(version.get(self.guard.id()))
+        Some(version.read(*self.guard.id()))
     }
 
     pub fn insert(&mut self, key: Id, value: T) -> bool {
@@ -90,14 +89,23 @@ impl<T> Value<T> {
 }
 
 impl<T: Clone> Value<T> {
-    fn get(&self, txn_id: &TxnId) -> T {
-        self.versions.get(txn_id).expect("value version").clone()
+    fn commit(&mut self, txn_id: &TxnId) {
+        if let Some(value) = self.versions.get(txn_id) {
+            self.canon = Some(value.clone());
+        }
     }
 
-    fn read(&mut self, txn_id: TxnId) {
-        if !self.versions.contains_key(&txn_id) {
+    fn finalize(&mut self, txn_id: &TxnId) {
+        self.versions.remove(txn_id);
+    }
+
+    fn read(&mut self, txn_id: TxnId) -> T {
+        if let Some(value) = self.versions.get(&txn_id) {
+            value.clone()
+        } else {
             let value = self.canon.clone().expect("canonical value");
-            self.versions.insert(txn_id, value);
+            self.versions.insert(txn_id, value.clone());
+            value
         }
     }
 
@@ -120,7 +128,7 @@ struct Inner<T> {
 }
 
 #[derive(Clone)]
-struct TxnMapLock<T> {
+pub struct TxnMapLock<T> {
     inner: Arc<Inner<T>>,
 }
 
@@ -180,5 +188,56 @@ impl<T: Clone> TxnMapLock<T> {
 
         debug!("locked {} for writing at {}", self.inner.name, txn_id);
         Ok(guard)
+    }
+}
+
+#[async_trait]
+impl<T: Eq + Clone + Send + Sync> Transact for TxnMapLock<T> {
+    async fn commit(&self, txn_id: &TxnId) {
+        debug!("commit map {} at {}", self.inner.name, txn_id);
+
+        self.inner.keys.commit_dep(txn_id, |keys| {
+            let mut values = self.inner.values.lock().expect("transactional map values");
+
+            for key in keys {
+                let value = values.get_mut(key).expect("transactional map value");
+                value.commit(txn_id);
+            }
+        })
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        debug!("finalize map {} at {}", self.inner.name, txn_id);
+
+        {
+            let keys = self
+                .inner
+                .keys
+                .try_read_exclusive(*txn_id)
+                .expect("transactional map keys");
+
+            let mut values = self.inner.values.lock().expect("transactional map values");
+
+            let mut to_delete = Vec::with_capacity(values.len());
+            for (key, value) in values.iter_mut() {
+                if keys.contains(key) {
+                    value.finalize(txn_id);
+                } else {
+                    if let Some(last_commit) = value.versions.keys().last() {
+                        if last_commit <= txn_id {
+                            to_delete.push(key.clone());
+                        }
+                    } else {
+                        to_delete.push(key.clone())
+                    }
+                }
+            }
+
+            for key in to_delete.into_iter() {
+                values.remove(&key);
+            }
+        }
+
+        self.inner.keys.finalize(txn_id).await;
     }
 }

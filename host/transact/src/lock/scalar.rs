@@ -359,7 +359,7 @@ impl<T: Clone + PartialEq> LockState<T> {
     }
 }
 
-impl<T: Clone + Eq> LockState<T> {
+impl<T: Clone + PartialEq> LockState<T> {
     fn commit(&mut self, txn_id: &TxnId) {
         if self.versions.commit(txn_id) {
             self.last_commit = *txn_id;
@@ -583,10 +583,23 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         debug!("locked {} for writing at {}", self.inner.name, txn_id);
         Ok(guard)
     }
+
+    pub(super) fn commit_dep<F: Fn(&T) -> ()>(&self, txn_id: &TxnId, dep: F) {
+        debug!("TxnLock::commit {} dep at {}", self.inner.name, txn_id);
+
+        {
+            let mut lock_state = self.inner.state.lock().expect("TxnLock::commit");
+            lock_state.commit(txn_id);
+
+            dep(&lock_state.versions.canon);
+        }
+
+        self.wake();
+    }
 }
 
 #[async_trait]
-impl<T: Eq + Clone + Send + Sync> Transact for TxnLock<T> {
+impl<T: PartialEq + Clone + Send + Sync> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 

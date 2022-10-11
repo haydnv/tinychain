@@ -11,6 +11,7 @@ use crate::TxnId;
 mod map;
 mod scalar;
 
+pub use map::{TxnMapLock, TxnMapLockReadGuard, TxnMapLockWriteGuard};
 pub use scalar::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
 
 #[derive(Copy, Clone)]
