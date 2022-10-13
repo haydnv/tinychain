@@ -769,7 +769,7 @@ where
         debug!("File::finalize");
 
         {
-            let blocks = self.blocks.try_read(*txn_id).expect("file block listing");
+            let blocks = self.blocks.read(*txn_id).await.expect("file block listing");
             let finalize = blocks
                 .iter()
                 .map(|(_, last_commit_id)| async move { last_commit_id.finalize(txn_id).await });
