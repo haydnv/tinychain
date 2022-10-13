@@ -368,15 +368,15 @@ impl<T: Clone> TxnMapLock<T> {
 impl<T: Clone + Send + Sync> Transact for TxnMapLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit map {} at {}", self.name, txn_id);
+        todo!("TxnMapLock::commit")
 
-        self.keys.commit_dep(txn_id, |keys| {
-            let mut values = self.values.lock().expect("transactional map values");
-
-            for key in keys {
-                let value = values.get_mut(key).expect("transactional map value");
-                value.commit(txn_id);
-            }
-        })
+        // let keys = self.keys.commit(txn_id).await;
+        // let mut values = self.values.lock().expect("transactional map values");
+        //
+        // for key in keys {
+        //     let value = values.get_mut(key).expect("transactional map value");
+        //     value.commit(txn_id);
+        // }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
