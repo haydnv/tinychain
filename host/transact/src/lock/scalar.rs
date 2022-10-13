@@ -20,6 +20,7 @@ struct Wake;
 struct Versions<T> {
     canon: Arc<RwLock<T>>,
     versions: BTreeMap<TxnId, Arc<RwLock<T>>>,
+    last_commit: TxnId,
 }
 
 impl<T> Versions<T> {
@@ -27,19 +28,27 @@ impl<T> Versions<T> {
         Self {
             canon: Arc::new(RwLock::new(canon)),
             versions: BTreeMap::new(),
+            last_commit: crate::id::MIN_ID,
         }
     }
 }
 
 impl<T: Clone> Versions<T> {
-    async fn get(&mut self, txn_id: TxnId) -> Arc<RwLock<T>> {
+    async fn get(&mut self, txn_id: TxnId) -> TCResult<Arc<RwLock<T>>> {
         if let Some(version) = self.versions.get(&txn_id) {
-            version.clone()
+            Ok(version.clone())
         } else {
+            if txn_id < self.last_commit {
+                return Err(TCError::conflict(format!(
+                    "version {} has already been finalized",
+                    txn_id
+                )));
+            }
+
             let canon = self.canon.read().await;
             let version = Arc::new(RwLock::new(canon.clone()));
             self.versions.insert(txn_id, version.clone());
-            version
+            Ok(version)
         }
     }
 
@@ -47,6 +56,13 @@ impl<T: Clone> Versions<T> {
         if let Some(version) = self.versions.get(&txn_id) {
             Ok(version.clone())
         } else {
+            if txn_id < self.last_commit {
+                return Err(TCError::conflict(format!(
+                    "version {} has already been finalized",
+                    txn_id
+                )));
+            }
+
             let canon = self
                 .canon
                 .try_read()
@@ -66,6 +82,7 @@ impl<T: Clone + PartialEq> Versions<T> {
             let version = version.read().await;
             if &*version != &*canon {
                 *canon = version.clone();
+                self.last_commit = txn_id;
             }
         }
 
@@ -522,7 +539,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 }
             };
 
-            versions.get(txn_id).await
+            versions.get(txn_id).await?
         };
 
         let guard = version.clone().read_owned().await;
@@ -601,7 +618,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 }
             };
 
-            versions.get(txn_id).await
+            versions.get(txn_id).await?
         };
 
         let guard = version.write_owned().await;
@@ -675,7 +692,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 }
             };
 
-            versions.get(txn_id).await
+            versions.get(txn_id).await?
         };
 
         let guard = version.write_owned().await;
