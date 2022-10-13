@@ -1,17 +1,15 @@
 //! A transactional [`File`]
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, FutureExt, TryFutureExt};
 use log::{debug, trace};
 use safecast::AsType;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use tc_error::*;
@@ -19,15 +17,15 @@ use tc_transact::fs::{
     BlockData, BlockId, BlockRead, BlockReadExclusive, BlockWrite, FileRead, FileReadExclusive,
     FileWrite, Store,
 };
-use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
+use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
+use tcgeneric::Map;
 
 use super::{io_err, CacheBlock, VERSION};
 
-type Listing = HashSet<BlockId>;
-pub type FileReadGuard<B> = FileGuard<B, TxnLockReadGuard<Listing>>;
-pub type FileReadGuardExclusive<B> = FileGuard<B, TxnLockReadGuardExclusive<Listing>>;
-pub type FileWriteGuard<B> = FileGuard<B, TxnLockWriteGuard<Listing>>;
+pub type FileReadGuard<B> = FileGuard<B, TxnMapLockReadGuard<TxnLock<TxnId>>>;
+pub type FileReadGuardExclusive<B> = FileGuard<B, TxnMapLockReadGuardExclusive<TxnLock<TxnId>>>;
+pub type FileWriteGuard<B> = FileGuard<B, TxnMapLockWriteGuard<TxnLock<TxnId>>>;
 
 /// A read lock guard for a block in a [`File`]
 pub struct BlockReadGuard<B> {
@@ -122,30 +120,19 @@ where
 pub struct FileGuard<B, L> {
     file: File<B>,
     txn_id: TxnId,
-    listing: L,
+    blocks: L,
 }
 
 impl<B, L> FileGuard<B, L>
 where
     B: BlockData,
-    L: Deref<Target = Listing>,
+    L: TxnMapRead<TxnLock<TxnId>>,
     CacheBlock: AsType<B>,
 {
     async fn last_modified(&self, block_id: &BlockId) -> TCResult<TxnLock<TxnId>> {
-        if !self.listing.contains(block_id) {
-            #[cfg(debug_assertions)]
-            panic!("{} is missing block: {}", self.file, block_id);
-
-            #[cfg(not(debug_assertions))]
-            return Err(TCError::not_found(block_id));
-        }
-
-        let modified = self.file.modified.read().await;
-
-        Ok(modified
+        self.blocks
             .get(block_id)
-            .expect("block last mutation ID")
-            .clone())
+            .ok_or_else(|| TCError::not_found(block_id))
     }
 
     async fn block_version(
@@ -219,21 +206,21 @@ where
 impl<B, L> FileRead<B> for FileGuard<B, L>
 where
     B: BlockData,
-    L: Deref<Target = Listing> + Send + Sync,
+    L: TxnMapRead<TxnLock<TxnId>> + Send + Sync,
     CacheBlock: AsType<B>,
 {
     type File = File<B>;
 
     fn block_ids(&self) -> HashSet<&BlockId> {
-        self.listing.iter().collect()
+        self.blocks.iter().map(|(key, _)| key).collect()
     }
 
     fn contains(&self, block_id: &BlockId) -> bool {
-        self.listing.contains(block_id)
+        self.blocks.contains_key(block_id)
     }
 
     fn is_empty(&self) -> bool {
-        self.listing.is_empty()
+        self.blocks.is_empty()
     }
 
     async fn read_block<I>(&self, block_id: I) -> TCResult<BlockReadGuard<B>>
@@ -264,7 +251,7 @@ where
         let block_id = block_id.borrow();
         let txn_id = self.txn_id;
 
-        debug!("FileGuard::read_block {}", block_id);
+        debug!("FileGuard::read_block_exclusive {}", block_id);
 
         let modified = {
             let modified = self.last_modified(block_id).await?;
@@ -288,6 +275,8 @@ where
     {
         let block_id = block_id.borrow();
         let txn_id = self.txn_id;
+
+        debug!("FileGuard::write_block {}", block_id);
 
         let mut modified = {
             let modified = self.last_modified(block_id).await?;
@@ -367,7 +356,7 @@ where
         FileGuard {
             file: self.file,
             txn_id: self.txn_id,
-            listing: self.listing.upgrade(),
+            blocks: self.blocks.upgrade(),
         }
     }
 }
@@ -382,7 +371,7 @@ where
         FileGuard {
             file: self.file,
             txn_id: self.txn_id,
-            listing: self.listing.downgrade(),
+            blocks: self.blocks.downgrade(),
         }
     }
 
@@ -392,7 +381,7 @@ where
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<BlockWriteGuard<B>> {
-        if self.listing.contains(&block_id) {
+        if self.blocks.contains_key(&block_id) {
             #[cfg(debug_assertions)]
             panic!("{} already has a block with ID {}", self.file, block_id);
 
@@ -403,19 +392,16 @@ where
         let txn_id = self.txn_id;
 
         let (block, modified) = {
-            let mut modified = self.file.modified.write().await;
             let mut version = self.file.version_write(&txn_id).await?;
 
             let lock = TxnLock::new(format!("block {}", block_id), txn_id);
             let write_lock = lock.try_write(txn_id).expect("block last modified");
-            modified.insert(block_id.clone(), lock);
+            self.blocks.insert(block_id.clone(), lock);
 
             let name = format!("{}.{}", block_id, B::ext());
             let block = version
                 .create_file(name, initial_value, Some(size_hint))
                 .map_err(io_err)?;
-
-            self.listing.insert(block_id);
 
             (block, write_lock)
         };
@@ -438,7 +424,7 @@ where
     ) -> TCResult<(BlockId, BlockWriteGuard<B>)> {
         let block_id: BlockId = loop {
             let name = Uuid::new_v4().into();
-            if !self.listing.contains(&name) {
+            if !self.blocks.contains_key(&name) {
                 break name;
             }
         };
@@ -449,8 +435,7 @@ where
     }
 
     async fn delete_block(&mut self, block_id: BlockId) -> TCResult<()> {
-        let mut modified = self.file.modified.write().await;
-        if let Some(last_mutation) = modified.get_mut(&block_id) {
+        if let Some(last_mutation) = self.blocks.get(&block_id) {
             *last_mutation.write(self.txn_id).await? = self.txn_id;
 
             // keep the version directory in sync in case create_block is called later
@@ -462,7 +447,7 @@ where
                 .await?;
         }
 
-        self.listing.remove(&block_id);
+        self.blocks.remove(&block_id);
         Ok(())
     }
 
@@ -487,7 +472,7 @@ where
 
     async fn truncate(&mut self) -> TCResult<()> {
         let mut version = self.file.version_write(&self.txn_id).await?;
-        for block_id in self.listing.drain() {
+        for (block_id, _) in self.blocks.drain() {
             version.delete(file_name::<B>(&block_id));
         }
 
@@ -500,8 +485,7 @@ where
 pub struct File<B> {
     canon: freqfs::DirLock<CacheBlock>,
     versions: freqfs::DirLock<CacheBlock>,
-    listing: TxnLock<Listing>,
-    modified: Arc<RwLock<HashMap<BlockId, TxnLock<TxnId>>>>,
+    blocks: TxnMapLock<TxnLock<TxnId>>,
     phantom: PhantomData<B>,
 }
 
@@ -530,9 +514,8 @@ where
 
         Ok(Self {
             canon,
-            listing: TxnLock::new(Self::lock_name(&fs_dir), Listing::new()),
-            modified: Arc::new(Default::default()),
             versions: fs_dir.create_dir(VERSION.to_string()).map_err(io_err)?,
+            blocks: TxnMapLock::new(Self::lock_name(&fs_dir)),
             phantom: PhantomData,
         })
     }
@@ -546,8 +529,7 @@ where
             .get_or_create_dir(VERSION.to_string())
             .map_err(io_err)?;
 
-        let mut blocks = HashMap::new();
-        let mut present = HashSet::new();
+        let mut blocks = Map::new();
         let mut version = versions
             .write()
             .await
@@ -591,8 +573,6 @@ where
                 .parse()
                 .map_err(TCError::internal)?;
 
-            present.insert(block_id.clone());
-
             let lock_name = format!("block {}", block_id);
             blocks.insert(block_id, TxnLock::new(lock_name, txn_id));
 
@@ -604,8 +584,7 @@ where
         Ok(Self {
             canon,
             versions,
-            listing: TxnLock::new(Self::lock_name(&fs_dir), present),
-            modified: Arc::new(RwLock::new(blocks)),
+            blocks: TxnMapLock::with_contents(Self::lock_name(&fs_dir), blocks),
             phantom: Default::default(),
         })
     }
@@ -662,15 +641,15 @@ where
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         debug!("File::read");
 
-        self.listing
+        self.blocks
             .read(txn_id)
-            .map_ok(move |listing| {
+            .map_ok(move |blocks| {
                 trace!("locked file for reading at {}", txn_id);
 
                 FileGuard {
                     file: self.clone(),
                     txn_id,
-                    listing,
+                    blocks,
                 }
             })
             .await
@@ -679,15 +658,15 @@ where
     async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<Self::ReadExclusive> {
         debug!("File::read_exclusive");
 
-        self.listing
+        self.blocks
             .read_exclusive(txn_id)
-            .map_ok(move |listing| {
+            .map_ok(move |blocks| {
                 trace!("locked file for reading at {}", txn_id);
 
                 FileGuard {
                     file: self.clone(),
                     txn_id,
-                    listing,
+                    blocks,
                 }
             })
             .await
@@ -696,15 +675,15 @@ where
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
         debug!("File::write");
 
-        self.listing
+        self.blocks
             .write(txn_id)
-            .map_ok(move |listing| {
+            .map_ok(move |blocks| {
                 trace!("locked file for writing at {}", txn_id);
 
                 FileGuard {
                     file: self.clone(),
                     txn_id,
-                    listing,
+                    blocks,
                 }
             })
             .await
@@ -721,62 +700,63 @@ where
     async fn commit(&self, txn_id: &TxnId) {
         debug!("File::commit");
 
-        let modified = self.modified.read().await;
-
-        self.listing.commit(txn_id).await;
+        let blocks = self.blocks.try_read(*txn_id).expect("file block list");
+        self.blocks.commit(txn_id).await;
         trace!("File::commit committed block listing");
 
-        let block_commits = modified
-            .values()
-            .map(|last_mutation| last_mutation.commit(txn_id));
-
-        join_all(block_commits).await;
-
         {
-            let present = self.listing.read(*txn_id).await.expect("file block list");
-
             let version = {
                 let fs_dir = self.versions.read().await;
                 if let Some(version) = fs_dir.get_dir(&txn_id.to_string()) {
-                    Some(version.read().await)
+                    version.read().await
                 } else {
-                    None
+                    return;
                 }
             };
 
             let mut canon = self.canon.write().await;
-            let mut synchronize = Vec::with_capacity(present.len());
-            for block_id in modified.keys() {
-                let name = file_name::<B>(block_id);
-                if present.contains(block_id) {
-                    if let Some(version) = &version {
-                        if let Some(version) = version.get_file(&name) {
-                            let block: freqfs::FileReadGuard<CacheBlock, B> =
-                                version.read().await.expect("block version");
 
-                            let canon = if let Some(canon) = canon.get_file(&name) {
-                                *canon.write().await.expect("canonical block") = (*block).clone();
-                                canon
-                            } else {
-                                let size_hint = version.size_hint().await;
-                                canon
-                                    .create_file(name, (*block).clone(), size_hint)
-                                    .expect("new canonical block")
-                            };
+            for (block_id, last_modified) in blocks.iter() {
+                last_modified.commit(txn_id).await;
 
-                            synchronize.push(async move { canon.sync(true).await });
-                        } else {
-                            trace!("block {} has no version to commit at {}", block_id, txn_id);
-                        }
-                    }
+                if txn_id
+                    == &*last_modified
+                        .try_read(*txn_id)
+                        .expect("block last commit ID")
+                {
+                    let name = file_name::<B>(block_id);
+                    let version = version.get_file(&name).expect("block version lock");
+
+                    let block = version.read().await.expect("block version");
+
+                    let canon = if let Some(canon) = canon.get_file(&name) {
+                        *canon.write().await.expect("canonical block") = (*block).clone();
+                        canon
+                    } else {
+                        let size_hint = version.size_hint().await;
+
+                        canon
+                            .create_file(name, (*block).clone(), size_hint)
+                            .expect("new canonical block")
+                    };
+
+                    canon.sync(true).await.expect("sync canonical block");
+                    trace!("File::commit canonical block {}", block_id);
                 } else {
-                    canon.delete(name);
+                    trace!(
+                        "File::commit skipping block {} since it was not modified",
+                        block_id
+                    );
                 }
             }
 
-            try_join_all(synchronize)
-                .await
-                .expect("sync block contents to disk");
+            for (name, _) in version.iter() {
+                let block_id = block_id(name).expect("block ID");
+                if !blocks.contains_key(&block_id) {
+                    trace!("File::commit delete block {}", block_id);
+                    canon.delete(name.clone());
+                }
+            }
         }
 
         self.canon
@@ -789,16 +769,15 @@ where
         debug!("File::finalize");
 
         {
-            let modified = self.modified.read().await;
-            join_all(
-                modified
-                    .values()
-                    .map(|last_commit_id| last_commit_id.finalize(txn_id)),
-            )
-            .await;
+            let blocks = self.blocks.read(*txn_id).await.expect("file block listing");
+            let finalize = blocks
+                .iter()
+                .map(|(_, last_commit_id)| async move { last_commit_id.finalize(txn_id).await });
+
+            join_all(finalize).await;
         }
 
-        self.listing.finalize(txn_id).await;
+        self.blocks.finalize(txn_id).await;
 
         self.versions
             .write()
@@ -813,6 +792,17 @@ impl<B: Send + Sync + 'static> fmt::Display for File<B> {
     }
 }
 
+#[inline]
+fn block_id(name: &str) -> TCResult<BlockId> {
+    let i = name
+        .rfind('.')
+        .ok_or_else(|| TCError::bad_request("invalid block name", name))?;
+    let name = std::str::from_utf8(&name.as_bytes()[..i]).map_err(TCError::internal)?;
+    name.parse()
+        .map_err(|cause| TCError::bad_request("invalid block name", cause))
+}
+
+#[inline]
 fn file_name<B: BlockData>(block_id: &BlockId) -> String {
     format!("{}.{}", block_id, B::ext())
 }

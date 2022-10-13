@@ -1,12 +1,12 @@
 //! A [`TxnLock`] to support transaction-specific versioning
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use tokio::sync::broadcast::{self, Sender};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
@@ -14,13 +14,19 @@ use tc_error::*;
 
 use crate::{Transact, TxnId, MIN_ID};
 
-#[derive(Copy, Clone)]
-struct Wake;
+use super::{Versions, Wake};
 
 pub struct TxnLockReadGuard<T: Clone + PartialEq> {
     lock: TxnLock<T>,
     txn_id: TxnId,
     guard: OwnedRwLockReadGuard<T>,
+}
+
+impl<T: Clone + PartialEq> TxnLockReadGuard<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
 }
 
 impl<T: Clone + PartialEq> Clone for TxnLockReadGuard<T> {
@@ -92,6 +98,13 @@ pub struct TxnLockReadGuardExclusive<T: Clone + PartialEq> {
 }
 
 impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
+}
+
+impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
     pub fn upgrade(mut self) -> TxnLockWriteGuard<T> {
         let lock = self.lock.clone();
         let txn_id = self.txn_id;
@@ -140,6 +153,13 @@ pub struct TxnLockWriteGuard<T: Clone + PartialEq> {
     txn_id: TxnId,
     guard: OwnedRwLockWriteGuard<T>,
     pending_downgrade: bool,
+}
+
+impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
 }
 
 impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
@@ -199,46 +219,6 @@ impl<T: Clone + PartialEq> Drop for TxnLockWriteGuard<T> {
 
         if !self.pending_downgrade {
             self.lock.wake();
-        }
-    }
-}
-
-struct Versions<T> {
-    canon: T,
-    versions: HashMap<TxnId, Arc<RwLock<T>>>,
-}
-
-impl<T: Clone + PartialEq<T>> Versions<T> {
-    fn commit(&mut self, txn_id: &TxnId) -> bool {
-        if let Some(version) = self.versions.get(txn_id) {
-            let version = version.try_read().expect("transaction version");
-            if version.deref() == &self.canon {
-                // no-op
-                false
-            } else {
-                self.canon = version.clone();
-                true
-            }
-        } else {
-            // it's still valid to read the version at this transaction, so keep a copy around
-            let canon = self.canon.clone();
-            self.versions.insert(*txn_id, Arc::new(RwLock::new(canon)));
-            false
-        }
-    }
-
-    fn finalize(&mut self, txn_id: &TxnId) {
-        self.versions.remove(txn_id);
-    }
-
-    fn get(self: &mut Versions<T>, txn_id: TxnId) -> Arc<RwLock<T>> {
-        if let Some(version) = self.versions.get(&txn_id) {
-            version.clone()
-        } else {
-            let version = self.canon.clone();
-            let version = Arc::new(RwLock::new(version));
-            self.versions.insert(txn_id, version.clone());
-            version
         }
     }
 }
@@ -379,7 +359,7 @@ impl<T: Clone + PartialEq> LockState<T> {
     }
 }
 
-impl<T: Clone + Eq> LockState<T> {
+impl<T: Clone + PartialEq> LockState<T> {
     fn commit(&mut self, txn_id: &TxnId) {
         if self.versions.commit(txn_id) {
             self.last_commit = *txn_id;
@@ -410,10 +390,7 @@ impl<T> TxnLock<T> {
     pub fn new<I: fmt::Display>(name: I, canon: T) -> Self {
         let (tx, _) = broadcast::channel(16);
 
-        let versions = Versions {
-            canon,
-            versions: HashMap::new(),
-        };
+        let versions = Versions::new(canon);
 
         let state = LockState {
             versions,
@@ -464,19 +441,48 @@ impl<T: Clone + PartialEq> TxnLock<T> {
             let mut rx = self.inner.tx.subscribe();
             loop {
                 {
-                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+                    let mut lock_state = self.inner.state.lock().expect("TxnLock state to read");
                     if let Some(version) = lock_state.try_read(&txn_id, false)? {
                         break version;
                     }
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
 
         let guard = version.read_owned().await;
+        let guard = TxnLockReadGuard {
+            lock: self.clone(),
+            txn_id,
+            guard,
+        };
+
+        debug!("locked {} for reading at {}", self.inner.name, txn_id);
+        Ok(guard)
+    }
+
+    /// Lock this value for reading at the given `txn_id`, if possible.
+    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
+        debug!("try to lock {} to read at {}...", self.inner.name, txn_id);
+
+        const ERR: &str = "could not acquire transactional read lock";
+
+        let version = {
+            let mut lock_state = self.inner.state.lock().expect("TxnLock state to read");
+            if let Some(version) = lock_state.try_read(&txn_id, false)? {
+                Ok(version)
+            } else {
+                Err(TCError::conflict(ERR))
+            }
+        }?;
+
+        let guard = version
+            .try_read_owned()
+            .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
+
         let guard = TxnLockReadGuard {
             lock: self.clone(),
             txn_id,
@@ -498,14 +504,19 @@ impl<T: Clone + PartialEq> TxnLock<T> {
             let mut rx = self.inner.tx.subscribe();
             loop {
                 {
-                    let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+                    let mut lock_state = self
+                        .inner
+                        .state
+                        .lock()
+                        .expect("TxnLock state to read exclusively");
+
                     if let Some(version) = lock_state.try_read(&txn_id, true)? {
                         break version;
                     }
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
@@ -532,7 +543,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         const ERR: &str = "could not acquire transactional exclusive-read lock";
 
         let version = {
-            let mut lock_state = self.inner.state.lock().expect("TxnLock::await_readable");
+            let mut lock_state = self.inner.state.lock().expect("TxnLock state to write");
             if let Some(version) = lock_state.try_read(&txn_id, true)? {
                 Ok(version)
             } else {
@@ -575,7 +586,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         Ok(TxnLockWriteGuard::new(self.clone(), txn_id, guard))
     }
 
-    /// Lock this value for writing.
+    /// Lock this value for writing at the given `txn_id`.
     pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnLockWriteGuard<T>> {
         debug!("locking {} for writing at {}...", self.inner.name, txn_id);
 
@@ -590,7 +601,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 }
 
                 if let Err(cause) = rx.recv().await {
-                    debug!("TxnLock wake error: {}", cause);
+                    warn!("TxnLock wake error: {}", cause);
                 }
             }
         };
@@ -601,10 +612,23 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         debug!("locked {} for writing at {}", self.inner.name, txn_id);
         Ok(guard)
     }
+
+    pub(super) fn commit_dep<F: Fn(&T) -> ()>(&self, txn_id: &TxnId, dep: F) {
+        debug!("TxnLock::commit {} dep at {}", self.inner.name, txn_id);
+
+        {
+            let mut lock_state = self.inner.state.lock().expect("TxnLock::commit");
+            lock_state.commit(txn_id);
+
+            dep(&lock_state.versions.canon);
+        }
+
+        self.wake();
+    }
 }
 
 #[async_trait]
-impl<T: Eq + Clone + Send + Sync> Transact for TxnLock<T> {
+impl<T: PartialEq + Clone + Send + Sync> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 

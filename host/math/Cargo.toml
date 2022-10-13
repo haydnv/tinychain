@@ -14,7 +14,7 @@ categories = ["algorithms", "concurrency", "mathematics", "science"]
 [dependencies]
 log = { version = "0.4", features = ["release_max_level_warn"] }
 tc-error = "0.6"
-tc-transact = { version = "0.14", features = ["tensor"] }
+tc-transact = { path = "../transact", features = ["tensor"] }
 tc-value = "0.7"
-tc-tensor = "0.7"
+tc-tensor = { path = "../tensor" }
 tcgeneric = "0.5"
