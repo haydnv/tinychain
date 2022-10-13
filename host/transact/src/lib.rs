@@ -28,8 +28,11 @@ pub trait IntoView<'en, D: fs::Dir> {
 /// Transaction lifecycle callbacks
 #[async_trait]
 pub trait Transact {
+    /// A guard which blocks concurrent commits
+    type Commit;
+
     /// Commit this transaction.
-    async fn commit(&self, txn_id: &TxnId);
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit;
 
     /// Delete any version data specific to this transaction.
     async fn finalize(&self, txn_id: &TxnId);

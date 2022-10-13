@@ -4,8 +4,10 @@ mod map;
 mod scalar;
 
 pub use map::{
-    TxnMapLock, TxnMapLockReadGuard, TxnMapLockReadGuardExclusive, TxnMapLockWriteGuard,
-    TxnMapRead, TxnMapWrite,
+    TxnMapLock, TxnMapLockCommitGuard, TxnMapLockReadGuard, TxnMapLockReadGuardExclusive,
+    TxnMapLockWriteGuard, TxnMapRead, TxnMapWrite,
 };
 
-pub use scalar::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
+pub use scalar::{
+    TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard,
+};

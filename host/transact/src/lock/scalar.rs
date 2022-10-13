@@ -60,7 +60,7 @@ impl<T: Clone> Versions<T> {
 }
 
 impl<T: Clone + PartialEq> Versions<T> {
-    async fn commit(&mut self, txn_id: TxnId) -> OwnedRwLockWriteGuard<T> {
+    async fn commit(&mut self, txn_id: TxnId) -> OwnedRwLockReadGuard<T> {
         let mut canon = self.canon.clone().write_owned().await;
         if let Some(version) = self.versions.get(&txn_id) {
             let version = version.read().await;
@@ -69,7 +69,7 @@ impl<T: Clone + PartialEq> Versions<T> {
             }
         }
 
-        canon
+        canon.downgrade()
     }
 
     fn finalize(&mut self, txn_id: &TxnId) {
@@ -286,6 +286,26 @@ impl<T: Clone + PartialEq> Drop for TxnLockWriteGuard<T> {
     }
 }
 
+pub struct TxnLockCommitGuard<T> {
+    guard: OwnedRwLockReadGuard<T>,
+    txn_id: TxnId,
+}
+
+impl<T> TxnLockCommitGuard<T> {
+    #[inline]
+    pub fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
+}
+
+impl<T> Deref for TxnLockCommitGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard.deref()
+    }
+}
+
 struct LockState {
     readers: BTreeMap<TxnId, usize>,
     exclusive: BTreeSet<TxnId>,
@@ -413,6 +433,8 @@ impl LockState {
 
 impl LockState {
     fn commit(&mut self, txn_id: TxnId) {
+        assert!(txn_id > self.last_commit);
+
         self.pending_writes.remove(&txn_id);
         self.last_commit = txn_id;
     }
@@ -692,17 +714,25 @@ impl<T: Clone + PartialEq> TxnLock<T> {
 
 #[async_trait]
 impl<T: PartialEq + Clone + Send + Sync> Transact for TxnLock<T> {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = TxnLockCommitGuard<T>;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 
         let mut versions = self.inner.versions.lock().await;
-        let _guard = {
+        let guard = versions.commit(*txn_id).await;
+
+        {
             let mut lock_state = self.inner.state.lock().expect("TxnLock::commit");
             lock_state.commit(*txn_id);
-            versions.commit(*txn_id)
         };
 
         self.wake();
+
+        TxnLockCommitGuard {
+            guard,
+            txn_id: *txn_id,
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
