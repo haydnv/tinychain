@@ -404,7 +404,7 @@ impl LockState {
             if reader > &txn_id {
                 // can't write-lock the past
                 return Err(TCError::conflict(format!(
-                    "can't acquire write lock at {} since it already has a read lock at {}",
+                    "can't acquire write lock at {} since there is already a read lock at {}",
                     txn_id, reader
                 )));
             }

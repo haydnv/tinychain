@@ -74,25 +74,5 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
                 self.assertEqual(n, count, f"host {i}")
 
 
-class TableErrorTest(unittest.TestCase):
-    def setUp(self):
-        class Persistent(tc.app.App):
-            __uri__ = tc.URI(f"/test/table")
-
-            def __init__(self):
-                self.table = tc.chain.Block(tc.table.Table(SCHEMA))
-                tc.app.App.__init__(self)
-
-        self.host = start_host("test_table_error", [Persistent()])
-
-    def testInsert(self):
-        self.assertRaises(
-            tc.error.BadRequest,
-            lambda: self.host.put("/test/table/table", "one", [1]))
-
-    def tearDown(self):
-        self.host.stop()
-
-
 def expected(schema, rows):
     return {str(tc.URI(tc.table.Table)): [tc.to_json(schema), rows]}

@@ -409,12 +409,13 @@ impl<T: Clone + Send + Sync> Transact for TxnMapLock<T> {
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("finalize map {} at {}", self.name, txn_id);
 
-        {
-            let keys = self
-                .keys
-                .try_read_exclusive(*txn_id)
-                .expect("transactional map keys");
+        let keys = self
+            .keys
+            .read_exclusive(*txn_id)
+            .await
+            .expect("transactional map keys");
 
+        {
             let mut values = self.values.lock().expect("transactional map values");
 
             let mut to_delete = Vec::with_capacity(values.len());
