@@ -450,8 +450,6 @@ impl LockState {
 
 impl LockState {
     fn commit(&mut self, txn_id: TxnId) {
-        assert!(txn_id > self.last_commit);
-
         self.pending_writes.remove(&txn_id);
         self.last_commit = txn_id;
     }
