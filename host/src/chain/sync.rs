@@ -180,10 +180,12 @@ impl Persist<fs::Dir> for SyncChain {
 
 #[async_trait]
 impl Transact for SyncChain {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         debug!("SyncChain::commit");
 
-        self.subject.commit(txn_id).await;
+        let guard = self.subject.commit(txn_id).await;
 
         // assume the mutations for the transaction have already been moved and sync'd
         // from `self.pending` to `self.committed` by calling the `write_ahead` method
@@ -195,6 +197,8 @@ impl Transact for SyncChain {
         }
 
         self.committed.sync(false).await.expect("sync commit block");
+
+        guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

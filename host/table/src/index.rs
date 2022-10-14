@@ -275,7 +275,9 @@ where
 
 #[async_trait]
 impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F, D, Txn> {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.btree.commit(txn_id).await
     }
 
@@ -847,14 +849,19 @@ where
 
 #[async_trait]
 impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIndex<F, D, Txn> {
-    async fn commit(&self, txn_id: &TxnId) {
-        let mut commits = Vec::with_capacity(self.inner.auxiliary.len() + 1);
-        commits.push(self.inner.primary.commit(txn_id));
+    type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        let guard = self.inner.primary.commit(txn_id).await;
+
+        let mut commits = Vec::with_capacity(self.inner.auxiliary.len());
         for (_, index) in &self.inner.auxiliary {
             commits.push(index.commit(txn_id));
         }
 
         join_all(commits).await;
+
+        guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

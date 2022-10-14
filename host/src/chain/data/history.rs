@@ -371,6 +371,8 @@ impl Persist<fs::Dir> for History {
 
 #[async_trait]
 impl Transact for History {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit chain history {}", txn_id);
 

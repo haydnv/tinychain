@@ -358,6 +358,8 @@ impl Instance for Cluster {
 
 #[async_trait]
 impl Transact for Cluster {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         join_all(self.chains.iter().map(|(name, chain)| {
             debug!("cluster {} committing chain {}", self.link, name);
