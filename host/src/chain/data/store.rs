@@ -259,11 +259,13 @@ impl Store {
 
 #[async_trait]
 impl Transact for Store {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <fs::Dir as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.dir.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.dir.commit(txn_id).await
+        self.dir.finalize(txn_id).await
     }
 }

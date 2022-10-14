@@ -329,6 +329,8 @@ impl Subject {
 
 #[async_trait]
 impl Transact for Subject {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit chain subject");
 

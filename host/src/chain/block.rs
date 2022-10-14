@@ -115,6 +115,8 @@ impl Persist<fs::Dir> for BlockChain {
 
 #[async_trait]
 impl Transact for BlockChain {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         debug!("BlockChain::commit");
         self.subject.commit(txn_id).await;

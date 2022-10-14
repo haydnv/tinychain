@@ -281,16 +281,26 @@ impl SubjectCollection {
 
 #[async_trait]
 impl Transact for SubjectCollection {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit chain subject collection");
 
         match self {
-            Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Table(table) => table.commit(txn_id).await,
+            Self::BTree(btree) => {
+                btree.commit(txn_id).await;
+            }
+            Self::Table(table) => {
+                table.commit(txn_id).await;
+            }
             #[cfg(feature = "tensor")]
-            Self::Dense(tensor) => tensor.commit(txn_id).await,
+            Self::Dense(tensor) => {
+                tensor.commit(txn_id).await;
+            }
             #[cfg(feature = "tensor")]
-            Self::Sparse(tensor) => tensor.commit(txn_id).await,
+            Self::Sparse(tensor) => {
+                tensor.commit(txn_id).await;
+            }
         }
     }
 

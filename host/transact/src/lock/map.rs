@@ -12,7 +12,9 @@ use log::debug;
 use tc_error::*;
 use tcgeneric::{Id, Map};
 
-use crate::lock::{TxnLock, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard};
+use crate::lock::{
+    TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard,
+};
 use crate::{Transact, TxnId};
 
 trait Guard<T> {
@@ -210,6 +212,25 @@ impl<T: Clone> TxnMapWrite<T> for TxnMapLockWriteGuard<T> {
     }
 }
 
+pub struct TxnMapLockCommitGuard<T> {
+    keys: TxnLockCommitGuard<BTreeSet<Id>>,
+    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+}
+
+impl<T> Guard<T> for TxnMapLockCommitGuard<T> {
+    fn id(&self) -> &TxnId {
+        self.keys.id()
+    }
+
+    fn keys(&self) -> &BTreeSet<Id> {
+        &self.keys
+    }
+
+    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>> {
+        &self.values
+    }
+}
+
 struct Value<T> {
     canon: Option<T>,
     versions: HashMap<TxnId, T>,
@@ -366,28 +387,35 @@ impl<T: Clone> TxnMapLock<T> {
 
 #[async_trait]
 impl<T: Clone + Send + Sync> Transact for TxnMapLock<T> {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = TxnMapLockCommitGuard<T>;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit map {} at {}", self.name, txn_id);
 
-        self.keys.commit_dep(txn_id, |keys| {
-            let mut values = self.values.lock().expect("transactional map values");
+        let keys = self.keys.commit(txn_id).await;
+        let mut values = self.values.lock().expect("transactional map values");
 
-            for key in keys {
-                let value = values.get_mut(key).expect("transactional map value");
-                value.commit(txn_id);
-            }
-        })
+        for key in &*keys {
+            let value = values.get_mut(key).expect("transactional map value");
+            value.commit(txn_id);
+        }
+
+        TxnMapLockCommitGuard {
+            keys,
+            values: self.values.clone(),
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("finalize map {} at {}", self.name, txn_id);
 
-        {
-            let keys = self
-                .keys
-                .try_read_exclusive(*txn_id)
-                .expect("transactional map keys");
+        let keys = self
+            .keys
+            .read_exclusive(*txn_id)
+            .await
+            .expect("transactional map keys");
 
+        {
             let mut values = self.values.lock().expect("transactional map values");
 
             let mut to_delete = Vec::with_capacity(values.len());

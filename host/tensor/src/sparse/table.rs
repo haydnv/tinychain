@@ -240,7 +240,9 @@ where
     T: Transaction<D>,
     TableIndex<FS, D, T>: Transact,
 {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <TableIndex<FS, D, T> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.table.commit(txn_id).await
     }
 

@@ -362,44 +362,52 @@ impl fs::Store for Dir {}
 
 #[async_trait]
 impl Transact for Dir {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.listing.commit(txn_id).await;
+    type Commit = TxnMapLockCommitGuard<DirEntry>;
 
-        let listing = self.listing.try_read(*txn_id).expect("dir iterator");
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        let listing = self.listing.commit(txn_id).await;
 
         join_all(listing.iter().map(|(_, entry)| async move {
             match entry {
-                DirEntry::Dir(dir) => dir.commit(txn_id).await,
+                DirEntry::Dir(dir) => {
+                    dir.commit(txn_id).await;
+                }
+                DirEntry::File(file) => {
+                    match file {
+                        FileEntry::BTree(file) => file.commit(txn_id).await,
+                        FileEntry::Chain(file) => file.commit(txn_id).await,
+                        FileEntry::Scalar(file) => file.commit(txn_id).await,
+                        #[cfg(feature = "tensor")]
+                        FileEntry::Tensor(file) => file.commit(txn_id).await,
+                    };
+                }
+            }
+        }))
+        .await;
+
+        listing
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        let listing = self
+            .listing
+            .read_exclusive(*txn_id)
+            .await
+            .expect("dir listing");
+
+        join_all(listing.iter().map(|(_, entry)| async move {
+            match entry {
+                DirEntry::Dir(dir) => dir.finalize(txn_id).await,
                 DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.commit(txn_id).await,
-                    FileEntry::Chain(file) => file.commit(txn_id).await,
-                    FileEntry::Scalar(file) => file.commit(txn_id).await,
+                    FileEntry::BTree(file) => file.finalize(txn_id).await,
+                    FileEntry::Chain(file) => file.finalize(txn_id).await,
+                    FileEntry::Scalar(file) => file.finalize(txn_id).await,
                     #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.commit(txn_id).await,
+                    FileEntry::Tensor(file) => file.finalize(txn_id).await,
                 },
             }
         }))
         .await;
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let listing = self.listing.try_read(*txn_id).expect("dir listing");
-
-            join_all(listing.iter().map(|(_, entry)| async move {
-                match entry {
-                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
-                    DirEntry::File(file) => match file {
-                        FileEntry::BTree(file) => file.finalize(txn_id).await,
-                        FileEntry::Chain(file) => file.finalize(txn_id).await,
-                        FileEntry::Scalar(file) => file.finalize(txn_id).await,
-                        #[cfg(feature = "tensor")]
-                        FileEntry::Tensor(file) => file.finalize(txn_id).await,
-                    },
-                }
-            }))
-            .await;
-        }
 
         self.listing.finalize(txn_id).await;
     }

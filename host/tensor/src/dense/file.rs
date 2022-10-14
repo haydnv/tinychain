@@ -594,7 +594,9 @@ where
     D: Dir,
     T: Transaction<D>,
 {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <FD as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.file.commit(txn_id).await
     }
 

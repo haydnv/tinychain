@@ -46,6 +46,7 @@ class DataStructures(tc.app.App):
     def table_read(self, key: tc.UInt):
         return self.table[(key,)]
 
+    # TODO: why is this test flaky?
     @tc.get
     def tensor_multiply(self) -> tc.F32:
         return (self.tensor1 * self.tensor2.transpose()).sum()
@@ -233,7 +234,7 @@ if __name__ == "__main__":
     task = benchmark.main([
         ConcurrentWriteBenchmarks(),
         LoadBenchmarks(),
-        ReplicationBenchmarks(),
+        # ReplicationBenchmarks(), TODO: re-enable after implementing support for /service
     ])
 
     asyncio.run(task)

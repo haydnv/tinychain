@@ -1372,7 +1372,9 @@ where
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <BlockListFile<FD, FS, D, T> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.blocks.commit(txn_id).await
     }
 

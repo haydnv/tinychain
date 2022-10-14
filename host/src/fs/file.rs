@@ -697,11 +697,12 @@ impl<B: BlockData> Transact for File<B>
 where
     CacheBlock: AsType<B>,
 {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = TxnMapLockCommitGuard<TxnLock<TxnId>>;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("File::commit");
 
-        let blocks = self.blocks.try_read(*txn_id).expect("file block list");
-        self.blocks.commit(txn_id).await;
+        let blocks = self.blocks.commit(txn_id).await;
         trace!("File::commit committed block listing");
 
         {
@@ -710,20 +711,17 @@ where
                 if let Some(version) = fs_dir.get_dir(&txn_id.to_string()) {
                     version.read().await
                 } else {
-                    return;
+                    // in this case no blocks have been modified, so there's nothing to commit
+                    return blocks;
                 }
             };
 
             let mut canon = self.canon.write().await;
 
             for (block_id, last_modified) in blocks.iter() {
-                last_modified.commit(txn_id).await;
+                let last_modified = last_modified.commit(txn_id).await;
 
-                if txn_id
-                    == &*last_modified
-                        .try_read(*txn_id)
-                        .expect("block last commit ID")
-                {
+                if &*last_modified == txn_id {
                     let name = file_name::<B>(block_id);
                     let version = version.get_file(&name).expect("block version lock");
 
@@ -763,6 +761,8 @@ where
             .sync(false)
             .await
             .expect("sync file content to disk");
+
+        blocks
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

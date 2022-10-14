@@ -389,6 +389,8 @@ impl ChainInstance for Chain {
 
 #[async_trait]
 impl Transact for Chain {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::Block(chain) => chain.commit(txn_id).await,

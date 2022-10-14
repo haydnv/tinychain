@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnLockCommitGuard};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -722,11 +722,12 @@ where
 
 #[async_trait]
 impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        join!(
-            self.inner.file.commit(txn_id),
-            self.inner.root.commit(txn_id)
-        );
+    type Commit = TxnLockCommitGuard<NodeId>;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        let guard = self.inner.root.commit(txn_id).await;
+        self.inner.file.commit(txn_id).await;
+        guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

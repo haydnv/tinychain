@@ -5,9 +5,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::de;
-use futures::future::{self, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt};
-use futures::TryStreamExt;
+use futures::future::{self, join_all, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{join, try_join};
 use log::{debug, warn};
 use safecast::{CastFrom, TryCastFrom, TryCastInto};
@@ -222,12 +221,19 @@ impl SubjectMap {
 
 #[async_trait]
 impl Transact for SubjectMap {
+    type Commit = ();
+
     async fn commit(&self, txn_id: &TxnId) {
         join!(self.dir.commit(txn_id), self.ids.commit(txn_id));
 
         let collections = self.collections.read().await;
-        let commits: FuturesUnordered<_> = collections.values().map(|c| c.commit(txn_id)).collect();
-        commits.fold((), |(), ()| future::ready(())).await
+
+        let mut commits = Vec::with_capacity(collections.len());
+        for collection in collections.values() {
+            commits.push(collection.commit(txn_id));
+        }
+
+        join_all(commits).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

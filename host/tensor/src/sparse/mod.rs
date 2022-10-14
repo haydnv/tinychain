@@ -1349,7 +1349,9 @@ where
     Self: Send + Sync,
     SparseTable<FD, FS, D, T>: Transact + Send + Sync,
 {
-    async fn commit(&self, txn_id: &TxnId) {
+    type Commit = <SparseTable<FD, FS, D, T> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.accessor.commit(txn_id).await
     }
 
