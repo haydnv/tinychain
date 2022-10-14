@@ -6,16 +6,12 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::{debug, trace, warn};
-use tokio::sync::broadcast::{self, Sender};
-use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use log::{debug, trace};
+use tokio::sync::{Mutex, Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
 
 use crate::{Transact, TxnId};
-
-#[derive(Copy, Clone)]
-struct Wake;
 
 struct Versions<T> {
     canon: Arc<RwLock<T>>,
@@ -463,7 +459,7 @@ struct Inner<T> {
     name: String,
     state: std::sync::Mutex<LockState>,
     versions: Mutex<Versions<T>>,
-    tx: Sender<Wake>,
+    notify: Arc<Notify>,
 }
 
 #[derive(Clone)]
@@ -474,8 +470,6 @@ pub struct TxnLock<T> {
 impl<T> TxnLock<T> {
     /// Create a new transactional lock.
     pub fn new<I: fmt::Display>(name: I, canon: T) -> Self {
-        let (tx, _) = broadcast::channel(16);
-
         let state = LockState {
             readers: BTreeMap::new(),
             exclusive: BTreeSet::new(),
@@ -489,30 +483,13 @@ impl<T> TxnLock<T> {
                 name: name.to_string(),
                 state: std::sync::Mutex::new(state),
                 versions: Mutex::new(Versions::new(canon)),
-                tx,
+                notify: Arc::new(Notify::new()),
             }),
         }
     }
 
-    fn wake(&self) -> usize {
-        trace!(
-            "TxnLock {} waking {} subscribers",
-            self.inner.name,
-            self.inner.tx.receiver_count()
-        );
-
-        match self.inner.tx.send(Wake) {
-            Err(broadcast::error::SendError(_)) => 0,
-            Ok(num_subscribed) => {
-                trace!(
-                    "TxnLock {} woke {} subscribers",
-                    self.inner.name,
-                    num_subscribed
-                );
-
-                num_subscribed
-            }
-        }
+    fn wake(&self) {
+        self.inner.notify.notify_waiters()
     }
 }
 
@@ -522,7 +499,6 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         debug!("lock {} to read at {}...", self.inner.name, txn_id);
 
         let version = {
-            let mut rx = self.inner.tx.subscribe();
             let mut versions = loop {
                 {
                     let versions = self.inner.versions.lock().await;
@@ -532,9 +508,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                     }
                 };
 
-                if let Err(cause) = rx.recv().await {
-                    warn!("TxnLock wake error: {}", cause);
-                }
+                self.inner.notify.notified().await;
             };
 
             versions.get(txn_id).await?
@@ -564,6 +538,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                 .versions
                 .try_lock()
                 .map_err(|cause| TCError::conflict(format!("{}: {}", ERR, cause)))?;
+
             let mut lock_state = self.inner.state.lock().expect("TxnLock state to read");
             if lock_state.can_read(&txn_id, false) {
                 versions.try_get(txn_id)
@@ -596,7 +571,6 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         );
 
         let version = {
-            let mut rx = self.inner.tx.subscribe();
             let mut versions = loop {
                 {
                     let versions = self.inner.versions.lock().await;
@@ -611,9 +585,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                     }
                 }
 
-                if let Err(cause) = rx.recv().await {
-                    warn!("TxnLock wake error: {}", cause);
-                }
+                self.inner.notify.notified().await;
             };
 
             versions.get(txn_id).await?
@@ -675,7 +647,6 @@ impl<T: Clone + PartialEq> TxnLock<T> {
         debug!("locking {} for writing at {}...", self.inner.name, txn_id);
 
         let version = {
-            let mut rx = self.inner.tx.subscribe();
             let mut versions = loop {
                 {
                     let versions = self.inner.versions.lock().await;
@@ -685,9 +656,7 @@ impl<T: Clone + PartialEq> TxnLock<T> {
                     };
                 }
 
-                if let Err(cause) = rx.recv().await {
-                    warn!("TxnLock wake error: {}", cause);
-                }
+                self.inner.notify.notified().await;
             };
 
             versions.get(txn_id).await?
