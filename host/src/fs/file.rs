@@ -23,9 +23,12 @@ use tcgeneric::Map;
 
 use super::{io_err, CacheBlock, VERSION};
 
-pub type FileReadGuard<B> = FileGuard<B, TxnMapLockReadGuard<TxnLock<TxnId>>>;
-pub type FileReadGuardExclusive<B> = FileGuard<B, TxnMapLockReadGuardExclusive<TxnLock<TxnId>>>;
-pub type FileWriteGuard<B> = FileGuard<B, TxnMapLockWriteGuard<TxnLock<TxnId>>>;
+pub type FileReadGuard<B> = FileGuard<B, TxnMapLockReadGuard<BlockId, TxnLock<TxnId>>>;
+
+pub type FileReadGuardExclusive<B> =
+    FileGuard<B, TxnMapLockReadGuardExclusive<BlockId, TxnLock<TxnId>>>;
+
+pub type FileWriteGuard<B> = FileGuard<B, TxnMapLockWriteGuard<BlockId, TxnLock<TxnId>>>;
 
 /// A read lock guard for a block in a [`File`]
 pub struct BlockReadGuard<B> {
@@ -126,7 +129,7 @@ pub struct FileGuard<B, L> {
 impl<B, L> FileGuard<B, L>
 where
     B: BlockData,
-    L: TxnMapRead<TxnLock<TxnId>>,
+    L: TxnMapRead<BlockId, TxnLock<TxnId>>,
     CacheBlock: AsType<B>,
 {
     async fn last_modified(&self, block_id: &BlockId) -> TCResult<TxnLock<TxnId>> {
@@ -206,7 +209,7 @@ where
 impl<B, L> FileRead<B> for FileGuard<B, L>
 where
     B: BlockData,
-    L: TxnMapRead<TxnLock<TxnId>> + Send + Sync,
+    L: TxnMapRead<BlockId, TxnLock<TxnId>> + Send + Sync,
     CacheBlock: AsType<B>,
 {
     type File = File<B>;
@@ -485,7 +488,7 @@ where
 pub struct File<B> {
     canon: freqfs::DirLock<CacheBlock>,
     versions: freqfs::DirLock<CacheBlock>,
-    blocks: TxnMapLock<TxnLock<TxnId>>,
+    blocks: TxnMapLock<BlockId, TxnLock<TxnId>>,
     phantom: PhantomData<B>,
 }
 
@@ -697,7 +700,7 @@ impl<B: BlockData> Transact for File<B>
 where
     CacheBlock: AsType<B>,
 {
-    type Commit = TxnMapLockCommitGuard<TxnLock<TxnId>>;
+    type Commit = TxnMapLockCommitGuard<BlockId, TxnLock<TxnId>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("File::commit");

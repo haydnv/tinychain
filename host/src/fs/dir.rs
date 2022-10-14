@@ -138,7 +138,7 @@ pub struct DirGuard<C, L> {
 impl<C, L> fs::DirRead for DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapRead<DirEntry> + Send + Sync,
+    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
 {
     type FileEntry = FileEntry;
     type Lock = Dir;
@@ -181,7 +181,7 @@ where
 impl<C, L> fs::DirWrite for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapWrite<DirEntry> + Send + Sync,
+    L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
 {
     type FileClass = StateType;
 
@@ -256,15 +256,16 @@ where
     }
 }
 
-pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<DirEntry>>;
+pub type DirReadGuard =
+    DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<PathSegment, DirEntry>>;
 pub type DirWriteGuard =
-    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<DirEntry>>;
+    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
 
 /// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    listing: TxnMapLock<DirEntry>,
+    listing: TxnMapLock<PathSegment, DirEntry>,
 }
 
 impl Dir {
@@ -362,7 +363,7 @@ impl fs::Store for Dir {}
 
 #[async_trait]
 impl Transact for Dir {
-    type Commit = TxnMapLockCommitGuard<DirEntry>;
+    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let listing = self.listing.commit(txn_id).await;
