@@ -10,29 +10,32 @@ use async_trait::async_trait;
 use log::debug;
 
 use tc_error::*;
-use tcgeneric::{Id, Map};
 
 use crate::lock::{
     TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockWriteGuard,
 };
 use crate::{Transact, TxnId};
 
-trait Guard<T> {
+trait Guard<K, V> {
+    fn borrow(&self) -> &BTreeSet<K>;
+
     fn id(&self) -> &TxnId;
 
-    fn keys(&self) -> &BTreeSet<Id>;
-
-    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>>;
+    fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>>;
 }
 
-pub struct Iter<'a, T> {
+pub struct Iter<'a, K, V> {
     txn_id: TxnId,
-    keys: std::collections::btree_set::Iter<'a, Id>,
-    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+    keys: std::collections::btree_set::Iter<'a, K>,
+    values: Arc<Mutex<BTreeMap<K, Value<V>>>>,
 }
 
-impl<'a, T: Clone> Iterator for Iter<'a, T> {
-    type Item = (&'a Id, T);
+impl<'a, K, V> Iterator for Iter<'a, K, V>
+where
+    K: Ord + Clone,
+    V: Clone,
+{
+    type Item = (&'a K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
         let key = self.keys.next()?;
@@ -42,78 +45,145 @@ impl<'a, T: Clone> Iterator for Iter<'a, T> {
     }
 }
 
-pub trait TxnMapRead<T> {
-    fn contains_key<K: Borrow<Id>>(&self, key: K) -> bool;
-
-    fn get<K: Borrow<Id>>(&self, key: K) -> Option<T>;
-
-    fn iter(&self) -> Iter<T>;
-
-    fn is_empty(&self) -> bool;
+pub struct Keys<'a, K> {
+    iter: std::collections::btree_set::Iter<'a, K>,
 }
 
-impl<G, T: Clone> TxnMapRead<T> for G
-where
-    G: Guard<T>,
-{
-    fn contains_key<K: Borrow<Id>>(&self, key: K) -> bool {
-        self.keys().contains(key.borrow())
+impl<'a, K> Iterator for Keys<'a, K> {
+    type Item = &'a K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 
-    fn get<K: Borrow<Id>>(&self, key: K) -> Option<T> {
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.iter.count()
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.iter.last()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.iter.nth(n)
+    }
+
+    fn max(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+        Self::Item: Ord,
+    {
+        self.iter.max()
+    }
+
+    fn min(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+        Self::Item: Ord,
+    {
+        self.iter.min()
+    }
+}
+
+pub trait TxnMapRead<K, V> {
+    fn contains_key<Q: Borrow<K>>(&self, key: Q) -> bool;
+
+    fn get<Q: Borrow<K>>(&self, key: Q) -> Option<V>;
+
+    fn iter(&self) -> Iter<K, V>;
+
+    fn is_empty(&self) -> bool;
+
+    fn keys(&self) -> Keys<K>;
+}
+
+impl<G, K, V> TxnMapRead<K, V> for G
+where
+    G: Guard<K, V>,
+    K: Ord + Clone,
+    V: Clone,
+{
+    fn contains_key<Q: Borrow<K>>(&self, key: Q) -> bool {
+        self.borrow().contains(key.borrow())
+    }
+
+    fn get<Q: Borrow<K>>(&self, key: Q) -> Option<V> {
         let mut values = self.values().lock().expect("TxnMapLock state");
         let version = values.get_mut(key.borrow())?;
         Some(version.read(*self.id()))
     }
 
-    fn iter(&self) -> Iter<T> {
+    fn iter(&self) -> Iter<K, V> {
         Iter {
             txn_id: *self.id(),
-            keys: self.keys().iter(),
+            keys: self.borrow().iter(),
             values: self.values().clone(),
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.keys().is_empty()
+        self.borrow().is_empty()
+    }
+
+    fn keys(&self) -> Keys<K> {
+        Keys {
+            iter: self.borrow().iter(),
+        }
     }
 }
 
-pub trait TxnMapWrite<T>: TxnMapRead<T> {
-    fn drain(&mut self) -> Drain<T>;
+pub trait TxnMapWrite<K, V>: TxnMapRead<K, V> {
+    fn drain(&mut self) -> Drain<K, V>;
 
-    fn insert(&mut self, key: Id, value: T) -> bool;
+    fn insert(&mut self, key: K, value: V) -> bool;
 
-    fn remove<K: Borrow<Id>>(&mut self, key: K) -> bool;
+    fn remove<Q: Borrow<K>>(&mut self, key: Q) -> bool;
 }
 
 #[derive(Clone)]
-pub struct TxnMapLockReadGuard<T> {
-    lock: TxnMapLock<T>,
-    guard: TxnLockReadGuard<BTreeSet<Id>>,
+pub struct TxnMapLockReadGuard<K: PartialEq + Clone, V> {
+    lock: TxnMapLock<K, V>,
+    guard: TxnLockReadGuard<BTreeSet<K>>,
 }
 
-impl<T: Clone> Guard<T> for TxnMapLockReadGuard<T> {
+impl<K, V> Guard<K, V> for TxnMapLockReadGuard<K, V>
+where
+    K: PartialEq + Clone,
+    V: Clone,
+{
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
+    }
+
     fn id(&self) -> &TxnId {
         self.guard.id()
     }
 
-    fn keys(&self) -> &BTreeSet<Id> {
-        &*self.guard
-    }
-
-    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>> {
+    fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
         &self.lock.values
     }
 }
 
-pub struct TxnMapLockReadGuardExclusive<T> {
-    lock: TxnMapLock<T>,
-    guard: TxnLockReadGuardExclusive<BTreeSet<Id>>,
+pub struct TxnMapLockReadGuardExclusive<K: PartialEq + Clone, V> {
+    lock: TxnMapLock<K, V>,
+    guard: TxnLockReadGuardExclusive<BTreeSet<K>>,
 }
 
-impl<T> TxnMapLockReadGuardExclusive<T> {
-    pub fn upgrade(self) -> TxnMapLockWriteGuard<T> {
+impl<K, V> TxnMapLockReadGuardExclusive<K, V>
+where
+    K: PartialEq + Clone,
+{
+    pub fn upgrade(self) -> TxnMapLockWriteGuard<K, V> {
         TxnMapLockWriteGuard {
             lock: self.lock,
             guard: self.guard.upgrade(),
@@ -121,27 +191,33 @@ impl<T> TxnMapLockReadGuardExclusive<T> {
     }
 }
 
-impl<T> Guard<T> for TxnMapLockReadGuardExclusive<T> {
+impl<K, V> Guard<K, V> for TxnMapLockReadGuardExclusive<K, V>
+where
+    K: PartialEq + Clone,
+{
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
+    }
+
     fn id(&self) -> &TxnId {
         self.guard.id()
     }
 
-    fn keys(&self) -> &BTreeSet<Id> {
-        &*self.guard
-    }
-
-    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>> {
+    fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
         &self.lock.values
     }
 }
 
-pub struct TxnMapLockWriteGuard<T> {
-    lock: TxnMapLock<T>,
-    guard: TxnLockWriteGuard<BTreeSet<Id>>,
+pub struct TxnMapLockWriteGuard<K: PartialEq + Clone, V> {
+    lock: TxnMapLock<K, V>,
+    guard: TxnLockWriteGuard<BTreeSet<K>>,
 }
 
-impl<T> TxnMapLockWriteGuard<T> {
-    pub fn downgrade(self) -> TxnMapLockReadGuardExclusive<T> {
+impl<K, V> TxnMapLockWriteGuard<K, V>
+where
+    K: PartialEq + Clone,
+{
+    pub fn downgrade(self) -> TxnMapLockReadGuardExclusive<K, V> {
         TxnMapLockReadGuardExclusive {
             lock: self.lock,
             guard: self.guard.downgrade(),
@@ -149,29 +225,37 @@ impl<T> TxnMapLockWriteGuard<T> {
     }
 }
 
-impl<T: Clone> Guard<T> for TxnMapLockWriteGuard<T> {
+impl<K, V> Guard<K, V> for TxnMapLockWriteGuard<K, V>
+where
+    K: PartialEq + Clone,
+    V: Clone,
+{
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
+    }
+
     fn id(&self) -> &TxnId {
         self.guard.id()
     }
 
-    fn keys(&self) -> &BTreeSet<Id> {
-        &*self.guard
-    }
-
-    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>> {
+    fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
         &self.lock.values
     }
 }
 
-pub struct Drain<'a, T> {
+pub struct Drain<'a, K, V> {
     txn_id: TxnId,
-    drain_from: Vec<Id>,
-    keys: &'a mut BTreeSet<Id>,
-    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+    drain_from: Vec<K>,
+    keys: &'a mut BTreeSet<K>,
+    values: Arc<Mutex<BTreeMap<K, Value<V>>>>,
 }
 
-impl<'a, T: Clone> Iterator for Drain<'a, T> {
-    type Item = (Id, T);
+impl<'a, K, V> Iterator for Drain<'a, K, V>
+where
+    K: Ord + Clone,
+    V: Clone,
+{
+    type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
         let key = self.drain_from.pop()?;
@@ -184,17 +268,21 @@ impl<'a, T: Clone> Iterator for Drain<'a, T> {
     }
 }
 
-impl<T: Clone> TxnMapWrite<T> for TxnMapLockWriteGuard<T> {
-    fn drain(&mut self) -> Drain<T> {
+impl<K, V> TxnMapWrite<K, V> for TxnMapLockWriteGuard<K, V>
+where
+    K: Ord + PartialEq + Clone,
+    V: Clone,
+{
+    fn drain(&mut self) -> Drain<K, V> {
         Drain {
             txn_id: *self.guard.id(),
-            drain_from: self.guard.iter().rev().cloned().collect::<Vec<Id>>(),
+            drain_from: self.guard.iter().rev().cloned().collect::<Vec<K>>(),
             keys: &mut *self.guard,
             values: self.lock.values.clone(),
         }
     }
 
-    fn insert(&mut self, key: Id, value: T) -> bool {
+    fn insert(&mut self, key: K, value: V) -> bool {
         let mut values = self.lock.values.lock().expect("TxnMapLock state");
 
         if self.guard.insert(key.clone()) {
@@ -207,26 +295,29 @@ impl<T: Clone> TxnMapWrite<T> for TxnMapLockWriteGuard<T> {
         }
     }
 
-    fn remove<K: Borrow<Id>>(&mut self, key: K) -> bool {
+    fn remove<Q: Borrow<K>>(&mut self, key: Q) -> bool {
         self.guard.remove(key.borrow())
     }
 }
 
-pub struct TxnMapLockCommitGuard<T> {
-    keys: TxnLockCommitGuard<BTreeSet<Id>>,
-    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+pub struct TxnMapLockCommitGuard<K, V> {
+    keys: TxnLockCommitGuard<BTreeSet<K>>,
+    values: Arc<Mutex<BTreeMap<K, Value<V>>>>,
 }
 
-impl<T> Guard<T> for TxnMapLockCommitGuard<T> {
+impl<K, V> Guard<K, V> for TxnMapLockCommitGuard<K, V>
+where
+    K: PartialEq,
+{
+    fn borrow(&self) -> &BTreeSet<K> {
+        &self.keys
+    }
+
     fn id(&self) -> &TxnId {
         self.keys.id()
     }
 
-    fn keys(&self) -> &BTreeSet<Id> {
-        &self.keys
-    }
-
-    fn values(&self) -> &Arc<Mutex<BTreeMap<Id, Value<T>>>> {
+    fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
         &self.values
     }
 }
@@ -289,13 +380,13 @@ impl<T: Clone> Value<T> {
 }
 
 #[derive(Clone)]
-pub struct TxnMapLock<T> {
+pub struct TxnMapLock<K, V> {
     name: Arc<String>,
-    keys: TxnLock<BTreeSet<Id>>,
-    values: Arc<Mutex<BTreeMap<Id, Value<T>>>>,
+    keys: TxnLock<BTreeSet<K>>,
+    values: Arc<Mutex<BTreeMap<K, Value<V>>>>,
 }
 
-impl<T> TxnMapLock<T> {
+impl<K, V> TxnMapLock<K, V> {
     pub fn new<I: fmt::Display>(name: I) -> Self {
         Self {
             name: Arc::new(name.to_string()),
@@ -303,8 +394,17 @@ impl<T> TxnMapLock<T> {
             values: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
+}
 
-    pub fn with_contents<I: fmt::Display>(name: I, contents: Map<T>) -> Self {
+impl<K, V> TxnMapLock<K, V>
+where
+    K: Ord + Clone,
+{
+    pub fn with_contents<I, M>(name: I, contents: M) -> Self
+    where
+        I: fmt::Display,
+        M: IntoIterator<Item = (K, V)>,
+    {
         let mut keys = BTreeSet::new();
         let mut values = BTreeMap::new();
         for (k, v) in contents.into_iter() {
@@ -320,9 +420,13 @@ impl<T> TxnMapLock<T> {
     }
 }
 
-impl<T: Clone> TxnMapLock<T> {
+impl<K, V> TxnMapLock<K, V>
+where
+    K: Clone + PartialEq,
+    V: Clone,
+{
     /// Lock this map for reading at the given `txn_id`.
-    pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<T>> {
+    pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<K, V>> {
         debug!("lock map {} to read at {}...", self.name, txn_id);
 
         let guard = self.keys.read(txn_id).await?;
@@ -336,7 +440,7 @@ impl<T: Clone> TxnMapLock<T> {
     }
 
     /// Lock this map for reading at the given `txn_id`, if possible.
-    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<T>> {
+    pub fn try_read(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuard<K, V>> {
         debug!("lock map {} to read at {}...", self.name, txn_id);
 
         let guard = self.keys.try_read(txn_id)?;
@@ -350,7 +454,10 @@ impl<T: Clone> TxnMapLock<T> {
     }
 
     /// Lock this map exclusively for reading at the given `txn_id`.
-    pub async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<TxnMapLockReadGuardExclusive<T>> {
+    pub async fn read_exclusive(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnMapLockReadGuardExclusive<K, V>> {
         debug!(
             "lock map {} exclusively to read at {}...",
             self.name, txn_id
@@ -371,7 +478,7 @@ impl<T: Clone> TxnMapLock<T> {
     }
 
     /// Lock this map for writing at the given `txn_id`.
-    pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnMapLockWriteGuard<T>> {
+    pub async fn write(&self, txn_id: TxnId) -> TCResult<TxnMapLockWriteGuard<K, V>> {
         debug!("lock map {} for writing at {}...", self.name, txn_id);
 
         let guard = self.keys.write(txn_id).await?;
@@ -386,8 +493,12 @@ impl<T: Clone> TxnMapLock<T> {
 }
 
 #[async_trait]
-impl<T: Clone + Send + Sync> Transact for TxnMapLock<T> {
-    type Commit = TxnMapLockCommitGuard<T>;
+impl<K, V> Transact for TxnMapLock<K, V>
+where
+    K: Ord + PartialEq + Clone + Send + Sync,
+    V: Clone + Send + Sync,
+{
+    type Commit = TxnMapLockCommitGuard<K, V>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit map {} at {}", self.name, txn_id);

@@ -8,7 +8,7 @@ use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCBoxTryStream};
 
 use super::{
-    validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, Range, RowSchema,
+    validate_range, BTree, BTreeFile, BTreeInstance, BTreeType, Key, Node, NodeId, Range, RowSchema,
 };
 
 /// A slice of a [`BTree`]
@@ -19,7 +19,7 @@ pub struct BTreeSlice<F, D, T> {
     reverse: bool,
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeSlice<F, D, T> {
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeSlice<F, D, T> {
     pub fn new(
         source: BTree<F, D, T>,
         range: Range,
@@ -72,7 +72,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T> {
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeSlice<F, D, T> {
     type Slice = Self;
 
     fn collator(&'_ self) -> &'_ ValueCollator {

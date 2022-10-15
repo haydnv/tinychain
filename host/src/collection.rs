@@ -10,11 +10,11 @@ use log::debug;
 use sha2::digest::Output;
 use sha2::Sha256;
 
-use tc_btree::{BTreeInstance, BTreeView};
+use tc_btree::{BTreeInstance, BTreeView, Node, NodeId};
 use tc_error::*;
 use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
-use tc_tensor::{Array, TensorView};
+use tc_tensor::{Array, Ordinal, TensorView};
 use tc_transact::fs::{CopyFrom, Dir, DirWrite};
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{
@@ -30,32 +30,32 @@ pub use tc_table::TableType;
 #[cfg(feature = "tensor")]
 pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
 
-pub type BTree = tc_btree::BTree<fs::File<tc_btree::Node>, fs::Dir, Txn>;
-pub type BTreeFile = tc_btree::BTreeFile<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type BTree = tc_btree::BTree<fs::File<NodeId, Node>, fs::Dir, Txn>;
+pub type BTreeFile = tc_btree::BTreeFile<fs::File<NodeId, Node>, fs::Dir, Txn>;
 
-pub type Table = tc_table::Table<fs::File<tc_btree::Node>, fs::Dir, Txn>;
-pub type TableIndex = tc_table::TableIndex<fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type Table = tc_table::Table<fs::File<NodeId, Node>, fs::Dir, Txn>;
+pub type TableIndex = tc_table::TableIndex<fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
-pub type Tensor = tc_tensor::Tensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+pub type Tensor = tc_tensor::Tensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type DenseAccessor =
-    tc_tensor::DenseAccessor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+    tc_tensor::DenseAccessor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type DenseTensor<B> =
-    tc_tensor::DenseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, B>;
+    tc_tensor::DenseTensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile =
-    tc_tensor::BlockListFile<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+    tc_tensor::BlockListFile<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type SparseAccessor =
-    tc_tensor::SparseAccessor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+    tc_tensor::SparseAccessor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type SparseTensor<A> =
-    tc_tensor::SparseTensor<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn, A>;
+    tc_tensor::SparseTensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
 pub type SparseTable =
-    tc_tensor::SparseTable<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>;
+    tc_tensor::SparseTable<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 pub(crate) const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -252,8 +252,8 @@ impl From<Tensor> for Collection {
 }
 
 #[cfg(feature = "tensor")]
-impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> From<DenseTensor<B>>
-    for Collection
+impl<B: DenseAccess<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
+    From<DenseTensor<B>> for Collection
 {
     fn from(tensor: DenseTensor<B>) -> Self {
         Self::Tensor(tensor.into())
@@ -261,8 +261,8 @@ impl<B: DenseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> Fr
 }
 
 #[cfg(feature = "tensor")]
-impl<A: SparseAccess<fs::File<Array>, fs::File<tc_btree::Node>, fs::Dir, Txn>> From<SparseTensor<A>>
-    for Collection
+impl<A: SparseAccess<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
+    From<SparseTensor<A>> for Collection
 {
     fn from(tensor: SparseTensor<A>) -> Self {
         Self::Tensor(tensor.into())

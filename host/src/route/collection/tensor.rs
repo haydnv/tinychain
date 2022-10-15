@@ -5,7 +5,7 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
-use tc_btree::Node;
+use tc_btree::{Node, NodeId};
 use tc_error::*;
 use tc_math::*;
 use tc_tensor::*;
@@ -1513,13 +1513,17 @@ where
     }
 }
 
-impl<B: DenseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for DenseTensor<B> {
+impl<B: DenseWrite<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
+    for DenseTensor<B>
+{
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
 }
 
-impl<A: SparseWrite<fs::File<Array>, fs::File<Node>, fs::Dir, Txn>> Route for SparseTensor<A> {
+impl<A: SparseWrite<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
+    for SparseTensor<A>
+{
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
@@ -1923,7 +1927,7 @@ where
     }
 }
 
-async fn create_file(txn: &Txn) -> TCResult<fs::File<Array>> {
+async fn create_file(txn: &Txn) -> TCResult<fs::File<Ordinal, Array>> {
     txn.context()
         .create_file_unique(*txn.id(), TensorType::Dense)
         .await

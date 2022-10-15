@@ -10,10 +10,10 @@ use log::debug;
 use safecast::{as_type, AsType};
 use uuid::Uuid;
 
-use tc_btree::{BTreeType, Node};
+use tc_btree::{BTreeType, Node, NodeId};
 use tc_error::*;
 #[cfg(feature = "tensor")]
-use tc_tensor::{Array, TensorType};
+use tc_tensor::{Array, Ordinal, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
@@ -30,12 +30,12 @@ use super::{io_err, CacheBlock, File};
 /// A file in a directory
 #[derive(Clone)]
 pub enum FileEntry {
-    BTree(File<Node>),
-    Chain(File<ChainBlock>),
-    Scalar(File<Scalar>),
+    BTree(File<NodeId, Node>),
+    Chain(File<Id, ChainBlock>),
+    Scalar(File<Id, Scalar>),
 
     #[cfg(feature = "tensor")]
-    Tensor(File<Array>),
+    Tensor(File<Ordinal, Array>),
 }
 
 impl FileEntry {
@@ -94,11 +94,11 @@ impl FileEntry {
     }
 }
 
-as_type!(FileEntry, BTree, File<Node>);
-as_type!(FileEntry, Chain, File<ChainBlock>);
-as_type!(FileEntry, Scalar, File<Scalar>);
+as_type!(FileEntry, BTree, File<NodeId, Node>);
+as_type!(FileEntry, Chain, File<Id, ChainBlock>);
+as_type!(FileEntry, Scalar, File<Id, Scalar>);
 #[cfg(feature = "tensor")]
-as_type!(FileEntry, Tensor, File<Array>);
+as_type!(FileEntry, Tensor, File<Ordinal, Array>);
 
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -138,7 +138,7 @@ pub struct DirGuard<C, L> {
 impl<C, L> fs::DirRead for DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapRead<DirEntry> + Send + Sync,
+    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
 {
     type FileEntry = FileEntry;
     type Lock = Dir;
@@ -155,11 +155,11 @@ where
         }
     }
 
-    fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
+    fn get_file<F, K, B>(&self, name: &Id) -> TCResult<Option<F>>
     where
         Self::FileEntry: AsType<F>,
         B: BlockData,
-        F: fs::File<B>,
+        F: fs::File<K, B>,
     {
         match self.contents.get(name) {
             Some(DirEntry::File(file)) => file
@@ -181,7 +181,7 @@ where
 impl<C, L> fs::DirWrite for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapWrite<DirEntry> + Send + Sync,
+    L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
 {
     type FileClass = StateType;
 
@@ -212,13 +212,13 @@ where
         self.create_dir(name)
     }
 
-    fn create_file<ST, F, B>(&mut self, name: Id, class: ST) -> TCResult<F>
+    fn create_file<ST, F, K, B>(&mut self, name: Id, class: ST) -> TCResult<F>
     where
         Self::FileEntry: AsType<F>,
         StateType: From<ST>,
         ST: Copy + Send + Display,
         B: BlockData,
-        F: fs::File<B>,
+        F: fs::File<K, B>,
     {
         if self.contents.contains_key(&name) {
             return Err(TCError::bad_request("file already exists", name));
@@ -237,13 +237,13 @@ where
             .ok_or_else(|| TCError::internal(format!("wrong file type for {}: {}", file, class)))
     }
 
-    fn create_file_unique<ST, F, B>(&mut self, class: ST) -> TCResult<F>
+    fn create_file_unique<ST, F, K, B>(&mut self, class: ST) -> TCResult<F>
     where
         Self::FileEntry: AsType<F>,
         StateType: From<ST>,
         ST: Copy + Send + Display,
         B: BlockData,
-        F: fs::File<B>,
+        F: fs::File<K, B>,
     {
         let name: PathSegment = loop {
             let name = Uuid::new_v4().into();
@@ -256,15 +256,16 @@ where
     }
 }
 
-pub type DirReadGuard = DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<DirEntry>>;
+pub type DirReadGuard =
+    DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<PathSegment, DirEntry>>;
 pub type DirWriteGuard =
-    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<DirEntry>>;
+    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
 
 /// A filesystem directory.
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    listing: TxnMapLock<DirEntry>,
+    listing: TxnMapLock<PathSegment, DirEntry>,
 }
 
 impl Dir {
@@ -362,7 +363,7 @@ impl fs::Store for Dir {}
 
 #[async_trait]
 impl Transact for Dir {
-    type Commit = TxnMapLockCommitGuard<DirEntry>;
+    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let listing = self.listing.commit(txn_id).await;
@@ -372,15 +373,21 @@ impl Transact for Dir {
                 DirEntry::Dir(dir) => {
                     dir.commit(txn_id).await;
                 }
-                DirEntry::File(file) => {
-                    match file {
-                        FileEntry::BTree(file) => file.commit(txn_id).await,
-                        FileEntry::Chain(file) => file.commit(txn_id).await,
-                        FileEntry::Scalar(file) => file.commit(txn_id).await,
-                        #[cfg(feature = "tensor")]
-                        FileEntry::Tensor(file) => file.commit(txn_id).await,
-                    };
-                }
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    FileEntry::Chain(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    FileEntry::Scalar(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => {
+                        file.commit(txn_id).await;
+                    }
+                },
             }
         }))
         .await;

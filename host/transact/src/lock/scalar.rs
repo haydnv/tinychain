@@ -71,7 +71,7 @@ impl<T: Clone> Versions<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Versions<T> {
+impl<T: PartialEq + Clone> Versions<T> {
     async fn commit(&mut self, txn_id: TxnId) -> OwnedRwLockReadGuard<T> {
         let mut canon = self.canon.clone().write_owned().await;
         if let Some(version) = self.versions.get(&txn_id) {
@@ -90,21 +90,24 @@ impl<T: Clone + PartialEq> Versions<T> {
     }
 }
 
-pub struct TxnLockReadGuard<T: Clone + PartialEq> {
+pub struct TxnLockReadGuard<T: PartialEq + Clone> {
     lock: TxnLock<T>,
     txn_id: TxnId,
     version: Arc<RwLock<T>>,
     guard: OwnedRwLockReadGuard<T>,
 }
 
-impl<T: Clone + PartialEq> TxnLockReadGuard<T> {
+impl<T: PartialEq + Clone> TxnLockReadGuard<T> {
     #[inline]
     pub fn id(&self) -> &TxnId {
         &self.txn_id
     }
 }
 
-impl<T: Clone + PartialEq> Clone for TxnLockReadGuard<T> {
+impl<T> Clone for TxnLockReadGuard<T>
+where
+    T: PartialEq + Clone,
+{
     fn clone(&self) -> Self {
         trace!("TxnLockReadGuard::clone {}", self.lock.inner.name);
 
@@ -137,7 +140,7 @@ impl<T: Clone + PartialEq> Clone for TxnLockReadGuard<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Deref for TxnLockReadGuard<T> {
+impl<T: PartialEq + Clone> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -145,7 +148,7 @@ impl<T: Clone + PartialEq> Deref for TxnLockReadGuard<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Drop for TxnLockReadGuard<T> {
+impl<T: PartialEq + Clone> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
         trace!("TxnLockReadGuard::drop {}", self.lock.inner.name);
 
@@ -166,21 +169,21 @@ impl<T: Clone + PartialEq> Drop for TxnLockReadGuard<T> {
     }
 }
 
-pub struct TxnLockReadGuardExclusive<T: Clone + PartialEq> {
+pub struct TxnLockReadGuardExclusive<T: PartialEq + Clone> {
     lock: TxnLock<T>,
     txn_id: TxnId,
     guard: OwnedRwLockWriteGuard<T>,
     pending_upgrade: bool,
 }
 
-impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
+impl<T: PartialEq + Clone> TxnLockReadGuardExclusive<T> {
     #[inline]
     pub fn id(&self) -> &TxnId {
         &self.txn_id
     }
 }
 
-impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
+impl<T: PartialEq + Clone> TxnLockReadGuardExclusive<T> {
     pub fn upgrade(mut self) -> TxnLockWriteGuard<T> {
         let lock = self.lock.clone();
         let txn_id = self.txn_id;
@@ -192,7 +195,7 @@ impl<T: Clone + PartialEq> TxnLockReadGuardExclusive<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Deref for TxnLockReadGuardExclusive<T> {
+impl<T: PartialEq + Clone> Deref for TxnLockReadGuardExclusive<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -200,7 +203,10 @@ impl<T: Clone + PartialEq> Deref for TxnLockReadGuardExclusive<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Drop for TxnLockReadGuardExclusive<T> {
+impl<T> Drop for TxnLockReadGuardExclusive<T>
+where
+    T: PartialEq + Clone,
+{
     fn drop(&mut self) {
         trace!("TxnLockReadGuardExclusive::drop {}", self.lock.inner.name);
 
@@ -224,21 +230,21 @@ impl<T: Clone + PartialEq> Drop for TxnLockReadGuardExclusive<T> {
     }
 }
 
-pub struct TxnLockWriteGuard<T: Clone + PartialEq> {
+pub struct TxnLockWriteGuard<T: PartialEq + Clone> {
     lock: TxnLock<T>,
     txn_id: TxnId,
     guard: OwnedRwLockWriteGuard<T>,
     pending_downgrade: bool,
 }
 
-impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
+impl<T: PartialEq + Clone> TxnLockWriteGuard<T> {
     #[inline]
     pub fn id(&self) -> &TxnId {
         &self.txn_id
     }
 }
 
-impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
+impl<T: PartialEq + Clone> TxnLockWriteGuard<T> {
     fn new(lock: TxnLock<T>, txn_id: TxnId, guard: OwnedRwLockWriteGuard<T>) -> Self {
         Self {
             lock,
@@ -260,7 +266,7 @@ impl<T: Clone + PartialEq> TxnLockWriteGuard<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Deref for TxnLockWriteGuard<T> {
+impl<T: PartialEq + Clone> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -268,13 +274,13 @@ impl<T: Clone + PartialEq> Deref for TxnLockWriteGuard<T> {
     }
 }
 
-impl<T: Clone + PartialEq> DerefMut for TxnLockWriteGuard<T> {
+impl<T: PartialEq + Clone> DerefMut for TxnLockWriteGuard<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.guard.deref_mut()
     }
 }
 
-impl<T: Clone + PartialEq> Drop for TxnLockWriteGuard<T> {
+impl<T: PartialEq + Clone> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         trace!("TxnLockWriteGuard::drop {}", self.lock.inner.name);
 
@@ -493,7 +499,7 @@ impl<T> TxnLock<T> {
     }
 }
 
-impl<T: Clone + PartialEq> TxnLock<T> {
+impl<T: PartialEq + Clone> TxnLock<T> {
     /// Lock this value for reading at the given `txn_id`.
     pub async fn read(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<T>> {
         debug!("lock {} to read at {}...", self.inner.name, txn_id);

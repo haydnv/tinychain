@@ -14,7 +14,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, DirWrite, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Label, TCPathBuf};
+use tcgeneric::{label, Id, Label, TCPathBuf};
 
 use crate::fs;
 use crate::state::{State, StateView};
@@ -144,7 +144,7 @@ impl Persist<fs::Dir> for SyncChain {
 
         let mut blocks_dir = {
             let mut dir = dir.write(txn_id).await?;
-            let file: fs::File<ChainBlock> =
+            let file: fs::File<Id, ChainBlock> =
                 dir.get_or_create_file(BLOCKS.into(), ChainType::Sync)?;
 
             file.into_inner().write().await
@@ -266,7 +266,7 @@ impl de::Visitor for ChainVisitor {
             .map_err(de::Error::custom)?;
 
         let mut blocks_dir = {
-            let file: fs::File<ChainBlock> = dir
+            let file: fs::File<Id, ChainBlock> = dir
                 .create_file(BLOCKS.into(), ChainType::Sync)
                 .map_err(de::Error::custom)?;
 

@@ -1,7 +1,6 @@
 //! Transactional filesystem traits and data structures.
 
 use std::borrow::Borrow;
-use std::collections::HashSet;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
@@ -12,9 +11,6 @@ use tc_error::*;
 use tcgeneric::{Id, PathSegment};
 
 use super::{Transaction, TxnId};
-
-/// An alias for [`Id`] used for code clarity
-pub type BlockId = PathSegment;
 
 /// The data contained by a single block on the filesystem
 pub trait BlockData: Clone + Send + Sync + 'static {
@@ -32,96 +28,100 @@ impl BlockData for afarray::Array {
 pub trait BlockRead<B: BlockData>: Deref<Target = B> + Send {}
 
 /// An exclusive read lock on a block
-pub trait BlockReadExclusive<B: BlockData>: Deref<Target = B> + Send {
+pub trait BlockReadExclusive<K, B: BlockData>: Deref<Target = B> + Send {
     /// The type of [`File`] that this block is part of
-    type File: File<B>;
+    type File: File<K, B>;
 
-    fn upgrade(self) -> <Self::File as File<B>>::BlockWrite;
+    fn upgrade(self) -> <Self::File as File<K, B>>::BlockWrite;
 }
 
 /// A write lock on a block
-pub trait BlockWrite<B: BlockData>: DerefMut<Target = B> + Send {
+pub trait BlockWrite<K, B: BlockData>: DerefMut<Target = B> + Send {
     /// The type of [`File`] that this block is part of
-    type File: File<B>;
+    type File: File<K, B>;
 
-    fn downgrade(self) -> <Self::File as File<B>>::BlockReadExclusive;
+    fn downgrade(self) -> <Self::File as File<K, B>>::BlockReadExclusive;
 }
 
 /// A read lock on a [`File`]
 #[async_trait]
-pub trait FileRead<B: BlockData>: Sized + Send + Sync {
+pub trait FileRead<K, B: BlockData>: Sized + Send + Sync {
     /// The type of this [`File`]
-    type File: File<B>;
+    type File: File<K, B>;
 
-    /// Get the set of all [`BlockId`]s in this [`File`].
-    fn block_ids(&self) -> HashSet<&BlockId>;
+    /// Iterate over the names of each block in this [`File`].
+    fn block_ids(&self) -> crate::lock::Keys<K>;
 
-    /// Return `true` if this [`File`] contains the given `block_id`.
-    fn contains(&self, block_id: &BlockId) -> bool;
+    /// Return `true` if this [`File`] contains a block with the given `name`.
+    fn contains<Q>(&self, name: Q) -> bool
+    where
+        Q: Borrow<K> + Copy;
 
     /// Return `true` if there are no blocks in this [`File`].
     fn is_empty(&self) -> bool;
 
     /// Lock the block at `name` for reading.
-    async fn read_block<I>(&self, name: I) -> TCResult<<Self::File as File<B>>::BlockRead>
+    async fn read_block<Q>(&self, name: Q) -> TCResult<<Self::File as File<K, B>>::BlockRead>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        Q: Borrow<K> + Send + Sync;
 
     /// Lock the block at `name` for reading exclusively,
-    /// i.e. prevent any more read locks being aquired while this one is active.
-    async fn read_block_exclusive<I>(
+    /// i.e. prevent any more read locks being acquired while this one is active.
+    async fn read_block_exclusive<Q>(
         &self,
-        name: I,
-    ) -> TCResult<<Self::File as File<B>>::BlockReadExclusive>
+        name: Q,
+    ) -> TCResult<<Self::File as File<K, B>>::BlockReadExclusive>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        Q: Borrow<K> + Send + Sync;
 
     /// Lock the block at `name` for reading, without borrowing.
-    async fn read_block_owned<I>(self, name: I) -> TCResult<<Self::File as File<B>>::BlockRead>
+    async fn read_block_owned<Q>(self, name: Q) -> TCResult<<Self::File as File<K, B>>::BlockRead>
     where
-        I: Borrow<BlockId> + Send + Sync,
+        Q: Borrow<K> + Send + Sync,
     {
         self.read_block(name).await
     }
 
     /// Convenience method to lock the block at `name` for writing.
-    async fn write_block<I>(&self, name: I) -> TCResult<<Self::File as File<B>>::BlockWrite>
+    async fn write_block<Q>(&self, name: Q) -> TCResult<<Self::File as File<K, B>>::BlockWrite>
     where
-        I: Borrow<BlockId> + Send + Sync;
+        Q: Borrow<K> + Send + Sync;
 }
 
 /// An exclusive read lock on a [`File`]
-pub trait FileReadExclusive<B: BlockData>: FileRead<B> {
+pub trait FileReadExclusive<K, B: BlockData>: FileRead<K, B> {
     /// Upgrade this read lock to a write lock
-    fn upgrade(self) -> <Self::File as File<B>>::Write;
+    fn upgrade(self) -> <Self::File as File<K, B>>::Write;
 }
 
 /// A write lock on a [`File`]
 #[async_trait]
-pub trait FileWrite<B: BlockData>: FileRead<B> {
+pub trait FileWrite<K, B: BlockData>: FileRead<K, B> {
     /// Downgrade this write lock to an exclusive read lock.
-    fn downgrade(self) -> <Self::File as File<B>>::ReadExclusive;
+    fn downgrade(self) -> <Self::File as File<K, B>>::ReadExclusive;
 
     /// Create a new block.
     async fn create_block(
         &mut self,
-        name: BlockId,
+        name: K,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<<Self::File as File<B>>::BlockWrite>;
+    ) -> TCResult<<Self::File as File<K, B>>::BlockWrite>;
 
     /// Create a new block.
     async fn create_block_unique(
         &mut self,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(BlockId, <Self::File as File<B>>::BlockWrite)>;
+    ) -> TCResult<(K, <Self::File as File<K, B>>::BlockWrite)>;
 
-    /// Delete the block with the given ID.
-    async fn delete_block(&mut self, name: BlockId) -> TCResult<()>;
+    /// Delete the block with the given `name`.
+    async fn delete_block<Q>(&mut self, name: Q) -> TCResult<()>
+    where
+        Q: Borrow<K> + Send + Sync;
 
     /// Delete all of this `File`'s blocks.
-    async fn copy_from<O: FileRead<B>>(&mut self, other: &O, truncate: bool) -> TCResult<()>;
+    async fn copy_from<O: FileRead<K, B>>(&mut self, other: &O, truncate: bool) -> TCResult<()>;
 
     /// Delete all of this `File`'s blocks.
     async fn truncate(&mut self) -> TCResult<()>;
@@ -129,24 +129,24 @@ pub trait FileWrite<B: BlockData>: FileRead<B> {
 
 /// A transactional file
 #[async_trait]
-pub trait File<B: BlockData>: Store + 'static {
+pub trait File<K, B: BlockData>: Store + 'static {
     /// The type of read guard used by this `File`
-    type Read: FileRead<B, File = Self> + Clone;
+    type Read: FileRead<K, B, File = Self> + Clone;
 
     /// The type of exclusive read guard used by this `File`
-    type ReadExclusive: FileReadExclusive<B, File = Self>;
+    type ReadExclusive: FileReadExclusive<K, B, File = Self>;
 
     /// The type of write guard used by this `File`
-    type Write: FileWrite<B, File = Self>;
+    type Write: FileWrite<K, B, File = Self>;
 
     /// A read lock on a block in this file.
     type BlockRead: BlockRead<B>;
 
     /// An exclusive read lock on a block in this file.
-    type BlockReadExclusive: BlockReadExclusive<B, File = Self>;
+    type BlockReadExclusive: BlockReadExclusive<K, B, File = Self>;
 
     /// A write lock on a block in this file.
-    type BlockWrite: BlockWrite<B, File = Self>;
+    type BlockWrite: BlockWrite<K, B, File = Self>;
 
     /// Lock the contents of this file for reading at the given `txn_id`.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
@@ -161,7 +161,7 @@ pub trait File<B: BlockData>: Store + 'static {
     /// Convenience method to lock the block at `name` for reading.
     async fn read_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockRead>
     where
-        I: Borrow<BlockId> + Send + Sync,
+        I: Borrow<K> + Send + Sync,
     {
         let file = self.read(txn_id).await?;
         file.read_block(name).await
@@ -170,7 +170,7 @@ pub trait File<B: BlockData>: Store + 'static {
     /// Convenience method to lock the block at `name` for writing.
     async fn write_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockWrite>
     where
-        I: Borrow<BlockId> + Send + Sync,
+        I: Borrow<K> + Send + Sync,
     {
         let file = self.read(txn_id).await?;
         file.write_block(name).await
@@ -192,11 +192,11 @@ pub trait DirRead: Send + Sync {
     fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>>;
 
     /// Get a [`File`] in this `Dir`.
-    fn get_file<F, B>(&self, name: &Id) -> TCResult<Option<F>>
+    fn get_file<F, K, B>(&self, name: &PathSegment) -> TCResult<Option<F>>
     where
         Self::FileEntry: AsType<F>,
         B: BlockData,
-        F: File<B>;
+        F: File<K, B>;
 
     /// Return `true` if there are no files or subdirectories in this [`Dir`].
     fn is_empty(&self) -> bool;
@@ -214,22 +214,22 @@ pub trait DirWrite: DirRead {
     fn create_dir_unique(&mut self) -> TCResult<Self::Lock>;
 
     /// Create a new [`File`].
-    fn create_file<C, F, B>(&mut self, name: Id, class: C) -> TCResult<F>
+    fn create_file<C, F, K, B>(&mut self, name: Id, class: C) -> TCResult<F>
     where
         Self::FileClass: From<C>,
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: File<B>;
+        F: File<K, B>;
 
     /// Create a new [`File`] with a new unique ID.
-    fn create_file_unique<C, F, B>(&mut self, class: C) -> TCResult<F>
+    fn create_file_unique<C, F, K, B>(&mut self, class: C) -> TCResult<F>
     where
         Self::FileClass: From<C>,
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: File<B>;
+        F: File<K, B>;
 
     /// Get the [`Dir`] with the given `name` and create a new one if none exists.
     fn get_or_create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
@@ -241,13 +241,13 @@ pub trait DirWrite: DirRead {
     }
 
     /// Get the [`File`] with the given `name` and create a new one if none exists.
-    fn get_or_create_file<C, F, B>(&mut self, name: PathSegment, class: C) -> TCResult<F>
+    fn get_or_create_file<C, F, K, B>(&mut self, name: PathSegment, class: C) -> TCResult<F>
     where
         Self::FileClass: From<C>,
         Self::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: File<B>,
+        F: File<K, B>,
     {
         if let Some(file) = self.get_file(&name)? {
             Ok(file)
@@ -279,13 +279,13 @@ pub trait Dir: Store + Send + Sized + 'static {
     }
 
     /// Convenience method to create a temporary file
-    async fn create_file_unique<C, F, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
+    async fn create_file_unique<C, F, K, B>(&self, txn_id: TxnId, class: C) -> TCResult<F>
     where
         <Self::Write as DirWrite>::FileClass: From<C>,
         <Self::Read as DirRead>::FileEntry: AsType<F>,
         C: Copy + Send + fmt::Display,
         B: BlockData,
-        F: File<B>,
+        F: File<K, B>,
     {
         let mut dir = self.write(txn_id).await?;
         dir.create_file_unique(class)

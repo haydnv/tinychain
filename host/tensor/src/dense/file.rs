@@ -14,9 +14,9 @@ use safecast::AsType;
 use strided::Stride;
 
 use tc_error::*;
-use tc_table::{BTreeType, Node};
+use tc_table::{BTreeType, Node, NodeId};
 use tc_transact::fs::{
-    BlockId, CopyFrom, Dir, DirRead, DirWrite, File, FileRead, FileWrite, Persist, Restore,
+    CopyFrom, Dir, DirRead, DirWrite, File, FileRead, FileWrite, Persist, Restore,
 };
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
@@ -24,7 +24,8 @@ use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::{
-    coord_bounds, transform, Bounds, Coord, FloatType, Schema, Shape, TensorAccess, TensorType,
+    coord_bounds, transform, Bounds, Coord, FloatType, Ordinal, Schema, Shape, TensorAccess,
+    TensorType,
 };
 
 use super::access::BlockListTranspose;
@@ -57,8 +58,8 @@ impl<FD, FS, D, T> BlockListFile<FD, FS, D, T> {
 
 impl<FD, FS, D, T> BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -193,9 +194,8 @@ where
             let chunk = chunk.into_iter().collect::<TCResult<Vec<Number>>>()?;
             size += chunk.len() as u64;
 
-            let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
-            file_lock.create_block(block_id, block, BLOCK_SIZE).await?;
+            file_lock.create_block(i, block, BLOCK_SIZE).await?;
 
             i += 1;
         }
@@ -244,8 +244,7 @@ where
         if num_blocks == 0 {
             return Ok(());
         } else if num_blocks == 1 {
-            let block_id = BlockId::from(0u64);
-            let mut block = file.write_block(block_id).await?;
+            let mut block = file.write_block(0).await?;
             block.sort(true).map_err(array_err)?;
             return Ok(());
         }
@@ -253,8 +252,7 @@ where
         loop {
             let mut sorted = true;
             for block_id in 0..(num_blocks - 1) {
-                let next_block_id = BlockId::from(block_id + 1);
-                let block_id = BlockId::from(block_id);
+                let next_block_id = block_id + 1;
 
                 let left = file.write_block(block_id);
                 let right = file.write_block(&next_block_id);
@@ -287,7 +285,7 @@ where
             .map(|(d, x)| d * x)
             .sum();
 
-        let block_id = BlockId::from(offset / PER_BLOCK as u64);
+        let block_id = offset / PER_BLOCK as u64;
         let mut block = self.file.write_block(txn_id, block_id).await?;
 
         let offset = offset % PER_BLOCK as u64;
@@ -312,7 +310,7 @@ where
         let mut block_id = 0u64;
         while let Some(array) = contents.try_next().await? {
             // TODO: can this be parallelized?
-            let mut block = file.write_block(BlockId::from(block_id)).await?;
+            let mut block = file.write_block(block_id).await?;
             *block = array;
             block_id += 1;
         }
@@ -344,8 +342,8 @@ impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -369,7 +367,6 @@ where
 
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
-                    .map(BlockId::from)
                     .then(move |block_id| file.clone().read_block_owned(block_id))
                     .map_ok(|block| (*block).clone()),
             );
@@ -408,7 +405,7 @@ where
             })
             .map(move |(block_id, mask, indices)| {
                 file.clone()
-                    .read_block_owned(BlockId::from(block_id))
+                    .read_block_owned(block_id)
                     .map_ok(move |block| block.get(&indices))
                     .map_ok(move |block_values| &block_values * &mask)
             })
@@ -425,8 +422,8 @@ impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -493,10 +490,7 @@ where
                         let indices = indices.slice(start, end);
                         let array = array.slice(start, end).map_err(array_err)?;
 
-                        let mut block = self
-                            .file
-                            .write_block(txn_id, BlockId::from(block_id))
-                            .await?;
+                        let mut block = self.file.write_block(txn_id, block_id).await?;
 
                         block.set(&indices, &array).map_err(array_err)?;
 
@@ -536,7 +530,6 @@ where
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        let block_id = BlockId::from(block_id);
                         let mut block = file.write_block(block_id).await?;
 
                         let value = Array::constant(value, (new_start - start) as usize);
@@ -560,8 +553,8 @@ impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -577,7 +570,7 @@ where
                 .map(|(d, x)| d * x)
                 .sum();
 
-            let block_id = BlockId::from(offset / PER_BLOCK as u64);
+            let block_id = offset / PER_BLOCK as u64;
             let block = self.file.read_block(*txn.id(), block_id).await?;
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
@@ -589,8 +582,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Transact for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array> + Transact,
-    FS: File<Node>,
+    FD: File<Ordinal, Array> + Transact,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -608,8 +601,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> CopyFrom<D, B> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -626,8 +619,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -647,8 +640,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Restore<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -681,7 +674,7 @@ impl<FD, FS, D, T> fmt::Display for BlockListFile<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Array>,
+    FD: File<Ordinal, Array>,
     FS: Send,
     D: Send,
     T: Send,
@@ -759,13 +752,13 @@ struct BlockListVisitor<'a, F> {
     file: &'a F,
 }
 
-impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
+impl<'a, F: File<Ordinal, Array>> BlockListVisitor<'a, F> {
     fn new(txn_id: TxnId, file: &'a F) -> Self {
         Self { txn_id, file }
     }
 }
 
-impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
+impl<'a, F: File<Ordinal, Array>> BlockListVisitor<'a, F> {
     async fn visit_array<
         T: af::HasAfEnum + Clone + Copy + Default,
         A: de::ArrayAccess<T>,
@@ -812,7 +805,7 @@ impl<'a, F: File<Array>> BlockListVisitor<'a, F> {
 }
 
 #[async_trait]
-impl<'a, F: File<Array>> de::Visitor for BlockListVisitor<'a, F> {
+impl<'a, F: File<Ordinal, Array>> de::Visitor for BlockListVisitor<'a, F> {
     type Value = u64;
 
     fn expecting() -> &'static str {
@@ -902,7 +895,7 @@ struct ComplexBlockListVisitor<'a, F> {
     visitor: BlockListVisitor<'a, F>,
 }
 
-impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
+impl<'a, F: File<Ordinal, Array>> ComplexBlockListVisitor<'a, F> {
     async fn visit_array<
         C: af::HasAfEnum,
         T: af::HasAfEnum + Clone + Copy + Default,
@@ -951,7 +944,7 @@ impl<'a, F: File<Array>> ComplexBlockListVisitor<'a, F> {
 }
 
 #[async_trait]
-impl<'a, F: File<Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
+impl<'a, F: File<Ordinal, Array>> de::Visitor for ComplexBlockListVisitor<'a, F> {
     type Value = u64;
 
     fn expecting() -> &'static str {
@@ -984,8 +977,8 @@ pub struct BlockListFileSlice<FD, FS, D, T> {
 
 impl<FD, FS, D, T> BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -1004,8 +997,8 @@ where
 
 impl<FD, FS, D, T> TensorAccess for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -1031,8 +1024,8 @@ impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -1069,9 +1062,7 @@ where
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        let block = file_clone
-                            .read_block(txn_id, BlockId::from(block_id))
-                            .await?;
+                        let block = file_clone.read_block(txn_id, block_id).await?;
 
                         values.extend(block.get(&block_offsets.into()).to_vec());
                         start = new_start;
@@ -1106,8 +1097,8 @@ impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {

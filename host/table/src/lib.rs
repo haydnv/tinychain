@@ -22,7 +22,7 @@ use tcgeneric::{
 use index::*;
 use view::*;
 
-pub use tc_btree::{BTreeType, Node};
+pub use tc_btree::{BTreeType, Node, NodeId};
 
 pub use bounds::*;
 pub use index::TableIndex;
@@ -207,7 +207,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -251,7 +251,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -306,7 +306,7 @@ where
     }
 }
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -324,7 +324,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -383,7 +383,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -417,7 +417,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
 where
     Self: Send + Sync,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -458,7 +458,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -477,7 +477,7 @@ where
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
+impl<'en, F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -510,14 +510,14 @@ where
     }
 }
 
-struct TableVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+struct TableVisitor<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> {
     txn: Txn,
     phantom_file: PhantomData<F>,
     phantom_dir: PhantomData<D>,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -550,13 +550,13 @@ where
     }
 }
 
-struct RowVisitor<F: File<Node>, D: Dir, Txn: Transaction<D>> {
+struct RowVisitor<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> {
     table: TableIndex<F, D, Txn>,
     txn_id: TxnId,
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -587,7 +587,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,

@@ -12,7 +12,7 @@ use log::debug;
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
-use tc_table::{BTreeType, Node};
+use tc_table::{BTreeType, Node, NodeId};
 use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
@@ -25,8 +25,8 @@ use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
 use super::transform;
 use super::{
-    coord_bounds, tile, trig_dtype, AxisBounds, Bounds, Coord, Phantom, Schema, Shape, Tensor,
-    TensorAccess, TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst,
+    coord_bounds, tile, trig_dtype, AxisBounds, Bounds, Coord, Ordinal, Phantom, Schema, Shape,
+    Tensor, TensorAccess, TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst,
     TensorDiagonal, TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath,
     TensorMathConst, TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType,
     TensorUnary, ERR_COMPLEX_EXPONENT,
@@ -77,8 +77,8 @@ type Condensed<FD, FS, D, T, L, R> =
 
 impl<FD, FS, D, T, A> SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -155,8 +155,8 @@ impl<FD, FS, D, T> SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -216,8 +216,8 @@ impl<FD, FS, D, T> TensorPersist for SparseTensor<FD, FS, D, T, SparseAccessor<F
 
 impl<FD, FS, D, T, A> TensorAccess for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -255,8 +255,8 @@ impl<FD, FS, D, T, A> TensorInstance for SparseTensor<FD, FS, D, T, A> {
 impl<FD, FS, D, T, L, R> TensorBoolean<SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
@@ -282,8 +282,8 @@ impl<FD, FS, D, T, A> TensorBoolean<Tensor<FD, FS, D, T>> for SparseTensor<FD, F
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -315,8 +315,8 @@ where
 
 impl<FD, FS, D, T, A> TensorBooleanConst for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -345,8 +345,8 @@ impl<FD, FS, D, T, L, R> TensorCompare<SparseTensor<FD, FS, D, T, R>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseAccess<FD, FS, D, T>,
@@ -408,8 +408,8 @@ impl<FD, FS, D, T, A> TensorCompare<Tensor<FD, FS, D, T>> for SparseTensor<FD, F
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -517,8 +517,8 @@ impl<FD, FS, D, T, A> TensorDiagonal<D> for SparseTensor<FD, FS, D, T, A>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     A: SparseAccess<FD, FS, D, T>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -580,8 +580,8 @@ impl<FD, FS, D, T, L> TensorDualIO<D, SparseTensor<FD, FS, D, T, SparseTable<FD,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     L: SparseWrite<FD, FS, D, T>,
@@ -624,8 +624,8 @@ impl<FD, FS, D, T, A> TensorDualIO<D, Tensor<FD, FS, D, T>> for SparseTensor<FD,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseWrite<FD, FS, D, T>,
@@ -668,8 +668,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorIndex<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseWrite<FD, FS, D, T>,
@@ -794,8 +794,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorIO<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseWrite<FD, FS, D, T>,
@@ -831,8 +831,8 @@ where
 impl<FD, FS, D, T, L, R> TensorMath<D, SparseTensor<FD, FS, D, T, R>>
     for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
@@ -896,8 +896,8 @@ impl<FD, FS, D, T, A> TensorMath<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, F
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -950,8 +950,8 @@ where
 
 impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1007,8 +1007,8 @@ impl<FD, FS, D, T, A> TensorReduce<D> for SparseTensor<FD, FS, D, T, A>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1101,8 +1101,8 @@ impl<FD, FS, D, T, A> TensorTransform for SparseTensor<FD, FS, D, T, A>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1174,8 +1174,8 @@ macro_rules! trig {
 #[async_trait]
 impl<FD, FS, D, T, A> TensorTrig for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1201,8 +1201,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorUnary<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1286,8 +1286,8 @@ impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1308,8 +1308,8 @@ impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -1333,8 +1333,8 @@ impl<FD, FS, D, T> Restore<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -1371,8 +1371,8 @@ impl<FD, FS, D, T, A> From<A> for SparseTensor<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> fmt::Display for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1392,8 +1392,8 @@ impl<'en, FD, FS, D, T, A> IntoView<'en, D> for SparseTensor<FD, FS, D, T, A>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1417,8 +1417,8 @@ impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FD,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -1452,8 +1452,8 @@ impl<FD, FS, D, T> de::Visitor for SparseTensorVisitor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {

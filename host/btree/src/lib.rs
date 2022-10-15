@@ -9,6 +9,7 @@ use destream::{de, en};
 use futures::{future, Stream, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
+use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
@@ -24,6 +25,8 @@ mod slice;
 
 const ERR_VIEW_WRITE: &str = "BTree view does not support write operations";
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
+
+pub type NodeId = Uuid;
 
 /// The file extension of a [`BTree`] as stored on-disk
 pub const EXT: &str = "node";
@@ -345,7 +348,7 @@ impl<F: Send + Sync, D: Send + Sync, T: Send + Sync> Instance for BTree<F, D, T>
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTree<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTree<F, D, T>
 where
     Self: 'static,
 {
@@ -402,7 +405,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTree<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTree<F, D, T>
 where
     Self: 'static,
 {
@@ -439,7 +442,7 @@ struct KeyListVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> de::Visitor for KeyListVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -462,7 +465,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> de::FromStream for KeyListVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -484,7 +487,7 @@ struct BTreeVisitor<F, D, T> {
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> de::Visitor for BTreeVisitor<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -516,7 +519,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> de::FromStream for BTree<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> de::FromStream for BTree<F, D, T>
 where
     Self: Send + Sync + 'static,
 {
@@ -553,7 +556,7 @@ impl<F, D, T> fmt::Display for BTree<F, D, T> {
 }
 
 #[async_trait]
-impl<'en, F: File<Node>, D: Dir, T: Transaction<D>> IntoView<'en, D> for BTree<F, D, T>
+impl<'en, F: File<NodeId, Node>, D: Dir, T: Transaction<D>> IntoView<'en, D> for BTree<F, D, T>
 where
     Self: 'static,
 {
