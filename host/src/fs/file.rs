@@ -223,7 +223,7 @@ where
 {
     type File = File<K, B>;
 
-    fn block_ids(&self) -> std::collections::btree_set::Iter<K> {
+    fn block_ids(&self) -> tc_transact::lock::Keys<K> {
         self.blocks.keys()
     }
 

@@ -45,6 +45,56 @@ where
     }
 }
 
+pub struct Keys<'a, K> {
+    iter: std::collections::btree_set::Iter<'a, K>,
+}
+
+impl<'a, K> Iterator for Keys<'a, K> {
+    type Item = &'a K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.iter.count()
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.iter.last()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.iter.nth(n)
+    }
+
+    fn max(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+        Self::Item: Ord,
+    {
+        self.iter.max()
+    }
+
+    fn min(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+        Self::Item: Ord,
+    {
+        self.iter.min()
+    }
+}
+
 pub trait TxnMapRead<K, V> {
     fn contains_key<Q: Borrow<K>>(&self, key: Q) -> bool;
 
@@ -54,7 +104,7 @@ pub trait TxnMapRead<K, V> {
 
     fn is_empty(&self) -> bool;
 
-    fn keys(&self) -> std::collections::btree_set::Iter<K>;
+    fn keys(&self) -> Keys<K>;
 }
 
 impl<G, K, V> TxnMapRead<K, V> for G
@@ -85,8 +135,10 @@ where
         self.borrow().is_empty()
     }
 
-    fn keys(&self) -> std::collections::btree_set::Iter<K> {
-        self.borrow().iter()
+    fn keys(&self) -> Keys<K> {
+        Keys {
+            iter: self.borrow().iter(),
+        }
     }
 }
 

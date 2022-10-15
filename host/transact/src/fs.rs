@@ -50,7 +50,7 @@ pub trait FileRead<K, B: BlockData>: Sized + Send + Sync {
     type File: File<K, B>;
 
     /// Iterate over the names of each block in this [`File`].
-    fn block_ids(&self) -> std::collections::btree_set::Iter<K>;
+    fn block_ids(&self) -> crate::lock::Keys<K>;
 
     /// Return `true` if this [`File`] contains a block with the given `name`.
     fn contains<Q>(&self, name: Q) -> bool
