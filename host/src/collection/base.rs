@@ -14,7 +14,7 @@ use crate::txn::Txn;
 use super::schema::{CollectionSchema, CollectionType};
 use super::{BTreeFile, Collection, TableIndex};
 #[cfg(feature = "tensor")]
-use super::{DenseTensorFile, SparseTable};
+use super::{DenseTensorFile, SparseTable, TensorType};
 
 /// The base type of a [`Collection`] which supports [`CopyFrom`], [`Persist`], and [`Transact`]
 pub enum CollectionBase {
@@ -34,9 +34,9 @@ impl Instance for CollectionBase {
             Self::BTree(btree) => btree.class().into(),
             Self::Table(table) => table.class().into(),
             #[cfg(feature = "tensor")]
-            Self::Dense(dense) => dense.class().into(),
+            Self::Dense(_dense) => TensorType::Dense.into(),
             #[cfg(feature = "tensor")]
-            Self::Sparse(sparse) => sparse.class().into(),
+            Self::Sparse(_sparse) => TensorType::Sparse.into(),
         }
     }
 }

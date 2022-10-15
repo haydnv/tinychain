@@ -168,10 +168,7 @@ impl ConcatenateHandler {
         dtype: NumberType,
     ) -> TCResult<DenseTensor<DenseTensorFile>> {
         let txn_id = *txn.id();
-        let file = txn
-            .context()
-            .create_file_unique(txn_id, TensorType::Dense)
-            .await?;
+        let file = txn.context().create_file_unique(txn_id).await?;
 
         DenseTensor::constant(file, txn_id, shape, dtype.zero()).await
     }
@@ -326,10 +323,7 @@ impl<'a> Handler<'a> for CopyFromHandler {
 
                 let copy = match source {
                     Tensor::Dense(source) => {
-                        let file = txn
-                            .context()
-                            .create_file_unique(*txn.id(), TensorType::Dense)
-                            .await?;
+                        let file = txn.context().create_file_unique(*txn.id()).await?;
 
                         let blocks =
                             BlockListFile::copy_from(source.into_inner(), file, txn).await?;
@@ -1513,7 +1507,7 @@ where
     }
 }
 
-impl<B: DenseWrite<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
+impl<B: DenseWrite<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
     for DenseTensor<B>
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -1521,7 +1515,7 @@ impl<B: DenseWrite<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Tx
     }
 }
 
-impl<A: SparseWrite<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
+impl<A: SparseWrite<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
     for SparseTensor<A>
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -1927,10 +1921,8 @@ where
     }
 }
 
-async fn create_file(txn: &Txn) -> TCResult<fs::File<Ordinal, Array>> {
-    txn.context()
-        .create_file_unique(*txn.id(), TensorType::Dense)
-        .await
+async fn create_file(txn: &Txn) -> TCResult<fs::File<u64, Array>> {
+    txn.context().create_file_unique(*txn.id()).await
 }
 
 async fn create_tensor(class: TensorType, schema: Schema, txn: &Txn) -> TCResult<Tensor> {

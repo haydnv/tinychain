@@ -6,7 +6,7 @@ use log::{debug, trace};
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirWrite};
+use tc_transact::fs::{Dir, DirCreate};
 use tc_transact::lock::TxnLock;
 use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};

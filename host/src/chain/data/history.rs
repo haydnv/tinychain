@@ -11,7 +11,7 @@ use log::{debug, error};
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, DirWrite, Persist};
+use tc_transact::fs::{BlockData, Dir, DirCreate, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;

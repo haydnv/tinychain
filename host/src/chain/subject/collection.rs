@@ -10,12 +10,12 @@ use log::{debug, trace};
 use sha2::digest::Output;
 use sha2::Sha256;
 
-use tc_btree::{BTreeInstance, BTreeType};
+use tc_btree::BTreeInstance;
 use tc_error::*;
 use tc_table::TableStream;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
-use tc_transact::fs::{Dir, DirRead, DirWrite, Persist, Restore};
+use tc_transact::fs::{Dir, DirCreate, DirCreateFile, DirRead, DirReadFile, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -87,7 +87,7 @@ impl SubjectCollection {
             match schema {
                 #[cfg(feature = "tensor")]
                 CollectionSchema::Dense(schema) => {
-                    let file = dir.create_file(name, TensorType::Dense)?;
+                    let file = dir.create_file(name)?;
                     DenseTensor::create(file, schema, txn_id)
                         .map_ok(Self::Dense)
                         .await
@@ -106,7 +106,7 @@ impl SubjectCollection {
                         .await
                 }
                 CollectionSchema::BTree(schema) => {
-                    let file = dir.create_file(name, BTreeType::default())?;
+                    let file = dir.create_file(name)?;
                     BTreeFile::create(file, schema, txn_id)
                         .map_ok(Self::BTree)
                         .await
@@ -196,10 +196,7 @@ impl SubjectCollection {
                 #[cfg(feature = "tensor")]
                 Self::Dense(tensor) => match backup {
                     Collection::Tensor(Tensor::Dense(backup)) => {
-                        let file = txn
-                            .context()
-                            .create_file_unique(txn_id, TensorType::Dense)
-                            .await?;
+                        let file = txn.context().create_file_unique(txn_id).await?;
 
                         let backup =
                             tc_transact::fs::CopyFrom::copy_from(backup, file, txn).await?;

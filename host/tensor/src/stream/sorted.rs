@@ -3,16 +3,15 @@ use std::fmt;
 use afarray::{Array, ArrayExt, CoordUnique, Coords, Offsets};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
-use safecast::AsType;
 
 use tc_error::*;
-use tc_table::{BTreeType, Node, NodeId};
-use tc_transact::fs::{Dir, DirRead, DirWrite, File};
+use tc_table::{Node, NodeId};
+use tc_transact::fs::{Dir, File, DirCreateFile};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
 use crate::dense::{BlockListFile, PER_BLOCK};
-use crate::{Coord, DenseAccess, Ordinal, Shape, TensorAccess, TensorType};
+use crate::{Coord, DenseAccess, Shape, TensorAccess};
 
 use super::ReadValueAt;
 
@@ -24,17 +23,13 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
 {
     let txn_id = *txn.id();
-    let file: FD = txn
-        .context()
-        .create_file_unique(txn_id, TensorType::Dense)
-        .await?;
+    let file: FD = txn.context().create_file_unique(txn_id).await?;
 
     let coords = coords.inspect_ok(|block| trace!("coord block len is {}", block.len()));
     let offsets = sort_coords::<FD, FS, D, T, _>(file, txn_id, coords, shape.clone()).await?;
@@ -56,12 +51,11 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     debug!("sort values by coordinate for {}", source);
 
@@ -85,8 +79,8 @@ async fn sort_coords<FD, FS, D, T, S>(
     shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,

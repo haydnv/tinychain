@@ -14,8 +14,8 @@ use tc_btree::{BTreeInstance, BTreeView, Node, NodeId};
 use tc_error::*;
 use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
-use tc_tensor::{Array, Ordinal, TensorView};
-use tc_transact::fs::{CopyFrom, Dir, DirWrite};
+use tc_tensor::{Array, TensorView};
+use tc_transact::fs::{CopyFrom, Dir, DirCreate, DirCreateFile};
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel, TCPathBuf};
 
@@ -41,25 +41,25 @@ pub type Table = tc_table::Table<fs::File<NodeId, Node>, fs::Dir, Txn>;
 pub type TableIndex = tc_table::TableIndex<fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
-pub type Tensor = tc_tensor::Tensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+pub type Tensor = tc_tensor::Tensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type DenseAccessor =
-    tc_tensor::DenseAccessor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+    tc_tensor::DenseAccessor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type DenseTensor<B> =
-    tc_tensor::DenseTensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, B>;
+    tc_tensor::DenseTensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, B>;
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile =
-    tc_tensor::BlockListFile<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+    tc_tensor::BlockListFile<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type SparseAccessor =
-    tc_tensor::SparseAccessor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+    tc_tensor::SparseAccessor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 #[cfg(feature = "tensor")]
 pub type SparseTensor<A> =
-    tc_tensor::SparseTensor<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, A>;
+    tc_tensor::SparseTensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, A>;
 #[cfg(feature = "tensor")]
 pub type SparseTable =
-    tc_tensor::SparseTable<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+    tc_tensor::SparseTable<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 pub(crate) const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
@@ -97,8 +97,7 @@ impl Collection {
 
         match source {
             Collection::BTree(source) => {
-                let class = BTreeType::default();
-                let file = lock.create_file(name, class)?;
+                let file = lock.create_file(name)?;
                 BTreeFile::copy_from(source, file, txn)
                     .map_ok(BTree::from)
                     .map_ok(Collection::BTree)
@@ -114,7 +113,7 @@ impl Collection {
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let file = lock.create_file(name, dense.class())?;
+                    let file = lock.create_file(name)?;
                     DenseTensor::copy_from(dense, file, txn)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)
@@ -188,7 +187,7 @@ impl From<Tensor> for Collection {
 }
 
 #[cfg(feature = "tensor")]
-impl<B: DenseAccess<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
+impl<B: DenseAccess<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
     From<DenseTensor<B>> for Collection
 {
     fn from(tensor: DenseTensor<B>) -> Self {
@@ -197,7 +196,7 @@ impl<B: DenseAccess<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, T
 }
 
 #[cfg(feature = "tensor")]
-impl<A: SparseAccess<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
+impl<A: SparseAccess<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>>
     From<SparseTensor<A>> for Collection
 {
     fn from(tensor: SparseTensor<A>) -> Self {
@@ -244,7 +243,7 @@ impl CollectionVisitor {
                 let file = self
                     .txn
                     .context()
-                    .create_file_unique(*self.txn.id(), BTreeType::default())
+                    .create_file_unique(*self.txn.id())
                     .map_err(de::Error::custom)
                     .await?;
 

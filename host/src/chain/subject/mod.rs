@@ -12,7 +12,7 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, DirWrite};
+use tc_transact::fs::{Dir, DirCreate, DirRead};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::*;
 

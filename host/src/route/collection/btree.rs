@@ -45,10 +45,7 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let txn_id = *txn.id();
 
-                let file = txn
-                    .context()
-                    .create_file_unique(*txn.id(), BTreeType::default())
-                    .await?;
+                let file = txn.context().create_file_unique(*txn.id()).await?;
 
                 let btree = BTreeFile::create(file, schema, txn_id).await?;
 
@@ -89,10 +86,7 @@ impl<'a> Handler<'a> for CreateHandler {
                     TCError::bad_request("invalid BTree schema", v)
                 })?;
 
-                let file = txn
-                    .context()
-                    .create_file_unique(*txn.id(), BTreeType::default())
-                    .await?;
+                let file = txn.context().create_file_unique(*txn.id()).await?;
 
                 BTreeFile::create(file, schema, *txn.id())
                     .map_ok(Collection::from)

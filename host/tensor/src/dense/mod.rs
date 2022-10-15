@@ -14,8 +14,8 @@ use log::{debug, warn};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
-use tc_table::{BTreeType, Node, NodeId};
-use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
+use tc_table::{Node, NodeId};
+use tc_transact::fs::{CopyFrom, Dir, File, DirCreateFile, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
@@ -26,11 +26,10 @@ use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    tile, trig_dtype, Bounds, Coord, Ordinal, Phantom, Schema, Shape, Tensor, TensorAccess,
-    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath, TensorMathConst,
-    TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
-    ERR_COMPLEX_EXPONENT,
+    tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
+    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
+    TensorIndex, TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce,
+    TensorTransform, TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -67,10 +66,10 @@ impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     fn combine<OT: DenseAccess<FD, FS, D, T>>(
         self,
@@ -114,10 +113,9 @@ impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     /// Create a new `DenseTensor` with the given [`Schema`].
     pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
@@ -181,10 +179,7 @@ where
         }
 
         let txn_id = *txn.id();
-        let output_file = txn
-            .context()
-            .create_file_unique(txn_id, TensorType::Dense)
-            .await?;
+        let output_file = txn.context().create_file_unique(txn_id).await?;
 
         let shape: Shape = tensor
             .shape()
@@ -197,11 +192,7 @@ where
         let input = match tensor.blocks {
             DenseAccessor::File(file) => DenseTensor::from(file),
             other => {
-                let input_file = txn
-                    .context()
-                    .create_file_unique(txn_id, TensorType::Dense)
-                    .await?;
-
+                let input_file = txn.context().create_file_unique(txn_id).await?;
                 DenseTensor::copy_from(DenseTensor::from(other), input_file, &txn).await?
             }
         };
@@ -225,8 +216,8 @@ impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD,
 
 impl<FD, FS, D, T, B> TensorAccess for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -266,12 +257,11 @@ impl<FD, FS, D, T, B, O> TensorBoolean<DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
     type LeftCombine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
@@ -293,11 +283,10 @@ impl<FD, FS, D, T, B> TensorBoolean<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = Tensor<FD, FS, D, T>;
     type LeftCombine = Tensor<FD, FS, D, T>;
@@ -328,8 +317,8 @@ impl<FD, FS, D, T, B> TensorBooleanConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -368,12 +357,11 @@ impl<FD, FS, D, T, B, O> TensorCompare<DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Compare = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
     type Dense = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
@@ -431,11 +419,10 @@ impl<FD, FS, D, T, B> TensorCompare<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Compare = Tensor<FD, FS, D, T>;
     type Dense = Tensor<FD, FS, D, T>;
@@ -487,8 +474,8 @@ impl<FD, FS, D, T, B> TensorCompareConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Compare = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -571,11 +558,10 @@ impl<FD, FS, D, T, B> TensorDiagonal<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseWrite<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
     type Diagonal = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
@@ -597,10 +583,7 @@ where
         }
 
         let txn_id = *txn.id();
-        let file = txn
-            .context()
-            .create_file_unique(txn_id, TensorType::Dense)
-            .await?;
+        let file = txn.context().create_file_unique(txn_id).await?;
 
         let ndim = self.ndim();
         let dtype = self.dtype();
@@ -657,11 +640,10 @@ impl<FD, FS, D, T, B> TensorIO<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseWrite<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -691,11 +673,10 @@ impl<FD, FS, D, T, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, BlockListFile<FD
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseWrite<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -715,11 +696,10 @@ impl<FD, FS, D, T, B> TensorIndex<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseWrite<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
     type Index = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
@@ -741,10 +721,7 @@ where
         };
 
         let txn_id = *txn.id();
-        let file = txn
-            .context()
-            .create_file_unique(txn_id, TensorType::Dense)
-            .await?;
+        let file = txn.context().create_file_unique(txn_id).await?;
 
         let per_block = self.size() / shape.size();
         debug_assert_eq!(self.size() / per_block, shape.size());
@@ -790,11 +767,10 @@ impl<FD, FS, D, T, B> TensorDualIO<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseWrite<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -812,20 +788,14 @@ where
             Tensor::Dense(dense) => match dense.blocks {
                 DenseAccessor::File(file) => self.write(txn, bounds, DenseTensor::from(file)).await,
                 other => {
-                    let file = txn
-                        .context()
-                        .create_file_unique(*txn.id(), TensorType::Dense)
-                        .await?;
+                    let file = txn.context().create_file_unique(*txn.id()).await?;
 
                     let other = DenseTensor::copy_from(other.into(), file, &txn).await?;
                     self.write(txn, bounds, other).await
                 }
             },
             Tensor::Sparse(sparse) => {
-                let file = txn
-                    .context()
-                    .create_file_unique(*txn.id(), TensorType::Dense)
-                    .await?;
+                let file = txn.context().create_file_unique(*txn.id()).await?;
 
                 let other = DenseTensor::copy_from(sparse.into_dense(), file, &txn).await?;
                 self.write(txn, bounds, other).await
@@ -839,12 +809,11 @@ impl<FD, FS, D, T, B, O> TensorMath<D, DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
     type LeftCombine = DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, O>>;
@@ -921,11 +890,10 @@ impl<FD, FS, D, T, B> TensorMath<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = Tensor<FD, FS, D, T>;
     type LeftCombine = Tensor<FD, FS, D, T>;
@@ -977,8 +945,8 @@ impl<FD, FS, D, T, B> TensorMathConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -1055,11 +1023,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1072,11 +1039,10 @@ impl<FD, FS, D, T, B> TensorReduce<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
     type Reduce = DenseTensor<FD, FS, D, T, BlockListReduce<FD, FS, D, T, B>>;
@@ -1172,11 +1138,10 @@ impl<FD, FS, D, T, B> TensorTransform for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Broadcast = DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>;
     type Cast = DenseTensor<FD, FS, D, T, BlockListCast<FD, FS, D, T, B>>;
@@ -1245,8 +1210,8 @@ impl<FD, FS, D, T, B> TensorTrig for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
@@ -1272,11 +1237,10 @@ impl<FD, FS, D, T, B> TensorUnary<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
     type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
@@ -1367,11 +1331,10 @@ impl<FD, FS, D, T> Transact for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array> + Transact,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array> + Transact,
+    FS: File<Key = NodeId, Block = Node>,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Commit = <BlockListFile<FD, FS, D, T> as Transact>::Commit;
 
@@ -1390,11 +1353,10 @@ impl<FD, FS, D, T, B> CopyFrom<D, DenseTensor<FD, FS, D, T, B>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     async fn copy_from(
         instance: DenseTensor<FD, FS, D, T, B>,
@@ -1412,11 +1374,10 @@ impl<FD, FS, D, T> Persist<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Schema = Schema;
     type Store = FD;
@@ -1438,11 +1399,10 @@ impl<FD, FS, D, T> Restore<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.blocks.restore(&backup.blocks, txn_id).await
@@ -1463,11 +1423,10 @@ impl<FD, FS, D, T> de::FromStream for DenseTensor<FD, FS, D, T, BlockListFile<FD
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType> + Send,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Context = T;
 
@@ -1475,7 +1434,7 @@ where
         let txn_id = *txn.id();
         let file = txn
             .context()
-            .create_file_unique(txn_id, TensorType::Dense)
+            .create_file_unique(txn_id)
             .map_err(de::Error::custom)
             .await?;
 
@@ -1487,8 +1446,8 @@ where
 
 impl<FD, FS, D, T, B> fmt::Display for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1528,11 +1487,10 @@ impl<FD, FS, D, T> de::Visitor for DenseTensorVisitor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Value = DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>;
 
@@ -1562,11 +1520,10 @@ impl<'en, FD, FS, D, T, B> IntoView<'en, D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
     type View = DenseTensorView<'en>;

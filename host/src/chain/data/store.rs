@@ -67,7 +67,7 @@ impl Store {
                     if dir.contains(&hash) {
                         debug!("BTree with hash {} is already saved", hash);
                     } else {
-                        let file = dir.create_file(hash.clone(), btree.class())?;
+                        let file = dir.create_file(hash.clone())?;
 
                         BTreeFile::copy_from(btree, file, txn).await?;
                         debug!("saved BTree with hash {}", hash);
@@ -118,7 +118,7 @@ impl Store {
                                     dense
                                 );
 
-                                let file = dir.create_file(hash.clone(), TensorType::Dense)?;
+                                let file = dir.create_file(hash.clone())?;
 
                                 debug!("chain data store created destination file for {}", dense);
                                 DenseTensor::copy_from(dense, file, txn).await?;

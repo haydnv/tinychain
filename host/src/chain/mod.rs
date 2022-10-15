@@ -16,8 +16,6 @@ use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::collection::CollectionSchema;
-#[cfg(feature = "tensor")]
-use crate::collection::TensorType;
 use crate::fs;
 use crate::scalar::Scalar;
 use crate::state::{State, StateView};

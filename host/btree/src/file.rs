@@ -222,7 +222,7 @@ pub struct BTreeFile<F, D, T> {
     inner: Arc<Inner<F, D, T>>,
 }
 
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
+impl<F: File<Key = NodeId, Block = Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
 where
     Self: Clone,
 {
@@ -586,10 +586,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
+impl<F, D, T> BTreeInstance for BTreeFile<F, D, T>
 where
-    Self: Clone,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
     BTreeSlice<F, D, T>: 'static,
+    Self: Clone,
 {
     type Slice = BTreeSlice<F, D, T>;
 
@@ -633,10 +636,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
+impl<F, D, T> BTreeWrite for BTreeFile<F, D, T>
 where
-    Self: Clone,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
     BTreeSlice<F, D, T>: 'static,
+    Self: Clone,
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() {
@@ -721,7 +727,12 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
+impl<F, D, T> Transact for BTreeFile<F, D, T>
+where
+    F: File<Key = NodeId, Block = Node> + Transact,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Commit = TxnLockCommitGuard<NodeId>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
@@ -739,7 +750,12 @@ impl<F: File<NodeId, Node> + Transact, D: Dir, T: Transaction<D>> Transact for B
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
+impl<F, D, T> Persist<D> for BTreeFile<F, D, T>
+where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     type Schema = RowSchema;
     type Store = F;
     type Txn = T;
@@ -781,7 +797,12 @@ impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
+impl<F, D, T> Restore<D> for BTreeFile<F, D, T>
+where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+{
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
@@ -807,8 +828,12 @@ impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
-    for BTreeFile<F, D, T>
+impl<F, D, T, I> CopyFrom<D, I> for BTreeFile<F, D, T>
+where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+    I: BTreeInstance + 'static,
 {
     async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {
         let txn_id = *txn.id();

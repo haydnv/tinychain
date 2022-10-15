@@ -9,24 +9,20 @@ use destream::de;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use log::{debug, trace};
-use safecast::AsType;
 
 use tc_error::*;
 use tc_table::{
-    BTreeType, Column, ColumnBound, Merged, Node, NodeId, TableIndex, TableSchema, TableSlice,
-    TableStream, TableWrite,
+    Column, ColumnBound, Merged, Node, NodeId, TableIndex, TableSchema, TableSlice, TableStream,
+    TableWrite,
 };
-use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirReadFile, File, DirCreateFile, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label, TCBoxTryStream, Tuple};
 
 use crate::dense::PER_BLOCK;
 use crate::stream::{sorted_coords, Read, ReadValueAt};
-use crate::{
-    needs_transpose, transform, AxisBounds, Bounds, Coord, Ordinal, Schema, Shape, TensorAccess,
-    TensorType,
-};
+use crate::{needs_transpose, transform, AxisBounds, Bounds, Coord, Schema, Shape, TensorAccess};
 
 use super::access::SparseTranspose;
 use super::{SparseAccess, SparseAccessor, SparseStream, SparseTensor, SparseWrite};
@@ -44,12 +40,11 @@ pub struct SparseTable<FD, FS, D, T> {
 
 impl<FD, FS, D, T> SparseTable<FD, FS, D, T>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     /// Create a new `SparseTable` with the given [`Schema`].
     pub async fn create(context: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
@@ -102,10 +97,9 @@ impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTable<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
 
@@ -192,12 +186,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
     Self: SparseAccess<FD, FS, D, T>,
 {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -210,10 +203,9 @@ impl<FD, FS, D, T> ReadValueAt<D> for SparseTable<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -235,8 +227,8 @@ impl<FD, FS, D, T> fmt::Display for SparseTable<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> Transact for SparseTable<FD, FS, D, T>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     TableIndex<FS, D, T>: Transact,
@@ -257,11 +249,11 @@ impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>> for SparseTable
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     async fn copy_from(
         instance: SparseTensor<FD, FS, D, T, A>,
@@ -293,10 +285,10 @@ impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Schema = Schema;
     type Store = D;
@@ -322,10 +314,10 @@ impl<FD, FS, D, T> Restore<D> for SparseTable<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.table.restore(&backup.table, txn_id).await
@@ -337,10 +329,10 @@ impl<FD, FS, D, T> de::FromStream for SparseTable<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Context = (Self, TxnId);
 
@@ -406,10 +398,9 @@ impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTableSlice<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
 
@@ -491,10 +482,9 @@ impl<FD, FS, D, T> ReadValueAt<D> for SparseTableSlice<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -515,15 +505,7 @@ impl<FD, FS, D, T> fmt::Display for SparseTableSlice<FD, FS, D, T> {
     }
 }
 
-struct SparseTableVisitor<FD, FS, D, T>
-where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
-{
+struct SparseTableVisitor<FD, FS, D, T> {
     table: SparseTable<FD, FS, D, T>,
     txn_id: TxnId,
 }
@@ -533,10 +515,10 @@ impl<FD, FS, D, T> de::Visitor for SparseTableVisitor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Value = SparseTable<FD, FS, D, T>;
 
@@ -564,12 +546,11 @@ async fn filled_at<'a, FD, FS, D, Txn, T>(
 where
     D: Dir,
     Txn: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     T: TableStream,
     T::Selection: TableStream,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     assert!(!axes.is_empty());
     let order: Vec<Id> = axes.into_iter().map(Id::from).collect();
