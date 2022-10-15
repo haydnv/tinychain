@@ -43,8 +43,7 @@ const ERR_NAN: &str = "Tensor combination resulted in a non-numeric value";
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-// TODO: delete and replace with `u64`
-pub type Ordinal = tcgeneric::Id;
+pub type Ordinal = u64;
 
 /// The file extension of a [`Tensor`]
 pub const EXT: &str = "array";

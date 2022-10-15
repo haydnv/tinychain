@@ -9,6 +9,7 @@ use destream::{de, en};
 use futures::{future, Stream, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
+use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File};
@@ -25,8 +26,7 @@ mod slice;
 const ERR_VIEW_WRITE: &str = "BTree view does not support write operations";
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
-// TODO: this should be `Uuid`
-pub type NodeId = Id;
+pub type NodeId = Uuid;
 
 /// The file extension of a [`BTree`] as stored on-disk
 pub const EXT: &str = "node";

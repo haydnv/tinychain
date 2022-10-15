@@ -255,7 +255,7 @@ where
 
         let order = validate_schema(&schema)?;
 
-        let root: NodeId = Uuid::new_v4().into(); // TODO: just use `Uuid`
+        let root: NodeId = Uuid::new_v4();
         let node = Node::new(true, None);
         file_contents
             .create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)

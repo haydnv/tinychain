@@ -20,7 +20,7 @@ use tc_transact::fs::{
 };
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
-use tcgeneric::{Id as BlockId, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
 
 use crate::stream::{Read, ReadValueAt};
 use crate::{
@@ -194,9 +194,8 @@ where
             let chunk = chunk.into_iter().collect::<TCResult<Vec<Number>>>()?;
             size += chunk.len() as u64;
 
-            let block_id = BlockId::from(i);
             let block = Array::from(chunk).cast_into(dtype);
-            file_lock.create_block(block_id, block, BLOCK_SIZE).await?;
+            file_lock.create_block(i, block, BLOCK_SIZE).await?;
 
             i += 1;
         }
@@ -245,8 +244,7 @@ where
         if num_blocks == 0 {
             return Ok(());
         } else if num_blocks == 1 {
-            let block_id = BlockId::from(0u64);
-            let mut block = file.write_block(block_id).await?;
+            let mut block = file.write_block(0).await?;
             block.sort(true).map_err(array_err)?;
             return Ok(());
         }
@@ -254,8 +252,7 @@ where
         loop {
             let mut sorted = true;
             for block_id in 0..(num_blocks - 1) {
-                let next_block_id = BlockId::from(block_id + 1);
-                let block_id = BlockId::from(block_id);
+                let next_block_id = block_id + 1;
 
                 let left = file.write_block(block_id);
                 let right = file.write_block(&next_block_id);
@@ -288,7 +285,7 @@ where
             .map(|(d, x)| d * x)
             .sum();
 
-        let block_id = BlockId::from(offset / PER_BLOCK as u64);
+        let block_id = offset / PER_BLOCK as u64;
         let mut block = self.file.write_block(txn_id, block_id).await?;
 
         let offset = offset % PER_BLOCK as u64;
@@ -313,7 +310,7 @@ where
         let mut block_id = 0u64;
         while let Some(array) = contents.try_next().await? {
             // TODO: can this be parallelized?
-            let mut block = file.write_block(BlockId::from(block_id)).await?;
+            let mut block = file.write_block(block_id).await?;
             *block = array;
             block_id += 1;
         }
@@ -370,7 +367,6 @@ where
 
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(size, PER_BLOCK as u64)))
-                    .map(BlockId::from)
                     .then(move |block_id| file.clone().read_block_owned(block_id))
                     .map_ok(|block| (*block).clone()),
             );
@@ -409,7 +405,7 @@ where
             })
             .map(move |(block_id, mask, indices)| {
                 file.clone()
-                    .read_block_owned(BlockId::from(block_id))
+                    .read_block_owned(block_id)
                     .map_ok(move |block| block.get(&indices))
                     .map_ok(move |block_values| &block_values * &mask)
             })
@@ -494,10 +490,7 @@ where
                         let indices = indices.slice(start, end);
                         let array = array.slice(start, end).map_err(array_err)?;
 
-                        let mut block = self
-                            .file
-                            .write_block(txn_id, BlockId::from(block_id))
-                            .await?;
+                        let mut block = self.file.write_block(txn_id, block_id).await?;
 
                         block.set(&indices, &array).map_err(array_err)?;
 
@@ -537,7 +530,6 @@ where
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        let block_id = BlockId::from(block_id);
                         let mut block = file.write_block(block_id).await?;
 
                         let value = Array::constant(value, (new_start - start) as usize);
@@ -578,7 +570,7 @@ where
                 .map(|(d, x)| d * x)
                 .sum();
 
-            let block_id = BlockId::from(offset / PER_BLOCK as u64);
+            let block_id = offset / PER_BLOCK as u64;
             let block = self.file.read_block(*txn.id(), block_id).await?;
             let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
@@ -1070,9 +1062,7 @@ where
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        let block = file_clone
-                            .read_block(txn_id, BlockId::from(block_id))
-                            .await?;
+                        let block = file_clone.read_block(txn_id, block_id).await?;
 
                         values.extend(block.get(&block_offsets.into()).to_vec());
                         start = new_start;

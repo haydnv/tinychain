@@ -373,15 +373,21 @@ impl Transact for Dir {
                 DirEntry::Dir(dir) => {
                     dir.commit(txn_id).await;
                 }
-                DirEntry::File(file) => {
-                    match file {
-                        FileEntry::BTree(file) => file.commit(txn_id).await,
-                        FileEntry::Chain(file) => file.commit(txn_id).await,
-                        FileEntry::Scalar(file) => file.commit(txn_id).await,
-                        #[cfg(feature = "tensor")]
-                        FileEntry::Tensor(file) => file.commit(txn_id).await,
-                    };
-                }
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    FileEntry::Chain(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    FileEntry::Scalar(file) => {
+                        file.commit(txn_id).await;
+                    }
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => {
+                        file.commit(txn_id).await;
+                    }
+                },
             }
         }))
         .await;
