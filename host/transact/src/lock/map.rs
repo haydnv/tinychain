@@ -17,9 +17,9 @@ use crate::lock::{
 use crate::{Transact, TxnId};
 
 trait Guard<K, V> {
-    fn id(&self) -> &TxnId;
+    fn borrow(&self) -> &BTreeSet<K>;
 
-    fn keys(&self) -> &BTreeSet<K>;
+    fn id(&self) -> &TxnId;
 
     fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>>;
 }
@@ -53,6 +53,8 @@ pub trait TxnMapRead<K, V> {
     fn iter(&self) -> Iter<K, V>;
 
     fn is_empty(&self) -> bool;
+
+    fn keys(&self) -> std::collections::btree_set::Iter<K>;
 }
 
 impl<G, K, V> TxnMapRead<K, V> for G
@@ -62,7 +64,7 @@ where
     V: Clone,
 {
     fn contains_key<Q: Borrow<K>>(&self, key: Q) -> bool {
-        self.keys().contains(key.borrow())
+        self.borrow().contains(key.borrow())
     }
 
     fn get<Q: Borrow<K>>(&self, key: Q) -> Option<V> {
@@ -74,13 +76,17 @@ where
     fn iter(&self) -> Iter<K, V> {
         Iter {
             txn_id: *self.id(),
-            keys: self.keys().iter(),
+            keys: self.borrow().iter(),
             values: self.values().clone(),
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.keys().is_empty()
+        self.borrow().is_empty()
+    }
+
+    fn keys(&self) -> std::collections::btree_set::Iter<K> {
+        self.borrow().iter()
     }
 }
 
@@ -103,12 +109,12 @@ where
     K: PartialEq + Clone,
     V: Clone,
 {
-    fn id(&self) -> &TxnId {
-        self.guard.id()
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
     }
 
-    fn keys(&self) -> &BTreeSet<K> {
-        &*self.guard
+    fn id(&self) -> &TxnId {
+        self.guard.id()
     }
 
     fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
@@ -137,12 +143,12 @@ impl<K, V> Guard<K, V> for TxnMapLockReadGuardExclusive<K, V>
 where
     K: PartialEq + Clone,
 {
-    fn id(&self) -> &TxnId {
-        self.guard.id()
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
     }
 
-    fn keys(&self) -> &BTreeSet<K> {
-        &*self.guard
+    fn id(&self) -> &TxnId {
+        self.guard.id()
     }
 
     fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
@@ -172,12 +178,12 @@ where
     K: PartialEq + Clone,
     V: Clone,
 {
-    fn id(&self) -> &TxnId {
-        self.guard.id()
+    fn borrow(&self) -> &BTreeSet<K> {
+        &*self.guard
     }
 
-    fn keys(&self) -> &BTreeSet<K> {
-        &*self.guard
+    fn id(&self) -> &TxnId {
+        self.guard.id()
     }
 
     fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {
@@ -251,12 +257,12 @@ impl<K, V> Guard<K, V> for TxnMapLockCommitGuard<K, V>
 where
     K: PartialEq,
 {
-    fn id(&self) -> &TxnId {
-        self.keys.id()
+    fn borrow(&self) -> &BTreeSet<K> {
+        &self.keys
     }
 
-    fn keys(&self) -> &BTreeSet<K> {
-        &self.keys
+    fn id(&self) -> &TxnId {
+        self.keys.id()
     }
 
     fn values(&self) -> &Arc<Mutex<BTreeMap<K, Value<V>>>> {

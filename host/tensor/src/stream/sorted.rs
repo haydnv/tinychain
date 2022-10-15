@@ -6,13 +6,13 @@ use log::{debug, trace};
 use safecast::AsType;
 
 use tc_error::*;
-use tc_table::{BTreeType, Node};
+use tc_table::{BTreeType, Node, NodeId};
 use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 
 use crate::dense::{BlockListFile, PER_BLOCK};
-use crate::{Coord, DenseAccess, Shape, TensorAccess, TensorType};
+use crate::{Coord, DenseAccess, Ordinal, Shape, TensorAccess, TensorType};
 
 use super::ReadValueAt;
 
@@ -24,8 +24,8 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
@@ -56,8 +56,8 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
@@ -85,8 +85,8 @@ async fn sort_coords<FD, FS, D, T, S>(
     shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     S: Stream<Item = TCResult<Coords>> + Send + Unpin,

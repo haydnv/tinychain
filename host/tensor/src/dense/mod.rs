@@ -14,7 +14,7 @@ use log::{debug, warn};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
-use tc_table::{BTreeType, Node};
+use tc_table::{BTreeType, Node, NodeId};
 use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
@@ -26,10 +26,11 @@ use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
 use super::{
-    tile, trig_dtype, Bounds, Coord, Phantom, Schema, Shape, Tensor, TensorAccess, TensorBoolean,
-    TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal, TensorDualIO, TensorIO,
-    TensorIndex, TensorInstance, TensorMath, TensorMathConst, TensorPersist, TensorReduce,
-    TensorTransform, TensorTrig, TensorType, TensorUnary, ERR_COMPLEX_EXPONENT,
+    tile, trig_dtype, Bounds, Coord, Ordinal, Phantom, Schema, Shape, Tensor, TensorAccess,
+    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
+    TensorDualIO, TensorIO, TensorIndex, TensorInstance, TensorMath, TensorMathConst,
+    TensorPersist, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
+    ERR_COMPLEX_EXPONENT,
 };
 
 use access::*;
@@ -66,8 +67,8 @@ impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
 {
@@ -113,8 +114,8 @@ impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
 {
@@ -224,8 +225,8 @@ impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD,
 
 impl<FD, FS, D, T, B> TensorAccess for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -265,8 +266,8 @@ impl<FD, FS, D, T, B, O> TensorBoolean<DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
@@ -292,8 +293,8 @@ impl<FD, FS, D, T, B> TensorBoolean<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -327,8 +328,8 @@ impl<FD, FS, D, T, B> TensorBooleanConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -367,8 +368,8 @@ impl<FD, FS, D, T, B, O> TensorCompare<DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
@@ -430,8 +431,8 @@ impl<FD, FS, D, T, B> TensorCompare<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -486,8 +487,8 @@ impl<FD, FS, D, T, B> TensorCompareConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Compare = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -570,8 +571,8 @@ impl<FD, FS, D, T, B> TensorDiagonal<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -656,8 +657,8 @@ impl<FD, FS, D, T, B> TensorIO<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -690,8 +691,8 @@ impl<FD, FS, D, T, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, BlockListFile<FD
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -714,8 +715,8 @@ impl<FD, FS, D, T, B> TensorIndex<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -789,8 +790,8 @@ impl<FD, FS, D, T, B> TensorDualIO<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseWrite<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -838,8 +839,8 @@ impl<FD, FS, D, T, B, O> TensorMath<D, DenseTensor<FD, FS, D, T, O>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     O: DenseAccess<FD, FS, D, T>,
@@ -920,8 +921,8 @@ impl<FD, FS, D, T, B> TensorMath<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -976,8 +977,8 @@ impl<FD, FS, D, T, B> TensorMathConst for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Combine = DenseTensor<FD, FS, D, T, BlockListConst<FD, FS, D, T, B>>;
@@ -1054,8 +1055,8 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1071,8 +1072,8 @@ impl<FD, FS, D, T, B> TensorReduce<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1171,8 +1172,8 @@ impl<FD, FS, D, T, B> TensorTransform for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1244,8 +1245,8 @@ impl<FD, FS, D, T, B> TensorTrig for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Unary = DenseTensor<FD, FS, D, T, BlockListUnary<FD, FS, D, T, B>>;
@@ -1271,8 +1272,8 @@ impl<FD, FS, D, T, B> TensorUnary<D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1366,8 +1367,8 @@ impl<FD, FS, D, T> Transact for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array> + Transact,
-    FS: File<Node>,
+    FD: File<Ordinal, Array> + Transact,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1389,8 +1390,8 @@ impl<FD, FS, D, T, B> CopyFrom<D, DenseTensor<FD, FS, D, T, B>>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1411,8 +1412,8 @@ impl<FD, FS, D, T> Persist<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1437,8 +1438,8 @@ impl<FD, FS, D, T> Restore<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1462,8 +1463,8 @@ impl<FD, FS, D, T> de::FromStream for DenseTensor<FD, FS, D, T, BlockListFile<FD
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType> + Send,
@@ -1486,8 +1487,8 @@ where
 
 impl<FD, FS, D, T, B> fmt::Display for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1527,8 +1528,8 @@ impl<FD, FS, D, T> de::Visitor for DenseTensorVisitor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     T: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
@@ -1561,8 +1562,8 @@ impl<'en, FD, FS, D, T, B> IntoView<'en, D> for DenseTensor<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Array>,
-    FS: File<Node>,
+    FD: File<Ordinal, Array>,
+    FS: File<NodeId, Node>,
     <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
     B: DenseAccess<FD, FS, D, T>,
     <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,

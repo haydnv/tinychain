@@ -9,7 +9,7 @@ use futures::stream::TryStreamExt;
 use log::debug;
 use safecast::AsType;
 
-use tc_btree::{BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Node};
+use tc_btree::{BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Node, NodeId};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, DirRead, DirWrite, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
@@ -30,7 +30,7 @@ pub struct Index<F, D, Txn> {
     schema: IndexSchema,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Index<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -147,7 +147,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Index<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for Index<F, D, Txn> {
     fn key(&self) -> &[Column] {
         self.schema.key()
     }
@@ -161,7 +161,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Index<F, D, T
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Index<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableOrder for Index<F, D, Txn> {
     type OrderBy = IndexSlice<F, D, Txn>;
     type Reverse = IndexSlice<F, D, Txn>;
 
@@ -194,7 +194,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Index<F, D, Txn>
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Index<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for Index<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -220,7 +220,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for Index<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableSlice for Index<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -274,7 +274,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F, D, Txn> {
+impl<F: File<NodeId, Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F, D, Txn> {
     type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
@@ -287,7 +287,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for Index<F
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn> {
     type Schema = IndexSchema;
     type Store = F;
     type Txn = Txn;
@@ -304,7 +304,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for Index<F, D, Txn>
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Restore<D> for Index<F, D, Txn> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         self.btree.restore(&backup.btree, txn_id).await
     }
@@ -328,7 +328,7 @@ pub struct TableIndex<F, D, Txn> {
     inner: Arc<Inner<F, D, Txn>>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for TableIndex<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Instance for TableIndex<F, D, Txn> {
     type Class = TableType;
 
     fn class(&self) -> TableType {
@@ -448,7 +448,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Instance for TableIndex<F, D, T
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for TableIndex<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for TableIndex<F, D, Txn> {
     fn key(&self) -> &[Column] {
         self.inner.primary.key()
     }
@@ -462,7 +462,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for TableIndex<F,
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableOrder for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -558,7 +558,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for TableIndex<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableRead for TableIndex<F, D, Txn> {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
         let slice = self
             .inner
@@ -573,7 +573,7 @@ impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableRead for TableIndex<F, D, 
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -598,7 +598,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableSlice for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -754,7 +754,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableWrite for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableWrite for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -848,7 +848,10 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIndex<F, D, Txn> {
+impl<F, D, Txn> Transact for TableIndex<F, D, Txn>
+where
+    F: File<NodeId, Node> + Transact, D: Dir, Txn: Transaction<D>
+{
     type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
@@ -876,7 +879,7 @@ impl<F: File<Node> + Transact, D: Dir, Txn: Transaction<D>> Transact for TableIn
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Persist<D> for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -921,7 +924,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Restore<D> for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -955,7 +958,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, I: TableStream + 'static> CopyFrom<D, I>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>, I: TableStream + 'static> CopyFrom<D, I>
     for TableIndex<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -979,13 +982,16 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> From<TableIndex<F, D, Txn>> for Table<F, D, Txn> {
+impl<F, D, Txn> From<TableIndex<F, D, Txn>> for Table<F, D, Txn>
+where
+    F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>
+{
     fn from(table: TableIndex<F, D, Txn>) -> Self {
         Self::Table(table)
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> fmt::Display for TableIndex<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> fmt::Display for TableIndex<F, D, Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Table")
     }

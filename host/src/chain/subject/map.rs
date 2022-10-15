@@ -75,7 +75,7 @@ impl SubjectMap {
             ));
         }
 
-        let _file: fs::File<Scalar> =
+        let _file: fs::File<Id, Scalar> =
             dir_lock.create_file(DYNAMIC.into(), ScalarType::default())?;
 
         Ok(Self {
@@ -89,10 +89,10 @@ impl SubjectMap {
         Box::pin(async move {
             let txn_id = *txn.id();
 
-            let file: fs::FileReadGuard<Scalar> = {
+            let file: fs::FileReadGuard<Id, Scalar> = {
                 let dir = dir.read(txn_id).await?;
                 let file = dir.get_file(&DYNAMIC.into())?;
-                let file: fs::File<Scalar> = file.ok_or_else(|| {
+                let file: fs::File<Id, Scalar> = file.ok_or_else(|| {
                     TCError::internal(format!("dynamic Chain is missing its schema file"))
                 })?;
 
@@ -100,7 +100,7 @@ impl SubjectMap {
             };
 
             let mut map = Map::new();
-            for id in FileReadGuard::<Scalar>::block_ids(&file) {
+            for id in FileReadGuard::<Id, Scalar>::block_ids(&file) {
                 let schema = file.read_block(id).await?;
                 let schema = Scalar::clone(&*schema);
                 let schema = schema.try_cast_into(|s| {
@@ -275,8 +275,8 @@ impl de::Visitor for SubjectMapVisitor {
         let txn_id = *self.txn.id();
         let mut collections = Map::new();
 
-        let mut file: fs::FileWriteGuard<Scalar> = {
-            let file: fs::File<Scalar> = {
+        let mut file: fs::FileWriteGuard<Id, Scalar> = {
+            let file: fs::File<Id, Scalar> = {
                 let mut dir = self
                     .txn
                     .context()
@@ -359,7 +359,7 @@ async fn put(
     let txn_id = *txn.id();
     let mut schema = {
         let container = container.read(txn_id).await?;
-        let schema: Option<fs::File<Scalar>> = container.get_file(&DYNAMIC.into())?;
+        let schema: Option<fs::File<Id, Scalar>> = container.get_file(&DYNAMIC.into())?;
         let schema = schema.ok_or_else(|| TCError::internal("missing schema file"))?;
         schema.write(txn_id).await?
     };

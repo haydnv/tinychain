@@ -8,7 +8,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::AsType;
 
-use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node};
+use tc_btree::{BTreeFile, BTreeInstance, BTreeType, Node, NodeId};
 use tc_error::*;
 use tc_transact::fs::{Dir, DirRead, DirWrite, File};
 use tc_transact::{Transaction, TxnId};
@@ -30,7 +30,7 @@ pub struct IndexSlice<F, D, Txn> {
     reverse: bool,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> IndexSlice<F, D, Txn> {
     pub fn all(source: BTreeFile<F, D, Txn>, schema: IndexSchema, reverse: bool) -> Self {
         IndexSlice {
             source,
@@ -129,7 +129,7 @@ where
 
 impl<F, D, Txn> TableInstance for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
 {
@@ -148,7 +148,7 @@ where
 
 impl<F, D, Txn> TableOrder for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
 {
@@ -184,7 +184,7 @@ where
 #[async_trait]
 impl<F, D, Txn> TableStream for IndexSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -248,7 +248,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Limited<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for Limited<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -267,7 +267,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Limited<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for Limited<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -307,7 +307,7 @@ pub enum MergeSource<F, D, Txn> {
     Merge(Box<Merged<F, D, Txn>>),
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -375,7 +375,7 @@ pub struct Merged<F, D, Txn> {
     bounds: Bounds,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -426,7 +426,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableInstance for Merged<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for Merged<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -451,7 +451,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableStream for Merged<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for Merged<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -485,7 +485,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableOrder for Merged<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableOrder for Merged<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -516,7 +516,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for Merged<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for Merged<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -555,7 +555,7 @@ pub struct Selection<F, D, Txn, T> {
     phantom: Phantom<F, D, Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>, T: TableInstance> Selection<F, D, Txn, T> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>, T: TableInstance> Selection<F, D, Txn, T> {
     pub fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
         let column_set: HashSet<&Id> = columns.iter().collect();
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
@@ -614,7 +614,7 @@ where
 
 impl<F, D, Txn, T> TableInstance for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     T: TableInstance,
@@ -647,7 +647,7 @@ where
 
 impl<F, D, Txn, T> TableOrder for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     T: TableOrder,
@@ -700,7 +700,7 @@ where
 #[async_trait]
 impl<F, D, Txn, T> TableStream for Selection<F, D, Txn, T>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     T: TableStream,
@@ -737,7 +737,7 @@ where
 
 impl<F, D, Txn, T> From<Selection<F, D, Txn, T>> for Table<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     T: TableInstance,
@@ -760,7 +760,7 @@ pub struct TableSlice<F, D, Txn> {
     slice: IndexSlice<F, D, Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -814,7 +814,7 @@ where
 
 impl<F, D, Txn> TableInstance for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -835,7 +835,7 @@ where
 
 impl<F, D, Txn> TableOrder for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -865,7 +865,7 @@ where
 #[async_trait]
 impl<F, D, Txn> TableStream for TableSlice<F, D, Txn>
 where
-    F: File<Node>,
+    F: File<NodeId, Node>,
     D: Dir,
     Txn: Transaction<D>,
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
@@ -891,7 +891,7 @@ where
     }
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for TableSlice<F, D, Txn>
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> super::TableSlice for TableSlice<F, D, Txn>
 where
     <D::Write as DirWrite>::FileClass: From<BTreeType>,
     <D::Read as DirRead>::FileEntry: AsType<F>,
@@ -927,7 +927,7 @@ struct Phantom<F, D, Txn> {
     txn: PhantomData<Txn>,
 }
 
-impl<F: File<Node>, D: Dir, Txn: Transaction<D>> Default for Phantom<F, D, Txn> {
+impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> Default for Phantom<F, D, Txn> {
     fn default() -> Self {
         Self {
             file: PhantomData,

@@ -23,7 +23,9 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
-use super::{BTree, BTreeInstance, BTreeSlice, BTreeType, BTreeWrite, Key, Range, RowSchema};
+use super::{
+    BTree, BTreeInstance, BTreeSlice, BTreeType, BTreeWrite, Key, NodeId, Range, RowSchema,
+};
 
 type Selection<'a> = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCBoxTryStream<'a, Key>>> + Send + Unpin + 'a>>,
@@ -31,8 +33,6 @@ type Selection<'a> = FuturesOrdered<
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-
-type NodeId = BlockId;
 
 #[derive(Clone, Eq, PartialEq)]
 struct NodeKey {
@@ -222,7 +222,7 @@ pub struct BTreeFile<F, D, T> {
     inner: Arc<Inner<F, D, T>>,
 }
 
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeFile<F, D, T>
 where
     Self: Clone,
 {
@@ -255,7 +255,7 @@ where
 
         let order = validate_schema(&schema)?;
 
-        let root: BlockId = Uuid::new_v4().into();
+        let root: NodeId = Uuid::new_v4().into(); // TODO: just use `Uuid`
         let node = Node::new(true, None);
         file_contents
             .create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
@@ -586,7 +586,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeInstance for BTreeFile<F, D, T>
 where
     Self: Clone,
     BTreeSlice<F, D, T>: 'static,
@@ -633,7 +633,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> BTreeWrite for BTreeFile<F, D, T>
 where
     Self: Clone,
     BTreeSlice<F, D, T>: 'static,
@@ -721,7 +721,7 @@ where
 }
 
 #[async_trait]
-impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
+impl<F: File<NodeId, Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile<F, D, T> {
     type Commit = TxnLockCommitGuard<NodeId>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
@@ -739,7 +739,7 @@ impl<F: File<Node> + Transact, D: Dir, T: Transaction<D>> Transact for BTreeFile
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T> {
     type Schema = RowSchema;
     type Store = F;
     type Txn = T;
@@ -781,7 +781,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Persist<D> for BTreeFile<F, D, T>
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T> {
     async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
@@ -807,7 +807,7 @@ impl<F: File<Node>, D: Dir, T: Transaction<D>> Restore<D> for BTreeFile<F, D, T>
 }
 
 #[async_trait]
-impl<F: File<Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
+impl<F: File<NodeId, Node>, D: Dir, T: Transaction<D>, I: BTreeInstance + 'static> CopyFrom<D, I>
     for BTreeFile<F, D, T>
 {
     async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {
