@@ -17,15 +17,19 @@ use tc_table::{TableStream, TableView};
 use tc_tensor::{Array, Ordinal, TensorView};
 use tc_transact::fs::{CopyFrom, Dir, DirWrite};
 use tc_transact::{IntoView, Transaction};
-use tcgeneric::{
-    path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPath, TCPathBuf,
-};
+use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel, TCPathBuf};
 
 use crate::fs;
 use crate::txn::Txn;
 
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
+
+pub use base::{CollectionBase, CollectionBaseCommitGuard};
+pub use schema::{CollectionSchema, CollectionType};
+
+mod base;
+mod schema;
 
 #[cfg(feature = "tensor")]
 pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
@@ -58,74 +62,6 @@ pub type SparseTable =
     tc_tensor::SparseTable<fs::File<Ordinal, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 pub(crate) const PREFIX: PathLabel = path_label(&["state", "collection"]);
-
-/// The [`Class`] of a [`Collection`].
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CollectionType {
-    BTree(BTreeType),
-    Table(TableType),
-    #[cfg(feature = "tensor")]
-    Tensor(TensorType),
-}
-
-impl Class for CollectionType {}
-
-impl NativeClass for CollectionType {
-    fn from_path(path: &[PathSegment]) -> Option<Self> {
-        debug!("CollectionType::from_path {}", TCPath::from(path));
-
-        if path.len() > 2 && &path[0..2] == &PREFIX[..] {
-            match path[2].as_str() {
-                "btree" => BTreeType::from_path(path).map(Self::BTree),
-                "table" => TableType::from_path(path).map(Self::Table),
-                #[cfg(feature = "tensor")]
-                "tensor" => TensorType::from_path(path).map(Self::Tensor),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn path(&self) -> TCPathBuf {
-        match self {
-            Self::BTree(btt) => btt.path(),
-            Self::Table(tt) => tt.path(),
-            #[cfg(feature = "tensor")]
-            Self::Tensor(tt) => tt.path(),
-        }
-    }
-}
-
-impl From<BTreeType> for CollectionType {
-    fn from(btt: BTreeType) -> Self {
-        Self::BTree(btt)
-    }
-}
-
-impl From<TableType> for CollectionType {
-    fn from(tt: TableType) -> Self {
-        Self::Table(tt)
-    }
-}
-
-#[cfg(feature = "tensor")]
-impl From<TensorType> for CollectionType {
-    fn from(tt: TensorType) -> Self {
-        Self::Tensor(tt)
-    }
-}
-
-impl fmt::Display for CollectionType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::BTree(btt) => fmt::Display::fmt(btt, f),
-            Self::Table(tt) => fmt::Display::fmt(tt, f),
-            #[cfg(feature = "tensor")]
-            Self::Tensor(tt) => fmt::Display::fmt(tt, f),
-        }
-    }
-}
 
 /// A stateful, transaction-aware [`Collection`], such as a [`BTree`] or [`Table`].
 #[derive(Clone)]

@@ -1,29 +1,25 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::TryFrom;
 use std::fmt;
-use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use sha2::digest::generic_array::GenericArray;
 use sha2::digest::Output;
 use sha2::Sha256;
 
-use tc_btree::{BTreeType, Column};
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
+use crate::collection::CollectionSchema;
 #[cfg(feature = "tensor")]
 use crate::collection::TensorType;
-use crate::collection::{CollectionType, TableType};
 use crate::fs;
-use crate::scalar::{OpRef, Scalar, TCRef};
+use crate::scalar::Scalar;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -41,142 +37,6 @@ mod sync;
 const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
-
-/// The schema of a [`Chain`] whose [`Subject`] is a `Collection`.
-#[derive(Clone, Eq, PartialEq)]
-pub enum CollectionSchema {
-    BTree(tc_btree::RowSchema),
-    Table(tc_table::TableSchema),
-    #[cfg(feature = "tensor")]
-    Dense(tc_tensor::Schema),
-    #[cfg(feature = "tensor")]
-    Sparse(tc_tensor::Schema),
-}
-
-impl CollectionSchema {
-    pub fn from_scalar(tc_ref: TCRef) -> TCResult<Self> {
-        match tc_ref {
-            TCRef::Op(op_ref) => match op_ref {
-                OpRef::Get((class, schema)) => {
-                    let class = TCPathBuf::try_from(class)?;
-                    let class = CollectionType::from_path(&class)
-                        .ok_or_else(|| TCError::bad_request("invalid Collection type", class))?;
-
-                    fn expect_value(scalar: Scalar) -> TCResult<Value> {
-                        Value::try_cast_from(scalar, |s| {
-                            TCError::bad_request("expected a Value for chain schema, not", s)
-                        })
-                    }
-
-                    match class {
-                        CollectionType::BTree(_) => {
-                            let schema = expect_value(schema)?;
-
-                            let schema = schema.try_cast_into(|s| {
-                                TCError::bad_request("invalid BTree schema", s)
-                            })?;
-
-                            Ok(Self::BTree(schema))
-                        }
-                        CollectionType::Table(_) => {
-                            let schema = expect_value(schema)?;
-
-                            let schema = schema.try_cast_into(|s| {
-                                TCError::bad_request("invalid Table schema", s)
-                            })?;
-
-                            Ok(Self::Table(schema))
-                        }
-
-                        #[cfg(feature = "tensor")]
-                        CollectionType::Tensor(tt) => {
-                            let schema = expect_value(schema)?;
-                            let schema = schema.try_cast_into(|v| {
-                                TCError::bad_request("invalid Tensor schema", v)
-                            })?;
-
-                            match tt {
-                                TensorType::Dense => Ok(Self::Dense(schema)),
-                                TensorType::Sparse => Ok(Self::Sparse(schema)),
-                            }
-                        }
-                    }
-                }
-                other => Err(TCError::bad_request("invalid Collection schema", other)),
-            },
-            other => Err(TCError::bad_request("invalid Collection schema", other)),
-        }
-    }
-}
-
-impl<'en> en::IntoStream<'en> for CollectionSchema {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use destream::en::EncodeMap;
-
-        match self {
-            Self::BTree(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(BTreeType::default().path(), (schema,))?;
-                map.end()
-            }
-
-            Self::Table(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(TableType::default().path(), (schema,))?;
-                map.end()
-            }
-
-            #[cfg(feature = "tensor")]
-            Self::Dense(schema) | Self::Sparse(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(TensorType::Dense.path(), (schema,))?;
-                map.end()
-            }
-        }
-    }
-}
-
-impl CastFrom<CollectionSchema> for Scalar {
-    fn cast_from(schema: CollectionSchema) -> Scalar {
-        let class: CollectionType = match schema {
-            CollectionSchema::BTree(_) => BTreeType::default().into(),
-            CollectionSchema::Table(_) => TableType::default().into(),
-            #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(_) => TensorType::Dense.into(),
-            #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(_) => TensorType::Sparse.into(),
-        };
-
-        let schema = match schema {
-            CollectionSchema::BTree(schema) => {
-                Value::Tuple(schema.into_iter().map(Value::from).collect())
-            }
-            CollectionSchema::Table(schema) => schema.cast_into(),
-            #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(schema) => schema.cast_into(),
-            #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(schema) => schema.cast_into(),
-        };
-
-        Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
-            class.path().into(),
-            schema.into(),
-        )))))
-    }
-}
-
-impl fmt::Display for CollectionSchema {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::BTree(schema) => write!(f, "{}", Tuple::<&Column>::from_iter(schema)),
-            Self::Table(schema) => fmt::Display::fmt(schema, f),
-            #[cfg(feature = "tensor")]
-            Self::Dense(schema) => fmt::Display::fmt(schema, f),
-            #[cfg(feature = "tensor")]
-            Self::Sparse(schema) => fmt::Display::fmt(schema, f),
-        }
-    }
-}
 
 /// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
 #[derive(Clone)]
