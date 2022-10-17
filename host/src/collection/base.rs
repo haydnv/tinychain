@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use async_trait::async_trait;
 use futures::future::{FutureExt, TryFutureExt};
 
+use crate::collection::Tensor;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Persist};
 use tc_transact::Transact;
@@ -97,19 +98,20 @@ impl CopyFrom<fs::Dir, Collection> for CollectionBase {
                     .await
             }
             #[cfg(feature = "tensor")]
-            Collection::Dense(dense) => {
-                let store = store.try_into()?;
-                DenseTensorFile::copy_from(dense, store, txn)
-                    .map_ok(Self::Dense)
-                    .await
-            }
-            #[cfg(feature = "tensor")]
-            Collection::Sparse(sparse) => {
-                let store = store.try_into()?;
-                SparseTable::copy_from(btree, store, txn)
-                    .map_ok(Self::Sparse)
-                    .await
-            }
+            Collection::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => {
+                    let store = store.try_into()?;
+                    DenseTensorFile::copy_from(dense.into_inner(), store, txn)
+                        .map_ok(Self::Dense)
+                        .await
+                }
+                Tensor::Sparse(sparse) => {
+                    let store = store.try_into()?;
+                    SparseTable::copy_from(sparse, store, txn)
+                        .map_ok(Self::Sparse)
+                        .await
+                }
+            },
         }
     }
 }

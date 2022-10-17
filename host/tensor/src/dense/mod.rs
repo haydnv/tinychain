@@ -71,6 +71,11 @@ where
     B: DenseAccess<FD, FS, D, T>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
+    /// Access the schema of this [`DenseTensor`]
+    pub fn schema(&self) -> Schema {
+        Schema::from((self.shape().clone(), self.dtype()))
+    }
+
     fn combine<OT: DenseAccess<FD, FS, D, T>>(
         self,
         other: DenseTensor<FD, FS, D, T, OT>,

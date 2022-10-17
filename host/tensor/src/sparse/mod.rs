@@ -83,6 +83,11 @@ where
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
 {
+    /// Access the schema of this [`SparseTensor`]
+    pub fn schema(&self) -> Schema {
+        Schema::from((self.shape().clone(), self.dtype()))
+    }
+
     fn combine<R: SparseAccess<FD, FS, D, T>>(
         self,
         other: SparseTensor<FD, FS, D, T, R>,
