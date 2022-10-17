@@ -353,7 +353,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    Self: 'static,
 {
     type Slice = Self;
 

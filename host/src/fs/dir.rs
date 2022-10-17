@@ -1,5 +1,6 @@
 //! A transactional filesystem directory.
 
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
@@ -95,8 +96,6 @@ pub enum DirEntry {
     File(FileEntry),
 }
 
-impl fs::Store for DirEntry {}
-
 impl fmt::Display for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -105,6 +104,36 @@ impl fmt::Display for DirEntry {
         }
     }
 }
+
+pub struct Store {
+    name: PathSegment,
+    parent: DirWriteGuard,
+}
+
+impl TryFrom<Store> for Dir {
+    type Error = TCError;
+
+    fn try_from(mut store: Store) -> TCResult<Self> {
+        fs::DirCreate::get_or_create_dir(&mut store.parent, store.name)
+    }
+}
+
+impl<K, B> TryFrom<Store> for File<K, B>
+where
+    K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
+    B: BlockData,
+    CacheBlock: AsType<B>,
+    DirWriteGuard: fs::DirCreateFile<File<K, B>>,
+    <K as FromStr>::Err: std::error::Error + fmt::Display,
+{
+    type Error = TCError;
+
+    fn try_from(mut store: Store) -> TCResult<Self> {
+        fs::DirCreateFile::get_or_create_file(&mut store.parent, store.name)
+    }
+}
+
+impl fs::Store for Store {}
 
 /// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
@@ -246,6 +275,13 @@ pub type DirReadGuard =
     DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<PathSegment, DirEntry>>;
 pub type DirWriteGuard =
     DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
+
+impl DirWriteGuard {
+    /// Access a [`Store`] in this [`Dir`] which can be resolved to either a [`Dir`] or [`File`].
+    pub fn get_or_create_store(self, name: PathSegment) -> Store {
+        Store { name, parent: self }
+    }
+}
 
 /// A filesystem directory.
 #[derive(Clone)]

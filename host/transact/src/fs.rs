@@ -130,7 +130,7 @@ pub trait FileWrite: FileRead {
 
 /// A transactional file
 #[async_trait]
-pub trait File: Store + 'static {
+pub trait File: Store + Clone + 'static {
     /// The type used to identify blocks in this [`File`]
     type Key;
 
@@ -237,7 +237,7 @@ pub trait DirCreateFile<F: File>: DirRead {
 
 /// A transactional directory
 #[async_trait]
-pub trait Dir: Store + Send + Sized + 'static {
+pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// The type of read guard used by this `Dir`
     type Read: DirRead<Lock = Self>;
 
@@ -268,7 +268,7 @@ pub trait Dir: Store + Send + Sized + 'static {
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
-pub trait Store: Clone + Send + Sync {}
+pub trait Store: Send + Sync {}
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]

@@ -7,7 +7,6 @@ use tc_transact::Transact;
 use tcgeneric::Instance;
 
 use crate::fs;
-use crate::fs::DirEntry;
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
@@ -44,7 +43,7 @@ impl Instance for CollectionBase {
 #[async_trait]
 impl Persist<fs::Dir> for CollectionBase {
     type Schema = CollectionSchema;
-    type Store = fs::DirEntry;
+    type Store = fs::Store;
     type Txn = Txn;
 
     fn schema(&self) -> &Self::Schema {
@@ -58,7 +57,7 @@ impl Persist<fs::Dir> for CollectionBase {
 
 #[async_trait]
 impl CopyFrom<fs::Dir, Collection> for CollectionBase {
-    async fn copy_from(instance: Collection, store: DirEntry, txn: &Txn) -> TCResult<Self> {
+    async fn copy_from(instance: Collection, store: Self::Store, txn: &Txn) -> TCResult<Self> {
         todo!()
     }
 }
