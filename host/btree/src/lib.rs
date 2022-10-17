@@ -502,7 +502,7 @@ where
     T: Transaction<D>,
     Self: Send + Sync + 'static,
 {
-    type Value = BTree<F, D, T>;
+    type Value = BTreeFile<F, D, T>;
 
     fn expecting() -> &'static str {
         "a BTree"
@@ -522,15 +522,15 @@ where
             .next_element::<KeyListVisitor<F, D, T>>((*self.txn.id(), btree.clone()))
             .await?
         {
-            Ok(BTree::File(visitor.btree))
+            Ok(visitor.btree)
         } else {
-            Ok(BTree::File(btree))
+            Ok(btree)
         }
     }
 }
 
 #[async_trait]
-impl<F, D, T> de::FromStream for BTree<F, D, T>
+impl<F, D, T> de::FromStream for BTreeFile<F, D, T>
 where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
@@ -551,6 +551,26 @@ where
         };
 
         decoder.decode_seq(visitor).await
+    }
+}
+
+#[async_trait]
+impl<F, D, T> de::FromStream for BTree<F, D, T>
+where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+    Self: Send + Sync + 'static,
+{
+    type Context = (T, F);
+
+    async fn from_stream<De: de::Decoder>(
+        cxt: (T, F),
+        decoder: &mut De,
+    ) -> Result<Self, De::Error> {
+        BTreeFile::from_stream(cxt, decoder)
+            .map_ok(BTree::File)
+            .await
     }
 }
 
