@@ -6,7 +6,6 @@ use async_hash::hash_try_stream;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
-use log::debug;
 use sha2::digest::Output;
 use sha2::Sha256;
 
@@ -17,7 +16,7 @@ use tc_table::{TableStream, TableView};
 use tc_tensor::{Array, TensorView};
 use tc_transact::fs::{CopyFrom, Dir, DirCreate, DirCreateFile};
 use tc_transact::{IntoView, Transaction};
-use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel, TCPathBuf};
+use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel};
 
 use crate::fs;
 use crate::txn::Txn;
@@ -25,7 +24,7 @@ use crate::txn::Txn;
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
 
-pub use base::{CollectionBase, CollectionBaseCommitGuard};
+pub use base::{CollectionBase, CollectionBaseCommitGuard, CollectionVisitor};
 pub use schema::{CollectionSchema, CollectionType};
 
 mod base;
@@ -221,82 +220,14 @@ impl safecast::TryCastFrom<Collection> for Tensor {
     }
 }
 
-/// A [`de::Visitor`] used to deserialize a [`Collection`].
-pub struct CollectionVisitor {
-    txn: Txn,
-}
-
-impl CollectionVisitor {
-    pub fn new(txn: Txn) -> Self {
-        Self { txn }
-    }
-
-    pub async fn visit_map_value<A: de::MapAccess>(
-        self,
-        class: CollectionType,
-        access: &mut A,
-    ) -> Result<Collection, A::Error> {
-        debug!("deserialize Collection");
-
-        match class {
-            CollectionType::BTree(_) => {
-                let file = self
-                    .txn
-                    .context()
-                    .create_file_unique(*self.txn.id())
-                    .map_err(de::Error::custom)
-                    .await?;
-
-                access
-                    .next_value((self.txn.clone(), file))
-                    .map_ok(Collection::BTree)
-                    .await
-            }
-
-            CollectionType::Table(_) => access.next_value(self.txn).map_ok(Collection::Table).await,
-
-            #[cfg(feature = "tensor")]
-            CollectionType::Tensor(tt) => match tt {
-                TensorType::Dense => {
-                    let tensor: DenseTensor<DenseTensorFile> = access.next_value(self.txn).await?;
-                    Ok(Collection::Tensor(tensor.into()))
-                }
-                TensorType::Sparse => {
-                    let tensor: SparseTensor<SparseTable> = access.next_value(self.txn).await?;
-                    Ok(Collection::Tensor(tensor.into()))
-                }
-            },
-        }
-    }
-}
-
-#[async_trait]
-impl de::Visitor for CollectionVisitor {
-    type Value = Collection;
-
-    fn expecting() -> &'static str {
-        "a Collection"
-    }
-
-    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let classpath = map
-            .next_key::<TCPathBuf>(())
-            .await?
-            .ok_or_else(|| de::Error::custom("expected a Collection type"))?;
-
-        let class = CollectionType::from_path(&classpath)
-            .ok_or_else(|| de::Error::invalid_value(classpath, "a Collection type"))?;
-
-        self.visit_map_value(class, &mut map).await
-    }
-}
-
 #[async_trait]
 impl de::FromStream for Collection {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_map(CollectionVisitor { txn }).await
+        CollectionBase::from_stream(txn, decoder)
+            .map_ok(Self::from)
+            .await
     }
 }
 
