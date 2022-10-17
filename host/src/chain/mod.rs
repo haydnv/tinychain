@@ -28,7 +28,7 @@ pub use sync::SyncChain;
 
 mod block;
 mod data;
-mod subject;
+mod subject; // TODO: delete
 
 mod sync;
 

@@ -13,7 +13,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{Dir, DirReadFile, File, DirCreateFile};
+use tc_transact::fs::{Dir, DirCreateFile, DirReadFile, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{
     ComplexType, FloatType, IntType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,

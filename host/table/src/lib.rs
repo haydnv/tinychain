@@ -9,7 +9,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::TryStreamExt;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, DirCreateFile};
+use tc_transact::fs::{Dir, DirCreateFile, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{

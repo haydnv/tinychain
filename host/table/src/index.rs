@@ -10,7 +10,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeWrite, Node, NodeId};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, DirReadFile, File, DirCreateFile, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, Tuple};
@@ -313,10 +313,6 @@ where
     type Schema = IndexSchema;
     type Store = F;
     type Txn = Txn;
-
-    fn schema(&self) -> &IndexSchema {
-        &self.schema
-    }
 
     async fn load(txn: &Txn, schema: IndexSchema, file: F) -> TCResult<Self> {
         BTreeFile::load(txn, schema.clone().into(), file)
@@ -936,10 +932,6 @@ where
     type Schema = TableSchema;
     type Store = D;
     type Txn = Txn;
-
-    fn schema(&self) -> &Self::Schema {
-        &self.inner.schema
-    }
 
     async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let dir = store.read(*txn.id()).await?;

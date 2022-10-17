@@ -15,7 +15,7 @@ use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{CopyFrom, Dir, File, DirCreateFile, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
@@ -1382,10 +1382,6 @@ where
     type Schema = Schema;
     type Store = FD;
     type Txn = T;
-
-    fn schema(&self) -> &Self::Schema {
-        self.blocks.schema()
-    }
 
     async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         BlockListFile::load(txn, schema, store)

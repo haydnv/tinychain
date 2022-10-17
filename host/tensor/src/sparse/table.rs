@@ -15,7 +15,7 @@ use tc_table::{
     Column, ColumnBound, Merged, Node, NodeId, TableIndex, TableSchema, TableSlice, TableStream,
     TableWrite,
 };
-use tc_transact::fs::{CopyFrom, Dir, DirReadFile, File, DirCreateFile, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Bound, Number, NumberClass, NumberInstance, NumberType, UInt, Value, ValueType};
 use tcgeneric::{label, Id, Label, TCBoxTryStream, Tuple};
@@ -293,10 +293,6 @@ where
     type Schema = Schema;
     type Store = D;
     type Txn = T;
-
-    fn schema(&self) -> &Self::Schema {
-        &self.schema
-    }
 
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let table_schema = Self::table_schema(&schema);

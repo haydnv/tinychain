@@ -12,7 +12,7 @@ use sha2::Sha256;
 
 use tc_btree::BTreeInstance;
 use tc_error::*;
-use tc_table::TableStream;
+use tc_table::{TableInstance, TableStream};
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
 use tc_transact::fs::{Dir, DirCreate, DirCreateFile, DirRead, DirReadFile, Persist, Restore};
@@ -228,7 +228,7 @@ impl SubjectCollection {
     pub fn schema(&self) -> CollectionSchema {
         match self {
             Self::BTree(btree) => CollectionSchema::BTree(BTreeInstance::schema(btree).clone()),
-            Self::Table(table) => CollectionSchema::Table(table.schema().clone()),
+            Self::Table(table) => CollectionSchema::Table(TableInstance::schema(table)),
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => CollectionSchema::Dense(dense.schema().clone()),
             #[cfg(feature = "tensor")]

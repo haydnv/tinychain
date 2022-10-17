@@ -277,9 +277,6 @@ pub trait Persist<D: Dir>: Sized {
     type Store: Store;
     type Txn: Transaction<D>;
 
-    /// Return the schema of this persistent state.
-    fn schema(&self) -> &Self::Schema;
-
     /// Load a saved state from persistent storage.
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
 }

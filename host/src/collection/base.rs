@@ -46,10 +46,6 @@ impl Persist<fs::Dir> for CollectionBase {
     type Store = fs::Store;
     type Txn = Txn;
 
-    fn schema(&self) -> &Self::Schema {
-        todo!()
-    }
-
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         todo!()
     }

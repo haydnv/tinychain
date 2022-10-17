@@ -14,7 +14,7 @@ use strided::Stride;
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{CopyFrom, Dir, File, DirCreateFile, FileRead, FileWrite, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, File, FileRead, FileWrite, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxTryFuture, TCBoxTryStream};
@@ -618,10 +618,6 @@ where
     type Schema = Schema;
     type Store = FD;
     type Txn = T;
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
 
     async fn load(_txn: &T, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
         Ok(Self::new(file, schema))

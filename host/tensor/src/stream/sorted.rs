@@ -6,7 +6,7 @@ use log::{debug, trace};
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{Dir, File, DirCreateFile};
+use tc_transact::fs::{Dir, DirCreateFile, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, UIntType};
 

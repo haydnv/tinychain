@@ -760,10 +760,6 @@ where
     type Store = F;
     type Txn = T;
 
-    fn schema(&self) -> &Self::Schema {
-        &self.inner.schema
-    }
-
     async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
 

@@ -9,7 +9,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, Node, NodeId};
 use tc_error::*;
-use tc_transact::fs::{Dir, File, DirCreateFile};
+use tc_transact::fs::{Dir, DirCreateFile, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, TCBoxTryStream};

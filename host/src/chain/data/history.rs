@@ -276,17 +276,11 @@ impl History {
     }
 }
 
-const SCHEMA: () = ();
-
 #[async_trait]
 impl Persist<fs::Dir> for History {
     type Schema = ();
     type Store = fs::Dir;
     type Txn = Txn;
-
-    fn schema(&self) -> &() {
-        &SCHEMA
-    }
 
     async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
         let txn_id = txn.id();

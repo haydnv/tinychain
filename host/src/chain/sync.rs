@@ -124,10 +124,6 @@ impl Persist<fs::Dir> for SyncChain {
     type Store = fs::Dir;
     type Txn = Txn;
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         debug!("SyncChain::load");
 

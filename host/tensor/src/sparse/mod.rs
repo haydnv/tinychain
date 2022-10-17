@@ -13,7 +13,7 @@ use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{CopyFrom, Dir, DirReadFile, File, DirCreateFile, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
@@ -1307,10 +1307,6 @@ where
     type Schema = Schema;
     type Store = D;
     type Txn = T;
-
-    fn schema(&self) -> &Self::Schema {
-        self.accessor.schema()
-    }
 
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         SparseTable::load(txn, schema, store)
