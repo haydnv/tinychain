@@ -2,9 +2,10 @@
 //!
 //! This crate is a part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
+use std::convert::Infallible;
 use std::fmt;
 
-use destream::{en, EncodeMap, Encoder};
+use destream::en;
 
 pub type TCResult<T> = Result<T, TCError>;
 
@@ -14,11 +15,12 @@ struct ErrorData {
 }
 
 impl<'en> en::ToStream<'en> for ErrorData {
-    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         if self.stack.is_empty() {
             return en::ToStream::to_stream(&self.message, encoder);
         }
 
+        use en::EncodeMap;
         let mut map = encoder.encode_map(Some(2))?;
         map.encode_entry("message", &self.message)?;
         map.encode_entry("stack", &self.stack)?;
@@ -27,11 +29,12 @@ impl<'en> en::ToStream<'en> for ErrorData {
 }
 
 impl<'en> en::IntoStream<'en> for ErrorData {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         if self.stack.is_empty() {
             return en::IntoStream::into_stream(self.message, encoder);
         }
 
+        use en::EncodeMap;
         let mut map = encoder.encode_map(Some(2))?;
         map.encode_entry("message", self.message)?;
         map.encode_entry("stack", self.stack)?;
@@ -68,7 +71,7 @@ pub enum ErrorType {
 }
 
 impl<'en> en::IntoStream<'en> for ErrorType {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         format!(
             "/error/{}",
             match self {
@@ -238,7 +241,8 @@ impl TCError {
 impl std::error::Error for TCError {}
 
 impl<'en> en::ToStream<'en> for TCError {
-    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.code, &self.data)?;
         map.end()
@@ -246,10 +250,17 @@ impl<'en> en::ToStream<'en> for TCError {
 }
 
 impl<'en> en::IntoStream<'en> for TCError {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.code, self.data)?;
         map.end()
+    }
+}
+
+impl From<Infallible> for TCError {
+    fn from(_: Infallible) -> Self {
+        Self::internal("an unanticipated error occurred--please file a bug report")
     }
 }
 
