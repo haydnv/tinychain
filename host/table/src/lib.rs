@@ -1,7 +1,5 @@
 //! A [`Table`], an ordered collection of [`Row`]s which supports `BTree`-based indexing
 
-// TODO: regularize use of inline vs "where" trait bounds
-
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -9,10 +7,9 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::TryStreamExt;
-use safecast::AsType;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, DirWrite, File};
+use tc_transact::fs::{Dir, DirCreateFile, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
@@ -207,11 +204,13 @@ where
     }
 }
 
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableInstance for Table<F, D, Txn>
+impl<F, D, Txn> TableInstance for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     fn key(&self) -> &[Column] {
         match self {
@@ -251,11 +250,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableOrder for Table<F, D, Txn>
+impl<F, D, Txn> TableOrder for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type OrderBy = Self;
     type Reverse = Self;
@@ -305,12 +306,15 @@ where
         }
     }
 }
+
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableRead for Table<F, D, Txn>
+impl<F, D, Txn> TableRead for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
         match self {
@@ -324,11 +328,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableStream for Table<F, D, Txn>
+impl<F, D, Txn> TableStream for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Limit = Self;
     type Selection = Self;
@@ -383,11 +389,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableSlice for Table<F, D, Txn>
+impl<F, D, Txn> TableSlice for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     type Slice = Self;
 
@@ -417,11 +425,13 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> TableWrite for Table<F, D, Txn>
+impl<F, D, Txn> TableWrite for Table<F, D, Txn>
 where
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         if let Self::Table(table) = self {
@@ -458,10 +468,12 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::FromStream for Table<F, D, Txn>
+impl<F, D, Txn> de::FromStream for Table<F, D, Txn>
 where
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
 {
     type Context = Txn;
 
@@ -477,10 +489,12 @@ where
 }
 
 #[async_trait]
-impl<'en, F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> IntoView<'en, D> for Table<F, D, Txn>
+impl<'en, F, D, Txn> IntoView<'en, D> for Table<F, D, Txn>
 where
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
 {
     type Txn = Txn;
     type View = TableView<'en>;
@@ -510,17 +524,19 @@ where
     }
 }
 
-struct TableVisitor<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> {
+struct TableVisitor<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> {
     txn: Txn,
     phantom_file: PhantomData<F>,
     phantom_dir: PhantomData<D>,
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::Visitor for TableVisitor<F, D, Txn>
+impl<F, D, Txn> de::Visitor for TableVisitor<F, D, Txn>
 where
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
 {
     type Value = Table<F, D, Txn>;
 
@@ -550,16 +566,18 @@ where
     }
 }
 
-struct RowVisitor<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> {
+struct RowVisitor<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> {
     table: TableIndex<F, D, Txn>,
     txn_id: TxnId,
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::Visitor for RowVisitor<F, D, Txn>
+impl<F, D, Txn> de::Visitor for RowVisitor<F, D, Txn>
 where
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
 {
     type Value = Self;
 
@@ -587,10 +605,12 @@ where
 }
 
 #[async_trait]
-impl<F: File<NodeId, Node>, D: Dir, Txn: Transaction<D>> de::FromStream for RowVisitor<F, D, Txn>
+impl<F, D, Txn> de::FromStream for RowVisitor<F, D, Txn>
 where
-    <D::Write as DirWrite>::FileClass: From<BTreeType>,
-    <D::Read as DirRead>::FileEntry: AsType<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
+    D::Write: DirCreateFile<F>,
 {
     type Context = (TxnId, TableIndex<F, D, Txn>);
 

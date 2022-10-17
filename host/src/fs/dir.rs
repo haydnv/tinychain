@@ -1,8 +1,9 @@
 //! A transactional filesystem directory.
 
+use std::convert::TryFrom;
 use std::fmt;
-use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
@@ -13,7 +14,7 @@ use uuid::Uuid;
 use tc_btree::{BTreeType, Node, NodeId};
 use tc_error::*;
 #[cfg(feature = "tensor")]
-use tc_tensor::{Array, Ordinal, TensorType};
+use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
@@ -35,35 +36,10 @@ pub enum FileEntry {
     Scalar(File<Id, Scalar>),
 
     #[cfg(feature = "tensor")]
-    Tensor(File<Ordinal, Array>),
+    Tensor(File<u64, Array>),
 }
 
 impl FileEntry {
-    fn new<ST>(cache: freqfs::DirLock<CacheBlock>, class: ST) -> TCResult<Self>
-    where
-        StateType: From<ST>,
-    {
-        fn err<T: fmt::Display>(class: T) -> TCError {
-            TCError::bad_request("cannot create file for", class)
-        }
-
-        match StateType::from(class) {
-            StateType::Collection(ct) => match ct {
-                CollectionType::BTree(_) => File::new(cache).map(Self::BTree),
-                CollectionType::Table(tt) => Err(err(tt)),
-
-                #[cfg(feature = "tensor")]
-                CollectionType::Tensor(tt) => match tt {
-                    TensorType::Dense => File::new(cache).map(Self::Tensor),
-                    TensorType::Sparse => Err(err(TensorType::Sparse)),
-                },
-            },
-            StateType::Chain(_) => File::new(cache).map(Self::Chain),
-            StateType::Scalar(_) => File::new(cache).map(Self::Scalar),
-            other => Err(err(other)),
-        }
-    }
-
     async fn load<ST>(
         cache: freqfs::DirLock<CacheBlock>,
         class: ST,
@@ -98,7 +74,7 @@ as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
 as_type!(FileEntry, Scalar, File<Id, Scalar>);
 #[cfg(feature = "tensor")]
-as_type!(FileEntry, Tensor, File<Ordinal, Array>);
+as_type!(FileEntry, Tensor, File<u64, Array>);
 
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -129,6 +105,36 @@ impl fmt::Display for DirEntry {
     }
 }
 
+pub struct Store {
+    name: PathSegment,
+    parent: DirWriteGuard,
+}
+
+impl TryFrom<Store> for Dir {
+    type Error = TCError;
+
+    fn try_from(mut store: Store) -> TCResult<Self> {
+        fs::DirCreate::get_or_create_dir(&mut store.parent, store.name)
+    }
+}
+
+impl<K, B> TryFrom<Store> for File<K, B>
+where
+    K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
+    B: BlockData,
+    CacheBlock: AsType<B>,
+    DirWriteGuard: fs::DirCreateFile<File<K, B>>,
+    <K as FromStr>::Err: std::error::Error + fmt::Display,
+{
+    type Error = TCError;
+
+    fn try_from(mut store: Store) -> TCResult<Self> {
+        fs::DirCreateFile::get_or_create_file(&mut store.parent, store.name)
+    }
+}
+
+impl fs::Store for Store {}
+
 /// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
     cache: C,
@@ -140,7 +146,6 @@ where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
     L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
 {
-    type FileEntry = FileEntry;
     type Lock = Dir;
 
     fn contains(&self, name: &PathSegment) -> bool {
@@ -155,12 +160,22 @@ where
         }
     }
 
-    fn get_file<F, K, B>(&self, name: &Id) -> TCResult<Option<F>>
-    where
-        Self::FileEntry: AsType<F>,
-        B: BlockData,
-        F: fs::File<K, B>,
-    {
+    fn is_empty(&self) -> bool {
+        self.contents.is_empty()
+    }
+}
+
+impl<C, L, K, B> fs::DirReadFile<File<K, B>> for DirGuard<C, L>
+where
+    K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
+    C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+    B: BlockData,
+    <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
+    FileEntry: AsType<File<K, B>>,
+{
+    fn get_file(&self, name: &Id) -> TCResult<Option<File<K, B>>> {
         match self.contents.get(name) {
             Some(DirEntry::File(file)) => file
                 .clone()
@@ -172,19 +187,13 @@ where
             None => Ok(None),
         }
     }
-
-    fn is_empty(&self) -> bool {
-        self.contents.is_empty()
-    }
 }
 
-impl<C, L> fs::DirWrite for DirGuard<C, L>
+impl<C, L> fs::DirCreate for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
     L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
 {
-    type FileClass = StateType;
-
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
             return Err(TCError::bad_request("directory already exists", name));
@@ -211,40 +220,36 @@ where
 
         self.create_dir(name)
     }
+}
 
-    fn create_file<ST, F, K, B>(&mut self, name: Id, class: ST) -> TCResult<F>
-    where
-        Self::FileEntry: AsType<F>,
-        StateType: From<ST>,
-        ST: Copy + Send + Display,
-        B: BlockData,
-        F: fs::File<K, B>,
-    {
+impl<C, L, K, B> fs::DirCreateFile<File<K, B>> for DirGuard<C, L>
+where
+    C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
+    B: BlockData,
+    K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
+    <K as FromStr>::Err: std::error::Error + fmt::Display,
+    FileEntry: AsType<File<K, B>>,
+    CacheBlock: AsType<B>,
+{
+    fn create_file(&mut self, name: Id) -> TCResult<File<K, B>> {
         if self.contents.contains_key(&name) {
             return Err(TCError::bad_request("file already exists", name));
         }
 
-        let file = self
+        let canon = self
             .cache
             .create_dir(format!("{}.{}", name, B::ext()))
-            .map_err(io_err)
-            .and_then(|cache| FileEntry::new(cache, class))?;
+            .map_err(io_err)?;
+        let file = File::<K, B>::new(canon)?;
 
-        self.contents.insert(name, DirEntry::File(file.clone()));
+        self.contents
+            .insert(name, DirEntry::File(file.clone().into()));
 
-        file.as_type()
-            .cloned()
-            .ok_or_else(|| TCError::internal(format!("wrong file type for {}: {}", file, class)))
+        Ok(file)
     }
 
-    fn create_file_unique<ST, F, K, B>(&mut self, class: ST) -> TCResult<F>
-    where
-        Self::FileEntry: AsType<F>,
-        StateType: From<ST>,
-        ST: Copy + Send + Display,
-        B: BlockData,
-        F: fs::File<K, B>,
-    {
+    fn create_file_unique(&mut self) -> TCResult<File<K, B>> {
         let name: PathSegment = loop {
             let name = Uuid::new_v4().into();
             if !self.contents.contains_key(&name) {
@@ -252,7 +257,17 @@ where
             }
         };
 
-        self.create_file(name, class)
+        self.create_file(name)
+    }
+
+    fn get_or_create_file(&mut self, name: PathSegment) -> TCResult<File<K, B>> {
+        use fs::DirReadFile;
+
+        if let Some(file) = self.get_file(&name)? {
+            Ok(file)
+        } else {
+            self.create_file(name)
+        }
     }
 }
 
@@ -260,6 +275,13 @@ pub type DirReadGuard =
     DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<PathSegment, DirEntry>>;
 pub type DirWriteGuard =
     DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
+
+impl DirWriteGuard {
+    /// Access a [`Store`] in this [`Dir`] which can be resolved to either a [`Dir`] or [`File`].
+    pub fn get_or_create_store(self, name: PathSegment) -> Store {
+        Store { name, parent: self }
+    }
+}
 
 /// A filesystem directory.
 #[derive(Clone)]

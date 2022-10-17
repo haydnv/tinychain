@@ -15,7 +15,7 @@ use sha2::Sha256;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirRead, DirWrite, File, FileRead, FileWrite};
+use tc_transact::fs::{Dir, DirCreateFile, DirRead, DirReadFile, File, FileRead, FileWrite};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
@@ -23,7 +23,7 @@ use tcgeneric::{Id, Map, TCBoxTryFuture, Tuple};
 use crate::collection::Collection;
 use crate::fs;
 use crate::fs::FileReadGuard;
-use crate::scalar::{Scalar, ScalarType, TCRef};
+use crate::scalar::{Scalar, TCRef};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -75,8 +75,7 @@ impl SubjectMap {
             ));
         }
 
-        let _file: fs::File<Id, Scalar> =
-            dir_lock.create_file(DYNAMIC.into(), ScalarType::default())?;
+        let _file: fs::File<Id, Scalar> = dir_lock.create_file(DYNAMIC.into())?;
 
         Ok(Self {
             dir,
@@ -284,8 +283,7 @@ impl de::Visitor for SubjectMapVisitor {
                     .map_err(de::Error::custom)
                     .await?;
 
-                dir.create_file(DYNAMIC.into(), ScalarType::default())
-                    .map_err(de::Error::custom)?
+                dir.create_file(DYNAMIC.into()).map_err(de::Error::custom)?
             };
 
             file.write(txn_id).map_err(de::Error::custom).await?

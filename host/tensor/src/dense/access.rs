@@ -6,11 +6,10 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
-use safecast::AsType;
 
 use tc_error::*;
-use tc_table::{BTreeType, Node, NodeId};
-use tc_transact::fs::{Dir, DirRead, DirWrite, File};
+use tc_table::{Node, NodeId};
+use tc_transact::fs::{Dir, DirCreateFile, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatInstance, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -18,8 +17,7 @@ use tcgeneric::{TCBoxStream, TCBoxTryFuture, TCBoxTryStream, Tuple};
 use crate::sparse::{SparseAccess, SparseAccessor};
 use crate::stream::{Read, ReadValueAt};
 use crate::{
-    transform, Bounds, Coord, Ordinal, Phantom, Shape, TensorAccess, TensorReduce, TensorType,
-    ERR_INF, ERR_NAN,
+    transform, Bounds, Coord, Phantom, Shape, TensorAccess, TensorReduce, ERR_INF, ERR_NAN,
 };
 
 use super::file::{BlockListFile, BlockListFileSlice};
@@ -28,7 +26,12 @@ use super::{DenseTensor, PER_BLOCK};
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
-pub trait DenseAccess<FD: File<Ordinal, Array>, FS: File<NodeId, Node>, D: Dir, T: Transaction<D>>:
+pub trait DenseAccess<
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+>:
     ReadValueAt<D, Txn = T> + TensorAccess + Clone + fmt::Display + Send + Sync + Sized + 'static
 {
     /// The type returned by `slice`
@@ -86,8 +89,12 @@ pub trait DenseAccess<FD: File<Ordinal, Array>, FS: File<NodeId, Node>, D: Dir, 
 
 /// Common [`DenseTensor`] access methods
 #[async_trait]
-pub trait DenseWrite<FD: File<Ordinal, Array>, FS: File<NodeId, Node>, D: Dir, T: Transaction<D>>:
-    DenseAccess<FD, FS, D, T>
+pub trait DenseWrite<
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+>: DenseAccess<FD, FS, D, T>
 {
     /// Overwrite this accessor's contents with those of the given accessor.
     async fn write<V: DenseAccess<FD, FS, D, T>>(
@@ -143,10 +150,9 @@ impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     fn dtype(&self) -> NumberType {
         dispatch!(self, this, this.dtype())
@@ -170,10 +176,9 @@ impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = Self;
     type Transpose = Self;
@@ -213,10 +218,9 @@ impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     async fn write<V: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -242,10 +246,9 @@ impl<FD, FS, D, T> ReadValueAt<D> for DenseAccessor<FD, FS, D, T>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -256,8 +259,8 @@ where
 
 impl<FD, FS, D, T> From<BlockListFile<FD, FS, D, T>> for DenseAccessor<FD, FS, D, T>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
 {
@@ -286,11 +289,11 @@ impl<FD, FS, D, T, L, R> BlockListCombine<FD, FS, D, T, L, R>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     pub fn new(
         left: L,
@@ -319,8 +322,8 @@ where
 
 impl<FD, FS, D, T, L, R> TensorAccess for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     L: DenseAccess<FD, FS, D, T>,
@@ -348,12 +351,11 @@ impl<FD, FS, D, T, L, R> DenseAccess<FD, FS, D, T> for BlockListCombine<FD, FS, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListCombine<FD, FS, D, T, L::Slice, R::Slice>;
     type Transpose = BlockListCombine<FD, FS, D, T, L::Transpose, R::Transpose>;
@@ -472,12 +474,11 @@ impl<FD, FS, D, T, L, R> ReadValueAt<D> for BlockListCombine<FD, FS, D, T, L, R>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     L: DenseAccess<FD, FS, D, T>,
     R: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -537,8 +538,8 @@ impl<FD, FS, D, T, B> TensorAccess for BlockListConst<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     fn dtype(&self) -> NumberType {
@@ -562,8 +563,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListConst<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -631,8 +632,8 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListConst<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -666,8 +667,8 @@ pub struct BlockListBroadcast<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -685,8 +686,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -713,11 +714,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListBroadcast<FD, FS, D
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -785,11 +785,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListBroadcast<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -821,8 +820,8 @@ pub struct BlockListCast<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -838,8 +837,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -866,11 +865,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListCast<FD, FS, D, T, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListCast<FD, FS, D, T, B::Slice>;
     type Transpose = BlockListCast<FD, FS, D, T, B::Transpose>;
@@ -915,11 +913,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListCast<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -949,8 +946,8 @@ pub struct BlockListExpand<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -967,8 +964,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -995,11 +992,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListExpand<FD, FS, D, T
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
     type Transpose = BlockListExpand<FD, FS, D, T, B::Transpose>;
@@ -1094,11 +1090,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListExpand<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1128,8 +1123,8 @@ pub struct BlockListFlip<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1146,8 +1141,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1174,11 +1169,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListFlip<FD, FS, D, T, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = DenseAccessor<FD, FS, D, T>;
     type Transpose = BlockListFlip<FD, FS, D, T, B::Transpose>;
@@ -1257,11 +1251,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListFlip<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1338,13 +1331,12 @@ pub struct BlockListReduce<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     pub fn max(source: B, axis: usize, keepdims: bool) -> TCResult<Self> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis, keepdims)?;
@@ -1401,8 +1393,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1429,11 +1421,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReduce<FD, FS, D, T
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListReduce<FD, FS, D, T, <B as DenseAccess<FD, FS, D, T>>::Slice>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1535,11 +1526,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReduce<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1586,8 +1576,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListReshape<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1614,11 +1604,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReshape<FD, FS, D, 
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListFile<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1669,8 +1658,8 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReshape<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
 {
     type Txn = T;
@@ -1696,8 +1685,8 @@ pub struct BlockListTranspose<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1714,8 +1703,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -1742,11 +1731,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListTranspose<FD, FS, D
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = <<B as DenseAccess<FD, FS, D, T>>::Slice as DenseAccess<FD, FS, D, T>>::Transpose;
     type Transpose = B::Transpose;
@@ -1818,11 +1806,10 @@ impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListTranspose<FD, FS, D, T, B>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1852,8 +1839,8 @@ pub struct BlockListSparse<FD, FS, D, T, A> {
 
 impl<FD, FS, D, T, A> TensorAccess for BlockListSparse<FD, FS, D, T, A>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1880,11 +1867,10 @@ impl<FD, FS, D, T, A> DenseAccess<FD, FS, D, T> for BlockListSparse<FD, FS, D, T
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListSparse<FD, FS, D, T, A::Slice>;
     type Transpose = BlockListSparse<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>;
@@ -1941,11 +1927,10 @@ impl<FD, FS, D, T, A> ReadValueAt<D> for BlockListSparse<FD, FS, D, T, A>
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -1982,8 +1967,8 @@ pub struct BlockListUnary<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -2006,8 +1991,8 @@ where
 
 impl<FD, FS, D, T, B> TensorAccess for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -2034,11 +2019,10 @@ impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListUnary<FD, FS, D, T,
 where
     D: Dir,
     T: Transaction<D>,
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
-    <D::Read as DirRead>::FileEntry: AsType<FD> + AsType<FS>,
-    <D::Write as DirWrite>::FileClass: From<BTreeType> + From<TensorType>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Slice = BlockListUnary<FD, FS, D, T, B::Slice>;
     type Transpose = BlockListUnary<FD, FS, D, T, B::Transpose>;
@@ -2101,8 +2085,8 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Ordinal, Array>,
-    FS: File<NodeId, Node>,
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,

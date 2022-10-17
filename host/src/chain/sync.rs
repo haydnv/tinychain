@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirWrite, Persist};
+use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label, TCPathBuf};
@@ -20,7 +20,7 @@ use crate::fs;
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
-use super::{null_hash, ChainBlock, ChainInstance, ChainType, Schema, Subject};
+use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
 
 const BLOCKS: Label = label("blocks");
 const COMMITTED: &str = "committed.chain_block";
@@ -124,10 +124,6 @@ impl Persist<fs::Dir> for SyncChain {
     type Store = fs::Dir;
     type Txn = Txn;
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         debug!("SyncChain::load");
 
@@ -144,9 +140,7 @@ impl Persist<fs::Dir> for SyncChain {
 
         let mut blocks_dir = {
             let mut dir = dir.write(txn_id).await?;
-            let file: fs::File<Id, ChainBlock> =
-                dir.get_or_create_file(BLOCKS.into(), ChainType::Sync)?;
-
+            let file: fs::File<Id, ChainBlock> = dir.get_or_create_file(BLOCKS.into())?;
             file.into_inner().write().await
         };
 
@@ -266,9 +260,8 @@ impl de::Visitor for ChainVisitor {
             .map_err(de::Error::custom)?;
 
         let mut blocks_dir = {
-            let file: fs::File<Id, ChainBlock> = dir
-                .create_file(BLOCKS.into(), ChainType::Sync)
-                .map_err(de::Error::custom)?;
+            let file: fs::File<Id, ChainBlock> =
+                dir.create_file(BLOCKS.into()).map_err(de::Error::custom)?;
 
             file.into_inner().write().await
         };

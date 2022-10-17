@@ -48,14 +48,15 @@ impl<B> Deref for BlockReadGuard<B> {
 impl<B: BlockData> BlockRead<B> for BlockReadGuard<B> {}
 
 /// An exclusive read lock guard for a block in a [`File`]
-pub struct BlockReadGuardExclusive<B> {
+pub struct BlockReadGuardExclusive<K, B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     txn_id: TxnId,
     #[allow(unused)]
     modified: TxnLockReadGuardExclusive<TxnId>,
+    phantom: PhantomData<K>,
 }
 
-impl<B> Deref for BlockReadGuardExclusive<B> {
+impl<K, B> Deref for BlockReadGuardExclusive<K, B> {
     type Target = B;
 
     fn deref(&self) -> &Self::Target {
@@ -63,7 +64,7 @@ impl<B> Deref for BlockReadGuardExclusive<B> {
     }
 }
 
-impl<K, B: BlockData> BlockReadExclusive<K, B> for BlockReadGuardExclusive<B>
+impl<K, B: BlockData> BlockReadExclusive for BlockReadGuardExclusive<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     CacheBlock: AsType<B>,
@@ -71,7 +72,7 @@ where
 {
     type File = File<K, B>;
 
-    fn upgrade(self) -> <Self::File as tc_transact::fs::File<K, B>>::BlockWrite {
+    fn upgrade(self) -> BlockWriteGuard<K, B> {
         let mut modified = self.modified.upgrade();
         assert!(*modified <= self.txn_id);
         *modified = self.txn_id;
@@ -80,18 +81,20 @@ where
             cache: self.cache,
             txn_id: self.txn_id,
             modified,
+            phantom: PhantomData,
         }
     }
 }
 
 /// A write lock guard for a block in a [`File`]
-pub struct BlockWriteGuard<B> {
+pub struct BlockWriteGuard<K, B> {
     cache: freqfs::FileWriteGuard<CacheBlock, B>,
     txn_id: TxnId,
     modified: TxnLockWriteGuard<TxnId>,
+    phantom: PhantomData<K>,
 }
 
-impl<B> Deref for BlockWriteGuard<B> {
+impl<K, B> Deref for BlockWriteGuard<K, B> {
     type Target = B;
 
     fn deref(&self) -> &Self::Target {
@@ -99,13 +102,13 @@ impl<B> Deref for BlockWriteGuard<B> {
     }
 }
 
-impl<B> DerefMut for BlockWriteGuard<B> {
+impl<K, B> DerefMut for BlockWriteGuard<K, B> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cache.deref_mut()
     }
 }
 
-impl<K, B> BlockWrite<K, B> for BlockWriteGuard<B>
+impl<K, B> BlockWrite for BlockWriteGuard<K, B>
 where
     K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
     B: BlockData,
@@ -114,11 +117,12 @@ where
 {
     type File = File<K, B>;
 
-    fn downgrade(self) -> <Self::File as tc_transact::fs::File<K, B>>::BlockReadExclusive {
+    fn downgrade(self) -> BlockReadGuardExclusive<K, B> {
         BlockReadGuardExclusive {
             cache: self.cache,
             txn_id: self.txn_id,
             modified: self.modified.downgrade(),
+            phantom: PhantomData,
         }
     }
 }
@@ -213,7 +217,7 @@ where
 }
 
 #[async_trait]
-impl<K, B, L> FileRead<K, B> for FileGuard<K, B, L>
+impl<K, B, L> FileRead for FileGuard<K, B, L>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
@@ -253,10 +257,7 @@ where
         Ok(BlockReadGuard { cache, modified })
     }
 
-    async fn read_block_exclusive<Q>(
-        &self,
-        block_id: Q,
-    ) -> TCResult<<Self::File as tc_transact::fs::File<K, B>>::BlockReadExclusive>
+    async fn read_block_exclusive<Q>(&self, block_id: Q) -> TCResult<BlockReadGuardExclusive<K, B>>
     where
         Q: Borrow<K> + Send + Sync,
     {
@@ -278,10 +279,11 @@ where
             cache,
             txn_id,
             modified,
+            phantom: PhantomData,
         })
     }
 
-    async fn write_block<Q>(&self, block_id: Q) -> TCResult<BlockWriteGuard<B>>
+    async fn write_block<Q>(&self, block_id: Q) -> TCResult<BlockWriteGuard<K, B>>
     where
         Q: Borrow<K> + Send + Sync,
     {
@@ -312,6 +314,7 @@ where
                 cache,
                 txn_id,
                 modified,
+                phantom: PhantomData,
             };
 
             trace!("locked block {} for writing at {}", block_id, txn_id);
@@ -351,6 +354,7 @@ where
             cache,
             txn_id,
             modified,
+            phantom: PhantomData,
         };
 
         trace!("locked block {} for writing at {}", block_id, txn_id);
@@ -359,14 +363,14 @@ where
     }
 }
 
-impl<K, B> FileReadExclusive<K, B> for FileReadGuardExclusive<K, B>
+impl<K, B> FileReadExclusive for FileReadGuardExclusive<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
     CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
 {
-    fn upgrade(self) -> <Self::File as tc_transact::fs::File<K, B>>::Write {
+    fn upgrade(self) -> FileWriteGuard<K, B> {
         FileGuard {
             file: self.file,
             txn_id: self.txn_id,
@@ -376,14 +380,14 @@ where
 }
 
 #[async_trait]
-impl<K, B> FileWrite<K, B> for FileWriteGuard<K, B>
+impl<K, B> FileWrite for FileWriteGuard<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
     CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
 {
-    fn downgrade(self) -> <Self::File as tc_transact::fs::File<K, B>>::ReadExclusive {
+    fn downgrade(self) -> FileReadGuardExclusive<K, B> {
         FileGuard {
             file: self.file,
             txn_id: self.txn_id,
@@ -396,7 +400,7 @@ where
         block_id: K,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<BlockWriteGuard<B>> {
+    ) -> TCResult<BlockWriteGuard<K, B>> {
         if self.blocks.contains_key(&block_id) {
             #[cfg(debug_assertions)]
             panic!("{} already has a block with ID {}", self.file, block_id);
@@ -428,6 +432,7 @@ where
                 cache,
                 txn_id,
                 modified,
+                phantom: PhantomData,
             })
             .map_err(io_err)
             .await
@@ -437,7 +442,7 @@ where
         &mut self,
         initial_value: B,
         size_hint: usize,
-    ) -> TCResult<(K, BlockWriteGuard<B>)> {
+    ) -> TCResult<(K, BlockWriteGuard<K, B>)> {
         let block_id: K = loop {
             let name = Uuid::new_v4()
                 .to_string()
@@ -474,7 +479,11 @@ where
         Ok(())
     }
 
-    async fn copy_from<O: FileRead<K, B>>(&mut self, other: &O, truncate: bool) -> TCResult<()> {
+    async fn copy_from<O>(&mut self, other: &O, truncate: bool) -> TCResult<()>
+    where
+        O: FileRead,
+        O::File: tc_transact::fs::File<Key = K, Block = B>,
+    {
         if truncate {
             self.truncate().await?;
         }
@@ -514,8 +523,8 @@ pub struct File<K, B> {
 
 impl<K, B: BlockData> File<K, B>
 where
-    K: FromStr + fmt::Display + Ord + Clone,
     CacheBlock: AsType<B>,
+    K: FromStr + fmt::Display + Ord + Clone,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
 {
     #[cfg(debug_assertions)]
@@ -651,19 +660,21 @@ where
 }
 
 #[async_trait]
-impl<K, B> tc_transact::fs::File<K, B> for File<K, B>
+impl<K, B> tc_transact::fs::File for File<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
     CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
 {
+    type Key = K;
+    type Block = B;
     type Read = FileReadGuard<K, B>;
     type ReadExclusive = FileReadGuardExclusive<K, B>;
     type Write = FileWriteGuard<K, B>;
     type BlockRead = BlockReadGuard<B>;
-    type BlockReadExclusive = BlockReadGuardExclusive<B>;
-    type BlockWrite = BlockWriteGuard<B>;
+    type BlockReadExclusive = BlockReadGuardExclusive<K, B>;
+    type BlockWrite = BlockWriteGuard<K, B>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         debug!("File::read");

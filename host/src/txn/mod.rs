@@ -9,7 +9,7 @@ use futures::future::TryFutureExt;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirWrite};
+use tc_transact::fs::{Dir, DirCreate};
 use tc_transact::Transaction;
 use tc_value::{Link, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};

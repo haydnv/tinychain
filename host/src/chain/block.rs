@@ -96,10 +96,6 @@ impl Persist<fs::Dir> for BlockChain {
     type Store = fs::Dir;
     type Txn = Txn;
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     async fn load(txn: &Txn, schema: Schema, dir: fs::Dir) -> TCResult<Self> {
         let subject = Subject::load(txn, schema.clone(), &dir).await?;
         let history = History::load(txn, (), dir).await?;
