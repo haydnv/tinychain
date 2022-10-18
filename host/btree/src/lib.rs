@@ -12,7 +12,7 @@ use safecast::*;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File};
+use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{NumberType, Value, ValueCollator, ValueType};
 use tcgeneric::*;
@@ -514,7 +514,7 @@ where
             .await?
             .ok_or_else(|| de::Error::custom("expected BTree schema"))?;
 
-        let btree = BTreeFile::create(self.file, schema, *self.txn.id())
+        let btree = BTreeFile::create(&self.txn, schema, self.file)
             .map_err(de::Error::custom)
             .await?;
 

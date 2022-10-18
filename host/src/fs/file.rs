@@ -67,8 +67,8 @@ impl<K, B> Deref for BlockReadGuardExclusive<K, B> {
 impl<K, B: BlockData> BlockReadExclusive for BlockReadGuardExclusive<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     type File = File<K, B>;
 
@@ -112,8 +112,8 @@ impl<K, B> BlockWrite for BlockWriteGuard<K, B>
 where
     K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
     B: BlockData,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     type File = File<K, B>;
 
@@ -140,8 +140,8 @@ where
     K: FromStr + fmt::Display + Ord + Clone,
     B: BlockData,
     L: TxnMapRead<K, TxnLock<TxnId>>,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     async fn last_modified(&self, block_id: &K) -> TCResult<TxnLock<TxnId>> {
         self.blocks
@@ -222,8 +222,8 @@ where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
     L: TxnMapRead<K, TxnLock<TxnId>> + Send + Sync,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     type File = File<K, B>;
 
@@ -367,8 +367,8 @@ impl<K, B> FileReadExclusive for FileReadGuardExclusive<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     fn upgrade(self) -> FileWriteGuard<K, B> {
         FileGuard {
@@ -384,8 +384,8 @@ impl<K, B> FileWrite for FileWriteGuard<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     fn downgrade(self) -> FileReadGuardExclusive<K, B> {
         FileGuard {
@@ -664,8 +664,8 @@ impl<K, B> tc_transact::fs::File for File<K, B>
 where
     K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
     B: BlockData,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     type Key = K;
     type Block = B;
@@ -728,14 +728,27 @@ where
     }
 }
 
-impl<K, B: BlockData> Store for File<K, B> where K: Clone + Send + Sync {}
+#[async_trait]
+impl<K, B: BlockData> Store for File<K, B>
+where
+    K: FromStr + fmt::Display + Ord + PartialEq + Clone + Send + Sync + 'static,
+    B: BlockData,
+    <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
+{
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        tc_transact::fs::File::read(self, txn_id)
+            .map_ok(|guard| guard.is_empty())
+            .await
+    }
+}
 
 #[async_trait]
 impl<K, B: BlockData> Transact for File<K, B>
 where
     K: FromStr + fmt::Display + PartialEq + Ord + Clone + Send + Sync + 'static,
-    CacheBlock: AsType<B>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    CacheBlock: AsType<B>,
 {
     type Commit = TxnMapLockCommitGuard<K, TxnLock<TxnId>>;
 

@@ -55,6 +55,37 @@ impl Persist<fs::Dir> for CollectionBase {
     type Store = fs::Store;
     type Txn = Txn;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        match schema {
+            CollectionSchema::BTree(btree_schema) => {
+                let store = store.try_into()?;
+                BTreeFile::create(txn, btree_schema, store)
+                    .map_ok(Self::BTree)
+                    .await
+            }
+            CollectionSchema::Table(table_schema) => {
+                let store = store.try_into()?;
+                TableIndex::create(txn, table_schema, store)
+                    .map_ok(Self::Table)
+                    .await
+            }
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Dense(tensor_schema) => {
+                let store = store.try_into()?;
+                DenseTensor::create(txn, tensor_schema, store)
+                    .map_ok(Self::Dense)
+                    .await
+            }
+            #[cfg(feature = "tensor")]
+            CollectionSchema::Sparse(tensor_schema) => {
+                let store = store.try_into()?;
+                SparseTensor::create(txn, tensor_schema, store)
+                    .map_ok(Self::Sparse)
+                    .await
+            }
+        }
+    }
+
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         match schema {
             CollectionSchema::BTree(btree_schema) => {

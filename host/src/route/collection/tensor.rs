@@ -9,7 +9,7 @@ use tc_btree::{Node, NodeId};
 use tc_error::*;
 use tc_math::*;
 use tc_tensor::*;
-use tc_transact::fs::{CopyFrom, Dir};
+use tc_transact::fs::{CopyFrom, Dir, Persist};
 use tc_transact::Transaction;
 use tc_value::{
     Bound, FloatType, Number, NumberClass, NumberInstance, NumberType, Range, TCString, Value,
@@ -1889,7 +1889,7 @@ async fn constant(
 async fn create_sparse(txn: &Txn, schema: Schema) -> TCResult<SparseTensor<SparseTable>> {
     let txn_id = *txn.id();
     let dir = txn.context().create_dir_unique(txn_id).await?;
-    SparseTensor::create(&dir, schema, txn_id).await
+    SparseTensor::create(txn, schema, dir).await
 }
 
 async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>

@@ -96,8 +96,24 @@ where
     type Store = fs::Dir;
     type Txn = Txn;
 
-    async fn load(txn: &Txn, schema: T::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let mut dir = dir.write(*txn.id()).await?;
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let mut dir = store.write(*txn.id()).await?;
+
+        let history = dir.create_dir(HISTORY.into())?;
+        let history = History::create(txn, (), history).await?;
+
+        let store = dir
+            .get_or_create_store(SUBJECT.into())
+            .try_into()
+            .map_err(TCError::from)?;
+
+        let subject = T::create(txn, schema.clone(), store).await?;
+
+        Ok(BlockChain::new(subject, history))
+    }
+
+    async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let mut dir = store.write(*txn.id()).await?;
 
         let history = dir.get_or_create_dir(HISTORY.into())?;
         let history = History::load(txn, (), history).await?;

@@ -12,7 +12,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeWrite, Node, NodeId};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirRead, DirReadFile, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, Tuple};
@@ -38,12 +38,6 @@ where
     Txn: Transaction<D>,
     D::Write: DirCreateFile<F>,
 {
-    pub async fn create(file: F, schema: IndexSchema, txn_id: TxnId) -> TCResult<Self> {
-        BTreeFile::create(file, schema.clone().into(), txn_id)
-            .map_ok(|btree| Index { btree, schema })
-            .await
-    }
-
     pub fn btree(&'_ self) -> &'_ BTreeFile<F, D, Txn> {
         &self.btree
     }
@@ -316,7 +310,13 @@ where
     type Store = F;
     type Txn = Txn;
 
-    async fn load(txn: &Txn, schema: IndexSchema, file: F) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
+        BTreeFile::create(txn, schema.clone().into(), file)
+            .map_ok(|btree| Self { schema, btree })
+            .await
+    }
+
+    async fn load(txn: &Self::Txn, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
         BTreeFile::load(txn, schema.clone().into(), file)
             .map_ok(|btree| Self { schema, btree })
             .await
@@ -357,53 +357,14 @@ impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableInde
 where
     D::Write: DirCreateFile<F>,
 {
-    /// Create a new `TableIndex` with the given [`TableSchema`].
-    pub async fn create(
-        context: &D,
-        schema: TableSchema,
-        txn_id: TxnId,
-    ) -> TCResult<TableIndex<F, D, Txn>> {
-        let mut dir = context.write(txn_id).await?;
-
-        let primary_file = dir.create_file(PRIMARY_INDEX.into())?;
-        let primary = Index::create(primary_file, schema.primary().clone(), txn_id).await?;
-
-        let primary_schema = schema.primary();
-        let mut auxiliary = Vec::with_capacity(schema.indices().len());
-        for (name, column_names) in schema.indices() {
-            if name == &PRIMARY_INDEX {
-                return Err(TCError::bad_request(
-                    "cannot create an auxiliary index with reserved name",
-                    PRIMARY_INDEX,
-                ));
-            }
-
-            let file = dir.create_file(name.clone())?;
-            let index = Self::create_index(file, primary_schema, column_names.to_vec(), txn_id)
-                .map_ok(move |index| (name.clone(), index))
-                .await?;
-
-            auxiliary.push(index);
-        }
-
-        Ok(TableIndex {
-            inner: Arc::new(Inner {
-                schema,
-                primary,
-                auxiliary,
-            }),
-        })
-    }
-
     async fn create_index(
-        file: F,
+        txn: &Txn,
         primary: &IndexSchema,
+        file: F,
         key: Vec<Id>,
-        txn_id: TxnId,
     ) -> TCResult<Index<F, D, Txn>> {
         let schema = primary.auxiliary(&key)?;
-        let btree = BTreeFile::create(file, schema.clone().into(), txn_id).await?;
-        Ok(Index { btree, schema })
+        Index::create(txn, schema, file).await
     }
 
     /// Return `true` if this table has zero rows.
@@ -935,13 +896,42 @@ where
     type Store = D;
     type Txn = Txn;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let txn_id = *txn.id();
+        let mut dir = store.write(txn_id).await?;
+
+        let primary_file = dir.create_file(PRIMARY_INDEX.into())?;
+        let primary = Index::create(txn, schema.primary().clone(), primary_file).await?;
+
+        let primary_schema = schema.primary();
+        let mut auxiliary = Vec::with_capacity(schema.indices().len());
+        for (name, column_names) in schema.indices() {
+            if name == &PRIMARY_INDEX {
+                return Err(TCError::bad_request(
+                    "cannot create an auxiliary index with reserved name",
+                    PRIMARY_INDEX,
+                ));
+            }
+
+            let file = dir.create_file(name.clone())?;
+            let index = Self::create_index(txn, primary_schema, file, column_names.to_vec())
+                .map_ok(move |index| (name.clone(), index))
+                .await?;
+
+            auxiliary.push(index);
+        }
+
+        Ok(Self {
+            inner: Arc::new(Inner {
+                schema,
+                primary,
+                auxiliary,
+            }),
+        })
+    }
+
     async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let dir = store.read(*txn.id()).await?;
-
-        if dir.is_empty() {
-            std::mem::drop(dir);
-            return Self::create(&store, schema, *txn.id()).await;
-        }
 
         let file = dir
             .get_file(&PRIMARY_INDEX.into())?
@@ -1022,7 +1012,7 @@ where
         let txn_id = *txn.id();
         let schema = source.schema();
         let key_len = schema.primary().key().len();
-        let table = Self::create(&dir, schema, txn_id).await?;
+        let table = Self::create(txn, schema, dir).await?;
 
         let rows = source.rows(txn_id).await?;
 
@@ -1048,6 +1038,7 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
+    D::Read: DirReadFile<F>,
     D::Write: DirCreateFile<F>,
 {
     type Value = TableIndex<F, D, Txn>;
@@ -1063,7 +1054,7 @@ where
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a Table schema"))?;
 
-        let table = TableIndex::create(self.txn.context(), schema, *self.txn.id())
+        let table = TableIndex::create(&self.txn, schema, self.txn.context().clone())
             .map_err(de::Error::custom)
             .await?;
 
@@ -1141,6 +1132,7 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
+    D::Read: DirReadFile<F>,
     D::Write: DirCreateFile<F>,
 {
     type Context = Txn;

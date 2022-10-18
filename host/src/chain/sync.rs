@@ -131,9 +131,48 @@ where
 }
 
 #[async_trait]
+impl<T> Transact for SyncChain<T>
+where
+    T: Transact + Send + Sync,
+{
+    type Commit = T::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        debug!("SyncChain::commit");
+
+        let guard = self.subject.commit(txn_id).await;
+
+        // assume the mutations for the transaction have already been moved and sync'd
+        // from `self.pending` to `self.committed` by calling the `write_ahead` method
+        {
+            let mut committed: FileWriteGuard<_, ChainBlock> =
+                self.committed.write().await.expect("committed");
+
+            committed.mutations.remove(txn_id);
+        }
+
+        self.committed.sync(false).await.expect("sync commit block");
+
+        guard
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        {
+            let mut pending: FileWriteGuard<_, ChainBlock> =
+                self.pending.write().await.expect("pending");
+
+            pending.mutations.remove(txn_id);
+        }
+
+        self.pending.sync(false).await.expect("sync pending block");
+        self.subject.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
 impl<T> Persist<fs::Dir> for SyncChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>,
+    T: Persist<fs::Dir, Txn = Txn> + Send + Sync,
     <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
     TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
 {
@@ -141,7 +180,46 @@ where
     type Store = fs::Dir;
     type Txn = Txn;
 
-    async fn load(txn: &Txn, schema: T::Schema, dir: fs::Dir) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+        debug!("SyncChain::create");
+
+        let mut dir = dir.write(*txn.id()).await?;
+
+        let store = dir
+            .get_or_create_dir(STORE.into())
+            .map(super::data::Store::new)?;
+
+        let mut blocks_dir = {
+            let file: fs::File<Id, ChainBlock> = dir.get_or_create_file(BLOCKS.into())?;
+            file.into_inner().write().await
+        };
+
+        let block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        let pending = blocks_dir
+            .create_file(PENDING.to_string(), block, Some(0))
+            .map_err(fs::io_err)?;
+
+        let block = ChainBlock::new(null_hash().to_vec());
+        let committed = blocks_dir
+            .create_file(COMMITTED.to_string(), block, Some(0))
+            .map_err(fs::io_err)?;
+
+        let subject_store = dir
+            .get_or_create_store(super::SUBJECT.into())
+            .try_into()
+            .map_err(TCError::from)?;
+
+        let subject = T::create(txn, schema, subject_store).await?;
+
+        Ok(Self {
+            subject,
+            pending,
+            committed,
+            store,
+        })
+    }
+
+    async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         debug!("SyncChain::load");
 
         let mut dir = dir.write(*txn.id()).await?;
@@ -178,53 +256,14 @@ where
             .try_into()
             .map_err(TCError::from)?;
 
-        let subject = T::load(txn, schema, subject_store).await?;
+        let subject = T::load_or_create(txn, schema, subject_store).await?;
 
-        Ok(SyncChain {
+        Ok(Self {
             subject,
             pending,
             committed,
             store,
         })
-    }
-}
-
-#[async_trait]
-impl<T> Transact for SyncChain<T>
-where
-    T: Transact + Send + Sync,
-{
-    type Commit = T::Commit;
-
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        debug!("SyncChain::commit");
-
-        let guard = self.subject.commit(txn_id).await;
-
-        // assume the mutations for the transaction have already been moved and sync'd
-        // from `self.pending` to `self.committed` by calling the `write_ahead` method
-        {
-            let mut committed: FileWriteGuard<_, ChainBlock> =
-                self.committed.write().await.expect("committed");
-
-            committed.mutations.remove(txn_id);
-        }
-
-        self.committed.sync(false).await.expect("sync commit block");
-
-        guard
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let mut pending: FileWriteGuard<_, ChainBlock> =
-                self.pending.write().await.expect("pending");
-
-            pending.mutations.remove(txn_id);
-        }
-
-        self.pending.sync(false).await.expect("sync pending block");
-        self.subject.finalize(txn_id).await
     }
 }
 

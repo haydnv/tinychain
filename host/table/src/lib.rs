@@ -8,7 +8,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::TryStreamExt;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreateFile, File};
+use tc_transact::fs::{Dir, DirCreateFile, DirReadFile, File};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
@@ -472,6 +472,7 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
+    D::Read: DirReadFile<F>,
     D::Write: DirCreateFile<F>,
 {
     type Context = Txn;

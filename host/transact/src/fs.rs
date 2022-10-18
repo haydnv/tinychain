@@ -268,19 +268,36 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
-// TODO: add `is_empty` method
-pub trait Store: Send + Sync {}
+#[async_trait]
+pub trait Store: Send + Sync {
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
+}
 
 /// Defines how to load a persistent data structure from the filesystem.
-// TODO: add `create` and `load_or_create` methods
 #[async_trait]
 pub trait Persist<D: Dir>: Sized {
     type Schema: Clone + Send + Sync;
     type Store: Store;
     type Txn: Transaction<D>;
 
-    /// Load a saved state from persistent storage.
+    /// Create a new instance of [`Self`] from an empty [`Self::Store`].
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+
+    /// Load a saved instance of [`Self`] from persistent storage.
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+
+    /// Load a saved instance of [`Self`] from persistent storage if present, or create a new one.
+    async fn load_or_create(
+        txn: &Self::Txn,
+        schema: Self::Schema,
+        store: Self::Store,
+    ) -> TCResult<Self> {
+        if store.is_empty(*txn.id()).await? {
+            Self::create(txn, schema, store).await
+        } else {
+            Self::load(txn, schema, store).await
+        }
+    }
 }
 
 /// Defines how to copy a base state from another instance, possibly a view.

@@ -240,32 +240,6 @@ where
         }
     }
 
-    /// Create a new `BTreeFile`.
-    pub async fn create(file: F, schema: RowSchema, txn_id: TxnId) -> TCResult<Self> {
-        debug!("BTreeFile::create");
-
-        let mut file_contents = file.write(txn_id).await?;
-        trace!("BTreeFile::create got file write lock");
-
-        if !file_contents.is_empty() {
-            return Err(TCError::internal(
-                "Tried to create a new BTree without a new File",
-            ));
-        }
-
-        let order = validate_schema(&schema)?;
-
-        let root: NodeId = Uuid::new_v4();
-        let node = Node::new(true, None);
-        file_contents
-            .create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
-            .await?;
-
-        assert!(file_contents.contains(&root));
-
-        Ok(BTreeFile::new(file, schema, order, root))
-    }
-
     fn _delete_range<'a>(
         file: &'a F::Read,
         schema: &'a RowSchema,
@@ -760,20 +734,37 @@ where
     type Store = F;
     type Txn = T;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        debug!("BTreeFile::create");
+
+        let order = validate_schema(&schema)?;
+
+        let mut file = store.write(*txn.id()).await?;
+        trace!("BTreeFile::create got file write lock");
+
+        if !file.is_empty() {
+            return Err(TCError::internal(
+                "Tried to create a new BTree without a new File",
+            ));
+        }
+
+        let root: NodeId = Uuid::new_v4();
+        let node = Node::new(true, None);
+        file.create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
+            .await?;
+
+        assert!(file.contains(&root));
+
+        Ok(BTreeFile::new(store, schema, order, root))
+    }
+
     async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
-
-        let file_contents = file.read(*txn.id()).await?;
 
         let order = validate_schema(&schema)?;
 
         let txn_id = *txn.id();
-
-        if file_contents.is_empty() {
-            // TODO: there must be a better way to do this
-            std::mem::drop(file_contents);
-            return Self::create(file, schema, txn_id).await;
-        }
+        let file_contents = file.read(txn_id).await?;
 
         let mut root = None;
         for block_id in file_contents.block_ids() {
@@ -841,7 +832,7 @@ where
     async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {
         let txn_id = *txn.id();
         let schema = source.schema().clone();
-        let dest = Self::create(file, schema, txn_id).await?;
+        let dest = Self::create(txn, schema, file).await?;
         let keys = source.keys(txn_id).await?;
         dest.try_insert_from(txn_id, keys).await?;
         Ok(dest)

@@ -857,8 +857,9 @@ where
     T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
 {
     type Txn = T;
     type Diagonal = Self;
@@ -935,6 +936,7 @@ where
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
@@ -961,6 +963,7 @@ where
     T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = Self;

@@ -220,6 +220,18 @@ where
     type Store = fs::Dir;
     type Txn = Txn;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let (class, schema) = schema;
+        match class {
+            ChainType::Block => {
+                BlockChain::create(txn, schema, store)
+                    .map_ok(Self::Block)
+                    .await
+            }
+            ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+        }
+    }
+
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
