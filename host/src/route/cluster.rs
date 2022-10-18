@@ -1,48 +1,35 @@
-use std::iter::FromIterator;
-
 use bytes::Bytes;
-use futures::future;
+use futures::{future, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
-use tcgeneric::{Id, Tuple};
+use tcgeneric::Tuple;
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
 use crate::route::*;
 use crate::state::State;
 
-pub struct ClusterHandler<'a> {
-    cluster: &'a Cluster,
+pub struct ClusterHandler<'a, T> {
+    cluster: &'a Cluster<T>,
 }
 
-impl<'a> ClusterHandler<'a> {
-    fn handle_get(self, key: Value) -> TCResult<State> {
-        debug!("Cluster::get {}", key);
-
-        if key.is_some() {
-            let key: Id = key.try_cast_into(|v| TCError::bad_request("invalid ID", v))?;
-            self.cluster
-                .chain(&key)
-                .cloned()
-                .map(State::from)
-                .ok_or_else(|| TCError::not_found(format!("{} member {}", self.cluster, key)))
-        } else {
-            let public_key = Bytes::from(self.cluster.public_key().to_vec());
-            Ok(Value::from(public_key).into())
-        }
-    }
-}
-
-impl<'a> Handler<'a> for ClusterHandler<'a> {
+impl<'a, T> Handler<'a> for ClusterHandler<'a, T>
+where
+    T: Transact + Send + Sync,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key| {
-            Box::pin(future::ready(self.handle_get(key)))
+        Some(Box::new(move |_txn, key| {
+            Box::pin(future::ready((|key: Value| {
+                key.expect_none()?;
+                let public_key = Bytes::from(self.cluster.public_key().to_vec());
+                Ok(Value::from(public_key).into())
+            })(key)))
         }))
     }
 
@@ -82,7 +69,6 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                 if txn.is_leader(self.cluster.path()) {
                     self.cluster.distribute_commit(txn).await?;
                 } else {
-                    self.cluster.write_ahead(txn.id()).await;
                     self.cluster.commit(txn.id()).await;
                 }
 
@@ -111,17 +97,20 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
+impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
+    fn from(cluster: &'a Cluster<T>) -> Self {
         Self { cluster }
     }
 }
 
-struct ReplicaHandler<'a> {
-    cluster: &'a Cluster,
+struct ReplicaHandler<'a, T> {
+    cluster: &'a Cluster<T>,
 }
 
-impl<'a> Handler<'a> for ReplicaHandler<'a> {
+impl<'a, T> Handler<'a> for ReplicaHandler<'a, T>
+where
+    T: Replica + Send + Sync,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -130,9 +119,11 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
             Box::pin(async move {
                 key.expect_none()?;
 
-                let replicas = self.cluster.replicas(*txn.id()).await?;
-                assert!(replicas.contains(&txn.link(self.cluster.link().path().clone())));
-                Ok(Value::from_iter(replicas).into())
+                self.cluster
+                    .replicas(*txn.id())
+                    .map_ok(|replicas| Value::Tuple(replicas.iter().cloned().collect()))
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -170,27 +161,33 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
     }
 }
 
-impl<'a> From<&'a Cluster> for ReplicaHandler<'a> {
-    fn from(cluster: &'a Cluster) -> Self {
+impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
+    fn from(cluster: &'a Cluster<T>) -> Self {
         Self { cluster }
     }
 }
 
-impl Route for Cluster {
+impl<T> Route for Cluster<T>
+where
+    T: Replica + Route,
+{
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(ClusterHandler::from(self)))
-        } else if let Some(chain) = self.chain(&path[0]) {
-            debug!("Cluster has a Chain at {}", &path[0]);
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
+        }
+    }
+}
+
+impl Route for Legacy {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if let Some(chain) = self.chain(&path[0]) {
+            debug!("Legacy cluster has a Chain at {}", &path[0]);
             chain.route(&path[1..])
         } else if let Some(class) = self.class(&path[0]) {
-            debug!("Cluster has a Class at {}", &path[0]);
+            debug!("Legacy cluster has a Class at {}", &path[0]);
             class.route(&path[1..])
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "replicas" => Some(Box::new(ReplicaHandler::from(self))),
-                _ => None,
-            }
         } else {
             None
         }

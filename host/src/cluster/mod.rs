@@ -2,9 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -15,12 +13,13 @@ use safecast::TryCastFrom;
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard};
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
+use crate::collection::CollectionBase;
 use crate::object::InstanceClass;
 use crate::scalar::Scalar;
 use crate::state::{State, ToState};
@@ -28,18 +27,25 @@ use crate::txn::{Actor, Txn, TxnId};
 
 use owner::Owner;
 
-use crate::collection::CollectionBase;
 use futures::stream::FuturesUnordered;
 pub use load::instantiate;
 
-mod load;
+mod load; // TODO: delete
 mod owner;
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
 
+/// A state which supports replication in a [`Cluster`]
+#[async_trait]
+pub trait Replica: Transact {
+    async fn replicate(&self, txn: &Txn, source: &Link) -> TCResult<()>;
+}
+
 /// The [`Class`] of a [`Cluster`].
-pub struct ClusterType;
+pub enum ClusterType {
+    Legacy,
+}
 
 impl Class for ClusterType {}
 
@@ -49,51 +55,34 @@ impl fmt::Display for ClusterType {
     }
 }
 
-/// The data structure responsible for maintaining consensus per-transaction.
-pub struct Cluster {
+/// The data structure responsible for maintaining consensus per-transaction across the network.
+pub struct Cluster<T> {
     link: Link,
     actor: Arc<Actor>,
-    chains: Map<Chain<CollectionBase>>,
-    classes: Map<InstanceClass>,
     owned: RwLock<HashMap<TxnId, Owner>>,
     replicas: TxnLock<HashSet<Link>>,
+    state: T,
 }
 
-impl Cluster {
-    /// Borrow one of this cluster's [`Chain`]s.
-    pub fn chain(&self, name: &Id) -> Option<&Chain<CollectionBase>> {
-        self.chains.get(name)
-    }
-
-    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
-    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
-        self.classes.get(name)
-    }
-
-    /// Borrow the public key of this cluster.
-    pub fn public_key(&self) -> &[u8] {
-        self.actor.public_key().as_bytes()
-    }
-
-    /// Return the canonical [`Link`] to this cluster (probably not on this host).
+impl<T> Cluster<T> {
+    /// Borrow the canonical [`Link`] to this `Cluster` (probably not on this host).
     pub fn link(&self) -> &Link {
         &self.link
     }
 
-    /// Return the path of this cluster, relative to this host.
+    /// Borrow the state managed by this `Cluster`
+    pub fn state(&self) -> &T {
+        &self.state
+    }
+
+    /// Borrow the path of this `Cluster`, relative to this host.
     pub fn path(&'_ self) -> &'_ [PathSegment] {
         self.link.path()
     }
 
-    /// Return the names of the members of this cluster.
-    pub fn ns(&self) -> impl Iterator<Item = &Id> {
-        self.chains.keys().chain(self.classes.keys())
-    }
-
-    /// Iterate over a list of replicas of this cluster.
-    pub async fn replicas(&self, txn_id: TxnId) -> TCResult<HashSet<Link>> {
-        let replicas = self.replicas.read(txn_id).await?;
-        Ok(replicas.deref().clone())
+    /// Borrow the public key of this `Cluster`.
+    pub fn public_key(&self) -> &[u8] {
+        self.actor.public_key().as_bytes()
     }
 
     /// Claim ownership of the given [`Txn`].
@@ -108,6 +97,7 @@ impl Cluster {
             .await?;
 
         owned.insert(*txn.id(), Owner::new());
+
         Ok(txn)
     }
 
@@ -115,8 +105,101 @@ impl Cluster {
     pub async fn lead(&self, txn: Txn) -> TCResult<Txn> {
         txn.lead(&self.actor, self.link.path().clone()).await
     }
+}
 
-    /// Add a replica to this cluster.
+impl<T> Cluster<T>
+where
+    T: Transact + Send + Sync,
+{
+    /// Register a participant in the given [`Txn`].
+    pub async fn mutate(&self, txn: &Txn, participant: Link) -> TCResult<()> {
+        if participant.path() == self.link.path() {
+            log::warn!(
+                "got participant message within Cluster {}",
+                self.link.path()
+            );
+
+            return Ok(());
+        }
+
+        let owned = self.owned.write().await;
+        let owner = owned.get(txn.id()).ok_or_else(|| {
+            TCError::bad_request(
+                format!(
+                    "{} does not own transaction",
+                    txn.link(self.link.path().clone())
+                ),
+                txn.id(),
+            )
+        })?;
+
+        owner.mutate(participant).await;
+        Ok(())
+    }
+
+    /// Commit the given [`Txn`] for all members of this `Cluster`.
+    pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
+        let replicas = self.replicas.read(*txn.id()).await?;
+
+        if let Some(owner) = self.owned.read().await.get(txn.id()) {
+            owner.commit(txn).await?;
+        }
+
+        let self_link = txn.link(self.link.path().clone());
+        let mut replica_commits: FuturesUnordered<_> = replicas
+            .iter()
+            .filter(|replica| *replica != &self_link)
+            .map(|replica| {
+                debug!("commit replica {}...", replica);
+                txn.post(replica.clone(), State::Map(Map::default()))
+            })
+            .collect();
+
+        while let Some(result) = replica_commits.next().await {
+            match result {
+                Ok(_) => {}
+                Err(cause) => log::error!("commit failure: {}", cause),
+            }
+        }
+
+        self.commit(txn.id()).await;
+
+        Ok(())
+    }
+
+    /// Roll back the given [`Txn`] for all members of this `Cluster`.
+    pub async fn distribute_rollback(&self, txn: &Txn) {
+        let replicas = self.replicas.read(*txn.id()).await;
+
+        if let Some(owner) = self.owned.read().await.get(txn.id()) {
+            owner.rollback(txn).await;
+        }
+
+        if let Ok(replicas) = replicas {
+            let self_link = txn.link(self.link.path().clone());
+
+            let replicas = replicas
+                .iter()
+                .filter(|replica| *replica != &self_link)
+                .map(|replica| txn.delete(replica.clone(), Value::None));
+
+            join_all(replicas).await;
+        }
+
+        self.finalize(txn.id()).await;
+    }
+}
+
+impl<T> Cluster<T>
+where
+    T: Replica,
+{
+    /// Get the set of current replicas of this `Cluster`.
+    pub async fn replicas(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<HashSet<Link>>> {
+        self.replicas.read(txn_id).await
+    }
+
+    /// Add a replica to this `Cluster`.
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
         let self_link = txn.link(self.link.path().clone());
 
@@ -161,7 +244,7 @@ impl Cluster {
                 warn!("{} has no other replicas", self);
             }
 
-            self.replicate(txn).await?;
+            self.state.replicate(txn, &self.link).await?;
         } else {
             debug!("add replica {}", replica);
             (*self.replicas.write(*txn.id()).await?).insert(replica);
@@ -170,7 +253,7 @@ impl Cluster {
         Ok(())
     }
 
-    /// Remove a replica from this cluster.
+    /// Remove one or more replicas from this `Cluster`.
     pub async fn remove_replicas(&self, txn: &Txn, to_remove: &[Link]) -> TCResult<()> {
         let self_link = txn.link(self.link.path().clone());
         let mut replicas = self.replicas.write(*txn.id()).await?;
@@ -186,45 +269,33 @@ impl Cluster {
         Ok(())
     }
 
-    async fn replicate(&self, txn: &Txn) -> TCResult<()> {
-        let replication = self.chains.iter().map(|(name, chain)| {
-            let mut path = self.link.path().to_vec();
-            path.push(name.clone());
+    /// Replicate the given `write` operation across all replicas of this `Cluster`.
+    pub async fn replicate_write<F, W>(&self, txn: Txn, write: W) -> TCResult<()>
+    where
+        F: Future<Output = TCResult<()>> + Send,
+        W: Fn(Link) -> F + Send,
+    {
+        let replicas = self.replicas.read(*txn.id()).await?;
+        debug!("replicating write to {} replicas", replicas.len() - 1);
 
-            chain.replicate(txn, self.link.clone().append(name.clone()))
-        });
-
-        try_join_all(replication).await?;
-
-        Ok(())
-    }
-
-    pub async fn replicate_write<F: Future<Output = TCResult<()>>, W: Fn(Link) -> F>(
-        &self,
-        txn: Txn,
-        write: W,
-    ) -> TCResult<()> {
-        let mut replicas = self.replicas(*txn.id()).await?;
-        replicas.remove(&txn.link(self.link().path().clone()));
-        debug!("replicating write to {} replicas", replicas.len());
-
-        let max_failures = replicas.len() / 2;
+        let max_failures = (replicas.len() - 1) / 2;
         let mut failed = HashSet::with_capacity(replicas.len());
         let mut succeeded = HashSet::with_capacity(replicas.len());
 
         {
-            let mut results = FuturesUnordered::from_iter(
-                replicas
-                    .into_iter()
-                    .map(|link| write(link.clone()).map(|result| (link, result))),
-            );
+            let self_link = txn.link(self.path().to_vec().into());
+            let mut results: FuturesUnordered<_> = replicas
+                .iter()
+                .filter(|replica| *replica != &self_link)
+                .map(|link| write(link.clone()).map(move |result| (link, result)))
+                .collect();
 
             while let Some((replica, result)) = results.next().await {
                 match result {
                     Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
                     Err(ref cause) => {
                         debug!("replica at {} failed: {}", replica, cause);
-                        failed.insert(replica);
+                        failed.insert(replica.clone());
                     }
                     Ok(()) => {
                         debug!("replica at {} succeeded", replica);
@@ -241,151 +312,108 @@ impl Cluster {
 
         if !failed.is_empty() {
             let failed = Value::from_iter(failed);
-            try_join_all(
-                succeeded
-                    .into_iter()
-                    .map(|replica| txn.delete(replica.append(REPLICAS.into()), failed.clone())),
-            )
+            try_join_all(succeeded.into_iter().map(|replica| {
+                txn.delete(replica.clone().append(REPLICAS.into()), failed.clone())
+            }))
             .await?;
         }
 
         Ok(())
     }
-
-    pub async fn mutate(&self, txn: &Txn, participant: Link) -> TCResult<()> {
-        if participant.path() == self.link.path() {
-            log::warn!(
-                "got participant message within Cluster {}",
-                self.link.path()
-            );
-
-            return Ok(());
-        }
-
-        let owned = self.owned.write().await;
-        let owner = owned.get(txn.id()).ok_or_else(|| {
-            TCError::bad_request(
-                format!(
-                    "{} does not own transaction",
-                    txn.link(self.link.path().clone())
-                ),
-                txn.id(),
-            )
-        })?;
-
-        owner.mutate(participant).await;
-        Ok(())
-    }
-
-    pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
-        let replicas = self.replicas.read(*txn.id()).await?;
-
-        if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            owner.commit(txn).await?;
-        }
-
-        self.write_ahead(txn.id()).await;
-
-        let self_link = txn.link(self.link.path().clone());
-        let mut replica_commits = FuturesUnordered::from_iter(
-            replicas
-                .iter()
-                .filter(|replica| *replica != &self_link)
-                .map(|replica| {
-                    debug!("commit replica {}...", replica);
-                    txn.post(replica.clone(), State::Map(Map::default()))
-                }),
-        );
-
-        while let Some(result) = replica_commits.next().await {
-            match result {
-                Ok(_) => {}
-                Err(cause) => log::error!("commit failure: {}", cause),
-            }
-        }
-
-        self.commit(txn.id()).await;
-
-        Ok(())
-    }
-
-    pub async fn distribute_rollback(&self, txn: &Txn) {
-        let replicas = self.replicas.read(*txn.id()).await;
-
-        if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            owner.rollback(txn).await;
-        }
-
-        if let Ok(replicas) = replicas {
-            let self_link = txn.link(self.link.path().clone());
-            join_all(
-                replicas
-                    .iter()
-                    .filter(|replica| *replica != &self_link)
-                    .map(|replica| txn.delete(replica.clone(), Value::None)),
-            )
-            .await;
-        }
-
-        self.finalize(txn.id()).await;
-    }
-
-    pub async fn write_ahead(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.write_ahead(txn_id))).await;
-    }
 }
 
-impl Eq for Cluster {}
-
-impl PartialEq for Cluster {
-    fn eq(&self, other: &Self) -> bool {
-        self.path() == other.path()
-    }
-}
-
-impl Hash for Cluster {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        self.path().hash(h)
-    }
-}
-
-impl Instance for Cluster {
+impl Instance for Cluster<Legacy> {
     type Class = ClusterType;
 
     fn class(&self) -> Self::Class {
-        ClusterType
+        ClusterType::Legacy
     }
 }
 
 #[async_trait]
-impl Transact for Cluster {
-    type Commit = ();
+impl<T> Transact for Cluster<T>
+where
+    T: Transact + Send + Sync,
+{
+    type Commit = TxnLockCommitGuard<HashSet<Link>>;
 
-    async fn commit(&self, txn_id: &TxnId) {
-        join_all(self.chains.iter().map(|(name, chain)| {
-            debug!("cluster {} committing chain {}", self.link, name);
-            chain.commit(txn_id)
-        }))
-        .await;
-
-        self.replicas.commit(txn_id).await;
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        let guard = self.replicas.commit(txn_id).await;
+        self.state.commit(txn_id).await;
+        guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
+        self.state.finalize(txn_id).await;
         self.owned.write().await.remove(txn_id);
         self.replicas.finalize(txn_id).await
     }
 }
 
-impl ToState for Cluster {
+impl<T> ToState for Cluster<T> {
     fn to_state(&self) -> State {
         State::Scalar(Scalar::Cluster(self.link.path().clone().into()))
     }
 }
 
-impl fmt::Display for Cluster {
+impl<T> fmt::Display for Cluster<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Cluster {}", self.link.path())
+    }
+}
+
+// TODO: delete and replace with `Service`
+pub struct Legacy {
+    chains: Map<Chain<CollectionBase>>,
+    classes: Map<InstanceClass>,
+}
+
+impl Legacy {
+    /// Borrow one of this cluster's [`Chain`]s.
+    pub fn chain(&self, name: &Id) -> Option<&Chain<CollectionBase>> {
+        self.chains.get(name)
+    }
+
+    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
+    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
+        self.classes.get(name)
+    }
+
+    /// Return the names of the members of this cluster.
+    pub fn ns(&self) -> impl Iterator<Item = &Id> {
+        self.chains.keys().chain(self.classes.keys())
+    }
+
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.write_ahead(txn_id))).await;
+    }
+}
+
+#[async_trait]
+impl Replica for Legacy {
+    async fn replicate(&self, txn: &Txn, source: &Link) -> TCResult<()> {
+        let replication = self
+            .chains
+            .iter()
+            .map(|(name, chain)| chain.replicate(txn, source.clone().append(name.clone())));
+
+        try_join_all(replication).await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Transact for Legacy {
+    type Commit = ();
+
+    async fn commit(&self, txn_id: &TxnId) {
+        self.write_ahead(txn_id).await;
+
+        join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
     }
 }

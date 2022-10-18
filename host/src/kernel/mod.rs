@@ -1,4 +1,4 @@
-//! The host kernel, responsible for dispatching requests to the local host
+//! The host [`Kernel`], responsible for dispatching requests to the local host
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -11,7 +11,7 @@ use tc_error::*;
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Legacy};
 use crate::object::{InstanceClass, InstanceExt};
 use crate::route::{Public, Static};
 use crate::scalar::{OpRefType, Scalar, ScalarType};
@@ -21,7 +21,7 @@ use crate::txn::{hypothetical, Txn};
 use crate::txn::hypothetical::Hypothetical;
 use hosted::Hosted;
 
-mod hosted;
+mod hosted; // TODO: delete
 
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
@@ -31,7 +31,7 @@ pub struct Kernel {
 
 impl Kernel {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
+    pub fn new<I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>>(clusters: I) -> Self {
         Self {
             hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
@@ -39,18 +39,23 @@ impl Kernel {
     }
 
     /// Return a list of hosted clusters
-    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+    // TODO: delete
+    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster<Legacy>>> {
         self.hosted.clusters()
     }
 
     /// Route a GET request.
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path.is_empty() {
-            Err(TCError::not_found(format!(
-                "{} at {}",
-                key,
-                TCPath::from(path)
-            )))
+            if key.is_some() {
+                Err(TCError::not_found(format!(
+                    "{} at {}",
+                    key,
+                    TCPath::from(path)
+                )))
+            } else {
+                Err(TCError::unauthorized("access to /"))
+            }
         } else if let Some(class) = ScalarType::from_path(path) {
             let err = format!("cannot cast into an instance of {} from {}", class, key);
             Scalar::from(key)
@@ -296,12 +301,12 @@ impl fmt::Display for Kernel {
 
 fn execute<
     'a,
-    R: Send,
+    R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
-    F: FnOnce(Txn, &'a InstanceExt<Cluster>) -> Fut + Send + 'a,
+    F: FnOnce(Txn, &'a InstanceExt<Cluster<Legacy>>) -> Fut + Send + 'a,
 >(
     txn: Txn,
-    cluster: &'a InstanceExt<Cluster>,
+    cluster: &'a InstanceExt<Cluster<Legacy>>,
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
@@ -326,12 +331,15 @@ fn execute<
             let txn = cluster.claim(&txn).await?;
             let result = handler(txn.clone(), cluster).await;
 
-            if result.is_ok() {
-                debug!("commit {}", cluster);
-                cluster.distribute_commit(&txn).await?;
-            } else {
-                debug!("rollback {}", cluster);
-                cluster.distribute_rollback(&txn).await;
+            match &result {
+                Ok(_) => {
+                    debug!("commit {}", cluster);
+                    cluster.distribute_commit(&txn).await?;
+                }
+                Err(cause) => {
+                    debug!("rollback {} due to {}", cluster, cause);
+                    cluster.distribute_rollback(&txn).await;
+                }
             }
 
             result
@@ -339,7 +347,7 @@ fn execute<
     })
 }
 
-async fn maybe_claim_leadership(cluster: &Cluster, txn: &Txn) -> TCResult<Txn> {
+async fn maybe_claim_leadership(cluster: &Cluster<Legacy>, txn: &Txn) -> TCResult<Txn> {
     if txn.has_owner() && !txn.has_leader(cluster.path()) {
         cluster.lead(txn.clone()).await
     } else {

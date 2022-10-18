@@ -104,14 +104,6 @@ impl History {
         block.write().map_err(fs::io_err).await
     }
 
-    // pub async fn read_latest(
-    //     &self,
-    //     txn_id: TxnId,
-    // ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
-    //     let latest = self.latest.read(txn_id).await?;
-    //     self.read_block(*latest).await
-    // }
-
     pub async fn write_latest(
         &self,
         txn_id: TxnId,
