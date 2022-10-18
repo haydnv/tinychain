@@ -217,6 +217,13 @@ impl<FD, FS, D, T> TensorPersist for SparseTensor<FD, FS, D, T, SparseAccessor<F
             _ => None,
         }
     }
+
+    fn is_persistent(&self) -> bool {
+        match &self.accessor {
+            SparseAccessor::Table(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<FD, FS, D, T, A> TensorAccess for SparseTensor<FD, FS, D, T, A>

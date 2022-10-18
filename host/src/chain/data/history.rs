@@ -17,10 +17,10 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
 
-use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
+use crate::chain::{null_hash, BLOCK_SIZE, CHAIN};
 use crate::fs;
 use crate::fs::CacheBlock;
-use crate::route::Public;
+use crate::route::{Public, Route};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -104,13 +104,13 @@ impl History {
         block.write().map_err(fs::io_err).await
     }
 
-    pub async fn read_latest(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
-        let latest = self.latest.read(txn_id).await?;
-        self.read_block(*latest).await
-    }
+    // pub async fn read_latest(
+    //     &self,
+    //     txn_id: TxnId,
+    // ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
+    //     let latest = self.latest.read(txn_id).await?;
+    //     self.read_block(*latest).await
+    // }
 
     pub async fn write_latest(
         &self,
@@ -130,7 +130,10 @@ impl History {
         log.read().map_err(fs::io_err).await
     }
 
-    pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
+    pub async fn replicate<T>(&self, txn: &Txn, subject: &T, other: Self) -> TCResult<()>
+    where
+        T: Route + Public,
+    {
         let err_divergent =
             |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
 
@@ -183,7 +186,7 @@ impl History {
 
                 assert!(!dest.mutations.contains_key(txn_id));
                 replay_and_save(
-                    &subject,
+                    subject,
                     txn,
                     *txn_id,
                     ops,
@@ -226,7 +229,7 @@ impl History {
                 assert!(!dest.mutations.contains_key(txn_id));
 
                 replay_and_save(
-                    &subject,
+                    subject,
                     txn,
                     *txn_id,
                     ops,
@@ -590,15 +593,18 @@ async fn parse_block_state(
     Ok(mutations)
 }
 
-async fn replay_and_save(
-    subject: &Subject,
+async fn replay_and_save<T>(
+    subject: &T,
     txn: &Txn,
     txn_id: TxnId,
     ops: &[Mutation],
     source: &Store,
     dest: &Store,
     block: &mut ChainBlock,
-) -> TCResult<()> {
+) -> TCResult<()>
+where
+    T: Route + Public,
+{
     for op in ops {
         match op {
             Mutation::Delete(path, key) => {

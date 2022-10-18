@@ -217,6 +217,13 @@ impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD,
             _ => None,
         }
     }
+
+    fn is_persistent(&self) -> bool {
+        match &self.blocks {
+            DenseAccessor::File(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<FD, FS, D, T, B> TensorAccess for DenseTensor<FD, FS, D, T, B>

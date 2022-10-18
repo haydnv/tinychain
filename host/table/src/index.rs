@@ -12,7 +12,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, BTreeWrite, Node, NodeId};
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirRead, DirReadFile, File, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, Tuple};
@@ -937,6 +937,11 @@ where
 
     async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         let dir = store.read(*txn.id()).await?;
+
+        if dir.is_empty() {
+            std::mem::drop(dir);
+            return Self::create(&store, schema, *txn.id()).await;
+        }
 
         let file = dir
             .get_file(&PRIMARY_INDEX.into())?

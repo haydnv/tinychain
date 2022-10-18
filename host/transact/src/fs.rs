@@ -268,12 +268,14 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
+// TODO: add `is_empty` method
 pub trait Store: Send + Sync {}
 
 /// Defines how to load a persistent data structure from the filesystem.
+// TODO: add `create` and `load_or_create` methods
 #[async_trait]
 pub trait Persist<D: Dir>: Sized {
-    type Schema;
+    type Schema: Clone + Send + Sync;
     type Store: Store;
     type Txn: Transaction<D>;
 

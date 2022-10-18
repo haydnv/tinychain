@@ -1,103 +1,44 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
+use std::convert::TryFrom;
 use std::fmt;
+use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use safecast::TryCastFrom;
 use sha2::digest::generic_array::GenericArray;
 use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Persist, Restore};
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
-use crate::collection::CollectionSchema;
 use crate::fs;
-use crate::scalar::Scalar;
-use crate::state::{State, StateView};
+use crate::state::State;
 use crate::txn::Txn;
 
+use crate::route::{Public, Route};
 pub use block::BlockChain;
 pub use data::ChainBlock;
-pub use subject::{Subject, SubjectCollection, SubjectMap};
 pub use sync::SyncChain;
 
 mod block;
 mod data;
-mod subject; // TODO: delete
-
 mod sync;
 
 const BLOCK_SIZE: usize = 1_000_000;
 const CHAIN: Label = label("chain");
+const SUBJECT: Label = label("subject");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
-
-/// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
-#[derive(Clone)]
-pub enum Schema {
-    Collection(CollectionSchema),
-    Map(Map<Schema>),
-    Tuple(Tuple<Schema>),
-}
-
-impl Schema {
-    pub fn from_scalar(scalar: Scalar) -> TCResult<Self> {
-        match scalar {
-            Scalar::Ref(tc_ref) => CollectionSchema::from_scalar(*tc_ref).map(Self::Collection),
-            Scalar::Map(map) => map
-                .into_iter()
-                .map(|(name, scalar)| Schema::from_scalar(scalar).map(|schema| (name, schema)))
-                .collect::<TCResult<Map<Schema>>>()
-                .map(Schema::Map),
-
-            Scalar::Tuple(tuple) => tuple
-                .into_iter()
-                .map(|scalar| Schema::from_scalar(scalar))
-                .collect::<TCResult<Tuple<Schema>>>()
-                .map(Schema::Tuple),
-
-            other => Err(TCError::bad_request("invalid Chain schema", other)),
-        }
-    }
-}
-
-#[async_trait]
-impl de::FromStream for Schema {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        let scalar = Scalar::from_stream(cxt, decoder).await?;
-        Self::from_scalar(scalar).map_err(de::Error::custom)
-    }
-}
-
-impl<'en> en::IntoStream<'en> for Schema {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Self::Collection(schema) => schema.into_stream(encoder),
-            Self::Map(map) => map.into_stream(encoder),
-            Self::Tuple(tuple) => tuple.into_stream(encoder),
-        }
-    }
-}
-
-impl fmt::Display for Schema {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Collection(collection) => fmt::Display::fmt(collection, f),
-            Self::Map(schema) => fmt::Display::fmt(schema, f),
-            Self::Tuple(schema) => fmt::Display::fmt(schema, f),
-        }
-    }
-}
 
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
-pub trait ChainInstance {
+pub trait ChainInstance<T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
 
@@ -110,11 +51,8 @@ pub trait ChainInstance {
         value: State,
     ) -> TCResult<()>;
 
-    /// Return the latest hash of this `Chain`.
-    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>>;
-
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
-    fn subject(&self) -> &Subject;
+    fn subject(&self) -> &T;
 
     /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
@@ -178,12 +116,15 @@ impl fmt::Display for ChainType {
 
 /// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
 #[derive(Clone)]
-pub enum Chain {
-    Block(block::BlockChain),
-    Sync(sync::SyncChain),
+pub enum Chain<T> {
+    Block(block::BlockChain<T>),
+    Sync(sync::SyncChain<T>),
 }
 
-impl Instance for Chain {
+impl<T> Instance for Chain<T>
+where
+    T: Send + Sync,
+{
     type Class = ChainType;
 
     fn class(&self) -> Self::Class {
@@ -195,7 +136,15 @@ impl Instance for Chain {
 }
 
 #[async_trait]
-impl ChainInstance for Chain {
+impl<T> ChainInstance<T> for Chain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn>
+        + Restore<fs::Dir>
+        + TryCastFrom<State>
+        + Route
+        + Public
+        + fmt::Display,
+{
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
         match self {
             Self::Block(chain) => chain.append_delete(txn_id, path, key).await,
@@ -216,14 +165,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        match self {
-            Self::Block(chain) => chain.hash(txn).await,
-            Self::Sync(chain) => chain.hash(txn).await,
-        }
-    }
-
-    fn subject(&self) -> &Subject {
+    fn subject(&self) -> &T {
         match self {
             Self::Block(chain) => chain.subject(),
             Self::Sync(chain) => chain.subject(),
@@ -246,10 +188,13 @@ impl ChainInstance for Chain {
 }
 
 #[async_trait]
-impl Transact for Chain {
-    type Commit = ();
+impl<T> Transact for Chain<T>
+where
+    T: Transact + Send + Sync,
+{
+    type Commit = T::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) {
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         match self {
             Self::Block(chain) => chain.commit(txn_id).await,
             Self::Sync(chain) => chain.commit(txn_id).await,
@@ -265,62 +210,67 @@ impl Transact for Chain {
 }
 
 #[async_trait]
-impl de::FromStream for Chain {
-    type Context = Txn;
-
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_map(ChainVisitor::new(txn)).await
-    }
-}
-
-#[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for Chain {
+impl<T> Persist<fs::Dir> for Chain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
+    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
+{
+    type Schema = (ChainType, T::Schema);
+    type Store = fs::Dir;
     type Txn = Txn;
-    type View = ChainView<'en>;
 
-    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        let class = self.class();
-
-        let data = match self {
-            Self::Block(chain) => chain.into_view(txn).map_ok(ChainViewData::Block).await,
-            Self::Sync(chain) => {
-                chain
-                    .into_view(txn)
-                    .map_ok(Box::new)
-                    .map_ok(ChainViewData::Sync)
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let (class, schema) = schema;
+        match class {
+            ChainType::Block => {
+                BlockChain::load(txn, schema, store)
+                    .map_ok(Self::Block)
                     .await
             }
-        }?;
-
-        Ok(ChainView { class, data })
+            ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+        }
     }
 }
 
-impl fmt::Debug for Chain {
+impl<T> fmt::Debug for Chain<T>
+where
+    Self: Instance,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "instance of {} with subject type {}",
+            self.class(),
+            std::any::type_name::<T>()
+        )
+    }
+}
+
+impl<T> fmt::Display for Chain<T>
+where
+    Self: Instance,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "instance of {}", self.class())
     }
 }
 
-impl fmt::Display for Chain {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "instance of {}", self.class())
-    }
-}
-
-/// A helper struct for [`ChainView`]
-pub enum ChainViewData<'en> {
-    Block((Schema, data::HistoryView<'en>)),
-    Sync(Box<(Schema, StateView<'en>)>),
+enum ChainViewData<'en, T> {
+    Block((T, data::HistoryView<'en>)),
+    Sync(T),
 }
 
 /// A view of a [`Chain`] within a single `Transaction`, used for serialization.
-pub struct ChainView<'en> {
+pub struct ChainView<'en, T> {
     class: ChainType,
-    data: ChainViewData<'en>,
+    data: ChainViewData<'en, T>,
 }
 
-impl<'en> en::IntoStream<'en> for ChainView<'en> {
+impl<'en, T> en::IntoStream<'en> for ChainView<'en, T>
+where
+    T: en::IntoStream<'en> + 'en,
+{
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use destream::en::EncodeMap;
 
@@ -336,33 +286,54 @@ impl<'en> en::IntoStream<'en> for ChainView<'en> {
     }
 }
 
-/// Load a [`Chain`] from disk.
-pub async fn load(txn: &Txn, class: ChainType, schema: Schema, dir: fs::Dir) -> TCResult<Chain> {
-    match class {
-        ChainType::Block => {
-            BlockChain::load(txn, schema, dir)
-                .map_ok(Chain::Block)
-                .await
-        }
-        ChainType::Sync => SyncChain::load(txn, schema, dir).map_ok(Chain::Sync).await,
+#[async_trait]
+impl<'en, T> IntoView<'en, fs::Dir> for Chain<T>
+where
+    T: IntoView<'en, fs::Dir, Txn = Txn> + 'en,
+    Chain<T>: Instance<Class = ChainType>,
+    BlockChain<T>:
+        IntoView<'en, fs::Dir, View = (T::View, data::HistoryView<'en>), Txn = Txn> + Send + Sync,
+    SyncChain<T>: IntoView<'en, fs::Dir, View = T::View, Txn = Txn> + Send + Sync,
+{
+    type Txn = Txn;
+    type View = ChainView<'en, T::View>;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let class = self.class();
+
+        let data = match self {
+            Self::Block(chain) => chain.into_view(txn).map_ok(ChainViewData::Block).await,
+            Self::Sync(chain) => chain.into_view(txn).map_ok(ChainViewData::Sync).await,
+        }?;
+
+        Ok(ChainView { class, data })
     }
 }
 
 /// A [`de::Visitor`] for deserializing a [`Chain`].
-pub struct ChainVisitor {
+pub struct ChainVisitor<T> {
     txn: Txn,
+    phantom: PhantomData<T>,
 }
 
-impl ChainVisitor {
-    pub fn new(txn: Txn) -> Self {
-        Self { txn }
+impl<T> ChainVisitor<T> {
+    pub(crate) fn new(txn: Txn) -> Self {
+        Self {
+            txn,
+            phantom: PhantomData,
+        }
     }
+}
 
-    pub async fn visit_map_value<A: de::MapAccess>(
+impl<T> ChainVisitor<T>
+where
+    T: Route + Public + de::FromStream<Context = Txn>,
+{
+    pub(crate) async fn visit_map_value<A: de::MapAccess>(
         self,
         class: ChainType,
         access: &mut A,
-    ) -> Result<Chain, A::Error> {
+    ) -> Result<Chain<T>, A::Error> {
         match class {
             ChainType::Block => {
                 access
@@ -377,8 +348,11 @@ impl ChainVisitor {
 }
 
 #[async_trait]
-impl de::Visitor for ChainVisitor {
-    type Value = Chain;
+impl<T> de::Visitor for ChainVisitor<T>
+where
+    T: Route + Public + de::FromStream<Context = Txn>,
+{
+    type Value = Chain<T>;
 
     fn expecting() -> &'static str {
         "a Chain"
@@ -393,6 +367,18 @@ impl de::Visitor for ChainVisitor {
         };
 
         self.visit_map_value(class, &mut map).await
+    }
+}
+
+#[async_trait]
+impl<T> de::FromStream for Chain<T>
+where
+    T: Route + Public + de::FromStream<Context = Txn>,
+{
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(ChainVisitor::new(txn)).await
     }
 }
 

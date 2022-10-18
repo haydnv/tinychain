@@ -376,6 +376,8 @@ pub trait TensorPersist: Sized {
     fn as_persistent(self) -> Option<Self::Persistent> {
         None
     }
+
+    fn is_persistent(&self) -> bool;
 }
 
 /// [`Tensor`] reduction operations

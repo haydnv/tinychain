@@ -1,26 +1,29 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
 
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
+
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
-use log::{debug, trace};
-use sha2::digest::Output;
-use sha2::Sha256;
+use log::debug;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist};
+use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label, TCPathBuf};
 
 use crate::fs;
-use crate::state::{State, StateView};
+use crate::route::{Public, Route};
+use crate::state::State;
 use crate::txn::Txn;
 
-use super::{null_hash, ChainBlock, ChainInstance, Schema, Subject};
+use super::{null_hash, ChainBlock, ChainInstance};
 
 const BLOCKS: Label = label("blocks");
 const COMMITTED: &str = "committed.chain_block";
@@ -30,16 +33,23 @@ const STORE: Label = label("store");
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
 #[derive(Clone)]
-pub struct SyncChain {
-    schema: Schema,
-    subject: Subject,
+pub struct SyncChain<T> {
+    subject: T,
     pending: FileLock<fs::CacheBlock>,
     committed: FileLock<fs::CacheBlock>,
     store: super::data::Store,
 }
 
 #[async_trait]
-impl ChainInstance for SyncChain {
+impl<T> ChainInstance<T> for SyncChain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn>
+        + Restore<fs::Dir>
+        + TryCastFrom<State>
+        + Route
+        + Public
+        + fmt::Display,
+{
     async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
         let mut block: FileWriteGuard<_, ChainBlock> =
             self.pending.write().map_err(fs::io_err).await?;
@@ -69,17 +79,19 @@ impl ChainInstance for SyncChain {
         Ok(())
     }
 
-    async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        self.subject.hash(txn).await
-    }
-
-    fn subject(&self) -> &Subject {
+    fn subject(&self) -> &T {
         &self.subject
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let subject = txn.get(source, Value::None).await?;
-        self.subject.restore(txn, subject).await?;
+        let backup = txn.get(source, Value::None).await?;
+        let backup = backup.try_cast_into(|backup| {
+            TCError::unsupported(format!(
+                "{} is not a valid backup of {}",
+                backup, &self.subject
+            ))
+        })?;
+        self.subject.restore(&backup, *txn.id()).await?;
 
         let (mut pending, mut committed): (
             FileWriteGuard<_, ChainBlock>,
@@ -119,27 +131,26 @@ impl ChainInstance for SyncChain {
 }
 
 #[async_trait]
-impl Persist<fs::Dir> for SyncChain {
-    type Schema = Schema;
+impl<T> Persist<fs::Dir> for SyncChain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn>,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
+    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
+{
+    type Schema = T::Schema;
     type Store = fs::Dir;
     type Txn = Txn;
 
-    async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+    async fn load(txn: &Txn, schema: T::Schema, dir: fs::Dir) -> TCResult<Self> {
         debug!("SyncChain::load");
 
-        let subject = Subject::load(txn, schema.clone(), &dir).await?;
+        let mut dir = dir.write(*txn.id()).await?;
 
-        trace!("SyncChain::load loaded {}", subject);
-
-        let txn_id = *txn.id();
-        let store = {
-            let mut dir = dir.write(txn_id).await?;
-            dir.get_or_create_dir(STORE.into())
-                .map(super::data::Store::new)?
-        };
+        let store = dir
+            .get_or_create_dir(STORE.into())
+            .map(super::data::Store::new)?;
 
         let mut blocks_dir = {
-            let mut dir = dir.write(txn_id).await?;
             let file: fs::File<Id, ChainBlock> = dir.get_or_create_file(BLOCKS.into())?;
             file.into_inner().write().await
         };
@@ -147,7 +158,7 @@ impl Persist<fs::Dir> for SyncChain {
         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
             file
         } else {
-            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+            let block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
             blocks_dir
                 .create_file(PENDING.to_string(), block, Some(0))
                 .map_err(fs::io_err)?
@@ -162,8 +173,14 @@ impl Persist<fs::Dir> for SyncChain {
                 .map_err(fs::io_err)?
         };
 
+        let subject_store = dir
+            .get_or_create_store(super::SUBJECT.into())
+            .try_into()
+            .map_err(TCError::from)?;
+
+        let subject = T::load(txn, schema, subject_store).await?;
+
         Ok(SyncChain {
-            schema,
             subject,
             pending,
             committed,
@@ -173,10 +190,13 @@ impl Persist<fs::Dir> for SyncChain {
 }
 
 #[async_trait]
-impl Transact for SyncChain {
-    type Commit = ();
+impl<T> Transact for SyncChain<T>
+where
+    T: Transact + Send + Sync,
+{
+    type Commit = T::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) {
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("SyncChain::commit");
 
         let guard = self.subject.commit(txn_id).await;
@@ -209,50 +229,24 @@ impl Transact for SyncChain {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for SyncChain {
-    type Txn = Txn;
-    type View = (Schema, StateView<'en>);
+impl<T> de::FromStream for SyncChain<T>
+where
+    T: FromStream<Context = Txn>,
+{
+    type Context = Txn;
 
-    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        Ok((self.schema, self.subject.into_view(txn).await?))
-    }
-}
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let subject = txn
+            .subcontext(super::SUBJECT.into())
+            .map_err(de::Error::custom)
+            .and_then(|txn| T::from_stream(txn, decoder))
+            .await?;
 
-struct ChainVisitor {
-    txn: Txn,
-}
-
-#[async_trait]
-impl de::Visitor for ChainVisitor {
-    type Value = SyncChain;
-
-    fn expecting() -> &'static str {
-        "a SyncChain"
-    }
-
-    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let null_hash = null_hash();
-        let txn_id = *self.txn.id();
-        let mut dir = {
-            let dir = self
-                .txn
-                .context()
-                .create_dir_unique(txn_id)
-                .map_err(de::Error::custom)
-                .await?;
-
-            dir.write(txn_id).map_err(de::Error::custom).await?
-        };
-
-        let schema = seq
-            .next_element(())
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(0, "a SyncChain schema"))?;
-
-        let subject = seq
-            .next_element(self.txn)
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(1, "the subject of a SyncChain"))?;
+        let mut dir = txn
+            .context()
+            .write(*txn.id())
+            .map_err(de::Error::custom)
+            .await?;
 
         let store = dir
             .create_dir(STORE.into())
@@ -266,6 +260,7 @@ impl de::Visitor for ChainVisitor {
             file.into_inner().write().await
         };
 
+        let null_hash = null_hash();
         let committed = blocks_dir
             .create_file(
                 COMMITTED.to_string(),
@@ -277,13 +272,12 @@ impl de::Visitor for ChainVisitor {
         let pending = blocks_dir
             .create_file(
                 PENDING.to_string(),
-                ChainBlock::with_txn(null_hash.to_vec(), txn_id),
+                ChainBlock::with_txn(null_hash.to_vec(), *txn.id()),
                 Some(null_hash.len()),
             )
             .map_err(de::Error::custom)?;
 
-        Ok(SyncChain {
-            schema,
+        Ok(Self {
             subject,
             pending,
             committed,
@@ -293,11 +287,15 @@ impl de::Visitor for ChainVisitor {
 }
 
 #[async_trait]
-impl de::FromStream for SyncChain {
-    type Context = Txn;
+impl<'en, T> IntoView<'en, fs::Dir> for SyncChain<T>
+where
+    T: IntoView<'en, fs::Dir, Txn = Txn> + Send + Sync,
+    Self: Send + Sync,
+{
+    type Txn = Txn;
+    type View = T::View;
 
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let visitor = ChainVisitor { txn };
-        decoder.decode_seq(visitor).await
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        self.subject.into_view(txn).await
     }
 }

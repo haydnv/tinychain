@@ -28,6 +28,7 @@ use crate::txn::{Actor, Txn, TxnId};
 
 use owner::Owner;
 
+use crate::collection::CollectionBase;
 use futures::stream::FuturesUnordered;
 pub use load::instantiate;
 
@@ -52,7 +53,7 @@ impl fmt::Display for ClusterType {
 pub struct Cluster {
     link: Link,
     actor: Arc<Actor>,
-    chains: Map<Chain>,
+    chains: Map<Chain<CollectionBase>>,
     classes: Map<InstanceClass>,
     owned: RwLock<HashMap<TxnId, Owner>>,
     replicas: TxnLock<HashSet<Link>>,
@@ -60,7 +61,7 @@ pub struct Cluster {
 
 impl Cluster {
     /// Borrow one of this cluster's [`Chain`]s.
-    pub fn chain(&self, name: &Id) -> Option<&Chain> {
+    pub fn chain(&self, name: &Id) -> Option<&Chain<CollectionBase>> {
         self.chains.get(name)
     }
 

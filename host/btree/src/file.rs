@@ -768,6 +768,13 @@ where
         let order = validate_schema(&schema)?;
 
         let txn_id = *txn.id();
+
+        if file_contents.is_empty() {
+            // TODO: there must be a better way to do this
+            std::mem::drop(file_contents);
+            return Self::create(file, schema, txn_id).await;
+        }
+
         let mut root = None;
         for block_id in file_contents.block_ids() {
             debug!("BTreeFile::load block {}", block_id);
