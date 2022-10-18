@@ -133,7 +133,22 @@ where
     }
 }
 
-impl fs::Store for Store {}
+#[async_trait]
+impl fs::Store for Store {
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        match self.parent.contents.get(&self.name) {
+            Some(DirEntry::Dir(dir)) => fs::Store::is_empty(&dir, txn_id).await,
+            Some(DirEntry::File(file)) => match file {
+                FileEntry::BTree(file) => fs::Store::is_empty(&file, txn_id).await,
+                FileEntry::Chain(file) => fs::Store::is_empty(&file, txn_id).await,
+                FileEntry::Scalar(file) => fs::Store::is_empty(&file, txn_id).await,
+                #[cfg(feature = "tensor")]
+                FileEntry::Tensor(file) => fs::Store::is_empty(&file, txn_id).await,
+            },
+            None => Ok(true),
+        }
+    }
+}
 
 /// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
@@ -381,7 +396,13 @@ impl fs::Dir for Dir {
 }
 
 #[async_trait]
-impl fs::Store for Dir {}
+impl fs::Store for Dir {
+    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        tc_transact::fs::Dir::read(self, txn_id)
+            .map_ok(|guard| fs::DirRead::is_empty(&guard))
+            .await
+    }
+}
 
 #[async_trait]
 impl Transact for Dir {

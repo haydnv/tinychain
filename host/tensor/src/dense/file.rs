@@ -619,8 +619,24 @@ where
     type Store = FD;
     type Txn = T;
 
-    async fn load(_txn: &T, schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
-        Ok(Self::new(file, schema))
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        schema.validate("create dense tensor")?;
+        Self::constant(store, *txn.id(), schema.shape, schema.dtype.zero()).await
+    }
+
+    async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        schema.validate("load dense tensor")?;
+
+        let txn_id = *txn.id();
+        let file = store.read(txn_id).await?;
+
+        for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
+            if !file.contains(i) {
+                return Err(TCError::bad_request("tensor is missing block", i));
+            }
+        }
+
+        Ok(Self::new(store, schema))
     }
 }
 

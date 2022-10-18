@@ -165,13 +165,6 @@ where
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
-    /// Create a new `SparseTensor` with the given schema
-    pub async fn create(dir: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        SparseTable::create(dir, schema, txn_id)
-            .map_ok(Self::from)
-            .await
-    }
-
     /// Tile the given `tensor` into a new `SparseTensor`
     pub async fn tile(
         txn: T,
@@ -203,7 +196,7 @@ where
             }
         };
 
-        let output = Self::create(&dir, Schema { shape, dtype }, txn_id).await?;
+        let output = Self::create(&txn, Schema { shape, dtype }, dir).await?;
         tile(txn, input, output, multiples).await
     }
 }
@@ -215,6 +208,13 @@ impl<FD, FS, D, T> TensorPersist for SparseTensor<FD, FS, D, T, SparseAccessor<F
         match self.accessor {
             SparseAccessor::Table(table) => Some(table.into()),
             _ => None,
+        }
+    }
+
+    fn is_persistent(&self) -> bool {
+        match &self.accessor {
+            SparseAccessor::Table(_) => true,
+            _ => false,
         }
     }
 }
@@ -523,6 +523,7 @@ where
     FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
     SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
@@ -550,7 +551,7 @@ where
         let shape = vec![size].into();
         let dtype = self.dtype();
         let schema = Schema { shape, dtype };
-        let table = SparseTable::create(&dir, schema, txn_id).await?;
+        let table = SparseTable::create(&txn, schema, dir).await?;
 
         let filled = self.accessor.filled(txn).await?;
         filled
@@ -673,6 +674,7 @@ where
     D: Dir,
     T: Transaction<D>,
     A: SparseWrite<FD, FS, D, T>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
@@ -701,7 +703,7 @@ where
         let txn_id = *txn.id();
         let dir = txn.context().create_dir_unique(txn_id).await?;
 
-        let table = SparseTable::create(&dir, schema, txn_id).await?;
+        let table = SparseTable::create(&txn, schema, dir).await?;
 
         let dim = self.shape()[axis];
         let zero = self.dtype().zero();
@@ -836,6 +838,7 @@ where
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
     R: SparseAccess<FD, FS, D, T>,
+    D::Read: DirReadFile<FS>,
 {
     type Combine = SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, L, R>>;
     type LeftCombine = SparseTensor<FD, FS, D, T, SparseLeftCombinator<FD, FS, D, T, L, R>>;
@@ -898,6 +901,7 @@ where
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = Tensor<FD, FS, D, T>;
@@ -1313,6 +1317,12 @@ where
     type Store = D;
     type Txn = T;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        SparseTable::create(txn, schema, store)
+            .map_ok(Self::from)
+            .await
+    }
+
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         SparseTable::load(txn, schema, store)
             .map_ok(Self::from)
@@ -1460,7 +1470,7 @@ where
         schema.validate("load Sparse").map_err(de::Error::custom)?;
 
         let txn_id = *self.txn.id();
-        let table = SparseTable::create(self.txn.context(), schema, txn_id)
+        let table = SparseTable::create(&self.txn, schema, self.txn.context().clone())
             .map_err(de::Error::custom)
             .await?;
 

@@ -1,7 +1,5 @@
 from .test_app import UserTests
 from .test_btree import BTreeChainTests
-from .test_chain import MapChainTests
-from .test_graph import GraphTests
 from .test_inheritance import InheritanceTests
 from .test_linalg import LinearAlgebraTests
 from .test_neural_net import NeuralNetTests

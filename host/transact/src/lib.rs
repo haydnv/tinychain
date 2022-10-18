@@ -19,7 +19,7 @@ pub use id::{TxnId, MIN_ID};
 #[async_trait]
 pub trait IntoView<'en, D: fs::Dir> {
     type Txn: Transaction<D>;
-    type View: en::IntoStream<'en> + Sized;
+    type View: en::IntoStream<'en> + Sized + 'en;
 
     /// Return a `View` which can be encoded with [`en::IntoStream`].
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View>;
@@ -29,7 +29,7 @@ pub trait IntoView<'en, D: fs::Dir> {
 #[async_trait]
 pub trait Transact {
     /// A guard which blocks concurrent commits
-    type Commit;
+    type Commit: Send + Sync;
 
     /// Commit this transaction.
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit;

@@ -3,16 +3,18 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use log::{debug, trace};
+use safecast::TryCastInto;
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate};
+use tc_transact::fs::{Dir, DirCreate, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
-use crate::chain::{self, Chain, ChainType, Schema};
+use crate::chain::{Chain, ChainType};
+use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::{OpRef, Refer, Scalar};
@@ -73,7 +75,12 @@ pub async fn instantiate(
                             .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
 
                         debug!("an instance of {} with schema {}", ct, schema);
-                        let schema = Schema::from_scalar(schema)?;
+                        let schema = schema.try_cast_into(|scalar| {
+                            TCError::bad_request("invalid schema for Collection", scalar)
+                        })?;
+
+                        let schema = CollectionSchema::from_scalar(schema)?;
+
                         chain_schema.insert(id, (ct, schema));
                     }
                     OpRef::Post((extends, proto)) => {
@@ -115,12 +122,12 @@ pub async fn instantiate(
     let mut replicas = HashSet::new();
     replicas.insert((host, link.path().clone()).into());
 
-    let mut chains = Map::<Chain>::new();
+    let mut chains = Map::<Chain<CollectionBase>>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
         let dir = dir.get_or_create_dir(id.clone())?;
-        let chain = chain::load(txn, class, schema, dir).await?;
+        let chain = Chain::load_or_create(txn, (class, schema), dir).await?;
         trace!("loaded chain {}", id);
 
         chains.insert(id, chain);

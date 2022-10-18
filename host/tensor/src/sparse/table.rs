@@ -46,20 +46,6 @@ where
     T: Transaction<D>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
-    /// Create a new `SparseTable` with the given [`Schema`].
-    pub async fn create(context: &D, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        schema.validate("create Sparse")?;
-
-        let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::create(context, table_schema, txn_id).await?;
-
-        Ok(Self {
-            table,
-            schema,
-            dense: PhantomData,
-        })
-    }
-
     fn table_schema(schema: &Schema) -> TableSchema {
         let ndim = schema.shape.len();
         let u64_type = NumberType::uint64();
@@ -266,7 +252,7 @@ where
         let shape = instance.shape().clone();
         let dtype = instance.dtype();
         let schema = Schema { shape, dtype };
-        let accessor = SparseTable::create(&store, schema, txn_id).await?;
+        let accessor = SparseTable::create(txn, schema, store).await?;
 
         let filled = instance.accessor.filled(txn.clone()).await?;
 
@@ -294,7 +280,21 @@ where
     type Store = D;
     type Txn = T;
 
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        schema.validate("create sparse tensor")?;
+
+        let table_schema = Self::table_schema(&schema);
+        let table = TableIndex::create(txn, table_schema, store).await?;
+        Ok(Self {
+            table,
+            schema,
+            dense: PhantomData,
+        })
+    }
+
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        schema.validate("create sparse tensor")?;
+
         let table_schema = Self::table_schema(&schema);
         let table = TableIndex::load(txn, table_schema, store).await?;
         Ok(Self {

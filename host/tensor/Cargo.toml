@@ -24,8 +24,8 @@ num_cpus = "1.13"
 pin-project = "1.0"
 safecast = "~0.1.2"
 strided = "~0.2.9"
-tc-error = "0.6"
+tc-error = { path = "../error" }
 tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = "0.7"
+tc-value = { path = "../value" }
 tc-table = { path = "../table" }
-tcgeneric = "0.5"
+tcgeneric = { path = "../generic" }

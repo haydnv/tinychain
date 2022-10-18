@@ -5,7 +5,7 @@ use tc_table::TableInstance;
 use tc_value::Value;
 use tcgeneric::{PathSegment, Tuple};
 
-use crate::collection::{Collection, CollectionType};
+use crate::collection::{Collection, CollectionBase, CollectionType};
 use crate::route::GetHandler;
 
 use super::{Handler, Route};
@@ -86,6 +86,19 @@ impl Route for Collection {
             }
         } else {
             None
+        }
+    }
+}
+
+impl Route for CollectionBase {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match self {
+            Self::BTree(btree) => btree.route(path),
+            Self::Table(table) => table.route(path),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.route(path),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => sparse.route(path),
         }
     }
 }

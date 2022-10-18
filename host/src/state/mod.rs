@@ -21,7 +21,7 @@ use tc_transact::Transaction;
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{Chain, ChainInstance, ChainType, ChainVisitor};
+use crate::chain::{Chain, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -189,7 +189,7 @@ impl fmt::Display for StateType {
 #[derive(Clone)]
 pub enum State {
     Collection(Collection),
-    Chain(Chain),
+    Chain(Chain<CollectionBase>),
     Closure(Closure),
     Map(Map<Self>),
     Object(Object),
@@ -204,7 +204,7 @@ impl State {
         Box::pin(async move {
             match self {
                 Self::Collection(collection) => collection.hash(txn).await,
-                Self::Chain(chain) => chain.hash(txn).await,
+                Self::Chain(_chain) => Err(TCError::not_implemented("Chain hash")),
                 Self::Closure(closure) => closure.hash(txn).await,
                 Self::Map(map) => {
                     let mut hashes = stream::iter(map)
@@ -483,8 +483,8 @@ impl From<BTree> for State {
     }
 }
 
-impl From<Chain> for State {
-    fn from(chain: Chain) -> Self {
+impl From<Chain<CollectionBase>> for State {
+    fn from(chain: Chain<CollectionBase>) -> Self {
         Self::Chain(chain)
     }
 }
@@ -784,6 +784,22 @@ impl TryCastFrom<State> for Closure {
         match state {
             State::Closure(closure) => Some(closure),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for CollectionBase {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(collection) => CollectionBase::can_cast_from(collection),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => CollectionBase::opt_cast_from(collection),
             _ => None,
         }
     }
@@ -1098,6 +1114,7 @@ impl StateVisitor {
             StateType::Collection(ct) => {
                 CollectionVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
+                    .map_ok(Collection::from)
                     .map_ok(State::Collection)
                     .await
             }

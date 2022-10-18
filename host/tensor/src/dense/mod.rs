@@ -15,7 +15,7 @@ use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_table::{Node, NodeId};
-use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
@@ -122,16 +122,6 @@ where
     FS: File<Key = NodeId, Block = Node>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
-    /// Create a new `DenseTensor` with the given [`Schema`].
-    pub async fn create(file: FD, schema: Schema, txn_id: TxnId) -> TCResult<Self> {
-        schema.validate("create Dense")?;
-
-        let Schema { shape, dtype } = schema;
-        BlockListFile::constant(file, txn_id, shape, dtype.zero())
-            .map_ok(Self::from)
-            .await
-    }
-
     /// Create a new `DenseTensor` filled with the given `value`.
     pub async fn constant<S>(file: FD, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
     where
@@ -141,6 +131,7 @@ where
             shape: shape.into(),
             dtype: value.class(),
         };
+
         schema.validate("create Dense constant")?;
 
         BlockListFile::constant(file, txn_id, schema.shape, value)
@@ -215,6 +206,13 @@ impl<FD, FS, D, T> TensorPersist for DenseTensor<FD, FS, D, T, DenseAccessor<FD,
         match self.into_inner() {
             DenseAccessor::File(file) => Some(file.into()),
             _ => None,
+        }
+    }
+
+    fn is_persistent(&self) -> bool {
+        match &self.blocks {
+            DenseAccessor::File(_) => true,
+            _ => false,
         }
     }
 }
@@ -898,6 +896,7 @@ where
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Combine = Tensor<FD, FS, D, T>;
@@ -1387,6 +1386,12 @@ where
     type Schema = Schema;
     type Store = FD;
     type Txn = T;
+
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        BlockListFile::create(txn, schema, store)
+            .map_ok(Self::from)
+            .await
+    }
 
     async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
         BlockListFile::load(txn, schema, store)

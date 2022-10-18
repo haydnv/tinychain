@@ -4,7 +4,7 @@ use std::fmt;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use freqfs::{DirLock, FileReadGuard, FileWriteGuard};
+use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileWriteGuard};
 use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
@@ -17,10 +17,10 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
 
-use crate::chain::{null_hash, Subject, BLOCK_SIZE, CHAIN};
+use crate::chain::{null_hash, BLOCK_SIZE, CHAIN};
 use crate::fs;
 use crate::fs::CacheBlock;
-use crate::route::Public;
+use crate::route::{Public, Route};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -104,13 +104,13 @@ impl History {
         block.write().map_err(fs::io_err).await
     }
 
-    pub async fn read_latest(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
-        let latest = self.latest.read(txn_id).await?;
-        self.read_block(*latest).await
-    }
+    // pub async fn read_latest(
+    //     &self,
+    //     txn_id: TxnId,
+    // ) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
+    //     let latest = self.latest.read(txn_id).await?;
+    //     self.read_block(*latest).await
+    // }
 
     pub async fn write_latest(
         &self,
@@ -130,7 +130,10 @@ impl History {
         log.read().map_err(fs::io_err).await
     }
 
-    pub async fn replicate(&self, txn: &Txn, subject: &Subject, other: Self) -> TCResult<()> {
+    pub async fn replicate<T>(&self, txn: &Txn, subject: &T, other: Self) -> TCResult<()>
+    where
+        T: Route + Public,
+    {
         let err_divergent =
             |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
 
@@ -183,7 +186,7 @@ impl History {
 
                 assert!(!dest.mutations.contains_key(txn_id));
                 replay_and_save(
-                    &subject,
+                    subject,
                     txn,
                     *txn_id,
                     ops,
@@ -226,7 +229,7 @@ impl History {
                 assert!(!dest.mutations.contains_key(txn_id));
 
                 replay_and_save(
-                    &subject,
+                    subject,
                     txn,
                     *txn_id,
                     ops,
@@ -282,11 +285,34 @@ impl Persist<fs::Dir> for History {
     type Store = fs::Dir;
     type Txn = Txn;
 
-    async fn load(txn: &Txn, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, _schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
         let txn_id = txn.id();
 
-        // if there's no data in the data dir, it may not have been sync'd to the filesystem
-        // so just create a new one
+        let store = {
+            let mut dir = dir.write(*txn_id).await?;
+            dir.create_dir(STORE.into()).map(Store::new)?
+        };
+
+        let file = {
+            let mut dir = dir.into_inner().write().await;
+            dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
+        };
+
+        let mut file_lock = file.write().await;
+
+        let cutoff = *txn_id;
+        let latest = 0;
+
+        create_block(&mut file_lock, PENDING).await?;
+        create_block(&mut file_lock, WRITE_AHEAD).await?;
+        create_block(&mut file_lock, latest).await?;
+
+        Ok(Self::new(file.clone(), store, latest, cutoff))
+    }
+
+    async fn load(txn: &Txn, _schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+        let txn_id = txn.id();
+
         let store = {
             let mut dir = dir.write(*txn_id).await?;
             dir.get_or_create_dir(STORE.into()).map(Store::new)?
@@ -294,11 +320,8 @@ impl Persist<fs::Dir> for History {
 
         let file = {
             let mut dir = dir.into_inner().write().await;
-            if let Some(file) = dir.get_dir(&block_name(CHAIN)) {
-                file.clone()
-            } else {
-                dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
-            }
+            dir.get_or_create_dir(block_name(CHAIN))
+                .map_err(fs::io_err)?
         };
 
         let mut file_lock = file.write().await;
@@ -307,40 +330,9 @@ impl Persist<fs::Dir> for History {
         let mut latest = 0;
         let mut last_hash = Bytes::from(null_hash().to_vec());
 
-        if file_lock.get_file(&block_name(PENDING)).is_none() {
-            // the pending block may never be sync'd to the filesystem
-            file_lock
-                .create_file(
-                    block_name(PENDING),
-                    ChainBlock::new(last_hash.clone()),
-                    Some(last_hash.len()),
-                )
-                .map_err(fs::io_err)?;
-        }
-
-        if file_lock.get_file(&block_name(WRITE_AHEAD)).is_none() {
-            // if there were no mutations committed after the chain was created,
-            // it may not have a write-ahead block on the filesystem, so just create one now
-            file_lock
-                .create_file(
-                    block_name(WRITE_AHEAD),
-                    ChainBlock::new(last_hash.clone()),
-                    Some(last_hash.len()),
-                )
-                .map_err(fs::io_err)?;
-        }
-
-        if file_lock.get_file(&block_name(latest)).is_none() {
-            // if there were no mutations committed after the chain was created,
-            // it may not have an initial block on the filesystem, so just create one now
-            file_lock
-                .create_file(
-                    block_name(latest),
-                    ChainBlock::new(last_hash.clone()),
-                    Some(last_hash.len()),
-                )
-                .map_err(fs::io_err)?;
-        }
+        get_or_create_block(&mut file_lock, PENDING).await?;
+        get_or_create_block(&mut file_lock, WRITE_AHEAD).await?;
+        get_or_create_block(&mut file_lock, latest).await?;
 
         while let Some(block) = file_lock.get_file(&block_name(latest)) {
             let block: FileReadGuard<_, ChainBlock> = block.read().map_err(fs::io_err).await?;
@@ -361,6 +353,32 @@ impl Persist<fs::Dir> for History {
         let latest = if latest == 0 { 0 } else { latest - 1 };
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
+}
+
+async fn get_or_create_block<I: fmt::Display>(
+    cache: &mut DirWriteGuard<CacheBlock>,
+    name: I,
+) -> TCResult<FileLock<CacheBlock>> {
+    if let Some(file) = cache.get_file(&block_name(&name)) {
+        Ok(file)
+    } else {
+        create_block(cache, name).await
+    }
+}
+
+async fn create_block<I: fmt::Display>(
+    cache: &mut DirWriteGuard<CacheBlock>,
+    name: I,
+) -> TCResult<FileLock<CacheBlock>> {
+    let last_hash = Bytes::from(null_hash().to_vec());
+
+    cache
+        .create_file(
+            block_name(name),
+            ChainBlock::new(last_hash.clone()),
+            Some(last_hash.len()),
+        )
+        .map_err(fs::io_err)
 }
 
 #[async_trait]
@@ -590,15 +608,18 @@ async fn parse_block_state(
     Ok(mutations)
 }
 
-async fn replay_and_save(
-    subject: &Subject,
+async fn replay_and_save<T>(
+    subject: &T,
     txn: &Txn,
     txn_id: TxnId,
     ops: &[Mutation],
     source: &Store,
     dest: &Store,
     block: &mut ChainBlock,
-) -> TCResult<()> {
+) -> TCResult<()>
+where
+    T: Route + Public,
+{
     for op in ops {
         match op {
             Mutation::Delete(path, key) => {
