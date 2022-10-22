@@ -28,8 +28,11 @@ use crate::txn::{Actor, Txn, TxnId};
 use owner::Owner;
 
 use futures::stream::FuturesUnordered;
+
+pub use library::Dir;
 pub use load::instantiate;
 
+mod library;
 mod load; // TODO: delete
 mod owner;
 
@@ -44,6 +47,7 @@ pub trait Replica: Transact {
 
 /// The [`Class`] of a [`Cluster`].
 pub enum ClusterType {
+    Dir,
     Legacy,
 }
 
@@ -65,6 +69,19 @@ pub struct Cluster<T> {
 }
 
 impl<T> Cluster<T> {
+    /// Create a new [`Cluster`] to manage replication of the given `state`.
+    pub fn with_state(link: Link, state: T) -> Self {
+        let replicas = [&link].iter().map(|link| (*link).clone()).collect();
+
+        Self {
+            replicas: TxnLock::new(format!("replicas of {}", link), replicas),
+            actor: Arc::new(Actor::new(Value::None)),
+            owned: RwLock::new(HashMap::new()),
+            link,
+            state,
+        }
+    }
+
     /// Borrow the canonical [`Link`] to this `Cluster` (probably not on this host).
     pub fn link(&self) -> &Link {
         &self.link
@@ -276,7 +293,10 @@ where
         W: Fn(Link) -> F + Send,
     {
         let replicas = self.replicas.read(*txn.id()).await?;
-        debug!("replicating write to {} replicas", replicas.len() - 1);
+        assert!(!replicas.is_empty());
+        if replicas.len() == 1 {
+            return Ok(());
+        }
 
         let max_failures = (replicas.len() - 1) / 2;
         let mut failed = HashSet::with_capacity(replicas.len());
@@ -319,6 +339,14 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl Instance for Cluster<Dir> {
+    type Class = ClusterType;
+
+    fn class(&self) -> Self::Class {
+        ClusterType::Dir
     }
 }
 
