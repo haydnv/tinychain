@@ -188,7 +188,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
         tc.app.write_config(dep, app_path, overwrite)
         app_configs.append(app_path)
 
-    data_dir = f"/tmp/tc/tmp/{port}/{name}"
+    data_dir = f"/tmp/tc/data/{port}/{name}"
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 

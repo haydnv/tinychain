@@ -1,3 +1,5 @@
+use std::fmt;
+
 use async_trait::async_trait;
 
 use tc_error::*;
@@ -46,5 +48,11 @@ impl Transact for Dir {
 impl From<fs::Dir> for Dir {
     fn from(dir: fs::Dir) -> Self {
         Self { dir }
+    }
+}
+
+impl fmt::Display for Dir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("library directory")
     }
 }

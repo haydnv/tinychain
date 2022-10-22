@@ -16,7 +16,8 @@ from .base import product
 # from "Numerical Recipes in C" p. 65
 EPS = 10**-6
 
-LIB_URI = URI("/lib/linalg")
+# TODO: update to use a Library at /lib
+LIB_URI = URI("/legacy/linalg")
 
 
 def diagonal(tensor):

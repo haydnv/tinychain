@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use bytes::Bytes;
 use destream::de::FromStream;
-use futures::{future, stream, TryFutureExt};
+use futures::{future, stream};
 use structopt::StructOpt;
 use tokio::time::Duration;
 
@@ -47,6 +47,7 @@ fn duration(flag: &str) -> TCResult<Duration> {
         .map_err(|_| TCError::bad_request("invalid duration", flag))
 }
 
+// TODO: replace structopt with clap
 #[derive(Clone, StructOpt)]
 struct Config {
     #[structopt(
@@ -144,6 +145,12 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         return Err(TCError::bad_request("the minimum cache size is", MIN_CACHE_SIZE).into());
     }
 
+    let address = LinkHost::new(
+        LinkProtocol::HTTP,
+        config.address.into(),
+        Some(config.http_port),
+    );
+
     let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace).await?;
     let txn_id = TxnId::new(Gateway::time());
@@ -154,12 +161,10 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
 
         let data_dir = cache.load(data_dir).await?;
-        tinychain::fs::Dir::load(data_dir, txn_id)
-            .map_ok(Some)
-            .await?
+        tinychain::fs::Dir::load(data_dir, txn_id).await
     } else {
-        None
-    };
+        Err(TCError::internal("the --data-dir option is required"))
+    }?;
 
     #[cfg(feature = "tensor")]
     {
@@ -168,17 +173,21 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
+
+    let library = {
+        let mut data_dir = tc_transact::fs::Dir::write(&data_dir, txn_id).await?;
+        tc_transact::fs::DirCreate::get_or_create_dir(&mut data_dir, kernel::LIB.into())
+            .map(cluster::Dir::from)?
+    };
+
+    // TODO: delete
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let txn_server = txn_server.clone();
-        let kernel = tinychain::Kernel::new(std::iter::empty());
+        let kernel = tinychain::Kernel::new(address.clone(), library.clone(), std::iter::empty());
         let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
         let token = gateway.new_token(&txn_id)?;
         let txn = txn_server.new_txn(gateway, txn_id, token).await?;
-
-        let data_dir = data_dir.ok_or_else(|| {
-            TCError::internal("the --data_dir option is required to host a Cluster")
-        })?;
 
         let host = LinkHost::from((
             LinkProtocol::HTTP,
@@ -204,11 +213,11 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
             clusters.push(cluster);
         }
-
-        data_dir.commit(&txn_id).await;
     }
 
-    let kernel = tinychain::Kernel::new(clusters);
+    data_dir.commit(&txn_id).await;
+
+    let kernel = tinychain::Kernel::new(address, library, clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(

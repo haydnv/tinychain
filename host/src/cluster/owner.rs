@@ -54,6 +54,7 @@ impl Owner {
 
         if mutated.is_empty() {
             debug!("no dependencies to roll back");
+            return;
         }
 
         let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dependent| {

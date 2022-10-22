@@ -8,8 +8,9 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
-use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
+use crate::cluster::{Cluster, Dir, Legacy, Replica, REPLICAS};
 use crate::route::*;
+use crate::scalar::OpRefType;
 use crate::state::State;
 
 pub struct ClusterHandler<'a, T> {
@@ -18,7 +19,7 @@ pub struct ClusterHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for ClusterHandler<'a, T>
 where
-    T: Transact + Send + Sync,
+    T: Route + Transact + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -38,16 +39,24 @@ where
         'b: 'a,
     {
         Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                if key.is_some() {
-                    return Err(TCError::unsupported("a Cluster itself is immutable"));
+            if key.is_none() {
+                return Box::pin(async move {
+                    let participant =
+                        value.try_cast_into(|s| TCError::bad_request("expected a Link, not", s))?;
+
+                    self.cluster.mutate(&txn, participant).await
+                });
+            } else if let Some(handler) = self.cluster.state().route(&[]) {
+                if let Some(handler) = handler.put() {
+                    return handler(txn, key, value);
                 }
+            }
 
-                let participant =
-                    value.try_cast_into(|s| TCError::bad_request("expected a Link, not", s))?;
-
-                self.cluster.mutate(&txn, participant).await
-            })
+            Box::pin(future::ready(Err(TCError::method_not_allowed(
+                OpRefType::Put,
+                format!("state of {}", self.cluster),
+                TCPath::default(),
+            ))))
         }))
     }
 
@@ -177,6 +186,53 @@ where
             path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
             path => self.state().route(path),
         }
+    }
+}
+
+struct DirHandler<'a> {
+    dir: &'a Dir,
+    path: &'a [PathSegment],
+}
+
+impl<'a> DirHandler<'a> {
+    fn new(dir: &'a Dir, path: &'a [PathSegment]) -> Self {
+        Self { dir, path }
+    }
+}
+
+impl<'a> Handler<'a> for DirHandler<'a> {
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.path.is_empty() {
+            Some(Box::new(|txn, key, value| {
+                Box::pin(async move {
+                    let name = key.try_cast_into(|value| {
+                        TCError::bad_request("invalid library name", value)
+                    })?;
+
+                    let lib = value.try_into_map(|state| {
+                        TCError::bad_request("invalid library definition", state)
+                    })?;
+
+                    if lib.is_empty() {
+                        self.dir.create_dir(*txn.id(), name).await?;
+                        Ok(())
+                    } else {
+                        Err(TCError::not_implemented("upload library definition"))
+                    }
+                })
+            }))
+        } else {
+            None
+        }
+    }
+}
+
+impl Route for Dir {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(DirHandler::new(self, path)))
     }
 }
 

@@ -292,6 +292,14 @@ pub struct Link {
 }
 
 impl Link {
+    /// Create a new [`Link`] with the given [`LinkHost`] and [`TCPathBuf`].
+    pub fn new(host: LinkHost, path: TCPathBuf) -> Self {
+        Self {
+            host: Some(host),
+            path,
+        }
+    }
+
     /// Consume this `Link` and return its path.
     pub fn into_path(self) -> TCPathBuf {
         self.path

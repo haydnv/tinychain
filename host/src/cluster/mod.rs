@@ -156,26 +156,30 @@ where
 
     /// Commit the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
-        let replicas = self.replicas.read(*txn.id()).await?;
+        debug!("distribute commit of {}", self);
 
-        if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            owner.commit(txn).await?;
-        }
+        {
+            let replicas = self.replicas.read(*txn.id()).await?;
 
-        let self_link = txn.link(self.link.path().clone());
-        let mut replica_commits: FuturesUnordered<_> = replicas
-            .iter()
-            .filter(|replica| *replica != &self_link)
-            .map(|replica| {
-                debug!("commit replica {}...", replica);
-                txn.post(replica.clone(), State::Map(Map::default()))
-            })
-            .collect();
+            if let Some(owner) = self.owned.read().await.get(txn.id()) {
+                owner.commit(txn).await?;
+            }
 
-        while let Some(result) = replica_commits.next().await {
-            match result {
-                Ok(_) => {}
-                Err(cause) => log::error!("commit failure: {}", cause),
+            let self_link = txn.link(self.link.path().clone());
+            let mut replica_commits: FuturesUnordered<_> = replicas
+                .iter()
+                .filter(|replica| *replica != &self_link)
+                .map(|replica| {
+                    debug!("commit replica {}...", replica);
+                    txn.post(replica.clone(), State::Map(Map::default()))
+                })
+                .collect();
+
+            while let Some(result) = replica_commits.next().await {
+                match result {
+                    Ok(_) => {}
+                    Err(cause) => log::error!("commit failure: {}", cause),
+                }
             }
         }
 
@@ -186,21 +190,28 @@ where
 
     /// Roll back the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_rollback(&self, txn: &Txn) {
-        let replicas = self.replicas.read(*txn.id()).await;
+        debug!("distribute rollback of {}", self);
 
-        if let Some(owner) = self.owned.read().await.get(txn.id()) {
-            owner.rollback(txn).await;
-        }
+        {
+            let replicas = self.replicas.read(*txn.id()).await;
 
-        if let Ok(replicas) = replicas {
-            let self_link = txn.link(self.link.path().clone());
+            if let Some(owner) = self.owned.read().await.get(txn.id()) {
+                owner.rollback(txn).await;
+            }
 
-            let replicas = replicas
-                .iter()
-                .filter(|replica| *replica != &self_link)
-                .map(|replica| txn.delete(replica.clone(), Value::None));
+            if let Ok(replicas) = replicas {
+                let self_link = txn.link(self.link.path().clone());
 
-            join_all(replicas).await;
+                let replicas = replicas
+                    .iter()
+                    .filter(|replica| *replica != &self_link)
+                    .map(|replica| {
+                        debug!("roll back replica {} of {}", replica, self);
+                        txn.delete(replica.clone(), Value::None)
+                    });
+
+                join_all(replicas).await;
+            }
         }
 
         self.finalize(txn.id()).await;
