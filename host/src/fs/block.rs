@@ -15,7 +15,7 @@ use tc_btree::Node;
 use tc_tensor::Array;
 
 use crate::chain::ChainBlock;
-use crate::scalar::Scalar;
+use crate::cluster::library;
 
 use super::file_ext;
 
@@ -24,9 +24,9 @@ use super::file_ext;
 pub enum CacheBlock {
     BTree(Node),
     Chain(ChainBlock),
+    Library(library::Version),
     #[cfg(feature = "tensor")]
     Tensor(Array),
-    Scalar(Scalar),
 }
 
 #[async_trait]
@@ -47,17 +47,17 @@ impl freqfs::FileLoad for CacheBlock {
                     .await
             }
 
-            #[cfg(feature = "tensor")]
-            Some("array") => {
+            Some("lib") => {
                 tbon::de::read_from((), file)
-                    .map_ok(Self::Tensor)
+                    .map_ok(Self::Library)
                     .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
                     .await
             }
 
-            Some("scalar") => {
+            #[cfg(feature = "tensor")]
+            Some("array") => {
                 tbon::de::read_from((), file)
-                    .map_ok(Self::Scalar)
+                    .map_ok(Self::Tensor)
                     .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
                     .await
             }
@@ -77,16 +77,16 @@ impl freqfs::FileLoad for CacheBlock {
         match self {
             Self::BTree(node) => persist(node, file).await,
             Self::Chain(block) => persist(block, file).await,
+            Self::Library(library) => persist(library, file).await,
             #[cfg(feature = "tensor")]
             Self::Tensor(array) => persist(array, file).await,
-            Self::Scalar(scalar) => persist(scalar, file).await,
         }
     }
 }
 
 as_type!(CacheBlock, BTree, Node);
 as_type!(CacheBlock, Chain, ChainBlock);
-as_type!(CacheBlock, Scalar, Scalar);
+as_type!(CacheBlock, Library, library::Version);
 #[cfg(feature = "tensor")]
 as_type!(CacheBlock, Tensor, Array);
 

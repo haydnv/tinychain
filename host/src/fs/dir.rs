@@ -18,9 +18,11 @@ use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
+use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 
 use crate::chain::{ChainBlock, ChainType};
+use crate::cluster::library;
 use crate::collection::CollectionType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
@@ -32,6 +34,7 @@ use super::{io_err, CacheBlock, File};
 pub enum FileEntry {
     BTree(File<NodeId, Node>),
     Chain(File<Id, ChainBlock>),
+    Library(File<VersionNumber, library::Version>),
 
     #[cfg(feature = "tensor")]
     Tensor(File<u64, Array>),
@@ -69,6 +72,7 @@ impl FileEntry {
 
 as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
+as_type!(FileEntry, Library, File<VersionNumber, library::Version>);
 #[cfg(feature = "tensor")]
 as_type!(FileEntry, Tensor, File<u64, Array>);
 
@@ -77,6 +81,7 @@ impl fmt::Display for FileEntry {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Library(library) => fmt::Display::fmt(library, f),
 
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
@@ -136,6 +141,7 @@ impl fs::Store for Store {
             Some(DirEntry::File(file)) => match file {
                 FileEntry::BTree(file) => fs::Store::is_empty(&file, txn_id).await,
                 FileEntry::Chain(file) => fs::Store::is_empty(&file, txn_id).await,
+                FileEntry::Library(file) => fs::Store::is_empty(&file, txn_id).await,
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => fs::Store::is_empty(&file, txn_id).await,
             },
@@ -369,6 +375,12 @@ impl Dir {
     pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
         self.cache
     }
+
+    /// Get an [`DirEntry`] from this [`Dir`] which can be a [`File`] or a sub-[`Dir`].
+    pub async fn get(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
+        let listing = self.listing.read(txn_id).await?;
+        Ok(listing.get(name).clone())
+    }
 }
 
 #[async_trait]
@@ -417,6 +429,9 @@ impl Transact for Dir {
                     FileEntry::Chain(file) => {
                         file.commit(txn_id).await;
                     }
+                    FileEntry::Library(file) => {
+                        file.commit(txn_id).await;
+                    }
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => {
                         file.commit(txn_id).await;
@@ -430,24 +445,23 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let listing = self
-            .listing
-            .read_exclusive(*txn_id)
-            .await
-            .expect("dir listing");
+        {
+            let listing = self.listing.read(*txn_id).await.expect("dir listing");
 
-        join_all(listing.iter().map(|(_, entry)| async move {
-            match entry {
-                DirEntry::Dir(dir) => dir.finalize(txn_id).await,
-                DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.finalize(txn_id).await,
-                    FileEntry::Chain(file) => file.finalize(txn_id).await,
-                    #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.finalize(txn_id).await,
-                },
-            }
-        }))
-        .await;
+            join_all(listing.iter().map(|(_, entry)| async move {
+                match entry {
+                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
+                    DirEntry::File(file) => match file {
+                        FileEntry::BTree(file) => file.finalize(txn_id).await,
+                        FileEntry::Chain(file) => file.finalize(txn_id).await,
+                        FileEntry::Library(file) => file.finalize(txn_id).await,
+                        #[cfg(feature = "tensor")]
+                        FileEntry::Tensor(file) => file.finalize(txn_id).await,
+                    },
+                }
+            }))
+            .await;
+        }
 
         self.listing.finalize(txn_id).await;
     }

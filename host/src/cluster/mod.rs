@@ -29,10 +29,10 @@ use owner::Owner;
 
 use futures::stream::FuturesUnordered;
 
-pub use library::Dir;
+pub use library::{Dir, Library};
 pub use load::instantiate;
 
-mod library;
+pub mod library;
 mod load; // TODO: delete
 mod owner;
 

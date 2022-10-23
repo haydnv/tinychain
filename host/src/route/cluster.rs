@@ -8,7 +8,7 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
-use crate::cluster::{Cluster, Dir, Legacy, Replica, REPLICAS};
+use crate::cluster::{library, Cluster, Dir, Legacy, Replica, REPLICAS};
 use crate::route::*;
 use crate::scalar::OpRefType;
 use crate::state::State;
@@ -52,6 +52,7 @@ where
                 }
             }
 
+            // TODO: add a trait boundary T: Instance so that T: fmt::Display
             Box::pin(future::ready(Err(TCError::method_not_allowed(
                 OpRefType::Put,
                 format!("state of {}", self.cluster),
@@ -220,12 +221,34 @@ impl<'a> Handler<'a> for DirHandler<'a> {
                         self.dir.create_dir(*txn.id(), name).await?;
                         Ok(())
                     } else {
-                        Err(TCError::not_implemented("upload library definition"))
+                        let lib = State::Map(lib).try_cast_into(|state| {
+                            TCError::bad_request(
+                                "library definition must be a scalar value, not",
+                                state,
+                            )
+                        })?;
+
+                        self.dir.create_lib(*txn.id(), name, lib).await?;
+                        Ok(())
                     }
                 })
             }))
         } else {
-            None
+            Some(Box::new(|txn, key, value| {
+                Box::pin(async move {
+                    match self.dir.get(*txn.id(), &self.path[0]).await? {
+                        Some(entry) => match entry {
+                            library::DirEntry::Dir(dir) => {
+                                dir.put(txn, &self.path[1..], key, value).await
+                            }
+                            library::DirEntry::Item(_lib) => {
+                                Err(TCError::not_implemented("Library::put"))
+                            }
+                        },
+                        None => Err(TCError::not_found(&self.path[0])),
+                    }
+                })
+            }))
         }
     }
 }

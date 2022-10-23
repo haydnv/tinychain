@@ -185,6 +185,10 @@ impl TCError {
         subject: S,
         path: P,
     ) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}{} does not support {}", subject, path, method);
+
+        #[cfg(not(debug_assertions))]
         Self::new(
             ErrorType::MethodNotAllowed,
             format!("{} endpoint {} does not support {}", subject, path, method),
