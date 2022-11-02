@@ -6,7 +6,7 @@ use futures::future::TryFutureExt;
 use safecast::AsType;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, DirCreate, DirCreateFile, File, FileWrite};
+use tc_transact::fs::{BlockData, DirCreate, DirCreateFile, File, FileRead, FileWrite};
 use tc_transact::{Transact, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
@@ -49,7 +49,7 @@ impl Dir {
         Ok(lib)
     }
 
-    pub async fn get(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
+    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
         match self.dir.get(txn_id, name).await? {
             Some(entry) => match entry {
                 fs::DirEntry::Dir(dir) => Ok(Some(DirEntry::Dir(Self::from(dir)))),
@@ -102,6 +102,12 @@ pub struct Version {
     lib: Map<Scalar>,
 }
 
+impl Version {
+    pub fn attribute(&self, name: &PathSegment) -> Option<&Scalar> {
+        self.lib.get(name)
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Version {
     type Context = ();
@@ -140,6 +146,12 @@ impl From<Map<Scalar>> for Version {
     }
 }
 
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "library version {}", self.lib)
+    }
+}
+
 #[derive(Clone)]
 pub struct Library {
     file: fs::File<VersionNumber, Version>,
@@ -159,10 +171,25 @@ impl Library {
         file.create_block(number, version.into(), 0).await?;
         Ok(())
     }
+
+    pub async fn get_version(
+        &self,
+        txn_id: TxnId,
+        number: VersionNumber,
+    ) -> TCResult<fs::BlockReadGuard<Version>> {
+        let file = self.file.read(txn_id).await?;
+        file.read_block(&number).await
+    }
 }
 
 impl From<fs::File<VersionNumber, Version>> for Library {
     fn from(file: fs::File<VersionNumber, Version>) -> Self {
         Self { file }
+    }
+}
+
+impl fmt::Display for Library {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a Library")
     }
 }

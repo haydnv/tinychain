@@ -8,7 +8,8 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
-use crate::cluster::{library, Cluster, Dir, Legacy, Replica, REPLICAS};
+use crate::cluster::library::Version;
+use crate::cluster::{library, Cluster, Dir, Legacy, Library, Replica, REPLICAS};
 use crate::route::*;
 use crate::scalar::OpRefType;
 use crate::state::State;
@@ -202,6 +203,27 @@ impl<'a> DirHandler<'a> {
 }
 
 impl<'a> Handler<'a> for DirHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.path.is_empty() {
+            return None;
+        }
+
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                match self.dir.entry(*txn.id(), &self.path[0]).await? {
+                    Some(entry) => match entry {
+                        library::DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
+                        library::DirEntry::Item(lib) => lib.get(txn, &self.path[1..], key).await,
+                    },
+                    None => Err(TCError::not_found(&self.path[0])),
+                }
+            })
+        }))
+    }
+
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
@@ -236,7 +258,7 @@ impl<'a> Handler<'a> for DirHandler<'a> {
         } else {
             Some(Box::new(|txn, key, value| {
                 Box::pin(async move {
-                    match self.dir.get(*txn.id(), &self.path[0]).await? {
+                    match self.dir.entry(*txn.id(), &self.path[0]).await? {
                         Some(entry) => match entry {
                             library::DirEntry::Dir(dir) => {
                                 dir.put(txn, &self.path[1..], key, value).await
@@ -256,6 +278,77 @@ impl<'a> Handler<'a> for DirHandler<'a> {
 impl Route for Dir {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         Some(Box::new(DirHandler::new(self, path)))
+    }
+}
+
+struct LibHandler<'a> {
+    lib: &'a Library,
+    path: &'a [PathSegment],
+}
+
+impl<'a> LibHandler<'a> {
+    fn new(lib: &'a Library, path: &'a [PathSegment]) -> Self {
+        Self { lib, path }
+    }
+}
+
+impl<'a> Handler<'a> for LibHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let number = self.path[0].as_str().parse()?;
+                let version = self.lib.get_version(*txn.id(), number).await?;
+                version.get(txn, &self.path[1..], key).await
+            })
+        }))
+    }
+}
+
+impl Route for Library {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(LibHandler::new(self, path)))
+    }
+}
+
+struct VersionHandler<'a> {
+    version: &'a Version,
+    path: &'a [PathSegment],
+}
+
+impl<'a> VersionHandler<'a> {
+    fn new(version: &'a Version, path: &'a [PathSegment]) -> Self {
+        Self { version, path }
+    }
+}
+
+impl<'a> Handler<'a> for VersionHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        if self.path.is_empty() {
+            todo!("library replication")
+        }
+
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let attr = self
+                    .version
+                    .attribute(&self.path[0])
+                    .ok_or_else(|| TCError::not_found(&self.path[0]))?;
+
+                attr.get(txn, &self.path[1..], key).await
+            })
+        }))
+    }
+}
+
+impl Route for Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(VersionHandler::new(self, path)))
     }
 }
 

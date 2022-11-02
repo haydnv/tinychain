@@ -71,9 +71,15 @@ impl Kernel {
                 .into_type(class)
                 .map(State::Scalar)
                 .ok_or_else(|| TCError::unsupported(err))
+        } else if path.starts_with(&[LIB.into()]) {
+            let path = &path[1..];
+            debug!("GET {}: {}", TCPath::from(path), key);
+
+            self.library.get(&txn, path, key).await
         } else if path == &hypothetical::PATH[..] {
             self.hypothetical.get(txn, &path[..], key).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            // TODO: delete this clause
             debug!(
                 "GET {}: {} from cluster {}",
                 TCPath::from(suffix),
@@ -369,6 +375,7 @@ impl Kernel {
                     self_link,
                     TCPath::from(suffix)
                 );
+
                 let write = |replica_link: Link| {
                     let mut target = replica_link.clone();
                     target.extend(suffix.to_vec());
