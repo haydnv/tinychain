@@ -3,7 +3,6 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, DirCreate, DirCreateFile, File, FileRead, FileWrite};
@@ -16,11 +15,11 @@ use crate::scalar::value::Link;
 use crate::scalar::Scalar;
 use crate::txn::Txn;
 
-use super::Replica;
+use super::{Cluster, Replica};
 
 pub enum DirEntry {
-    Dir(Dir),
-    Item(Library),
+    Dir(Cluster<Dir>),
+    Item(Cluster<Library>),
 }
 
 #[derive(Clone)]
@@ -49,19 +48,8 @@ impl Dir {
         Ok(lib)
     }
 
-    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
-        match self.dir.get(txn_id, name).await? {
-            Some(entry) => match entry {
-                fs::DirEntry::Dir(dir) => Ok(Some(DirEntry::Dir(Self::from(dir)))),
-                fs::DirEntry::File(file) => {
-                    match AsType::<fs::File<VersionNumber, Version>>::into_type(file) {
-                        Some(lib) => Ok(Some(DirEntry::Item(Library::from(lib)))),
-                        None => Err(TCError::internal("wrong file type")),
-                    }
-                }
-            },
-            None => Ok(None),
-        }
+    pub async fn entry(&self, _txn_id: TxnId, _name: &PathSegment) -> TCResult<Option<DirEntry>> {
+        todo!()
     }
 }
 
@@ -179,6 +167,26 @@ impl Library {
     ) -> TCResult<fs::BlockReadGuard<Version>> {
         let file = self.file.read(txn_id).await?;
         file.read_block(&number).await
+    }
+}
+
+#[async_trait]
+impl Replica for Library {
+    async fn replicate(&self, _txn: &Txn, _source: &Link) -> TCResult<()> {
+        Err(TCError::not_implemented("replicate a Library"))
+    }
+}
+
+#[async_trait]
+impl Transact for Library {
+    type Commit = <fs::File<VersionNumber, Version> as Transact>::Commit;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        self.file.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.file.finalize(txn_id).await
     }
 }
 

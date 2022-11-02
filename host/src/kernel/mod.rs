@@ -405,11 +405,11 @@ fn execute<'a, T, R, Fut, F>(
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
 where
-    T: Replica + Route + Send + Sync + fmt::Display,
+    T: Replica + Send + Sync + fmt::Display,
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a Cluster<T>) -> Fut + Send + 'a,
-    Cluster<T>: Instance,
+    Cluster<T>: Route,
 {
     Box::pin(async move {
         if let Some(owner) = txn.owner() {
