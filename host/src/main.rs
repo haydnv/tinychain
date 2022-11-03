@@ -174,21 +174,14 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
-    let library = {
-        let mut data_dir = tc_transact::fs::Dir::write(&data_dir, txn_id).await?;
-        tc_transact::fs::DirCreate::get_or_create_dir(&mut data_dir, kernel::LIB.into())
-            .map(cluster::Dir::from)?
-    };
+    let kernel = tinychain::Kernel::bootstrap();
+    let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
+    let token = gateway.new_token(&txn_id)?;
+    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
 
     // TODO: delete
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
-        let txn_server = txn_server.clone();
-        let kernel = tinychain::Kernel::new(address.clone(), library.clone(), std::iter::empty());
-        let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
-        let token = gateway.new_token(&txn_id)?;
-        let txn = txn_server.new_txn(gateway, txn_id, token).await?;
-
         let host = LinkHost::from((
             LinkProtocol::HTTP,
             config.address.clone(),
@@ -215,9 +208,15 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
+    let library = {
+        let mut data_dir = tc_transact::fs::Dir::write(&data_dir, txn_id).await?;
+        tc_transact::fs::DirCreate::get_or_create_dir(&mut data_dir, kernel::LIB.into())
+            .map(cluster::Dir::from)?
+    };
+
     data_dir.commit(&txn_id).await;
 
-    let kernel = tinychain::Kernel::new(address, library, clusters);
+    let kernel = tinychain::Kernel::with_userspace(address, library, clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
