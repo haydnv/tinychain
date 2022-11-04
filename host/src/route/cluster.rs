@@ -1,3 +1,5 @@
+use std::convert::{TryFrom, TryInto};
+
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
 use log::debug;
@@ -11,6 +13,7 @@ use tcgeneric::Tuple;
 use crate::cluster::library::Version;
 use crate::cluster::{library, Cluster, Dir, Legacy, Library, Replica, REPLICAS};
 use crate::route::*;
+use crate::scalar::Scalar;
 use crate::state::State;
 
 pub struct ClusterHandler<'a, T> {
@@ -169,8 +172,22 @@ impl<'a> Handler<'a> for DirHandler<'a> {
                                 lib.put(txn, &self.path[1..], key, value).await
                             }
                         },
-                        None if self.path.len() == 1 && value.is_none() => {
-                            self.dir.create_dir(txn, self.path[0].clone()).await
+                        None if self.path.len() == 1 => {
+                            if value.is_none() {
+                                key.expect_none()?;
+                                self.dir.create_dir(txn, self.path[0].clone()).await
+                            } else {
+                                let number = key.try_cast_into(|v| {
+                                    TCError::bad_request("invalid version number", v)
+                                })?;
+
+                                let version = Scalar::try_from(value)?;
+                                let version = version.try_into()?;
+
+                                self.dir
+                                    .create_lib(txn, self.path[0].clone(), number, version)
+                                    .await
+                            }
                         }
                         None => Err(TCError::not_found(&self.path[0])),
                     }

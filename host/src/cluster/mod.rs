@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard};
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
@@ -29,7 +29,6 @@ use owner::Owner;
 
 use futures::stream::FuturesUnordered;
 
-use crate::cluster::library::Version;
 pub use library::{Dir, Library};
 pub use load::instantiate;
 
@@ -359,8 +358,16 @@ impl Cluster<Dir> {
         self.state().create_dir(txn, &self.link, name).await
     }
 
-    pub async fn create_lib(&self, txn_id: TxnId, name: PathSegment, lib: Version) -> TCResult<()> {
-        todo!()
+    pub async fn create_lib(
+        &self,
+        txn: &Txn,
+        name: PathSegment,
+        number: VersionNumber,
+        lib: Map<Scalar>,
+    ) -> TCResult<()> {
+        self.state()
+            .create_lib(txn, &self.link, name, number, lib)
+            .await
     }
 }
 

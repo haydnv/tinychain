@@ -52,6 +52,31 @@ impl Dir {
         Ok(())
     }
 
+    pub(super) async fn create_lib(
+        &self,
+        txn: &Txn,
+        link: &Link,
+        name: PathSegment,
+        number: VersionNumber,
+        version: Map<Scalar>,
+    ) -> TCResult<()> {
+        let mut contents = self.contents.write(*txn.id()).await?;
+        let mut cache = self.cache.write().await;
+
+        let file = cache
+            .create_dir(format!("{}.{}", name, Version::ext()))
+            .map_err(fs::io_err)
+            .and_then(fs::File::new)?;
+
+        let lib = Library::create(txn, (), file).await?;
+        lib.create_version(*txn.id(), number, version).await?;
+
+        let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
+        contents.insert(name, DirEntry::Item(Arc::new(lib)));
+
+        Ok(())
+    }
+
     pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
         self.contents
             .read(txn_id)
@@ -207,6 +232,28 @@ impl Transact for Library {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.file.finalize(txn_id).await
+    }
+}
+
+#[async_trait]
+impl Persist<fs::Dir> for Library {
+    type Schema = ();
+    type Store = fs::File<VersionNumber, Version>;
+    type Txn = Txn;
+
+    async fn create(txn: &Self::Txn, _schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
+        let versions = file.read(*txn.id()).await?;
+        if versions.is_empty() {
+            Ok(Self { file })
+        } else {
+            Err(TCError::unsupported(
+                "cannot create a new Library from a non-empty file",
+            ))
+        }
+    }
+
+    async fn load(_txn: &Self::Txn, _schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
+        Ok(Self { file })
     }
 }
 
