@@ -73,7 +73,7 @@ struct Config {
 
     #[structopt(
         long = "cache_size",
-        about="the maximum size of the in-memory transactional filesystem cache (in bytes)",
+        about = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
         default_value = "1G",
         parse(try_from_str = data_size),
     )]
@@ -81,18 +81,16 @@ struct Config {
 
     #[structopt(
         long = "stack_size",
-        about="the size of the stack of each worker thread (in bytes)",
+        about = "the size of the stack of each worker thread (in bytes)",
         default_value = "4M",
         parse(try_from_str = data_size),
     )]
     pub stack_size: usize,
 
-    #[structopt(
-        long = "data_dir",
-        about = "data directory (required to host a Cluster)"
-    )]
+    #[structopt(long = "data_dir", about = "persistent data directory")]
     pub data_dir: Option<PathBuf>,
 
+    // TODO: delete
     #[structopt(
         long = "cluster",
         about = "path(s) to cluster configuration files (this flag can be repeated)"
@@ -209,9 +207,10 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let library = {
-        let mut data_dir = tc_transact::fs::Dir::write(&data_dir, txn_id).await?;
-        tc_transact::fs::DirCreate::get_or_create_dir(&mut data_dir, kernel::LIB.into())
-            .map(cluster::Dir::from)?
+        use tc_transact::fs::*;
+        let mut data_dir = data_dir.write(txn_id).await?;
+        let lib_dir = data_dir.get_or_create_dir(kernel::LIB.into())?;
+        crate::cluster::Dir::load(&txn, (), lib_dir).await?
     };
 
     data_dir.commit(&txn_id).await;

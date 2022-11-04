@@ -1,55 +1,62 @@
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, DirCreate, DirCreateFile, File, FileRead, FileWrite};
-use tc_transact::{Transact, TxnId};
+use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist, Store};
+use tc_transact::lock::{TxnMapLock, TxnMapLockCommitGuard, TxnMapRead, TxnMapWrite};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
 
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::scalar::value::Link;
 use crate::scalar::Scalar;
 use crate::txn::Txn;
 
 use super::{Cluster, Replica};
 
+#[derive(Clone)]
 pub enum DirEntry {
-    Dir(Cluster<Dir>),
-    Item(Cluster<Library>),
+    Dir(Arc<Cluster<Dir>>),
+    Item(Arc<Cluster<Library>>),
 }
 
 #[derive(Clone)]
 pub struct Dir {
-    dir: fs::Dir,
+    cache: freqfs::DirLock<CacheBlock>,
+    contents: TxnMapLock<PathSegment, DirEntry>,
 }
 
 impl Dir {
-    pub async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
-        let mut lock = tc_transact::fs::Dir::write(&self.dir, txn_id).await?;
-        lock.create_dir(name).map(|dir| Self { dir })
-    }
-
-    pub async fn create_lib(
+    pub(super) async fn create_dir(
         &self,
-        txn_id: TxnId,
+        txn: &Txn,
+        link: &Link,
         name: PathSegment,
-        library: Map<Scalar>,
-    ) -> TCResult<Library> {
-        let mut lock = tc_transact::fs::Dir::write(&self.dir, txn_id).await?;
+    ) -> TCResult<()> {
+        let mut contents = self.contents.write(*txn.id()).await?;
+        let mut cache = self.cache.write().await;
 
-        let lib = lock.create_file(name).map(Library::from)?;
-        lib.create_version(txn_id, VersionNumber::default(), library)
-            .await?;
+        let dir = cache.create_dir(name.to_string()).map_err(fs::io_err)?;
+        let dir = fs::Dir::new(dir);
 
-        Ok(lib)
+        let dir = Self::create(txn, (), dir).await?;
+        let dir = Cluster::with_state(link.clone().append(name.clone()), dir);
+        contents.insert(name, DirEntry::Dir(Arc::new(dir)));
+
+        Ok(())
     }
 
-    pub async fn entry(&self, _txn_id: TxnId, _name: &PathSegment) -> TCResult<Option<DirEntry>> {
-        todo!()
+    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
+        self.contents
+            .read(txn_id)
+            .map_ok(|contents| contents.get(name))
+            .await
     }
 }
 
@@ -62,20 +69,33 @@ impl Replica for Dir {
 
 #[async_trait]
 impl Transact for Dir {
-    type Commit = <fs::Dir as Transact>::Commit;
+    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        self.dir.commit(txn_id).await
+        self.contents.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.dir.finalize(txn_id).await
+        self.contents.finalize(txn_id).await
     }
 }
 
-impl From<fs::Dir> for Dir {
-    fn from(dir: fs::Dir) -> Self {
-        Self { dir }
+#[async_trait]
+impl Persist<fs::Dir> for Dir {
+    type Schema = ();
+    type Store = fs::Dir;
+    type Txn = Txn;
+
+    async fn create(_txn: &Self::Txn, _schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+        Ok(Self {
+            cache: dir.into_inner(),
+            contents: TxnMapLock::new("service directory"),
+        })
+    }
+
+    async fn load(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+        assert!(dir.is_empty(*txn.id()).await?);
+        Self::create(txn, schema, dir).await
     }
 }
 

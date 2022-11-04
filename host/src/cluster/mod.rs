@@ -29,6 +29,7 @@ use owner::Owner;
 
 use futures::stream::FuturesUnordered;
 
+use crate::cluster::library::Version;
 pub use library::{Dir, Library};
 pub use load::instantiate;
 
@@ -350,6 +351,16 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl Cluster<Dir> {
+    pub async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<()> {
+        self.state().create_dir(txn, &self.link, name).await
+    }
+
+    pub async fn create_lib(&self, txn_id: TxnId, name: PathSegment, lib: Version) -> TCResult<()> {
+        todo!()
     }
 }
 

@@ -151,18 +151,9 @@ impl<'a> Handler<'a> for DirHandler<'a> {
                     })?;
 
                     if lib.is_empty() {
-                        self.dir.state().create_dir(*txn.id(), name).await?;
-                        Ok(())
+                        self.dir.create_dir(txn, name).await
                     } else {
-                        let lib = State::Map(lib).try_cast_into(|state| {
-                            TCError::bad_request(
-                                "library definition must be a scalar value, not",
-                                state,
-                            )
-                        })?;
-
-                        self.dir.state().create_lib(*txn.id(), name, lib).await?;
-                        Ok(())
+                        Err(TCError::not_implemented("create new lib"))
                     }
                 })
             }))
@@ -174,10 +165,13 @@ impl<'a> Handler<'a> for DirHandler<'a> {
                             library::DirEntry::Dir(dir) => {
                                 dir.put(txn, &self.path[1..], key, value).await
                             }
-                            library::DirEntry::Item(_lib) => {
-                                Err(TCError::not_implemented("Library::put"))
+                            library::DirEntry::Item(lib) => {
+                                lib.put(txn, &self.path[1..], key, value).await
                             }
                         },
+                        None if self.path.len() == 1 && value.is_none() => {
+                            self.dir.create_dir(txn, self.path[0].clone()).await
+                        }
                         None => Err(TCError::not_found(&self.path[0])),
                     }
                 })
