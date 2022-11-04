@@ -24,7 +24,7 @@ class LibraryTests(unittest.TestCase):
     def testCreateLib(self):
         self.host.put("/lib/test")
         self.host.put("/lib/test/libhello", "0.0.1", TestLibV0())
-        # self.assertEqual(self.host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+        self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
 
     @classmethod
     def tearDownClass(cls) -> None:

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::future::TryFutureExt;
+use futures::future::{join_all, FutureExt, TryFutureExt};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist, Store};
@@ -24,6 +24,30 @@ use super::{Cluster, Replica};
 pub enum DirEntry {
     Dir(Arc<Cluster<Dir>>),
     Item(Arc<Cluster<Library>>),
+}
+
+pub enum DirEntryCommitGuard {
+    Dir(<Cluster<Dir> as Transact>::Commit),
+    Item(<Cluster<Library> as Transact>::Commit),
+}
+
+#[async_trait]
+impl Transact for DirEntry {
+    type Commit = DirEntryCommitGuard;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        match self {
+            Self::Dir(dir) => dir.commit(txn_id).map(DirEntryCommitGuard::Dir).await,
+            Self::Item(item) => item.commit(txn_id).map(DirEntryCommitGuard::Item).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dir(dir) => dir.finalize(txn_id).await,
+            Self::Item(item) => item.finalize(txn_id).await,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -97,7 +121,16 @@ impl Transact for Dir {
     type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        self.contents.commit(txn_id).await
+        let guard = self.contents.commit(txn_id).await;
+
+        let commits = guard
+            .iter()
+            // TODO: add a .values method to the guard to borrow the values, avoiding the async move
+            .map(|(_, entry)| async move { entry.commit(txn_id).await });
+
+        join_all(commits).await;
+
+        guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

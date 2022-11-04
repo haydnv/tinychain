@@ -98,7 +98,7 @@ impl UserSpace {
                         .await?;
 
                     let self_link = txn.link(cluster.path().to_vec().into());
-                    if path.is_empty() {
+                    if path.is_empty() && key.is_none() && value.is_none() {
                         // it's a synchronization message
                         return Ok(());
                     } else if !txn.is_leader(cluster.path()) {
