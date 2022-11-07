@@ -7,10 +7,11 @@ use futures::future::Future;
 use log::debug;
 
 use tc_error::*;
+use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};
-use tcgeneric::{label, Label, Map, PathSegment, TCPath, TCPathBuf};
+use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{Cluster, Dir, Legacy, Replica};
+use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -19,7 +20,7 @@ use crate::txn::Txn;
 use super::{hypothetical, Dispatch, Hosted, Hypothetical};
 
 /// The library directory
-pub const LIB: Label = label("lib");
+pub const LIB: PathLabel = path_label(&["lib"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
@@ -42,7 +43,13 @@ impl UserSpace {
     }
 
     pub fn handles(&self, path: &[PathSegment]) -> bool {
-        path.starts_with(&[LIB.into()])
+        if path.is_empty() {
+            return false;
+        }
+
+        &path[..1] == &LIB[..]
+            || &path[..] == &hypothetical::PATH[..]
+            || self.hosted.contains(&path[0])
     }
 
     /// Return a list of hosted clusters
@@ -55,72 +62,24 @@ impl UserSpace {
 #[async_trait]
 impl Dispatch for UserSpace {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
-        if path.starts_with(&[LIB.into()]) {
-            let path = &path[1..];
-            debug!("GET {}: {}", TCPath::from(path), key);
-            self.library.get(&txn, path, key).await
-        } else if path == &hypothetical::PATH[..] {
+        if path == &hypothetical::PATH[..] {
             self.hypothetical.get(txn, &path[..], key).await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             // TODO: delete this clause
-            debug!(
-                "GET {}: {} from cluster {}",
-                TCPath::from(suffix),
-                key,
-                cluster
-            );
+            debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
+            cluster.get(&txn, suffix, key).await
+        } else if &path[..1] == &LIB[..] {
+            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
+            debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
             cluster.get(&txn, suffix, key).await
         } else {
-            Err(TCError::not_found(&path[0]))
+            Err(TCError::not_found(TCPath::from(path)))
         }
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.put(txn, &path[..], key, value).await
-        } else if path.starts_with(&[LIB.into()]) {
-            let path = &path[1..];
-
-            debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
-
-            let txn = maybe_claim_leadership(&self.library, txn).await?;
-
-            execute(txn, &self.library, |txn, cluster| async move {
-                self.library
-                    .put(&txn, path, key.clone(), value.clone())
-                    .await?;
-
-                let self_link = txn.link(cluster.path().to_vec().into());
-                if path.is_empty() && key.is_none() && value.is_none() {
-                    // it's a synchronization message
-                    return Ok(());
-                } else if !txn.is_leader(cluster.path()) {
-                    debug!(
-                        "{} successfully replicated PUT {}",
-                        self_link,
-                        TCPath::from(path)
-                    );
-
-                    return Ok(());
-                }
-
-                debug!(
-                    "{} is leading replication of PUT {}",
-                    self_link,
-                    TCPath::from(path)
-                );
-
-                let write = |replica_link: Link| {
-                    let mut target = replica_link.clone();
-                    target.extend(path.to_vec());
-
-                    debug!("replicate PUT to {}", target);
-                    txn.put(target, key.clone(), value.clone())
-                };
-
-                cluster.replicate_write(txn.clone(), write).await
-            })
-            .await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             // TODO: delete this clause
 
@@ -169,8 +128,21 @@ impl Dispatch for UserSpace {
                 cluster.replicate_write(txn.clone(), write).await
             })
             .await
+        } else if &path[..1] == &LIB[..] {
+            debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
+            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
+
+            if suffix.is_empty() && key.is_none() {
+                // it's a synchronization message
+                return cluster.put(txn, suffix, key, value).await;
+            }
+
+            match cluster {
+                DirEntry::Dir(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
+                DirEntry::Item(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
+            }
         } else {
-            Err(TCError::not_found(&path[0]))
+            Err(TCError::not_found(TCPath::from(path)))
         }
     }
 
@@ -198,6 +170,20 @@ impl Dispatch for UserSpace {
                 })
                 .await
             }
+        } else if &path[..1] == &LIB[..] {
+            let params: Map<State> = data.try_into()?;
+            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
+            debug!("POST {}: {} to {}", TCPath::from(suffix), params, cluster);
+
+            if suffix.is_empty() && params.is_empty() {
+                // it's a commit message
+                return cluster.post(txn, &path[1..], params).await;
+            }
+
+            match cluster {
+                DirEntry::Dir(cluster) => execute_post(&cluster, txn, suffix, params).await,
+                DirEntry::Item(cluster) => execute_post(&cluster, txn, suffix, params).await,
+            }
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -206,44 +192,6 @@ impl Dispatch for UserSpace {
     async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.delete(txn, &path[2..], key).await
-        } else if path.starts_with(&[LIB.into()]) {
-            let path = &path[1..];
-
-            if path.is_empty() && key.is_none() {
-                // it's a rollback message
-                return self.library.delete(&txn, path, key).await;
-            }
-
-            debug!("DELETE {}: {}", TCPath::from(path), key);
-
-            let txn = maybe_claim_leadership(&self.library, txn).await?;
-            execute(txn, &self.library, |txn, cluster| async move {
-                cluster.delete(&txn, path, key.clone()).await?;
-
-                let txn = if !txn.has_leader(cluster.path()) {
-                    cluster.lead(txn).await?
-                } else {
-                    txn
-                };
-
-                if path.is_empty() {
-                    // it's a synchronization message
-                    return Ok(());
-                } else if !txn.is_leader(cluster.path()) {
-                    return Ok(());
-                }
-
-                let write = |replica_link: Link| {
-                    let mut target = replica_link.clone();
-                    target.extend(path.to_vec());
-
-                    debug!("replicate DELETE to {}", target);
-                    txn.delete(target, key.clone())
-                };
-
-                cluster.replicate_write(txn.clone(), write).await
-            })
-            .await
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             // TODO: delete this clause
             if suffix.is_empty() && key.is_none() {
@@ -299,10 +247,135 @@ impl Dispatch for UserSpace {
                 cluster.replicate_write(txn.clone(), write).await
             })
             .await
+        } else if &path[..1] == &LIB[..] {
+            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
+
+            if suffix.is_empty() && key.is_none() {
+                // it's a rollback message
+                return self.library.delete(&txn, path, key).await;
+            }
+
+            debug!("DELETE {}: {}", TCPath::from(path), key);
+
+            match cluster {
+                DirEntry::Dir(cluster) => execute_delete(&cluster, txn, suffix, key).await,
+                DirEntry::Item(cluster) => execute_delete(&cluster, txn, suffix, key).await,
+            }
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
     }
+}
+
+async fn maybe_claim_leadership<T>(cluster: &Cluster<T>, txn: &Txn) -> TCResult<Txn> {
+    if txn.has_owner() && !txn.has_leader(cluster.path()) {
+        cluster.lead(txn.clone()).await
+    } else {
+        Ok(txn.clone())
+    }
+}
+
+async fn execute_post<T>(
+    cluster: &Cluster<T>,
+    txn: &Txn,
+    path: &[PathSegment],
+    params: Map<State>,
+) -> TCResult<State>
+where
+    T: Replica + Send + Sync + fmt::Display,
+    Cluster<T>: Route,
+{
+    let txn = maybe_claim_leadership(cluster, txn).await?;
+
+    execute(txn, cluster, |txn, cluster| async move {
+        cluster.post(&txn, path, params).await
+    })
+    .await
+}
+
+async fn execute_put<T>(
+    cluster: &Cluster<T>,
+    txn: &Txn,
+    path: &[PathSegment],
+    key: Value,
+    value: State,
+) -> TCResult<()>
+where
+    T: Replica + Send + Sync + fmt::Display,
+    Cluster<T>: Route,
+{
+    let txn = maybe_claim_leadership(cluster, txn).await?;
+
+    execute(txn, cluster, |txn, cluster| async move {
+        cluster.put(&txn, path, key.clone(), value.clone()).await?;
+
+        if !txn.is_leader(cluster.path()) {
+            debug!(
+                "{} successfully replicated PUT {}",
+                cluster,
+                TCPath::from(path)
+            );
+            return Ok(());
+        }
+
+        debug!(
+            "{} is leading replication of PUT {}",
+            cluster,
+            TCPath::from(path)
+        );
+
+        let write = |replica_link: Link| {
+            let mut target = replica_link.clone();
+            target.extend(path.to_vec());
+
+            debug!("replicate PUT to {}", target);
+            txn.put(target, key.clone(), value.clone())
+        };
+
+        cluster.replicate_write(txn.clone(), write).await
+    })
+    .await
+}
+
+async fn execute_delete<T>(
+    cluster: &Cluster<T>,
+    txn: &Txn,
+    path: &[PathSegment],
+    key: Value,
+) -> TCResult<()>
+where
+    T: Replica + Send + Sync + fmt::Display,
+    Cluster<T>: Route,
+{
+    let txn = maybe_claim_leadership(cluster, txn).await?;
+
+    execute(txn, cluster, |txn, cluster| async move {
+        cluster.delete(&txn, path, key.clone()).await?;
+
+        let txn = if !txn.has_leader(cluster.path()) {
+            cluster.lead(txn).await?
+        } else {
+            txn
+        };
+
+        if path.is_empty() {
+            // it's a synchronization message
+            return Ok(());
+        } else if !txn.is_leader(cluster.path()) {
+            return Ok(());
+        }
+
+        let write = |replica_link: Link| {
+            let mut target = replica_link.clone();
+            target.extend(path.to_vec());
+
+            debug!("replicate DELETE to {}", target);
+            txn.delete(target, key.clone())
+        };
+
+        cluster.replicate_write(txn.clone(), write).await
+    })
+    .await
 }
 
 fn execute<'a, T, R, Fut, F>(
@@ -402,12 +475,4 @@ fn execute_legacy<
             result
         }
     })
-}
-
-async fn maybe_claim_leadership<T>(cluster: &Cluster<T>, txn: &Txn) -> TCResult<Txn> {
-    if txn.has_owner() && !txn.has_leader(cluster.path()) {
-        cluster.lead(txn.clone()).await
-    } else {
-        Ok(txn.clone())
-    }
 }

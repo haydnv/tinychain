@@ -11,7 +11,7 @@ use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
 use crate::cluster::library::Version;
-use crate::cluster::{library, Cluster, Dir, Legacy, Library, Replica, REPLICAS};
+use crate::cluster::{library, Cluster, Dir, DirEntry, Legacy, Library, Replica, REPLICAS};
 use crate::route::*;
 use crate::scalar::Scalar;
 use crate::state::State;
@@ -213,13 +213,30 @@ impl<'a> Handler<'a> for LibHandler<'a> {
     where
         'b: 'a,
     {
+        assert!(!self.path.is_empty());
+
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                debug!(
+                    "route GET {} to version {}",
+                    TCPath::from(&self.path[1..]),
+                    &self.path[0]
+                );
+
                 let number = self.path[0].as_str().parse()?;
                 let version = self.lib.state().get_version(*txn.id(), number).await?;
                 version.get(txn, &self.path[1..], key).await
             })
         }))
+    }
+}
+
+impl Route for DirEntry {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match self {
+            Self::Dir(dir) => dir.route(path),
+            Self::Item(item) => item.route(path),
+        }
     }
 }
 

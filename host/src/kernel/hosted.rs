@@ -93,6 +93,16 @@ impl Hosted {
         self.hosted.values()
     }
 
+    pub fn contains(&self, name: &PathSegment) -> bool {
+        for path in self.hosted.keys() {
+            if !path.is_empty() && &path[0] == name {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub fn get<'a>(
         &self,
         path: &'a [PathSegment],

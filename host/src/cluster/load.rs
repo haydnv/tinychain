@@ -136,11 +136,13 @@ pub async fn instantiate(
     let actor_id = Value::from(Link::default());
 
     let cluster = Cluster {
-        link: link.clone(),
-        actor: Arc::new(Actor::new(actor_id)),
-        owned: RwLock::new(HashMap::new()),
-        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
-        state: Legacy { chains, classes },
+        inner: Arc::new(super::Inner {
+            link: link.clone(),
+            actor: Arc::new(Actor::new(actor_id)),
+            owned: RwLock::new(HashMap::new()),
+            replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
+            state: Legacy { chains, classes },
+        }),
     };
 
     let class = InstanceClass::new(Some(link), cluster_proto.into());

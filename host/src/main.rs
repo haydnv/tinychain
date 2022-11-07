@@ -209,7 +209,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let library = {
         use tc_transact::fs::*;
         let mut data_dir = data_dir.write(txn_id).await?;
-        let lib_dir = data_dir.get_or_create_dir(kernel::LIB.into())?;
+        let lib_dir = data_dir.get_or_create_dir(tcgeneric::label(kernel::LIB[0]).into())?;
         crate::cluster::Dir::load(&txn, (), lib_dir).await?
     };
 

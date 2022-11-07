@@ -1,13 +1,16 @@
+use std::collections::hash_map::{self, HashMap};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{join_all, FutureExt, TryFutureExt};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist, Store};
-use tc_transact::lock::{TxnMapLock, TxnMapLockCommitGuard, TxnMapRead, TxnMapWrite};
+use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist};
+use tc_transact::lock::{
+    TxnMapLock, TxnMapLockCommitGuard, TxnMapLockReadGuard, TxnMapRead, TxnMapWrite,
+};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
@@ -22,8 +25,17 @@ use super::{Cluster, Replica};
 
 #[derive(Clone)]
 pub enum DirEntry {
-    Dir(Arc<Cluster<Dir>>),
-    Item(Arc<Cluster<Library>>),
+    Dir(Cluster<Dir>),
+    Item(Cluster<Library>),
+}
+
+impl fmt::Display for DirEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dir(dir) => dir.fmt(f),
+            Self::Item(item) => item.fmt(f),
+        }
+    }
 }
 
 pub enum DirEntryCommitGuard {
@@ -50,13 +62,32 @@ impl Transact for DirEntry {
     }
 }
 
+enum Delta {
+    Create,
+}
+
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
     contents: TxnMapLock<PathSegment, DirEntry>,
+    deltas: Arc<Mutex<HashMap<TxnId, HashMap<PathSegment, Delta>>>>,
 }
 
 impl Dir {
+    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
+        self.contents
+            .read(txn_id)
+            .map_ok(|contents| contents.get(name))
+            .await
+    }
+
+    pub(super) fn contents(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnMapLockReadGuard<PathSegment, DirEntry>> {
+        self.contents.try_read(txn_id)
+    }
+
     pub(super) async fn create_dir(
         &self,
         txn: &Txn,
@@ -71,7 +102,9 @@ impl Dir {
 
         let dir = Self::create(txn, (), dir).await?;
         let dir = Cluster::with_state(link.clone().append(name.clone()), dir);
-        contents.insert(name, DirEntry::Dir(Arc::new(dir)));
+        contents.insert(name.clone(), DirEntry::Dir(dir));
+
+        self.record_delta(*txn.id(), name, Delta::Create).await;
 
         Ok(())
     }
@@ -96,16 +129,25 @@ impl Dir {
         lib.create_version(*txn.id(), number, version).await?;
 
         let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
-        contents.insert(name, DirEntry::Item(Arc::new(lib)));
+        contents.insert(name.clone(), DirEntry::Item(lib));
+
+        self.record_delta(*txn.id(), name, Delta::Create).await;
 
         Ok(())
     }
 
-    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
-        self.contents
-            .read(txn_id)
-            .map_ok(|contents| contents.get(name))
-            .await
+    async fn record_delta(&self, txn_id: TxnId, name: PathSegment, delta: Delta) {
+        let mut deltas = self.deltas.lock().expect("dir deltas");
+        match deltas.entry(txn_id) {
+            hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().insert(name, delta);
+            }
+            hash_map::Entry::Vacant(entry) => {
+                let mut deltas = HashMap::new();
+                deltas.insert(name, delta);
+                entry.insert(deltas);
+            }
+        };
     }
 }
 
@@ -123,12 +165,18 @@ impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let guard = self.contents.commit(txn_id).await;
 
-        let commits = guard
-            .iter()
-            // TODO: add a .values method to the guard to borrow the values, avoiding the async move
-            .map(|(_, entry)| async move { entry.commit(txn_id).await });
+        if let Some(deltas) = {
+            let mut deltas = self.deltas.lock().expect("dir commit deltas");
+            let txn_deltas = deltas.remove(txn_id);
+            txn_deltas
+        } {
+            let commits = deltas
+                .into_iter()
+                .map(|(name, _delta)| guard.get(name).expect("dir entry"))
+                .map(|entry| async move { entry.commit(txn_id).await });
 
-        join_all(commits).await;
+            join_all(commits).await;
+        }
 
         guard
     }
@@ -148,11 +196,12 @@ impl Persist<fs::Dir> for Dir {
         Ok(Self {
             cache: dir.into_inner(),
             contents: TxnMapLock::new("service directory"),
+            deltas: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
     async fn load(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
-        assert!(dir.is_empty(*txn.id()).await?);
+        // TODO: read existing contents
         Self::create(txn, schema, dir).await
     }
 }
