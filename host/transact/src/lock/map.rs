@@ -117,6 +117,7 @@ where
         self.borrow().contains(key.borrow())
     }
 
+    // TODO: this should return a borrowed value
     fn get<Q: Borrow<K>>(&self, key: Q) -> Option<V> {
         let mut values = self.values().lock().expect("TxnMapLock state");
         let version = values.get_mut(key.borrow())?;

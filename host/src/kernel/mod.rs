@@ -79,9 +79,8 @@ impl Kernel {
 impl Dispatch for Kernel {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(userspace) = &self.userspace {
-            // TODO: remove key.clone()
-            if let Some(handler) = userspace.get(txn, path, key.clone()) {
-                return handler.await;
+            if userspace.handles(path) {
+                return userspace.get(txn, path, key).await;
             }
         }
 
@@ -90,9 +89,8 @@ impl Dispatch for Kernel {
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
         if let Some(userspace) = &self.userspace {
-            // TODO: remove key.clone(), value.clone()
-            if let Some(handler) = userspace.put(txn, path, key.clone(), value.clone()) {
-                return handler.await;
+            if userspace.handles(path) {
+                return userspace.put(txn, path, key, value).await;
             }
         }
 
@@ -101,9 +99,8 @@ impl Dispatch for Kernel {
 
     async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if let Some(userspace) = &self.userspace {
-            // TODO: remove data.clone()
-            if let Some(handler) = userspace.post(txn, path, data.clone()) {
-                return handler.await;
+            if userspace.handles(path) {
+                return userspace.post(txn, path, data).await;
             }
         }
 
@@ -112,9 +109,8 @@ impl Dispatch for Kernel {
 
     async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
         if let Some(userspace) = &self.userspace {
-            // TODO: remove key.clone()
-            if let Some(handler) = userspace.delete(txn, path, key.clone()) {
-                return handler.await;
+            if userspace.handles(path) {
+                return userspace.delete(txn, path, key).await;
             }
         }
 
