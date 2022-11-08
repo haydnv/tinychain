@@ -8,10 +8,9 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::Tuple;
 
-use crate::cluster::library::Version;
-use crate::cluster::{
-    library, Cluster, Dir, DirEntry, DirItem, Legacy, Library, Replica, REPLICAS,
-};
+use crate::cluster::dir::{Dir, DirEntry, DirItem};
+use crate::cluster::library::{Library, Version};
+use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
 use crate::route::*;
 use crate::state::State;
 
@@ -137,8 +136,8 @@ where
             Box::pin(async move {
                 match self.dir.state().entry(*txn.id(), &self.path[0]).await? {
                     Some(entry) => match entry {
-                        library::DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
-                        library::DirEntry::Item(item) => item.get(txn, &self.path[1..], key).await,
+                        DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
+                        DirEntry::Item(item) => item.get(txn, &self.path[1..], key).await,
                     },
                     None => Err(TCError::not_found(&self.path[0])),
                 }
