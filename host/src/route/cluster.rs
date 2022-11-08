@@ -1,5 +1,3 @@
-use std::convert::{TryFrom, TryInto};
-
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
 use log::debug;
@@ -7,14 +5,18 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::Tuple;
 
 use crate::cluster::library::Version;
-use crate::cluster::{library, Cluster, Dir, DirEntry, Legacy, Library, Replica, REPLICAS};
+use crate::cluster::{
+    library, Cluster, Dir, DirEntry, DirItem, Legacy, Library, Replica, REPLICAS,
+};
 use crate::route::*;
-use crate::scalar::Scalar;
 use crate::state::State;
+
+const ERR_CREATE: &str = "to create a directory, pass an empty key and value; \
+to create a library, pass a version number as the key with no value";
 
 pub struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
@@ -105,18 +107,24 @@ impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
     }
 }
 
-struct DirHandler<'a> {
-    dir: &'a Cluster<Dir>,
+struct DirHandler<'a, T> {
+    dir: &'a Cluster<Dir<T>>,
     path: &'a [PathSegment],
 }
 
-impl<'a> DirHandler<'a> {
-    fn new(dir: &'a Cluster<Dir>, path: &'a [PathSegment]) -> Self {
+impl<'a, T> DirHandler<'a, T> {
+    fn new(dir: &'a Cluster<Dir<T>>, path: &'a [PathSegment]) -> Self {
         Self { dir, path }
     }
 }
 
-impl<'a> Handler<'a> for DirHandler<'a> {
+impl<'a, T> Handler<'a> for DirHandler<'a, T>
+where
+    T: DirItem,
+    DirEntry<T>: Clone,
+    Cluster<T>: Route,
+    Cluster<Dir<T>>: Clone + Route,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -130,7 +138,7 @@ impl<'a> Handler<'a> for DirHandler<'a> {
                 match self.dir.state().entry(*txn.id(), &self.path[0]).await? {
                     Some(entry) => match entry {
                         library::DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
-                        library::DirEntry::Item(lib) => lib.get(txn, &self.path[1..], key).await,
+                        library::DirEntry::Item(item) => item.get(txn, &self.path[1..], key).await,
                     },
                     None => Err(TCError::not_found(&self.path[0])),
                 }
@@ -143,57 +151,34 @@ impl<'a> Handler<'a> for DirHandler<'a> {
         'b: 'a,
     {
         if self.path.is_empty() {
-            Some(Box::new(|txn, key, value| {
-                Box::pin(async move {
-                    let name = key.try_cast_into(|value| {
-                        TCError::bad_request("invalid library name", value)
-                    })?;
-
-                    let lib = value.try_into_map(|state| {
-                        TCError::bad_request("invalid library definition", state)
-                    })?;
-
-                    if lib.is_empty() {
-                        self.dir.create_dir(txn, name).await
-                    } else {
-                        Err(TCError::not_implemented("create new lib"))
-                    }
-                })
-            }))
-        } else {
-            Some(Box::new(|txn, key, value| {
-                Box::pin(async move {
-                    match self.dir.state().entry(*txn.id(), &self.path[0]).await? {
-                        Some(entry) => match entry {
-                            library::DirEntry::Dir(dir) => {
-                                dir.put(txn, &self.path[1..], key, value).await
-                            }
-                            library::DirEntry::Item(lib) => {
-                                lib.put(txn, &self.path[1..], key, value).await
-                            }
-                        },
-                        None if self.path.len() == 1 => {
-                            if value.is_none() {
-                                key.expect_none()?;
-                                self.dir.create_dir(txn, self.path[0].clone()).await
-                            } else {
-                                let number = key.try_cast_into(|v| {
-                                    TCError::bad_request("invalid version number", v)
-                                })?;
-
-                                let version = Scalar::try_from(value)?;
-                                let version = version.try_into()?;
-
-                                self.dir
-                                    .create_lib(txn, self.path[0].clone(), number, version)
-                                    .await
-                            }
-                        }
-                        None => Err(TCError::not_found(&self.path[0])),
-                    }
-                })
-            }))
+            return None;
         }
+
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                let entry = self.dir.state().entry(*txn.id(), &self.path[0]).await?;
+
+                if self.path.len() == 1 {
+                    if entry.is_some() {
+                        return Err(TCError::bad_request("already exists", &self.path[0]));
+                    }
+
+                    if key.is_none() {
+                        self.dir.create_dir(txn, self.path[0].clone()).await
+                    } else if let Some(number) = VersionNumber::opt_cast_from(key) {
+                        self.dir
+                            .create_item(txn, self.path[0].clone(), number, value)
+                            .await
+                    } else {
+                        Err(TCError::unsupported(ERR_CREATE))
+                    }
+                } else if let Some(entry) = entry {
+                    entry.put(txn, &self.path[1..], key, value).await
+                } else {
+                    Err(TCError::not_found(&self.path[0]))
+                }
+            })
+        }))
     }
 }
 
@@ -231,7 +216,11 @@ impl<'a> Handler<'a> for LibHandler<'a> {
     }
 }
 
-impl Route for DirEntry {
+impl<T> Route for DirEntry<T>
+where
+    Cluster<T>: Route + Send + Sync,
+    Cluster<Dir<T>>: Route + Send + Sync,
+{
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
             Self::Dir(dir) => dir.route(path),
@@ -329,7 +318,7 @@ impl Route for Cluster<Legacy> {
     }
 }
 
-route_cluster!(Dir, DirHandler);
+route_cluster!(Dir<Library>, DirHandler<Library>);
 route_cluster!(Library, LibHandler);
 
 struct VersionHandler<'a> {

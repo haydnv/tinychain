@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::{join_all, FutureExt, TryFutureExt};
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist};
@@ -19,17 +20,33 @@ use crate::fs;
 use crate::fs::CacheBlock;
 use crate::scalar::value::Link;
 use crate::scalar::Scalar;
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Cluster, Replica};
 
-#[derive(Clone)]
-pub enum DirEntry {
-    Dir(Cluster<Dir>),
-    Item(Cluster<Library>),
+#[async_trait]
+pub trait DirItem:
+    Persist<fs::Dir, Txn = Txn, Schema = (), Store = fs::File<VersionNumber, Version>>
+    + Transact
+    + Send
+    + Sync
+{
+    async fn create_version(
+        &self,
+        txn_id: TxnId,
+        number: VersionNumber,
+        version: State,
+    ) -> TCResult<()>;
 }
 
-impl fmt::Display for DirEntry {
+#[derive(Clone)]
+pub enum DirEntry<T> {
+    Dir(Cluster<Dir<T>>),
+    Item(Cluster<T>),
+}
+
+impl<T> fmt::Display for DirEntry<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Dir(dir) => dir.fmt(f),
@@ -38,14 +55,20 @@ impl fmt::Display for DirEntry {
     }
 }
 
-pub enum DirEntryCommitGuard {
-    Dir(<Cluster<Dir> as Transact>::Commit),
-    Item(<Cluster<Library> as Transact>::Commit),
+pub enum DirEntryCommitGuard<T>
+where
+    T: Clone + Transact + Send + Sync,
+{
+    Dir(<Cluster<Dir<T>> as Transact>::Commit),
+    Item(<Cluster<T> as Transact>::Commit),
 }
 
 #[async_trait]
-impl Transact for DirEntry {
-    type Commit = DirEntryCommitGuard;
+impl<T> Transact for DirEntry<T>
+where
+    T: Transact + Clone + Send + Sync,
+{
+    type Commit = DirEntryCommitGuard<T>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         match self {
@@ -67,14 +90,17 @@ enum Delta {
 }
 
 #[derive(Clone)]
-pub struct Dir {
+pub struct Dir<T> {
     cache: freqfs::DirLock<CacheBlock>,
-    contents: TxnMapLock<PathSegment, DirEntry>,
+    contents: TxnMapLock<PathSegment, DirEntry<T>>,
     deltas: Arc<Mutex<HashMap<TxnId, HashMap<PathSegment, Delta>>>>,
 }
 
-impl Dir {
-    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
+impl<T> Dir<T>
+where
+    DirEntry<T>: Clone,
+{
+    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry<T>>> {
         self.contents
             .read(txn_id)
             .map_ok(|contents| contents.get(name))
@@ -84,7 +110,7 @@ impl Dir {
     pub(super) fn contents(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<TxnMapLockReadGuard<PathSegment, DirEntry>> {
+    ) -> TCResult<TxnMapLockReadGuard<PathSegment, DirEntry<T>>> {
         self.contents.try_read(txn_id)
     }
 
@@ -109,33 +135,6 @@ impl Dir {
         Ok(())
     }
 
-    pub(super) async fn create_lib(
-        &self,
-        txn: &Txn,
-        link: &Link,
-        name: PathSegment,
-        number: VersionNumber,
-        version: Map<Scalar>,
-    ) -> TCResult<()> {
-        let mut contents = self.contents.write(*txn.id()).await?;
-        let mut cache = self.cache.write().await;
-
-        let file = cache
-            .create_dir(format!("{}.{}", name, Version::ext()))
-            .map_err(fs::io_err)
-            .and_then(fs::File::new)?;
-
-        let lib = Library::create(txn, (), file).await?;
-        lib.create_version(*txn.id(), number, version).await?;
-
-        let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
-        contents.insert(name.clone(), DirEntry::Item(lib));
-
-        self.record_delta(*txn.id(), name, Delta::Create).await;
-
-        Ok(())
-    }
-
     async fn record_delta(&self, txn_id: TxnId, name: PathSegment, delta: Delta) {
         let mut deltas = self.deltas.lock().expect("dir deltas");
         match deltas.entry(txn_id) {
@@ -151,16 +150,56 @@ impl Dir {
     }
 }
 
+impl<T> Dir<T>
+where
+    T: DirItem,
+    DirEntry<T>: Clone,
+{
+    pub(super) async fn create_item(
+        &self,
+        txn: &Txn,
+        link: &Link,
+        name: PathSegment,
+        number: VersionNumber,
+        state: State,
+    ) -> TCResult<()> {
+        let mut contents = self.contents.write(*txn.id()).await?;
+        let mut cache = self.cache.write().await;
+
+        let file = cache
+            .create_dir(format!("{}.{}", name, Version::ext()))
+            .map_err(fs::io_err)
+            .and_then(fs::File::new)?;
+
+        let lib = T::create(txn, (), file).await?;
+
+        let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
+        lib.state().create_version(*txn.id(), number, state).await?;
+        contents.insert(name.clone(), DirEntry::Item(lib));
+
+        self.record_delta(*txn.id(), name, Delta::Create).await;
+
+        Ok(())
+    }
+}
+
 #[async_trait]
-impl Replica for Dir {
+impl<T> Replica for Dir<T>
+where
+    T: Replica + Transact + Clone + Send + Sync,
+{
     async fn replicate(&self, _txn: &Txn, _source: &Link) -> TCResult<()> {
         Err(TCError::not_implemented("cluster::Dir::replicate"))
     }
 }
 
 #[async_trait]
-impl Transact for Dir {
-    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
+impl<T> Transact for Dir<T>
+where
+    T: Transact + Clone + Send + Sync,
+    DirEntry<T>: Clone,
+{
+    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry<T>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let guard = self.contents.commit(txn_id).await;
@@ -187,7 +226,7 @@ impl Transact for Dir {
 }
 
 #[async_trait]
-impl Persist<fs::Dir> for Dir {
+impl<T> Persist<fs::Dir> for Dir<T> {
     type Schema = ();
     type Store = fs::Dir;
     type Txn = Txn;
@@ -206,9 +245,9 @@ impl Persist<fs::Dir> for Dir {
     }
 }
 
-impl fmt::Display for Dir {
+impl<T> fmt::Display for Dir<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("library directory")
+        write!(f, "{} directory", std::any::type_name::<T>())
     }
 }
 
@@ -273,20 +312,6 @@ pub struct Library {
 }
 
 impl Library {
-    pub async fn create_version<V>(
-        &self,
-        txn_id: TxnId,
-        number: VersionNumber,
-        version: V,
-    ) -> TCResult<()>
-    where
-        Version: From<V>,
-    {
-        let mut file = self.file.write(txn_id).await?;
-        file.create_block(number, version.into(), 0).await?;
-        Ok(())
-    }
-
     pub async fn get_version(
         &self,
         txn_id: TxnId,
@@ -294,6 +319,24 @@ impl Library {
     ) -> TCResult<fs::BlockReadGuard<Version>> {
         let file = self.file.read(txn_id).await?;
         file.read_block(&number).await
+    }
+}
+
+#[async_trait]
+impl DirItem for Library {
+    async fn create_version(
+        &self,
+        txn_id: TxnId,
+        number: VersionNumber,
+        version: State,
+    ) -> TCResult<()> {
+        let version = Map::<Scalar>::try_cast_from(version, |s| {
+            TCError::bad_request("invalid library version", s)
+        })?;
+
+        let mut file = self.file.write(txn_id).await?;
+        file.create_block(number, version.into(), 0).await?;
+        Ok(())
     }
 }
 

@@ -7,7 +7,7 @@ use tc_error::*;
 use tc_value::{LinkHost, Value};
 use tcgeneric::*;
 
-use crate::cluster::{Cluster, Dir, Legacy};
+use crate::cluster::{Cluster, Dir, Legacy, Library};
 use crate::object::InstanceExt;
 use crate::state::State;
 use crate::txn::{hypothetical, Txn};
@@ -55,7 +55,7 @@ impl Kernel {
     }
 
     /// Initialize a new [`Kernel`] with no [`UserSpace`].
-    pub fn with_userspace<I>(address: LinkHost, library: Dir, clusters: I) -> Self
+    pub fn with_userspace<I>(address: LinkHost, library: Dir<Library>, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {

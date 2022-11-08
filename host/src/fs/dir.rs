@@ -156,6 +156,17 @@ pub struct DirGuard<C, L> {
     contents: L,
 }
 
+impl<C, L> DirGuard<C, L>
+where
+    C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+{
+    // Iterate over the contents of this directory
+    pub fn iter(&self) -> tc_transact::lock::Iter<PathSegment, DirEntry> {
+        self.contents.iter()
+    }
+}
+
 impl<C, L> fs::DirRead for DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,

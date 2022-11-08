@@ -29,7 +29,7 @@ use owner::Owner;
 
 use futures::stream::FuturesUnordered;
 
-pub use library::{Dir, DirEntry, Library};
+pub use library::{Dir, DirEntry, DirItem, Library};
 pub use load::instantiate;
 
 pub mod library;
@@ -228,7 +228,7 @@ where
 
 impl<T> Cluster<T>
 where
-    T: Replica,
+    T: Replica + Send + Sync,
 {
     /// Get the set of current replicas of this `Cluster`.
     pub async fn replicas(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<HashSet<Link>>> {
@@ -361,12 +361,20 @@ where
     }
 }
 
-impl Cluster<Dir> {
+impl<T> Cluster<Dir<T>>
+where
+    Self: Clone,
+    DirEntry<T>: Clone,
+{
+    pub async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<()> {
+        self.state().create_dir(txn, self.link(), name).await
+    }
+
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry)> {
+    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
         if path.is_empty() {
             return Ok((path, DirEntry::Dir(self.clone())));
         }
@@ -381,25 +389,30 @@ impl Cluster<Dir> {
             Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]),
         }
     }
+}
 
-    pub async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<()> {
-        self.state().create_dir(txn, self.link(), name).await
-    }
-
-    pub async fn create_lib(
+impl<T> Cluster<Dir<T>>
+where
+    T: DirItem,
+    DirEntry<T>: Clone,
+{
+    pub async fn create_item(
         &self,
         txn: &Txn,
         name: PathSegment,
         number: VersionNumber,
-        lib: Map<Scalar>,
+        state: State,
     ) -> TCResult<()> {
         self.state()
-            .create_lib(txn, self.link(), name, number, lib)
+            .create_item(txn, self.link(), name, number, state)
             .await
     }
 }
 
-impl Instance for Cluster<Dir> {
+impl<T> Instance for Cluster<Dir<T>>
+where
+    T: Send + Sync,
+{
     type Class = ClusterType;
 
     fn class(&self) -> Self::Class {

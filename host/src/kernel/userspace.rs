@@ -11,7 +11,7 @@ use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
+use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Library, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -26,12 +26,12 @@ pub const LIB: PathLabel = path_label(&["lib"]);
 pub struct UserSpace {
     hosted: Hosted, // TODO: delete
     hypothetical: Hypothetical,
-    library: Cluster<Dir>,
+    library: Cluster<Dir<Library>>,
 }
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(address: LinkHost, library: Dir, clusters: I) -> Self
+    pub fn new<I>(address: LinkHost, library: Dir<Library>, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
