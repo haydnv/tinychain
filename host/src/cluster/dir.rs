@@ -4,13 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
+use serde::{Deserialize, Serialize};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Persist};
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
-use tcgeneric::PathSegment;
+use tcgeneric::{Map, PathSegment};
 
 use crate::fs;
 use crate::state::State;
@@ -19,12 +20,14 @@ use crate::txn::Txn;
 use super::library::Version;
 use super::{Cluster, Replica};
 
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub struct Config {
+    children: Map<Link>,
+}
+
 #[async_trait]
 pub trait DirItem:
-    Persist<fs::Dir, Txn = Txn, Schema = (), Store = fs::File<VersionNumber, Version>>
-    + Transact
-    + Send
-    + Sync
+    Persist<fs::Dir, Txn = Txn, Store = fs::File<VersionNumber, Version>> + Transact + Send + Sync
 {
     async fn create_version(
         &self,
@@ -120,7 +123,7 @@ where
         let dir = cache.create_dir(name.to_string()).map_err(fs::io_err)?;
         let dir = fs::Dir::new(dir);
 
-        let dir = Self::create(txn, (), dir).await?;
+        let dir = Self::create(txn, Config::default(), dir).await?;
         let dir = Cluster::with_state(link.clone().append(name.clone()), dir);
         contents.insert(name.clone(), DirEntry::Dir(dir));
 
@@ -147,6 +150,7 @@ where
 impl<T> Dir<T>
 where
     T: DirItem,
+    T: Persist<fs::Dir, Schema = ()>,
     DirEntry<T>: Clone,
 {
     pub(super) async fn create_item(
@@ -165,7 +169,7 @@ where
             .map_err(fs::io_err)
             .and_then(fs::File::new)?;
 
-        let lib = T::create(txn, (), file).await?;
+        let lib = T::create(txn, ().into(), file).await?;
 
         let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
         lib.state().create_version(*txn.id(), number, state).await?;
@@ -221,7 +225,7 @@ where
 
 #[async_trait]
 impl<T> Persist<fs::Dir> for Dir<T> {
-    type Schema = ();
+    type Schema = Config;
     type Store = fs::Dir;
     type Txn = Txn;
 

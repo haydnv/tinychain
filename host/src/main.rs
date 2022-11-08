@@ -210,7 +210,9 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         use tc_transact::fs::*;
         let mut data_dir = data_dir.write(txn_id).await?;
         let lib_dir = data_dir.get_or_create_dir(tcgeneric::label(kernel::LIB[0]).into())?;
-        crate::cluster::Dir::load(&txn, (), lib_dir).await?
+        // TODO: load this schema from a config file
+        let schema = crate::cluster::dir::Config::default();
+        crate::cluster::Dir::load(&txn, schema, lib_dir).await?
     };
 
     data_dir.commit(&txn_id).await;

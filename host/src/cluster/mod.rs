@@ -1,18 +1,22 @@
 //! Maintains the consistency of the network by coordinating transaction commits.
 
 use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, Future, FutureExt};
-use futures::stream::StreamExt;
+use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, warn};
 use safecast::TryCastFrom;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use tc_error::*;
+use tc_transact::fs::Persist;
 use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnMapRead};
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
@@ -27,8 +31,7 @@ use crate::txn::{Actor, Txn, TxnId};
 
 use owner::Owner;
 
-use futures::stream::FuturesUnordered;
-
+use crate::fs;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
@@ -40,6 +43,29 @@ mod owner;
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
+
+#[derive(Deserialize, Serialize)]
+pub struct Config<T>
+where
+    T: Persist<fs::Dir>,
+    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+{
+    link: Link,
+    config: <T as Persist<fs::Dir>>::Schema,
+}
+
+impl<T> Clone for Config<T>
+where
+    T: Persist<fs::Dir>,
+    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+{
+    fn clone(&self) -> Self {
+        Self {
+            link: self.link.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
 
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
@@ -77,6 +103,7 @@ pub struct Cluster<T> {
 
 impl<T> Cluster<T> {
     /// Create a new [`Cluster`] to manage replication of the given `state`.
+    // TODO: set visibility to private
     pub fn with_state(link: Link, state: T) -> Self {
         let replicas = [&link].iter().map(|link| (*link).clone()).collect();
 
@@ -363,6 +390,36 @@ where
     }
 }
 
+#[async_trait]
+impl<T> Persist<fs::Dir> for Cluster<T>
+where
+    T: Persist<fs::Dir, Txn = Txn>,
+    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
+{
+    type Schema = Config<T>;
+    type Store = fs::Store;
+    type Txn = Txn;
+
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let Config { link, config } = schema;
+        let store = store.try_into()?;
+
+        T::create(txn, config, store)
+            .map_ok(|state| Self::with_state(link, state))
+            .await
+    }
+
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+        let Config { link, config } = schema;
+        let store = store.try_into()?;
+
+        T::load(txn, config, store)
+            .map_ok(|state| Self::with_state(link, state))
+            .await
+    }
+}
+
 impl<T> Cluster<Dir<T>>
 where
     Self: Clone,
@@ -396,6 +453,7 @@ where
 impl<T> Cluster<Dir<T>>
 where
     T: DirItem,
+    T: Persist<fs::Dir, Schema = ()>,
     DirEntry<T>: Clone,
 {
     pub async fn create_item(
