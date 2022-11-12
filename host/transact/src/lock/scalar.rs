@@ -494,6 +494,12 @@ impl<T> TxnLock<T> {
         }
     }
 
+    /// Get the [`TxnId`] of the last commit to this [`TxnLock`].
+    pub fn last_commit(&self) -> TxnId {
+        let state = self.inner.state.lock().expect("TxnLock state");
+        state.last_commit
+    }
+
     fn wake(&self) {
         self.inner.notify.notify_waiters()
     }

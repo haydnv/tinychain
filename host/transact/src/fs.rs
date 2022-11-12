@@ -298,6 +298,9 @@ pub trait Persist<D: Dir>: Sized {
             Self::load(txn, schema, store).await
         }
     }
+
+    /// Copy the schema of this persistent data structure at the given [`TxnId`].
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema>;
 }
 
 /// Defines how to copy a base state from another instance, possibly a view.

@@ -388,12 +388,18 @@ pub struct TxnMapLock<K, V> {
 }
 
 impl<K, V> TxnMapLock<K, V> {
+    /// Create a new [`TxnMapLock`].
     pub fn new<I: fmt::Display>(name: I) -> Self {
         Self {
             name: Arc::new(name.to_string()),
             keys: TxnLock::new(format!("{} keys", name), BTreeSet::new()),
             values: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Get the [`TxnId`] of the last commit to this [`TxnMapLock`].
+    pub fn last_commit(&self) -> TxnId {
+        self.keys.last_commit()
     }
 }
 
