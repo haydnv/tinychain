@@ -4,7 +4,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use tc_error::*;
-use tc_value::{LinkHost, Value};
+use tc_value::Value;
 use tcgeneric::*;
 
 use crate::cluster::{Cluster, Dir, Legacy, Library};
@@ -55,13 +55,13 @@ impl Kernel {
     }
 
     /// Initialize a new [`Kernel`] with no [`UserSpace`].
-    pub fn with_userspace<I>(address: LinkHost, library: Dir<Library>, clusters: I) -> Self
+    pub fn with_userspace<I>(library: Cluster<Dir<Library>>, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
         Self {
             system: System,
-            userspace: Some(UserSpace::new(address, library, clusters)),
+            userspace: Some(UserSpace::new(library, clusters)),
         }
     }
 

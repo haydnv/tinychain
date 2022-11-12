@@ -122,9 +122,17 @@ impl Persist<fs::Dir> for CollectionBase {
             Self::BTree(btree) => btree.schema(txn_id).map_ok(Self::Schema::BTree).await,
             Self::Table(table) => table.schema(txn_id).map_ok(Self::Schema::Table).await,
             #[cfg(feature = "tensor")]
-            Self::Dense(dense) => dense.schema(txn_id).map_ok(Self::Schema::Dense).await,
+            Self::Dense(dense) => {
+                Persist::schema(dense, txn_id)
+                    .map_ok(Self::Schema::Dense)
+                    .await
+            }
             #[cfg(feature = "tensor")]
-            Self::Sparse(sparse) => btree.schema(txn_id).map_ok(Self::Schema::Sparse).await,
+            Self::Sparse(sparse) => {
+                Persist::schema(sparse, txn_id)
+                    .map_ok(Self::Schema::Sparse)
+                    .await
+            }
         }
     }
 }

@@ -97,6 +97,9 @@ struct Config {
     )]
     pub clusters: Vec<PathBuf>,
 
+    #[structopt(long = "config", about = "path to the cluster configuration file")]
+    pub config_path: Option<PathBuf>,
+
     #[structopt(
         long = "request_ttl",
         about = "maximum allowed request duration",
@@ -123,6 +126,7 @@ impl Config {
     }
 }
 
+// TODO: split into startup, run, and shutdown functions
 async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let gateway_config = config.gateway();
 
@@ -142,12 +146,6 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     if cache_size < MIN_CACHE_SIZE {
         return Err(TCError::bad_request("the minimum cache size is", MIN_CACHE_SIZE).into());
     }
-
-    let address = LinkHost::new(
-        LinkProtocol::HTTP,
-        config.address.into(),
-        Some(config.http_port),
-    );
 
     let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace).await?;
@@ -207,17 +205,24 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let library = {
+        let schema = if let Some(config_path) = &config.config_path {
+            assert!(config_path.exists(), "config file not found");
+            let data = std::fs::read_to_string(config_path)?;
+            toml::from_str(&data).map_err(TokioError::from)
+        } else {
+            Ok(cluster::Config::new(kernel::LIB.into()))
+        }?;
+
         use tc_transact::fs::*;
-        let mut data_dir = data_dir.write(txn_id).await?;
-        let lib_dir = data_dir.get_or_create_dir(tcgeneric::label(kernel::LIB[0]).into())?;
-        // TODO: load this schema from a config file
-        let schema = crate::cluster::dir::Config::default();
-        crate::cluster::Dir::load(&txn, schema, lib_dir).await?
+
+        let data_dir = data_dir.write(txn_id).await?;
+        let lib_dir = data_dir.get_or_create_store(tcgeneric::label(kernel::LIB[0]).into());
+        cluster::Cluster::<cluster::Dir<cluster::Library>>::load(&txn, schema, lib_dir).await?
     };
 
     data_dir.commit(&txn_id).await;
 
-    let kernel = tinychain::Kernel::with_userspace(address, library, clusters);
+    let kernel = tinychain::Kernel::with_userspace(library.clone(), clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
@@ -226,7 +231,16 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         config.cache_size
     );
 
-    gateway.listen().await
+    gateway.listen().await?;
+
+    if let Some(config_path) = &config.config_path {
+        let txn_id = TxnId::new(Gateway::time());
+        let schema = tc_transact::fs::Persist::schema(&library, txn_id).await?;
+        let schema = toml::to_string(&schema).map_err(TokioError::from)?;
+        std::fs::write(config_path, schema).map_err(TokioError::from)
+    } else {
+        Ok(())
+    }
 }
 
 fn main() {

@@ -11,8 +11,8 @@ use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, warn};
 use safecast::TryCastFrom;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::de::{Deserialize, DeserializeOwned, Deserializer};
+use serde::ser::{Serialize, Serializer};
 use tokio::sync::RwLock;
 
 use tc_error::*;
@@ -44,11 +44,11 @@ mod owner;
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
 
-#[derive(Deserialize, Serialize)]
 pub struct Config<T>
 where
-    T: Persist<fs::Dir>,
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
     <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {
     link: Link,
     config: <T as Persist<fs::Dir>>::Schema,
@@ -56,8 +56,9 @@ where
 
 impl<T> Clone for Config<T>
 where
-    T: Persist<fs::Dir>,
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
     <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -69,14 +70,43 @@ where
 
 impl<T> Config<T>
 where
-    T: Persist<fs::Dir>,
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
     <T as Persist<fs::Dir>>::Schema: Default + DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {
     pub fn new(path: TCPathBuf) -> Self {
         Self {
             link: path.into(),
             config: Default::default(),
         }
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Config<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
+    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Deserialize::deserialize(deserializer).map(|(link, config)| Self { link, config })
+    }
+}
+
+impl<T> Serialize for Config<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
+    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
+    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (&self.link, &self.config).serialize(serializer)
     }
 }
 
@@ -406,7 +436,7 @@ where
 #[async_trait]
 impl<T> Persist<fs::Dir> for Cluster<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Send + Sync,
+    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
     <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
     <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {

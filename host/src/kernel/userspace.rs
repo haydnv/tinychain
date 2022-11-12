@@ -8,8 +8,8 @@ use log::debug;
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, LinkHost, Value};
-use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath, TCPathBuf};
+use tc_value::{Link, Value};
+use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
 use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Library, Replica};
 use crate::object::InstanceExt;
@@ -31,14 +31,14 @@ pub struct UserSpace {
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(address: LinkHost, library: Dir<Library>, clusters: I) -> Self
+    pub fn new<I>(library: Cluster<Dir<Library>>, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
         Self {
             hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
-            library: Cluster::with_state(Link::new(address, TCPathBuf::from(LIB)), library),
+            library,
         }
     }
 
