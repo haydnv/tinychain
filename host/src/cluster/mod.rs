@@ -67,6 +67,19 @@ where
     }
 }
 
+impl<T> Config<T>
+where
+    T: Persist<fs::Dir>,
+    <T as Persist<fs::Dir>>::Schema: Default + DeserializeOwned + Serialize,
+{
+    pub fn new(path: TCPathBuf) -> Self {
+        Self {
+            link: path.into(),
+            config: Default::default(),
+        }
+    }
+}
+
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
 pub trait Replica: Transact {
@@ -393,7 +406,7 @@ where
 #[async_trait]
 impl<T> Persist<fs::Dir> for Cluster<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>,
+    T: Persist<fs::Dir, Txn = Txn> + Send + Sync,
     <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
     <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {
@@ -418,10 +431,22 @@ where
             .map_ok(|state| Self::with_state(link, state))
             .await
     }
+
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
+        self.inner
+            .state
+            .schema(txn_id)
+            .map_ok(|config| Config {
+                config,
+                link: self.inner.link.clone(),
+            })
+            .await
+    }
 }
 
 impl<T> Cluster<Dir<T>>
 where
+    T: Clone + Send + Sync,
     Self: Clone,
     DirEntry<T>: Clone,
 {
@@ -441,7 +466,7 @@ where
         // IMPORTANT! Only use synchronous lock acquisition!
         // async lock acquisition here could cause deadlocks
         // and make services in this `Dir` impossible to update
-        let contents = self.state().contents(txn_id)?;
+        let contents = self.inner.state.contents(txn_id)?;
         match contents.get(&path[0]) {
             None => Ok((path, DirEntry::Dir(self.clone()))),
             Some(DirEntry::Item(item)) => Ok((&path[1..], DirEntry::Item(item))),

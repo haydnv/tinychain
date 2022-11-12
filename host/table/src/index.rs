@@ -321,6 +321,10 @@ where
             .map_ok(|btree| Self { schema, btree })
             .await
     }
+
+    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
+        Ok(self.schema.clone())
+    }
 }
 
 #[async_trait]
@@ -958,6 +962,10 @@ where
                 auxiliary,
             }),
         })
+    }
+
+    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
+        Ok(self.inner.schema.clone())
     }
 }
 

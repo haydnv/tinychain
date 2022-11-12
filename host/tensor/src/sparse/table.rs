@@ -303,6 +303,10 @@ where
             dense: PhantomData,
         })
     }
+
+    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
+        Ok(self.schema.clone())
+    }
 }
 
 #[async_trait]

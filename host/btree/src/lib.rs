@@ -365,8 +365,8 @@ where
 
     fn schema(&self) -> &RowSchema {
         match self {
-            Self::File(file) => file.schema(),
-            Self::Slice(slice) => slice.schema(),
+            Self::File(file) => BTreeInstance::schema(file),
+            Self::Slice(slice) => BTreeInstance::schema(slice),
         }
     }
 

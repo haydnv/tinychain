@@ -116,6 +116,17 @@ impl Persist<fs::Dir> for CollectionBase {
             }
         }
     }
+
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
+        match self {
+            Self::BTree(btree) => btree.schema(txn_id).map_ok(Self::Schema::BTree).await,
+            Self::Table(table) => table.schema(txn_id).map_ok(Self::Schema::Table).await,
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.schema(txn_id).map_ok(Self::Schema::Dense).await,
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => btree.schema(txn_id).map_ok(Self::Schema::Sparse).await,
+        }
+    }
 }
 
 #[async_trait]

@@ -1328,6 +1328,10 @@ where
             .map_ok(Self::from)
             .await
     }
+
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
+        self.accessor.schema(txn_id).await
+    }
 }
 
 #[async_trait]

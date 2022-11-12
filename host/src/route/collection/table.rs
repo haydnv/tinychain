@@ -63,7 +63,13 @@ impl<'a> Handler<'a> for CopyHandler {
                         value.try_cast_into(|v| TCError::bad_request("invalid Table row", v))
                     })
                 })
-                .map(|r| r.and_then(|row| table.schema().primary().key_values_from_tuple(row)))
+                .map(|r| {
+                    r.and_then(|row| {
+                        TableInstance::schema(&table)
+                            .primary()
+                            .key_values_from_tuple(row)
+                    })
+                })
                 .map_ok(|(key, values)| table.upsert(txn_id, key, values))
                 .try_buffer_unordered(num_cpus::get())
                 .try_fold((), |(), ()| future::ready(Ok(())))

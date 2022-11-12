@@ -788,6 +788,10 @@ where
             Err(TCError::internal("BTree corrupted (missing root block)"))
         }
     }
+
+    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
+        Ok(self.inner.schema.clone())
+    }
 }
 
 #[async_trait]

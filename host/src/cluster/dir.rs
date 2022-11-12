@@ -27,7 +27,11 @@ pub struct Config {
 
 #[async_trait]
 pub trait DirItem:
-    Persist<fs::Dir, Txn = Txn, Store = fs::File<VersionNumber, Version>> + Transact + Send + Sync
+    Persist<fs::Dir, Txn = Txn, Store = fs::File<VersionNumber, Version>>
+    + Transact
+    + Clone
+    + Send
+    + Sync
 {
     async fn create_version(
         &self,
@@ -95,6 +99,7 @@ pub struct Dir<T> {
 
 impl<T> Dir<T>
 where
+    T: Clone + Send + Sync,
     DirEntry<T>: Clone,
 {
     pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry<T>>> {
@@ -224,7 +229,10 @@ where
 }
 
 #[async_trait]
-impl<T> Persist<fs::Dir> for Dir<T> {
+impl<T> Persist<fs::Dir> for Dir<T>
+where
+    T: Clone + Send + Sync,
+{
     type Schema = Config;
     type Store = fs::Dir;
     type Txn = Txn;
@@ -240,6 +248,23 @@ impl<T> Persist<fs::Dir> for Dir<T> {
     async fn load(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
         // TODO: read existing contents
         Self::create(txn, schema, dir).await
+    }
+
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
+        self.contents
+            .read(txn_id)
+            .map_ok(|contents| {
+                contents
+                    .iter()
+                    .map(|(name, entry)| (name.clone(), entry))
+                    .map(|(name, entry)| match entry {
+                        DirEntry::Dir(dir) => (name, dir.link().clone()),
+                        DirEntry::Item(item) => (name, item.link().clone()),
+                    })
+                    .collect()
+            })
+            .map_ok(|children| Config { children })
+            .await
     }
 }
 
