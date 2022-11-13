@@ -74,9 +74,9 @@ where
     <T as Persist<fs::Dir>>::Schema: Default + DeserializeOwned + Serialize,
     <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
 {
-    pub fn new(path: TCPathBuf) -> Self {
+    pub fn new(link: Link) -> Self {
         Self {
-            link: path.into(),
+            link,
             config: Default::default(),
         }
     }
@@ -148,6 +148,8 @@ impl<T> Cluster<T> {
     /// Create a new [`Cluster`] to manage replication of the given `state`.
     // TODO: set visibility to private
     pub fn with_state(link: Link, state: T) -> Self {
+        assert!(link.host().is_some());
+
         let replicas = [&link].iter().map(|link| (*link).clone()).collect();
 
         Self {

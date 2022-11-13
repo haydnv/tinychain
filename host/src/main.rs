@@ -210,7 +210,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
             let data = std::fs::read_to_string(config_path)?;
             toml::from_str(&data).map_err(TokioError::from)
         } else {
-            Ok(cluster::Config::new(kernel::LIB.into()))
+            Ok(cluster::Config::new(txn.link(kernel::LIB.into())))
         }?;
 
         use tc_transact::fs::*;
