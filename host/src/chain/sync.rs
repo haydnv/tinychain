@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Id, Label, TCPathBuf};
+use tcgeneric::{label, Id, Label};
 
 use crate::fs;
 use crate::route::{Public, Route};
@@ -50,22 +50,16 @@ where
         + Public
         + fmt::Display,
 {
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         let mut block: FileWriteGuard<_, ChainBlock> =
             self.pending.write().map_err(fs::io_err).await?;
 
-        block.append_delete(txn_id, path, key);
+        block.append_delete(txn_id, key);
         Ok(())
     }
 
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        debug!("SyncChain::append_put {}: {} <- {}", path, key, value);
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+        debug!("SyncChain::append_put {} <- {}", key, value);
 
         let value = self.store.save_state(txn, value).await?;
 
@@ -73,7 +67,7 @@ where
         let mut block: FileWriteGuard<_, ChainBlock> =
             self.pending.write().map_err(fs::io_err).await?;
 
-        block.append_put(*txn.id(), path, key, value);
+        block.append_put(*txn.id(), key, value);
 
         debug!("locked pending transaction log block");
         Ok(())

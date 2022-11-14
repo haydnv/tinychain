@@ -15,21 +15,21 @@ use tc_error::*;
 use tc_transact::fs::BlockData;
 use tc_transact::TxnId;
 use tc_value::Value;
-use tcgeneric::{TCPathBuf, Tuple};
+use tcgeneric::Tuple;
 
 use crate::scalar::Scalar;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Mutation {
-    Delete(TCPathBuf, Value),
-    Put(TCPathBuf, Value, Scalar),
+    Delete(Value),
+    Put(Value, Scalar),
 }
 
 impl<'a, D: Digest> Hash<D> for &'a Mutation {
     fn hash(self) -> Output<D> {
         match self {
-            Mutation::Delete(path, key) => Hash::<D>::hash((path, key)),
-            Mutation::Put(path, key, value) => Hash::<D>::hash((path, key, value)),
+            Mutation::Delete(key) => Hash::<D>::hash(key),
+            Mutation::Put(key, value) => Hash::<D>::hash((key, value)),
         }
     }
 }
@@ -48,8 +48,8 @@ impl<'en> en::ToStream<'en> for Mutation {
         use en::IntoStream;
 
         match self {
-            Self::Delete(path, key) => (path, key).into_stream(encoder),
-            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+            Self::Delete(key) => (key,).into_stream(encoder),
+            Self::Put(key, value) => (key, value).into_stream(encoder),
         }
     }
 }
@@ -57,8 +57,8 @@ impl<'en> en::ToStream<'en> for Mutation {
 impl<'en> en::IntoStream<'en> for Mutation {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Delete(path, key) => (path, key).into_stream(encoder),
-            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+            Self::Delete(key) => (key,).into_stream(encoder),
+            Self::Put(key, value) => (key, value).into_stream(encoder),
         }
     }
 }
@@ -66,8 +66,8 @@ impl<'en> en::IntoStream<'en> for Mutation {
 impl fmt::Debug for Mutation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Delete(path, key) => write!(f, "DELETE {}: {:?}", path, key),
-            Self::Put(path, key, value) => write!(f, "PUT {}: {:?} <- {:?}", path, key, value),
+            Self::Delete(key) => write!(f, "DELETE {:?}", key),
+            Self::Put(key, value) => write!(f, "PUT {:?} <- {:?}", key, value),
         }
     }
 }
@@ -75,8 +75,8 @@ impl fmt::Debug for Mutation {
 impl fmt::Display for Mutation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Delete(path, key) => write!(f, "DELETE {}: {}", path, key),
-            Self::Put(path, key, value) => write!(f, "PUT {}: {} <- {}", path, key, value),
+            Self::Delete(key) => write!(f, "DELETE {}", key),
+            Self::Put(key, value) => write!(f, "PUT {} <- {}", key, value),
         }
     }
 }
@@ -92,20 +92,14 @@ impl de::Visitor for MutationVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let path = seq
-            .next_element(())
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
-
         let key = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
 
-        if let Some(value) = seq.next_element(()).await? {
-            Ok(Mutation::Put(path, key, value))
-        } else {
-            Ok(Mutation::Delete(path, key))
+        match seq.next_element(()).await? {
+            Some(value) => Ok(Mutation::Put(key, value)),
+            None => Ok(Mutation::Delete(key)),
         }
     }
 }
@@ -158,14 +152,14 @@ impl ChainBlock {
     }
 
     /// Append a DELETE op to this `ChainBlock`.
-    pub fn append_delete(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value) {
-        self.append(txn_id, Mutation::Delete(path, key))
+    pub fn append_delete(&mut self, txn_id: TxnId, key: Value) {
+        self.append(txn_id, Mutation::Delete(key))
     }
 
     /// Append a PUT op to the this `ChainBlock`.
-    pub fn append_put(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
-        debug!("ChainBlock::append_put {}: {} <- {}", path, key, value);
-        self.append(txn_id, Mutation::Put(path, key, value))
+    pub fn append_put(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
+        debug!("ChainBlock::append_put {} <- {}", key, value);
+        self.append(txn_id, Mutation::Put(key, value))
     }
 
     /// The hash of the previous block in the chain.
@@ -184,6 +178,7 @@ impl ChainBlock {
     /// The current size of this block.
     pub async fn size(&self) -> TCResult<usize> {
         let encoded = tbon::en::encode(self).map_err(TCError::internal)?;
+
         encoded
             .map_err(TCError::internal)
             .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))

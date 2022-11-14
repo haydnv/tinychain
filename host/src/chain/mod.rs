@@ -40,16 +40,10 @@ const PREFIX: PathLabel = path_label(&["state", "chain"]);
 #[async_trait]
 pub trait ChainInstance<T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()>;
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &T;
@@ -145,23 +139,17 @@ where
         + Public
         + fmt::Display,
 {
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_delete(txn_id, path, key).await,
-            Self::Sync(chain) => chain.append_delete(txn_id, path, key).await,
+            Self::Block(chain) => chain.append_delete(txn_id, key).await,
+            Self::Sync(chain) => chain.append_delete(txn_id, key).await,
         }
     }
 
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_put(txn, path, key, value).await,
-            Self::Sync(chain) => chain.append_put(txn, path, key, value).await,
+            Self::Block(chain) => chain.append_put(txn, key, value).await,
+            Self::Sync(chain) => chain.append_put(txn, key, value).await,
         }
     }
 
@@ -228,7 +216,11 @@ where
                     .map_ok(Self::Block)
                     .await
             }
-            ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+            ChainType::Sync => {
+                SyncChain::create(txn, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
         }
     }
 

@@ -23,12 +23,11 @@ impl Route for ChainType {
 
 struct AppendHandler<'a, T> {
     chain: &'a Chain<T>,
-    path: &'a [PathSegment],
 }
 
 impl<'a, T> AppendHandler<'a, T> {
-    fn new(chain: &'a Chain<T>, path: &'a [PathSegment]) -> Self {
-        Self { chain, path }
+    fn new(chain: &'a Chain<T>) -> Self {
+        Self { chain }
     }
 }
 
@@ -41,25 +40,22 @@ where
     where
         'b: 'a,
     {
-        match self.chain.subject().route(self.path) {
-            Some(handler) => handler.get(),
-            None => None,
-        }
+        let handler = self.chain.subject().route(&[])?;
+        handler.get()
     }
 
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        match self.chain.subject().route(self.path) {
+        match self.chain.subject().route(&[]) {
             Some(handler) => match handler.put() {
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
                         debug!("Chain::put {} <- {}", key, value);
 
-                        let path = self.path.to_vec().into();
                         self.chain
-                            .append_put(txn, path, key.clone(), value.clone())
+                            .append_put(txn, key.clone(), value.clone())
                             .await?;
 
                         put_handler(txn, key, value).await
@@ -75,25 +71,21 @@ where
     where
         'b: 'a,
     {
-        match self.chain.subject().route(self.path) {
-            Some(handler) => handler.post(),
-            None => None,
-        }
+        let handler = self.chain.subject().route(&[])?;
+        handler.post()
     }
 
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        match self.chain.subject().route(self.path) {
+        match self.chain.subject().route(&[]) {
             Some(handler) => match handler.delete() {
                 Some(delete_handler) => Some(Box::new(|txn, key| {
                     Box::pin(async move {
                         debug!("Chain::delete {}", key);
 
-                        self.chain
-                            .append_delete(*txn.id(), self.path.to_vec().into(), key.clone())
-                            .await?;
+                        self.chain.append_delete(*txn.id(), key.clone()).await?;
 
                         delete_handler(txn, key).await
                     })
@@ -179,12 +171,14 @@ where
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
-        if path.len() == 1 && path[0].as_str() == "chain" {
+        if path.is_empty() {
+            Some(Box::new(AppendHandler::new(self)))
+        } else if path.len() == 1 && path[0].as_str() == "chain" {
             Some(Box::new(ChainHandler::from(self)))
         } else if path == &COPY[..] {
             Some(Box::new(CopyHandler::from(self)))
         } else {
-            Some(Box::new(AppendHandler::new(self, path)))
+            self.subject().route(path)
         }
     }
 }

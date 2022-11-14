@@ -5,7 +5,7 @@ from ..process import start_host
 
 
 class TestLibV0(tc.app.Library):
-    __uri__ = tc.URI("/lib/test/libhello")
+    __uri__ = tc.URI("http://127.0.0.1:8702/lib/test/libhello")
 
     # TODO: remove this override and use the URI key to specify the replication master
     def __json__(self):
@@ -19,26 +19,28 @@ class TestLibV0(tc.app.Library):
 class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_versioning", [])
+        cls.hosts = [
+            start_host("test_versioning", [], http_port=port, replicate="http://127.0.0.1:8702")
+            for port in range(8702, 8706)]
 
     def testCreateLib(self):
-        self.host.put("/lib/test")
-        self.host.put("/lib/test/libhello", "0.0.1", TestLibV0())
-        self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
-
-        self.host.stop()
-
-        print()
-        print("host stopped")
-        print()
-
-        self.host.start()
-
-        print()
-        print("host started")
-        print()
-
-        self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
+        self.hosts[1].put("/lib/test")
+        # self.host.put("/lib/test/libhello", "0.0.1", TestLibV0())
+        # self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
+        #
+        # self.host.stop()
+        #
+        # print()
+        # print("host stopped")
+        # print()
+        #
+        # self.host.start()
+        #
+        # print()
+        # print("host started")
+        # print()
+        #
+        # self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
 
     @classmethod
     def tearDownClass(cls) -> None:

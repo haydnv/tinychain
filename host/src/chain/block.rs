@@ -15,7 +15,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate, Persist};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Label, TCPathBuf};
+use tcgeneric::{label, Label};
 
 use crate::fs;
 use crate::route::{Public, Route};
@@ -46,18 +46,12 @@ impl<T> ChainInstance<T> for BlockChain<T>
 where
     T: Route + Public,
 {
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        self.history.append_delete(txn_id, path, key).await
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+        self.history.append_delete(txn_id, key).await
     }
 
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        self.history.append_put(txn, path, key, value).await
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+        self.history.append_put(txn, key, value).await
     }
 
     fn subject(&self) -> &T {

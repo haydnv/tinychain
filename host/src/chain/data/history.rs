@@ -15,7 +15,7 @@ use tc_transact::fs::{BlockData, Dir, DirCreate, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, TCPathBuf, Tuple};
+use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, Tuple};
 
 use crate::chain::{null_hash, BLOCK_SIZE, CHAIN};
 use crate::fs;
@@ -52,30 +52,21 @@ impl History {
         &self.store
     }
 
-    pub async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
-        debug!("History::append_delete {} {} {}", txn_id, path, key);
+    pub async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+        debug!("History::append_delete {} {}", txn_id, key);
         let mut block = self.write_latest(txn_id).await?;
-        block.append_delete(txn_id, path, key);
+        block.append_delete(txn_id, key);
         Ok(())
     }
 
-    pub async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
+    pub async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         let txn_id = *txn.id();
         let value = self.store.save_state(txn, value).await?;
 
-        debug!(
-            "History::append_put {} {} {:?} {:?}",
-            txn_id, path, key, value
-        );
+        debug!("History::append_put {} {} {:?}", txn_id, key, value);
 
         let mut block = self.write_latest(txn_id).await?;
-        block.append_put(txn_id, path, key, value);
+        block.append_put(txn_id, key, value);
 
         Ok(())
     }
@@ -579,13 +570,13 @@ async fn parse_block_state(
         let mut parsed = Vec::with_capacity(ops.len());
 
         for op in ops.into_iter() {
-            if op.matches::<(TCPathBuf, Value)>() {
-                let (path, key) = op.opt_cast_into().unwrap();
-                parsed.push(Mutation::Delete(path, key));
-            } else if op.matches::<(TCPathBuf, Value, State)>() {
-                let (path, key, value) = op.opt_cast_into().unwrap();
+            if op.matches::<(Value,)>() {
+                let (key,) = op.opt_cast_into().unwrap();
+                parsed.push(Mutation::Delete(key));
+            } else if op.matches::<(Value, State)>() {
+                let (key, value) = op.opt_cast_into().unwrap();
                 let value = store.save_state(txn, value).await?;
-                parsed.push(Mutation::Put(path, key, value));
+                parsed.push(Mutation::Put(key, value));
             } else {
                 return Err(TCError::bad_request(
                     "unable to parse historical mutation",
@@ -614,13 +605,13 @@ where
 {
     for op in ops {
         match op {
-            Mutation::Delete(path, key) => {
-                subject.delete(txn, path, key.clone()).await?;
-                block.append_delete(txn_id, path.clone(), key.clone())
+            Mutation::Delete(key) => {
+                subject.delete(txn, &[], key.clone()).await?;
+                block.append_delete(txn_id, key.clone())
             }
-            Mutation::Put(path, key, original_hash) => {
+            Mutation::Put(key, original_hash) => {
                 let state = source.resolve(txn, original_hash.clone()).await?;
-                subject.put(txn, path, key.clone(), state.clone()).await?;
+                subject.put(txn, &[], key.clone(), state.clone()).await?;
 
                 let computed_hash = dest.save_state(txn, state).await?;
                 if &computed_hash != original_hash {
@@ -630,7 +621,7 @@ where
                     )));
                 }
 
-                block.append_put(txn_id, path.clone(), key.clone(), computed_hash)
+                block.append_put(txn_id, key.clone(), computed_hash)
             }
         }
     }
@@ -688,9 +679,9 @@ impl<'en> IntoView<'en, fs::Dir> for History {
 
 async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<MutationView<'a>> {
     match op {
-        Mutation::Delete(path, key) => Ok(MutationView::Delete(path, key)),
-        Mutation::Put(path, key, value) if value.is_ref() => {
-            debug!("historical mutation: PUT {}: {} <- {}", path, key, value);
+        Mutation::Delete(key) => Ok(MutationView::Delete(key)),
+        Mutation::Put(key, value) if value.is_ref() => {
+            debug!("historical mutation: PUT {} <- {}", key, value);
 
             let value = history
                 .store
@@ -702,12 +693,12 @@ async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<
                 .await?;
 
             let value = value.into_view(txn).await?;
-            Ok(MutationView::Put(path, key, value))
+            Ok(MutationView::Put(key, value))
         }
-        Mutation::Put(path, key, value) => {
+        Mutation::Put(key, value) => {
             let value = State::from(value).into_view(txn.clone()).await?;
 
-            Ok(MutationView::Put(path, key, value))
+            Ok(MutationView::Put(key, value))
         }
     }
 }
@@ -725,15 +716,15 @@ type HistoryBlockView<'en> = (
 );
 
 pub enum MutationView<'en> {
-    Delete(TCPathBuf, Value),
-    Put(TCPathBuf, Value, StateView<'en>),
+    Delete(Value),
+    Put(Value, StateView<'en>),
 }
 
 impl<'en> en::IntoStream<'en> for MutationView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Delete(path, key) => (path, key).into_stream(encoder),
-            Self::Put(path, key, value) => (path, key, value).into_stream(encoder),
+            Self::Delete(key) => (key,).into_stream(encoder),
+            Self::Put(key, value) => (key, value).into_stream(encoder),
         }
     }
 }
