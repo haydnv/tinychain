@@ -24,6 +24,7 @@ use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 use crate::chain::{ChainBlock, ChainType};
 use crate::cluster::library;
 use crate::collection::CollectionType;
+use crate::scalar::ScalarType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
 
@@ -65,6 +66,7 @@ impl FileEntry {
                 },
             },
             StateType::Chain(_) => File::load(cache, txn_id).map_ok(Self::Chain).await,
+            StateType::Scalar(_) => File::load(cache, txn_id).map_ok(Self::Library).await,
             other => Err(err(other)),
         }
     }
@@ -188,6 +190,10 @@ where
 
     fn is_empty(&self) -> bool {
         self.contents.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.contents.len()
     }
 }
 
@@ -538,6 +544,7 @@ fn ext_class(name: &str) -> Option<StateType> {
     match &name[i..] {
         "node" => Some(BTreeType::default().into()),
         "chain_block" => Some(ChainType::default().into()),
+        "lib" => Some(ScalarType::default().into()),
         #[cfg(feature = "tensor")]
         "array" => Some(TensorType::Dense.into()),
         _ => None,

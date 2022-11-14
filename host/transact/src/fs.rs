@@ -197,6 +197,9 @@ pub trait DirRead: Send {
 
     /// Return `true` if there are no files or subdirectories in this [`Dir`].
     fn is_empty(&self) -> bool;
+
+    /// Return the number of entries in this [`Dir`].
+    fn len(&self) -> usize;
 }
 
 /// A read lock on a [`Dir`], used to read the files it stores

@@ -26,6 +26,20 @@ class LibraryTests(unittest.TestCase):
         self.host.put("/lib/test/libhello", "0.0.1", TestLibV0())
         self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
 
+        self.host.stop()
+
+        print()
+        print("host stopped")
+        print()
+
+        self.host.start()
+
+        print()
+        print("host started")
+        print()
+
+        self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
+
     @classmethod
     def tearDownClass(cls) -> None:
         cls.host.stop()

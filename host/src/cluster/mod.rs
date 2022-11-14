@@ -396,7 +396,7 @@ where
 #[async_trait]
 impl Persist<fs::Dir> for Cluster<Library> {
     type Schema = Link;
-    type Store = fs::Store;
+    type Store = dir::File;
     type Txn = Txn;
 
     async fn create(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
@@ -418,21 +418,28 @@ impl Persist<fs::Dir> for Cluster<Library> {
     }
 }
 
-impl<T> Cluster<Dir<T>>
-where
-    T: DirItem,
-    Self: Clone,
-    DirEntry<T>: Clone,
-{
+impl Cluster<Dir<Library>> {
     pub async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<()> {
         self.state().create_dir(txn, self.link(), name).await
+    }
+
+    pub async fn create_item(
+        &self,
+        txn: &Txn,
+        name: PathSegment,
+        number: VersionNumber,
+        state: State,
+    ) -> TCResult<()> {
+        self.state()
+            .create_item(txn, self.link(), name, number, state)
+            .await
     }
 
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
+    ) -> TCResult<(&'a [PathSegment], DirEntry<Library>)> {
         if path.is_empty() {
             return Ok((path, DirEntry::Dir(self.clone())));
         }
@@ -446,25 +453,6 @@ where
             Some(DirEntry::Item(item)) => Ok((&path[1..], DirEntry::Item(item))),
             Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]),
         }
-    }
-}
-
-impl<T> Cluster<Dir<T>>
-where
-    T: DirItem,
-    T: Persist<fs::Dir, Schema = ()>,
-    DirEntry<T>: Clone,
-{
-    pub async fn create_item(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        number: VersionNumber,
-        state: State,
-    ) -> TCResult<()> {
-        self.state()
-            .create_item(txn, self.link(), name, number, state)
-            .await
     }
 }
 

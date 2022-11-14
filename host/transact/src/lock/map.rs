@@ -105,6 +105,8 @@ pub trait TxnMapRead<K, V> {
     fn is_empty(&self) -> bool;
 
     fn keys(&self) -> Keys<K>;
+
+    fn len(&self) -> usize;
 }
 
 impl<G, K, V> TxnMapRead<K, V> for G
@@ -140,6 +142,10 @@ where
         Keys {
             iter: self.borrow().iter(),
         }
+    }
+
+    fn len(&self) -> usize {
+        self.borrow().len()
     }
 }
 

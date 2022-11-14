@@ -4,15 +4,13 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::Tuple;
 
-use crate::cluster::dir::{Dir, DirEntry, DirItem};
+use crate::cluster::dir::{Dir, DirEntry};
 use crate::cluster::library::{Library, Version};
 use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
-use crate::fs;
 use crate::route::*;
 use crate::state::State;
 
@@ -108,25 +106,18 @@ impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
     }
 }
 
-struct DirHandler<'a, T> {
-    dir: &'a Cluster<Dir<T>>,
+struct DirHandler<'a> {
+    dir: &'a Cluster<Dir<Library>>,
     path: &'a [PathSegment],
 }
 
-impl<'a, T> DirHandler<'a, T> {
-    fn new(dir: &'a Cluster<Dir<T>>, path: &'a [PathSegment]) -> Self {
+impl<'a> DirHandler<'a> {
+    fn new(dir: &'a Cluster<Dir<Library>>, path: &'a [PathSegment]) -> Self {
         Self { dir, path }
     }
 }
 
-impl<'a, T> Handler<'a> for DirHandler<'a, T>
-where
-    T: DirItem,
-    T: Persist<fs::Dir, Schema = ()>,
-    DirEntry<T>: Clone,
-    Cluster<T>: Route,
-    Cluster<Dir<T>>: Clone + Route,
-{
+impl<'a> Handler<'a> for DirHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -320,7 +311,7 @@ impl Route for Cluster<Legacy> {
     }
 }
 
-route_cluster!(Dir<Library>, DirHandler<Library>);
+route_cluster!(Dir<Library>, DirHandler);
 route_cluster!(Library, LibHandler);
 
 struct VersionHandler<'a> {
