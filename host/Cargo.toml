@@ -54,6 +54,5 @@ tc-table = { path = "table" }
 tcgeneric = { path = "generic" }
 tokio = { version = "1.21", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
-toml = "0.5"
 uuid = "1.1"
 url = { version = "2.2" }

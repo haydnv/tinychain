@@ -5,7 +5,7 @@ from ..process import start_host
 
 
 class TestLibV0(tc.app.Library):
-    __uri__ = tc.URI("/lib/test")
+    __uri__ = tc.URI("/lib/test/libhello")
 
     # TODO: remove this override and use the URI key to specify the replication master
     def __json__(self):

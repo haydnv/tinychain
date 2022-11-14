@@ -148,10 +148,6 @@ impl Persist<fs::Dir> for Library {
     async fn load(_txn: &Self::Txn, _schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
         Ok(Self { file })
     }
-
-    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
-        Ok(())
-    }
 }
 
 impl From<fs::File<VersionNumber, Version>> for Library {

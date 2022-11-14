@@ -345,10 +345,6 @@ impl Persist<fs::Dir> for History {
         let latest = if latest == 0 { 0 } else { latest - 1 };
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
-
-    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
-        Ok(())
-    }
 }
 
 async fn get_or_create_block<I: fmt::Display>(

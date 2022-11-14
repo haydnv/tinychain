@@ -274,6 +274,25 @@ impl TryFrom<Link> for LinkHost {
     }
 }
 
+impl<'de> Deserialize<'de> for LinkHost {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for LinkHost {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
 impl fmt::Display for LinkHost {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(port) = self.port() {

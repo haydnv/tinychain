@@ -243,23 +243,6 @@ where
             ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
         }
     }
-
-    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
-        match self {
-            Self::Block(chain) => {
-                chain
-                    .schema(txn_id)
-                    .map_ok(|schema| (ChainType::Block, schema))
-                    .await
-            }
-            Self::Sync(chain) => {
-                chain
-                    .schema(txn_id)
-                    .map_ok(|schema| (ChainType::Sync, schema))
-                    .await
-            }
-        }
-    }
 }
 
 impl<T> fmt::Debug for Chain<T>

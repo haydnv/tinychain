@@ -10,8 +10,8 @@ use tokio::time::Duration;
 
 use tc_error::*;
 use tc_transact::{Transact, TxnId};
-
 use tc_value::{LinkHost, LinkProtocol};
+
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
@@ -58,37 +58,12 @@ struct Config {
     pub address: IpAddr,
 
     #[structopt(
-        long = "log_level",
-        about = "the log message level to write (options are trace, debug, warn, or error)",
-        default_value = "warn"
-    )]
-    pub log_level: String,
-
-    #[structopt(
-        long = "workspace",
-        about = "the directory to use as a temporary workspace in case of a cache overflow",
-        default_value = "/tmp/tc/tmp"
-    )]
-    pub workspace: PathBuf,
-
-    #[structopt(
         long = "cache_size",
         about = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
         default_value = "1G",
         parse(try_from_str = data_size),
     )]
     pub cache_size: usize,
-
-    #[structopt(
-        long = "stack_size",
-        about = "the size of the stack of each worker thread (in bytes)",
-        default_value = "4M",
-        parse(try_from_str = data_size),
-    )]
-    pub stack_size: usize,
-
-    #[structopt(long = "data_dir", about = "persistent data directory")]
-    pub data_dir: Option<PathBuf>,
 
     // TODO: delete
     #[structopt(
@@ -97,8 +72,25 @@ struct Config {
     )]
     pub clusters: Vec<PathBuf>,
 
-    #[structopt(long = "config", about = "path to the cluster configuration file")]
-    pub config_path: Option<PathBuf>,
+    #[structopt(long = "data_dir", about = "persistent data directory")]
+    pub data_dir: Option<PathBuf>,
+
+    #[structopt(
+        long = "http_port",
+        about = "the port that the HTTP server should listen on",
+        default_value = "8702"
+    )]
+    pub http_port: u16,
+
+    #[structopt(
+        long = "log_level",
+        about = "the log message level to write (options are trace, debug, warn, or error)",
+        default_value = "warn"
+    )]
+    pub log_level: String,
+
+    #[structopt(long = "replicate", about = "cluster to replicate from")]
+    pub replicate: Option<LinkHost>,
 
     #[structopt(
         long = "request_ttl",
@@ -109,11 +101,19 @@ struct Config {
     pub request_ttl: Duration,
 
     #[structopt(
-        long = "http_port",
-        about = "the port that the HTTP server should listen on",
-        default_value = "8702"
+        long = "stack_size",
+        about = "the size of the stack of each worker thread (in bytes)",
+        default_value = "4M",
+        parse(try_from_str = data_size),
     )]
-    pub http_port: u16,
+    pub stack_size: usize,
+
+    #[structopt(
+        long = "workspace",
+        about = "the directory to use as a temporary workspace in case of a cache overflow",
+        default_value = "/tmp/tc/tmp"
+    )]
+    pub workspace: PathBuf,
 }
 
 impl Config {
@@ -205,19 +205,16 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let library = {
-        let schema = if let Some(config_path) = &config.config_path {
-            assert!(config_path.exists(), "config file not found");
-            let data = std::fs::read_to_string(config_path)?;
-            toml::from_str(&data).map_err(TokioError::from)
+        let link = if let Some(host) = config.replicate {
+            (host, kernel::LIB.into()).into()
         } else {
-            Ok(cluster::Config::new(txn.link(kernel::LIB.into())))
-        }?;
+            kernel::LIB.into()
+        };
 
         use tc_transact::fs::*;
-
-        let data_dir = data_dir.write(txn_id).await?;
-        let lib_dir = data_dir.get_or_create_store(tcgeneric::label(kernel::LIB[0]).into());
-        cluster::Cluster::<cluster::Dir<cluster::Library>>::load(&txn, schema, lib_dir).await?
+        let mut data_dir = data_dir.write(txn_id).await?;
+        let lib_dir = data_dir.get_or_create_dir(tcgeneric::label(kernel::LIB[0]).into())?;
+        cluster::Cluster::<cluster::Dir<cluster::Library>>::load(&txn, link, lib_dir).await?
     };
 
     data_dir.commit(&txn_id).await;
@@ -231,16 +228,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         config.cache_size
     );
 
-    gateway.listen().await?;
-
-    if let Some(config_path) = &config.config_path {
-        let txn_id = TxnId::new(Gateway::time());
-        let schema = tc_transact::fs::Persist::schema(&library, txn_id).await?;
-        let schema = toml::to_string(&schema).map_err(TokioError::from)?;
-        std::fs::write(config_path, schema).map_err(TokioError::from)
-    } else {
-        Ok(())
-    }
+    gateway.listen().await
 }
 
 fn main() {

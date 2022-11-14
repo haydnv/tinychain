@@ -4,14 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
-use serde::{Deserialize, Serialize};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Persist};
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
-use tcgeneric::{Map, PathSegment};
+use tcgeneric::PathSegment;
 
 use crate::fs;
 use crate::state::State;
@@ -19,11 +18,6 @@ use crate::txn::Txn;
 
 use super::library::Version;
 use super::{Cluster, Replica};
-
-#[derive(Clone, Default, Deserialize, Serialize)]
-pub struct Config {
-    children: Map<Link>,
-}
 
 #[async_trait]
 pub trait DirItem:
@@ -99,7 +93,8 @@ pub struct Dir<T> {
 
 impl<T> Dir<T>
 where
-    T: Clone + Send + Sync,
+    T: DirItem,
+    T: Persist<fs::Dir>,
     DirEntry<T>: Clone,
 {
     pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry<T>>> {
@@ -128,8 +123,12 @@ where
         let dir = cache.create_dir(name.to_string()).map_err(fs::io_err)?;
         let dir = fs::Dir::new(dir);
 
-        let dir = Self::create(txn, Config::default(), dir).await?;
-        let dir = Cluster::with_state(link.clone().append(name.clone()), dir);
+        let cluster = link.clone().append(name.clone());
+        let self_link = txn.link(cluster.path().clone());
+
+        let dir = Self::create(txn, cluster.clone(), dir).await?;
+        let dir = Cluster::with_state(self_link, cluster, dir);
+
         contents.insert(name.clone(), DirEntry::Dir(dir));
 
         self.record_delta(*txn.id(), name, Delta::Create).await;
@@ -174,9 +173,11 @@ where
             .map_err(fs::io_err)
             .and_then(fs::File::new)?;
 
-        let lib = T::create(txn, ().into(), file).await?;
+        let cluster = link.clone().append(name.clone());
+        let self_link = txn.link(cluster.path().clone());
 
-        let lib = Cluster::with_state(link.clone().append(name.clone()), lib);
+        let lib = T::create(txn, ().into(), file).await?;
+        let lib = Cluster::with_state(self_link, cluster, lib);
         lib.state().create_version(*txn.id(), number, state).await?;
         contents.insert(name.clone(), DirEntry::Item(lib));
 
@@ -231,9 +232,9 @@ where
 #[async_trait]
 impl<T> Persist<fs::Dir> for Dir<T>
 where
-    T: Clone + Send + Sync,
+    T: DirItem,
 {
-    type Schema = Config;
+    type Schema = Link;
     type Store = fs::Dir;
     type Txn = Txn;
 
@@ -248,23 +249,6 @@ where
     async fn load(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
         // TODO: read existing contents
         Self::create(txn, schema, dir).await
-    }
-
-    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
-        self.contents
-            .read(txn_id)
-            .map_ok(|contents| {
-                contents
-                    .iter()
-                    .map(|(name, entry)| (name.clone(), entry))
-                    .map(|(name, entry)| match entry {
-                        DirEntry::Dir(dir) => (name, dir.link().clone()),
-                        DirEntry::Item(item) => (name, item.link().clone()),
-                    })
-                    .collect()
-            })
-            .map_ok(|children| Config { children })
-            .await
     }
 }
 

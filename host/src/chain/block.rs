@@ -132,10 +132,6 @@ where
 
         Ok(BlockChain::new(subject, history))
     }
-
-    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
-        self.subject.schema(txn_id).await
-    }
 }
 
 #[async_trait]

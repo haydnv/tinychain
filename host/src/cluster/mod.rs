@@ -1,7 +1,7 @@
 //! Maintains the consistency of the network by coordinating transaction commits.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -11,15 +11,14 @@ use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, warn};
 use safecast::TryCastFrom;
-use serde::de::{Deserialize, DeserializeOwned, Deserializer};
-use serde::ser::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnMapRead};
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value, Version as VersionNumber};
+use tc_value::{Link, LinkHost, Value, Version as VersionNumber};
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
@@ -43,72 +42,6 @@ mod owner;
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
-
-pub struct Config<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-{
-    link: Link,
-    config: <T as Persist<fs::Dir>>::Schema,
-}
-
-impl<T> Clone for Config<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-{
-    fn clone(&self) -> Self {
-        Self {
-            link: self.link.clone(),
-            config: self.config.clone(),
-        }
-    }
-}
-
-impl<T> Config<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: Default + DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-{
-    pub fn new(link: Link) -> Self {
-        Self {
-            link,
-            config: Default::default(),
-        }
-    }
-}
-
-impl<'de, T> Deserialize<'de> for Config<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Deserialize::deserialize(deserializer).map(|(link, config)| Self { link, config })
-    }
-}
-
-impl<T> Serialize for Config<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (&self.link, &self.config).serialize(serializer)
-    }
-}
 
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
@@ -147,17 +80,18 @@ pub struct Cluster<T> {
 impl<T> Cluster<T> {
     /// Create a new [`Cluster`] to manage replication of the given `state`.
     // TODO: set visibility to private
-    pub fn with_state(link: Link, state: T) -> Self {
-        assert!(link.host().is_some());
+    pub fn with_state(self_link: Link, cluster: Link, state: T) -> Self {
+        assert!(self_link.host().is_some());
+        assert_ne!(self_link, cluster);
 
-        let replicas = [&link].iter().map(|link| (*link).clone()).collect();
+        let replicas = [&self_link].iter().map(|link| Link::clone(link)).collect();
 
         Self {
             inner: Arc::new(Inner {
-                replicas: TxnLock::new(format!("replicas of {}", link), replicas),
+                replicas: TxnLock::new(format!("replicas of {}", cluster), replicas),
                 actor: Arc::new(Actor::new(Value::None)),
                 owned: RwLock::new(HashMap::new()),
-                link,
+                link: cluster,
                 state,
             }),
         }
@@ -436,49 +370,57 @@ where
 }
 
 #[async_trait]
-impl<T> Persist<fs::Dir> for Cluster<T>
+impl<T> Persist<fs::Dir> for Cluster<Dir<T>>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Clone + Send + Sync,
-    <T as Persist<fs::Dir>>::Schema: DeserializeOwned + Serialize,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
+    Dir<T>: Persist<fs::Dir, Txn = Txn, Schema = Link, Store = fs::Dir> + Clone + Send + Sync,
 {
-    type Schema = Config<T>;
+    type Schema = Link;
+    type Store = fs::Dir;
+    type Txn = Txn;
+
+    async fn create(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+        Dir::<T>::create(txn, link.clone(), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+
+    async fn load(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+        Dir::<T>::load(txn, link.clone(), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+}
+
+#[async_trait]
+impl Persist<fs::Dir> for Cluster<Library> {
+    type Schema = Link;
     type Store = fs::Store;
     type Txn = Txn;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        let Config { link, config } = schema;
+    async fn create(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
         let store = store.try_into()?;
 
-        T::create(txn, config, store)
-            .map_ok(|state| Self::with_state(link, state))
+        Library::create(txn, (), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        let Config { link, config } = schema;
+    async fn load(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
         let store = store.try_into()?;
 
-        T::load(txn, config, store)
-            .map_ok(|state| Self::with_state(link, state))
-            .await
-    }
-
-    async fn schema(&self, txn_id: TxnId) -> TCResult<Self::Schema> {
-        self.inner
-            .state
-            .schema(txn_id)
-            .map_ok(|config| Config {
-                config,
-                link: self.inner.link.clone(),
-            })
+        Library::load(txn, (), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 }
 
 impl<T> Cluster<Dir<T>>
 where
-    T: Clone + Send + Sync,
+    T: DirItem,
     Self: Clone,
     DirEntry<T>: Clone,
 {
@@ -631,4 +573,17 @@ impl Transact for Legacy {
     async fn finalize(&self, txn_id: &TxnId) {
         join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
     }
+}
+
+#[derive(Deserialize, Serialize)]
+enum ItemType {
+    Dir,
+    Lib,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Item {
+    r#type: ItemType,
+    host: Option<LinkHost>,
+    children: HashSet<PathSegment>,
 }

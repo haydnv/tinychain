@@ -638,10 +638,6 @@ where
 
         Ok(Self::new(store, schema))
     }
-
-    async fn schema(&self, _txn_id: TxnId) -> TCResult<Self::Schema> {
-        Ok(self.schema.clone())
-    }
 }
 
 #[async_trait]
