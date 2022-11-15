@@ -3,12 +3,12 @@ use std::marker::PhantomData;
 
 use log::debug;
 
-use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::Transaction;
+use tc_transact::{Transact, Transaction};
 use tcgeneric::{PathSegment, TCPath};
 
 use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
+use crate::cluster::Replica;
 use crate::fs;
 use crate::txn::Txn;
 
@@ -117,22 +117,26 @@ impl<'a, C, T> ChainHandler<'a, C, T> {
 
 impl<'a, C, T> Handler<'a> for ChainHandler<'a, C, T>
 where
-    C: ChainInstance<T> + Clone + Send + Sync + 'a,
+    C: ChainInstance<T> + Replica + Clone + Send + Sync + 'a,
     T: Send + Sync + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, _key| {
-            Box::pin(async move { Err(TCError::not_implemented("replicate a Chain")) })
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+                self.chain.state(*txn.id()).await
+            })
         }))
     }
 }
 
 impl<T> Route for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
@@ -149,7 +153,8 @@ where
 
 impl<T> Route for BlockChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));

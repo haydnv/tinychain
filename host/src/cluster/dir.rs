@@ -145,8 +145,9 @@ where
 
 impl<T> Dir<BlockChain<T>>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display,
+    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display,
     <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
+    BlockChain<T>: Replica,
     DirEntry<BlockChain<T>>: Clone,
     Cluster<BlockChain<T>>: Route,
     Cluster<BlockChain<Dir<BlockChain<T>>>>: Route,
@@ -205,6 +206,10 @@ impl<T> Replica for Dir<T>
 where
     T: Replica + Transact + Clone + Send + Sync,
 {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("cluster::Dir::state"))
+    }
+
     async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
         Err(TCError::not_implemented("cluster::Dir::replicate"))
     }

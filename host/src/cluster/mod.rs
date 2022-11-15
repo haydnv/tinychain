@@ -44,7 +44,9 @@ pub const REPLICAS: Label = label("replicas");
 
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
-pub trait Replica: Transact {
+pub trait Replica {
+    async fn state(&self, txn_id: TxnId) -> TCResult<State>;
+
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
@@ -511,6 +513,16 @@ impl Legacy {
 
 #[async_trait]
 impl Replica for Legacy {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        let map = self
+            .chains
+            .iter()
+            .map(|(name, chain)| (name.clone(), State::Chain(chain.clone())))
+            .collect();
+
+        Ok(State::Map(map))
+    }
+
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let replication = self
             .chains

@@ -10,6 +10,7 @@ use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
 use log::debug;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist, Restore};
@@ -98,28 +99,33 @@ where
 #[async_trait]
 impl<T> Replica for SyncChain<T>
 where
-    T: Restore<fs::Dir> + Transact + Send + Sync,
+    T: Restore<fs::Dir> + Transact + Clone + Send + Sync,
+    T: TryCastFrom<State>,
+    State: From<T>,
 {
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("SyncChain::replicate"))
-        // let backup = txn.get(source, Value::None).await?;
-        // let backup =
-        //     backup.try_cast_into(|backup| TCError::bad_request("not a valid backup", backup))?;
-        //
-        // self.subject.restore(&backup, *txn.id()).await?;
-        //
-        // let (mut pending, mut committed): (
-        //     FileWriteGuard<_, ChainBlock>,
-        //     FileWriteGuard<_, ChainBlock>,
-        // ) = try_join!(
-        //     self.pending.write().map_err(fs::io_err),
-        //     self.committed.write().map_err(fs::io_err)
-        // )?;
-        //
-        // *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
-        // *committed = ChainBlock::new(null_hash().to_vec());
-        //
-        // Ok(())
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Ok(self.subject.clone().into())
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let backup = txn.get(source, Value::None).await?;
+        let backup =
+            backup.try_cast_into(|backup| TCError::bad_request("not a valid backup", backup))?;
+
+        self.subject.restore(&backup, *txn.id()).await?;
+
+        let (mut pending, mut committed): (
+            FileWriteGuard<_, ChainBlock>,
+            FileWriteGuard<_, ChainBlock>,
+        ) = try_join!(
+            self.pending.write().map_err(fs::io_err),
+            self.committed.write().map_err(fs::io_err)
+        )?;
+
+        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        *committed = ChainBlock::new(null_hash().to_vec());
+
+        Ok(())
     }
 }
 

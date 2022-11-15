@@ -501,6 +501,12 @@ impl From<Collection> for State {
     }
 }
 
+impl From<CollectionBase> for State {
+    fn from(collection: CollectionBase) -> Self {
+        Self::Collection(collection.into())
+    }
+}
+
 impl From<Link> for State {
     fn from(link: Link) -> Self {
         Self::Scalar(Scalar::from(link))

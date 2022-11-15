@@ -19,6 +19,7 @@ use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 
 use crate::cluster::Replica;
+use crate::collection::CollectionBase;
 use crate::fs;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -66,10 +67,33 @@ where
 }
 
 #[async_trait]
-impl<T> Replica for BlockChain<T>
-where
-    T: Route + Transact + Send + Sync + fmt::Display,
-{
+impl Replica for BlockChain<crate::cluster::Library> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("BlockChain::<Library>::state"))
+    }
+
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("BlockChain::<Library>::replicate"))
+    }
+}
+
+#[async_trait]
+impl Replica for BlockChain<crate::cluster::Dir<BlockChain<crate::cluster::Library>>> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("BlockChain::state"))
+    }
+
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("BlockChain::::replicate"))
+    }
+}
+
+#[async_trait]
+impl Replica for BlockChain<CollectionBase> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Ok(State::Chain(self.clone().into()))
+    }
+
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let chain = match txn.get(source.append(CHAIN.into()), Value::None).await? {
             State::Chain(Chain::Block(chain)) => chain,

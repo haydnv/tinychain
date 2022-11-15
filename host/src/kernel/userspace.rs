@@ -7,7 +7,7 @@ use futures::future::Future;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
@@ -286,7 +286,7 @@ async fn execute_post<T>(
     params: Map<State>,
 ) -> TCResult<State>
 where
-    T: Replica + Send + Sync + fmt::Display,
+    T: Replica + Transact + Send + Sync + fmt::Display,
     Cluster<T>: Route,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
@@ -305,7 +305,7 @@ async fn execute_put<T>(
     value: State,
 ) -> TCResult<()>
 where
-    T: Replica + Send + Sync + fmt::Display,
+    T: Replica + Transact + Send + Sync + fmt::Display,
     Cluster<T>: Route,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
@@ -348,7 +348,7 @@ async fn execute_delete<T>(
     key: Value,
 ) -> TCResult<()>
 where
-    T: Replica + Send + Sync + fmt::Display,
+    T: Replica + Transact + Send + Sync + fmt::Display,
     Cluster<T>: Route,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
@@ -388,7 +388,7 @@ fn execute<'a, T, R, Fut, F>(
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
 where
-    T: Replica + Send + Sync + fmt::Display,
+    T: Replica + Transact + Send + Sync + fmt::Display,
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a Cluster<T>) -> Fut + Send + 'a,

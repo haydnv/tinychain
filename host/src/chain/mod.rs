@@ -12,7 +12,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Persist, Restore};
+use tc_transact::fs::Persist;
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -163,8 +163,17 @@ where
 #[async_trait]
 impl<T> Replica for Chain<T>
 where
-    T: Restore<fs::Dir> + Transact + Route + Send + Sync + fmt::Display,
+    T: Transact + Send + Sync,
+    BlockChain<T>: Replica,
+    SyncChain<T>: Replica,
 {
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        match self {
+            Self::Block(chain) => chain.state(txn_id).await,
+            Self::Sync(chain) => chain.state(txn_id).await,
+        }
+    }
+
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         match self {
             Self::Block(chain) => chain.replicate(txn, source).await,
@@ -255,6 +264,12 @@ impl<T> fmt::Display for Chain<T> {
             Self::Block(chain) => fmt::Display::fmt(chain, f),
             Self::Sync(chain) => fmt::Display::fmt(chain, f),
         }
+    }
+}
+
+impl<T> From<BlockChain<T>> for Chain<T> {
+    fn from(chain: BlockChain<T>) -> Self {
+        Self::Block(chain)
     }
 }
 
