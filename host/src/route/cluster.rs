@@ -4,18 +4,18 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value, Version as VersionNumber};
+use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
+use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirEntry};
 use crate::cluster::library::{Library, Version};
 use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
+use crate::fs;
 use crate::route::*;
 use crate::state::State;
-
-const ERR_CREATE: &str = "to create a directory, pass an empty key and value; \
-to create a library, pass a version number as the key with no value";
 
 pub struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
@@ -106,29 +106,32 @@ impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
     }
 }
 
-struct DirHandler<'a> {
-    dir: &'a Cluster<Dir<Library>>,
+struct DirHandler<'a, T> {
+    dir: &'a Dir<T>,
     path: &'a [PathSegment],
 }
 
-impl<'a> DirHandler<'a> {
-    fn new(dir: &'a Cluster<Dir<Library>>, path: &'a [PathSegment]) -> Self {
+impl<'a, T> DirHandler<'a, T> {
+    fn new(dir: &'a Dir<T>, path: &'a [PathSegment]) -> Self {
         Self { dir, path }
     }
 }
 
-impl<'a> Handler<'a> for DirHandler<'a> {
+impl<'a, T> Handler<'a> for DirHandler<'a, T>
+where
+    T: Persist<fs::Dir, Txn = Txn>,
+    Dir<T>: Persist<fs::Dir, Txn = Txn, Store = fs::Dir> + Send + Sync,
+    DirEntry<T>: Clone,
+    Cluster<T>: Route,
+    Cluster<BlockChain<Dir<T>>>: Route,
+{
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        if self.path.is_empty() {
-            return None;
-        }
-
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                match self.dir.state().entry(*txn.id(), &self.path[0]).await? {
+                match self.dir.entry(*txn.id(), &self.path[0]).await? {
                     Some(entry) => match entry {
                         DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
                         DirEntry::Item(item) => item.get(txn, &self.path[1..], key).await,
@@ -143,45 +146,32 @@ impl<'a> Handler<'a> for DirHandler<'a> {
     where
         'b: 'a,
     {
-        if self.path.is_empty() {
-            return None;
-        }
-
-        Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                let entry = self.dir.state().entry(*txn.id(), &self.path[0]).await?;
-
-                if self.path.len() == 1 {
-                    if entry.is_some() {
-                        return Err(TCError::bad_request("already exists", &self.path[0]));
-                    }
-
-                    if key.is_none() {
-                        self.dir.create_dir(txn, self.path[0].clone()).await
-                    } else if let Some(number) = VersionNumber::opt_cast_from(key) {
-                        self.dir
-                            .create_item(txn, self.path[0].clone(), number, value)
-                            .await
-                    } else {
-                        Err(TCError::unsupported(ERR_CREATE))
-                    }
-                } else if let Some(entry) = entry {
-                    entry.put(txn, &self.path[1..], key, value).await
-                } else {
-                    Err(TCError::not_found(&self.path[0]))
-                }
-            })
+        Some(Box::new(|_txn, _key, _value| {
+            Box::pin(async move { Err(TCError::not_implemented("Dir::PUT")) })
         }))
     }
 }
 
+impl<T> Route for Dir<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Route + Clone,
+    Dir<T>: Persist<fs::Dir, Txn = Txn, Store = fs::Dir>,
+    DirEntry<T>: Clone,
+    Cluster<T>: Route,
+    Cluster<BlockChain<Dir<T>>>: Route,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(DirHandler::new(self, path)))
+    }
+}
+
 struct LibHandler<'a> {
-    lib: &'a Cluster<Library>,
+    lib: &'a Library,
     path: &'a [PathSegment],
 }
 
 impl<'a> LibHandler<'a> {
-    fn new(lib: &'a Cluster<Library>, path: &'a [PathSegment]) -> Self {
+    fn new(lib: &'a Library, path: &'a [PathSegment]) -> Self {
         Self { lib, path }
     }
 }
@@ -202,17 +192,23 @@ impl<'a> Handler<'a> for LibHandler<'a> {
                 );
 
                 let number = self.path[0].as_str().parse()?;
-                let version = self.lib.state().get_version(*txn.id(), number).await?;
+                let version = self.lib.get_version(*txn.id(), number).await?;
                 version.get(txn, &self.path[1..], key).await
             })
         }))
     }
 }
 
+impl Route for Library {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(LibHandler::new(self, path)))
+    }
+}
+
 impl<T> Route for DirEntry<T>
 where
     Cluster<T>: Route + Send + Sync,
-    Cluster<Dir<T>>: Route + Send + Sync,
+    Cluster<BlockChain<Dir<T>>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
@@ -286,18 +282,24 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
     }
 }
 
-macro_rules! route_cluster {
-    ($t:ty, $h:ty) => {
-        impl Route for Cluster<$t> {
-            fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-                match path {
-                    path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-                    path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-                    path => Some(Box::new(<$h>::new(self, path))),
-                }
-            }
+impl Route for Cluster<BlockChain<Library>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
         }
-    };
+    }
+}
+
+impl Route for Cluster<BlockChain<Dir<BlockChain<Library>>>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
+        }
+    }
 }
 
 // TODO: delete
@@ -310,9 +312,6 @@ impl Route for Cluster<Legacy> {
         }
     }
 }
-
-route_cluster!(Dir<Library>, DirHandler);
-route_cluster!(Library, LibHandler);
 
 struct VersionHandler<'a> {
     version: &'a Version,

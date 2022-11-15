@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use safecast::TryCastFrom;
 use sha2::digest::generic_array::GenericArray;
 use sha2::digest::Output;
 use sha2::Sha256;
@@ -18,11 +17,12 @@ use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
+use crate::cluster::Replica;
 use crate::fs;
+use crate::route::{Public, Route};
 use crate::state::State;
 use crate::txn::Txn;
 
-use crate::route::{Public, Route};
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
@@ -47,9 +47,6 @@ pub trait ChainInstance<T> {
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &T;
-
-    /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 
     /// Write the mutation ops in the current transaction to the write-ahead log.
     async fn write_ahead(&self, txn_id: &TxnId);
@@ -132,12 +129,7 @@ where
 #[async_trait]
 impl<T> ChainInstance<T> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>
-        + Restore<fs::Dir>
-        + TryCastFrom<State>
-        + Route
-        + Public
-        + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
@@ -160,17 +152,23 @@ where
         }
     }
 
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        match self {
-            Self::Block(chain) => chain.replicate(txn, source).await,
-            Self::Sync(chain) => chain.replicate(txn, source).await,
-        }
-    }
-
     async fn write_ahead(&self, txn_id: &TxnId) {
         match self {
             Self::Block(chain) => chain.write_ahead(txn_id).await,
             Self::Sync(chain) => chain.write_ahead(txn_id).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<T> Replica for Chain<T>
+where
+    T: Restore<fs::Dir> + Transact + Route + Send + Sync + fmt::Display,
+{
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        match self {
+            Self::Block(chain) => chain.replicate(txn, source).await,
+            Self::Sync(chain) => chain.replicate(txn, source).await,
         }
     }
 }
@@ -251,12 +249,12 @@ where
     }
 }
 
-impl<T> fmt::Display for Chain<T>
-where
-    Self: Instance,
-{
+impl<T> fmt::Display for Chain<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "instance of {}", self.class())
+        match self {
+            Self::Block(chain) => fmt::Display::fmt(chain, f),
+            Self::Sync(chain) => fmt::Display::fmt(chain, f),
+        }
     }
 }
 

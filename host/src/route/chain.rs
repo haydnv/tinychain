@@ -1,19 +1,18 @@
 use std::fmt;
+use std::marker::PhantomData;
 
 use log::debug;
-use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::fs::{Persist, Restore};
+use tc_transact::fs::Persist;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, ChainType};
+use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
 use crate::fs;
-use crate::state::State;
 use crate::txn::Txn;
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route, COPY};
+use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
 impl Route for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -21,19 +20,24 @@ impl Route for ChainType {
     }
 }
 
-struct AppendHandler<'a, T> {
-    chain: &'a Chain<T>,
+struct AppendHandler<'a, C, T> {
+    chain: &'a C,
+    phantom: PhantomData<T>,
 }
 
-impl<'a, T> AppendHandler<'a, T> {
-    fn new(chain: &'a Chain<T>) -> Self {
-        Self { chain }
+impl<'a, C, T> AppendHandler<'a, C, T> {
+    fn new(chain: &'a C) -> Self {
+        Self {
+            chain,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T> Handler<'a> for AppendHandler<'a, T>
+impl<'a, C, T> Handler<'a> for AppendHandler<'a, C, T>
 where
-    T: Route + Public,
+    C: ChainInstance<T> + Send + Sync + 'a,
+    T: Route + Public + 'a,
     Chain<T>: ChainInstance<T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -97,76 +101,38 @@ where
     }
 }
 
-struct ChainHandler<'a, T> {
-    chain: &'a Chain<T>,
+struct ChainHandler<'a, C, T> {
+    chain: &'a C,
+    phantom: PhantomData<T>,
 }
 
-impl<'a, T> Handler<'a> for ChainHandler<'a, T>
+impl<'a, C, T> ChainHandler<'a, C, T> {
+    fn new(chain: &'a C) -> Self {
+        Self {
+            chain,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, C, T> Handler<'a> for ChainHandler<'a, C, T>
 where
-    T: Send + Sync,
-    Chain<T>: Clone,
-    State: From<Chain<T>>,
+    C: ChainInstance<T> + Clone + Send + Sync + 'a,
+    T: Send + Sync + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                if key.is_none() {
-                    Ok(self.chain.clone().into())
-                } else {
-                    Err(TCError::not_implemented("chain slicing"))
-                }
-            })
+        Some(Box::new(|_txn, _key| {
+            Box::pin(async move { Err(TCError::not_implemented("replicate a Chain")) })
         }))
-    }
-}
-
-impl<'a, T> From<&'a Chain<T>> for ChainHandler<'a, T> {
-    fn from(chain: &'a Chain<T>) -> Self {
-        Self { chain }
-    }
-}
-
-#[allow(unused)]
-struct CopyHandler<'a, T> {
-    chain: &'a Chain<T>,
-}
-
-impl<'a, T> Handler<'a> for CopyHandler<'a, T>
-where
-    T: Send + Sync,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                key.expect_none()?;
-                Err(TCError::not_implemented("copy a Chain"))
-            })
-        }))
-    }
-}
-
-impl<'a, T> From<&'a Chain<T>> for CopyHandler<'a, T> {
-    fn from(chain: &'a Chain<T>) -> Self {
-        Self { chain }
     }
 }
 
 impl<T> Route for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>
-        + Restore<fs::Dir>
-        + TryCastFrom<State>
-        + Route
-        + Public
-        + fmt::Display
-        + Clone,
-    State: From<Chain<T>>,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
@@ -174,9 +140,24 @@ where
         if path.is_empty() {
             Some(Box::new(AppendHandler::new(self)))
         } else if path.len() == 1 && path[0].as_str() == "chain" {
-            Some(Box::new(ChainHandler::from(self)))
-        } else if path == &COPY[..] {
-            Some(Box::new(CopyHandler::from(self)))
+            Some(Box::new(ChainHandler::new(self)))
+        } else {
+            self.subject().route(path)
+        }
+    }
+}
+
+impl<T> Route for BlockChain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Chain::route {}", TCPath::from(path));
+
+        if path.is_empty() {
+            Some(Box::new(AppendHandler::new(self)))
+        } else if path.len() == 1 && path[0].as_str() == "chain" {
+            Some(Box::new(ChainHandler::new(self)))
         } else {
             self.subject().route(path)
         }

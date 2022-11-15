@@ -12,12 +12,11 @@ use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
 
 use crate::fs;
-use crate::scalar::value::Link;
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{DirItem, Replica};
+use super::DirItem;
 
 #[derive(Clone)]
 pub struct Version {
@@ -105,13 +104,6 @@ impl DirItem for Library {
         let mut file = self.file.write(txn_id).await?;
         file.create_block(number, version.into(), 0).await?;
         Ok(())
-    }
-}
-
-#[async_trait]
-impl Replica for Library {
-    async fn replicate(&self, _txn: &Txn, _source: &Link) -> TCResult<()> {
-        Err(TCError::not_implemented("replicate a Library"))
     }
 }
 

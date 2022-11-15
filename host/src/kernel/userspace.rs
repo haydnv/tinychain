@@ -11,7 +11,8 @@ use tc_transact::Transaction;
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
-use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Library, Replica};
+use crate::chain::BlockChain;
+use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -19,19 +20,22 @@ use crate::txn::Txn;
 
 use super::{hypothetical, Dispatch, Hosted, Hypothetical};
 
-/// The library directory
+/// The type of the library directory
+pub type Library = Cluster<BlockChain<Dir<BlockChain<crate::cluster::Library>>>>;
+
+/// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
     hosted: Hosted, // TODO: delete
     hypothetical: Hypothetical,
-    library: Cluster<Dir<Library>>,
+    library: Library,
 }
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(library: Cluster<Dir<Library>>, clusters: I) -> Self
+    pub fn new<I>(library: Library, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {

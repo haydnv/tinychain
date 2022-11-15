@@ -1,7 +1,6 @@
 //! Maintains the consistency of the network by coordinating transaction commits.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -16,13 +15,14 @@ use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard, TxnMapRead};
+use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard};
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, LinkHost, Value, Version as VersionNumber};
+use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
-use crate::chain::{Chain, ChainInstance};
+use crate::chain::{BlockChain, Chain, ChainInstance};
 use crate::collection::CollectionBase;
+use crate::fs;
 use crate::object::InstanceClass;
 use crate::scalar::Scalar;
 use crate::state::{State, ToState};
@@ -30,7 +30,6 @@ use crate::txn::{Actor, Txn, TxnId};
 
 use owner::Owner;
 
-use crate::fs;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
@@ -46,7 +45,7 @@ pub const REPLICAS: Label = label("replicas");
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
 pub trait Replica: Transact {
-    async fn replicate(&self, txn: &Txn, source: &Link) -> TCResult<()>;
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
 /// The [`Class`] of a [`Cluster`].
@@ -288,7 +287,7 @@ where
                 warn!("{} has no other replicas", self);
             }
 
-            self.inner.state.replicate(txn, self.link()).await?;
+            self.inner.state.replicate(txn, self.link().clone()).await?;
         } else {
             debug!("add replica {}", replica);
             (*self.inner.replicas.write(*txn.id()).await?).insert(replica);
@@ -370,93 +369,69 @@ where
 }
 
 #[async_trait]
-impl<T> Persist<fs::Dir> for Cluster<Dir<T>>
-where
-    Dir<T>: Persist<fs::Dir, Txn = Txn, Schema = Link, Store = fs::Dir> + Clone + Send + Sync,
-{
+impl Persist<fs::Dir> for Cluster<BlockChain<Dir<BlockChain<Library>>>> {
     type Schema = Link;
     type Store = fs::Dir;
     type Txn = Txn;
 
     async fn create(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        Dir::<T>::create(txn, link.clone(), store)
+        BlockChain::create(txn, link.clone(), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 
     async fn load(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        Dir::<T>::load(txn, link.clone(), store)
+        BlockChain::load(txn, link.clone(), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 }
 
 #[async_trait]
-impl Persist<fs::Dir> for Cluster<Library> {
+impl Persist<fs::Dir> for Cluster<BlockChain<Library>> {
     type Schema = Link;
-    type Store = dir::File;
+    type Store = fs::Dir;
     type Txn = Txn;
 
     async fn create(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        let store = store.try_into()?;
 
-        Library::create(txn, (), store)
+        BlockChain::create(txn, (), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 
     async fn load(txn: &Txn, link: Link, store: Self::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        let store = store.try_into()?;
 
-        Library::load(txn, (), store)
+        BlockChain::load(txn, (), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 }
 
-impl Cluster<Dir<Library>> {
-    pub async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<()> {
-        self.state().create_dir(txn, self.link(), name).await
-    }
-
-    pub async fn create_item(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        number: VersionNumber,
-        state: State,
-    ) -> TCResult<()> {
-        self.state()
-            .create_item(txn, self.link(), name, number, state)
-            .await
-    }
-
+impl<T> Cluster<BlockChain<Dir<T>>>
+where
+    T: Clone,
+    BlockChain<Dir<T>>: ChainInstance<Dir<T>>,
+    Self: Clone,
+{
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry<Library>)> {
+    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
         if path.is_empty() {
             return Ok((path, DirEntry::Dir(self.clone())));
         }
 
-        // IMPORTANT! Only use synchronous lock acquisition!
-        // async lock acquisition here could cause deadlocks
-        // and make services in this `Dir` impossible to update
-        let contents = self.inner.state.contents(txn_id)?;
-        match contents.get(&path[0]) {
-            None => Ok((path, DirEntry::Dir(self.clone()))),
-            Some(DirEntry::Item(item)) => Ok((&path[1..], DirEntry::Item(item))),
-            Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]),
-        }
+        self.state().subject().lookup(txn_id, path)
     }
 }
 
-impl<T> Instance for Cluster<Dir<T>>
+impl<T> Instance for Cluster<BlockChain<Dir<T>>>
 where
     T: Send + Sync,
 {
@@ -536,7 +511,7 @@ impl Legacy {
 
 #[async_trait]
 impl Replica for Legacy {
-    async fn replicate(&self, txn: &Txn, source: &Link) -> TCResult<()> {
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let replication = self
             .chains
             .iter()

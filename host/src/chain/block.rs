@@ -3,6 +3,7 @@
 //! Each block in the chain begins with the hash of the previous block.
 
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -17,6 +18,7 @@ use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 
+use crate::cluster::Replica;
 use crate::fs;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -58,6 +60,16 @@ where
         &self.subject
     }
 
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        self.history.write_ahead(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<T> Replica for BlockChain<T>
+where
+    T: Route + Transact + Send + Sync + fmt::Display,
+{
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let chain = match txn.get(source.append(CHAIN.into()), Value::None).await? {
             State::Chain(Chain::Block(chain)) => chain,
@@ -72,10 +84,6 @@ where
         self.history
             .replicate(txn, &self.subject, chain.history)
             .await
-    }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        self.history.write_ahead(txn_id).await
     }
 }
 
@@ -228,5 +236,11 @@ where
         let history = self.history.into_view(txn.clone()).await?;
         let subject = self.subject.into_view(txn).await?;
         Ok((subject, history))
+    }
+}
+
+impl<T> fmt::Display for BlockChain<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BlockChain<{}>", std::any::type_name::<T>())
     }
 }

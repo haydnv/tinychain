@@ -7,7 +7,7 @@ use tc_error::*;
 use tc_value::Value;
 use tcgeneric::*;
 
-use crate::cluster::{Cluster, Dir, Legacy, Library};
+use crate::cluster::{Cluster, Legacy};
 use crate::object::InstanceExt;
 use crate::state::State;
 use crate::txn::{hypothetical, Txn};
@@ -17,7 +17,7 @@ use hosted::Hosted;
 use system::System;
 use userspace::UserSpace;
 
-pub use userspace::LIB;
+pub use userspace::{Library, LIB};
 
 mod hosted; // TODO: delete
 mod system;
@@ -55,7 +55,7 @@ impl Kernel {
     }
 
     /// Initialize a new [`Kernel`] with no [`UserSpace`].
-    pub fn with_userspace<I>(library: Cluster<Dir<Library>>, clusters: I) -> Self
+    pub fn with_userspace<I>(library: Library, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {

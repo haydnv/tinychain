@@ -10,7 +10,6 @@ use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist, Restore};
@@ -18,6 +17,7 @@ use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label};
 
+use crate::cluster::Replica;
 use crate::fs;
 use crate::route::{Public, Route};
 use crate::state::State;
@@ -43,12 +43,7 @@ pub struct SyncChain<T> {
 #[async_trait]
 impl<T> ChainInstance<T> for SyncChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>
-        + Restore<fs::Dir>
-        + TryCastFrom<State>
-        + Route
-        + Public
-        + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         let mut block: FileWriteGuard<_, ChainBlock> =
@@ -77,30 +72,6 @@ where
         &self.subject
     }
 
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let backup = txn.get(source, Value::None).await?;
-        let backup = backup.try_cast_into(|backup| {
-            TCError::unsupported(format!(
-                "{} is not a valid backup of {}",
-                backup, &self.subject
-            ))
-        })?;
-        self.subject.restore(&backup, *txn.id()).await?;
-
-        let (mut pending, mut committed): (
-            FileWriteGuard<_, ChainBlock>,
-            FileWriteGuard<_, ChainBlock>,
-        ) = try_join!(
-            self.pending.write().map_err(fs::io_err),
-            self.committed.write().map_err(fs::io_err)
-        )?;
-
-        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
-        *committed = ChainBlock::new(null_hash().to_vec());
-
-        Ok(())
-    }
-
     async fn write_ahead(&self, txn_id: &TxnId) {
         self.store.commit(txn_id).await;
 
@@ -121,6 +92,34 @@ where
 
         try_join!(self.pending.sync(false), self.committed.sync(false))
             .expect("sync SyncChain blocks");
+    }
+}
+
+#[async_trait]
+impl<T> Replica for SyncChain<T>
+where
+    T: Restore<fs::Dir> + Transact + Send + Sync,
+{
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("SyncChain::replicate"))
+        // let backup = txn.get(source, Value::None).await?;
+        // let backup =
+        //     backup.try_cast_into(|backup| TCError::bad_request("not a valid backup", backup))?;
+        //
+        // self.subject.restore(&backup, *txn.id()).await?;
+        //
+        // let (mut pending, mut committed): (
+        //     FileWriteGuard<_, ChainBlock>,
+        //     FileWriteGuard<_, ChainBlock>,
+        // ) = try_join!(
+        //     self.pending.write().map_err(fs::io_err),
+        //     self.committed.write().map_err(fs::io_err)
+        // )?;
+        //
+        // *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        // *committed = ChainBlock::new(null_hash().to_vec());
+        //
+        // Ok(())
     }
 }
 
@@ -330,5 +329,11 @@ where
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         self.subject.into_view(txn).await
+    }
+}
+
+impl<T> fmt::Display for SyncChain<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SyncChain<{}>", std::any::type_name::<T>())
     }
 }
