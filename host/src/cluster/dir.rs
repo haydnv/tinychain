@@ -1,5 +1,4 @@
 use std::collections::hash_map::{self, HashMap};
-use std::convert::TryFrom;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +21,16 @@ use crate::txn::Txn;
 use super::{Cluster, Library, Replica};
 
 pub type File = fs::File<VersionNumber, super::library::Version>;
+
+#[async_trait]
+pub trait DirCreate: Sized {
+    async fn create_dir(
+        &self,
+        txn: &Txn,
+        link: Link,
+        name: PathSegment,
+    ) -> TCResult<Cluster<BlockChain<Self>>>;
+}
 
 #[async_trait]
 pub trait DirItem:
@@ -143,34 +152,44 @@ where
     }
 }
 
-impl<T> Dir<BlockChain<T>>
+#[async_trait]
+impl<T> DirCreate for Dir<T>
 where
-    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store, Error = TCError>,
-    BlockChain<T>: Replica,
-    DirEntry<BlockChain<T>>: Clone,
-    Cluster<BlockChain<T>>: Route,
-    Cluster<BlockChain<Dir<BlockChain<T>>>>: Route,
-    Self: Persist<fs::Dir, Txn = Txn, Schema = Link, Store = fs::Dir>,
+    T: Send + Sync,
+    DirEntry<T>: Clone,
+    BlockChain<Self>: Persist<fs::Dir, Txn = Txn, Schema = Link, Store = fs::Dir>,
+    Cluster<BlockChain<Self>>: Clone,
+    Self: Route + fmt::Display,
 {
-    pub async fn create_dir(&self, txn: &Txn, link: &Link, name: PathSegment) -> TCResult<()> {
+    async fn create_dir(
+        &self,
+        txn: &Txn,
+        link: Link,
+        name: PathSegment,
+    ) -> TCResult<Cluster<BlockChain<Self>>> {
+        if link.path().last() != Some(&name) {
+            return Err(TCError::unsupported(format!(
+                "cluster directory link for {} must end with {} (found {})",
+                name, name, link
+            )));
+        }
+
         let mut contents = self.contents.write(*txn.id()).await?;
         let mut cache = self.cache.write().await;
 
         let dir = cache.create_dir(name.to_string()).map_err(fs::io_err)?;
         let dir = fs::Dir::new(dir);
 
-        let cluster = link.clone().append(name.clone());
-        let self_link = txn.link(cluster.path().clone());
+        let self_link = txn.link(link.path().clone());
 
-        let dir = BlockChain::create(txn, cluster.clone(), dir).await?;
-        let dir = Cluster::with_state(self_link, cluster, dir);
+        let dir = BlockChain::create(txn, link.clone(), dir).await?;
+        let dir = Cluster::with_state(self_link, link, dir);
 
-        contents.insert(name.clone(), DirEntry::Dir(dir));
+        contents.insert(name.clone(), DirEntry::Dir(dir.clone()));
 
         self.record_delta(*txn.id(), name, Delta::Create).await;
 
-        Ok(())
+        Ok(dir)
     }
 }
 

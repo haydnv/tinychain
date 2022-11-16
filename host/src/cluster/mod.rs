@@ -83,7 +83,11 @@ impl<T> Cluster<T> {
     // TODO: set visibility to private
     pub fn with_state(self_link: Link, cluster: Link, state: T) -> Self {
         assert!(self_link.host().is_some());
-        assert_ne!(self_link, cluster);
+        let cluster = if self_link == cluster {
+            cluster.path().clone().into()
+        } else {
+            cluster
+        };
 
         let replicas = [&self_link].iter().map(|link| Link::clone(link)).collect();
 
@@ -547,6 +551,12 @@ impl Transact for Legacy {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
+    }
+}
+
+impl fmt::Display for Legacy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a legacy cluster")
     }
 }
 

@@ -4,16 +4,14 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Tuple;
 
 use crate::chain::BlockChain;
-use crate::cluster::dir::{Dir, DirEntry};
+use crate::cluster::dir::{Dir, DirCreate, DirEntry};
 use crate::cluster::library::{Library, Version};
 use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
-use crate::fs;
 use crate::route::*;
 use crate::state::State;
 
@@ -23,7 +21,7 @@ pub struct ClusterHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for ClusterHandler<'a, T>
 where
-    T: Transact + Send + Sync,
+    T: Transact + Public + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -44,12 +42,14 @@ where
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                key.expect_none()?;
+                if key.is_none() {
+                    let participant = value
+                        .try_cast_into(|v| TCError::bad_request("invalid participant link", v))?;
 
-                let participant =
-                    value.try_cast_into(|s| TCError::bad_request("expected a Link, not", s))?;
-
-                self.cluster.mutate(&txn, participant).await
+                    self.cluster.mutate(&txn, participant).await
+                } else {
+                    self.cluster.state().put(txn, &[], key, value).await
+                }
             })
         }))
     }
@@ -119,11 +119,9 @@ impl<'a, T> DirHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for DirHandler<'a, T>
 where
-    T: Persist<fs::Dir, Txn = Txn>,
-    Dir<T>: Persist<fs::Dir, Txn = Txn, Store = fs::Dir> + Send + Sync,
-    DirEntry<T>: Clone,
-    Cluster<T>: Route,
-    Cluster<BlockChain<Dir<T>>>: Route,
+    T: Send + Sync,
+    Dir<T>: DirCreate,
+    DirEntry<T>: Route + Clone + fmt::Display,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -132,10 +130,7 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 match self.dir.entry(*txn.id(), &self.path[0]).await? {
-                    Some(entry) => match entry {
-                        DirEntry::Dir(dir) => dir.get(txn, &self.path[1..], key).await,
-                        DirEntry::Item(item) => item.get(txn, &self.path[1..], key).await,
-                    },
+                    Some(entry) => entry.get(txn, &self.path[1..], key).await,
                     None => Err(TCError::not_found(&self.path[0])),
                 }
             })
@@ -146,20 +141,24 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, _key, _value| {
-            Box::pin(async move { Err(TCError::not_implemented("Dir::PUT")) })
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                let name = key.try_cast_into(|v| {
+                    TCError::bad_request("invalid path segment for directory entry", v)
+                })?;
+
+                if let Some(link) = value.opt_cast_into() {
+                    self.dir.create_dir(txn, link, name).await?;
+                    Ok(())
+                } else {
+                    Err(TCError::not_implemented("Dir::PUT item"))
+                }
+            })
         }))
     }
 }
 
-impl<T> Route for Dir<T>
-where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone,
-    Dir<T>: Persist<fs::Dir, Txn = Txn, Store = fs::Dir>,
-    DirEntry<T>: Clone,
-    Cluster<T>: Route,
-    Cluster<BlockChain<Dir<T>>>: Route,
-{
+impl Route for Dir<BlockChain<Library>> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         Some(Box::new(DirHandler::new(self, path)))
     }
