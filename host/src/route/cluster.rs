@@ -12,7 +12,7 @@ use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry};
 use crate::cluster::library::{Library, Version};
 use crate::cluster::{Cluster, DirItem, Legacy, Replica, REPLICAS};
-use crate::object::InstanceClass;
+use crate::object::{InstanceClass, Object};
 use crate::route::*;
 use crate::state::State;
 
@@ -47,17 +47,20 @@ where
                     let participant = value
                         .try_cast_into(|v| TCError::bad_request("invalid participant link", v))?;
 
-                    self.cluster.mutate(&txn, participant).await
-                } else {
-                    let value = InstanceClass::try_cast_from(value, |v| {
-                        TCError::bad_request("invalid class definition", v)
-                    })?;
-
-                    self.cluster
-                        .state()
-                        .put(txn, &[], key, State::Object(value.into()))
-                        .await
+                    return self.cluster.mutate(&txn, participant).await;
                 }
+
+                let value = if InstanceClass::can_cast_from(&value) {
+                    InstanceClass::try_cast_from(value, |v| {
+                        TCError::bad_request("invalid class definition", v)
+                    })
+                    .map(Object::Class)
+                    .map(State::Object)?
+                } else {
+                    value
+                };
+
+                self.cluster.state().put(txn, &[], key, value).await
             })
         }))
     }
@@ -131,6 +134,7 @@ where
     Dir<T>: DirCreate,
     Dir<T>: DirCreateItem<T>,
     DirEntry<T>: Route + Clone + fmt::Display,
+    Cluster<BlockChain<T>>: Public,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -169,9 +173,10 @@ where
                 if lib.is_empty() {
                     self.dir.create_dir(txn, link, name).map_ok(|_dir| ()).await
                 } else {
-                    self.dir
-                        .create_item(txn, link, name)
-                        .map_ok(|_cluster| ())
+                    let cluster = self.dir.create_item(txn, link, name).await?;
+
+                    cluster
+                        .put(txn, &[], VersionNumber::default().into(), lib.into())
                         .await
                 }
             })
@@ -214,6 +219,23 @@ impl<'a> Handler<'a> for LibHandler<'a> {
                 let number = self.path[0].as_str().parse()?;
                 let version = self.lib.get_version(*txn.id(), number).await?;
                 version.get(txn, &self.path[1..], key).await
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                let number =
+                    key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+
+                let version =
+                    value.try_cast_into(|s| TCError::bad_request("invalid Library version", s))?;
+
+                self.lib.create_version(*txn.id(), number, version).await
             })
         }))
     }

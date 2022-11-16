@@ -744,6 +744,12 @@ impl From<Vec<Value>> for Value {
     }
 }
 
+impl From<Version> for Value {
+    fn from(version: Version) -> Self {
+        Self::Version(version)
+    }
+}
+
 impl From<i64> for Value {
     fn from(n: i64) -> Self {
         Self::Number(n.into())

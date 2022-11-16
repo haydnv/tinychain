@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -26,6 +27,40 @@ pub struct Version {
 impl Version {
     pub fn attribute(&self, name: &PathSegment) -> Option<&Scalar> {
         self.lib.get(name)
+    }
+}
+
+impl From<Map<Scalar>> for Version {
+    fn from(lib: Map<Scalar>) -> Self {
+        Self { lib }
+    }
+}
+
+impl TryCastFrom<Scalar> for Version {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        Map::<Scalar>::can_cast_from(scalar)
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        Map::<Scalar>::opt_cast_from(scalar).map(Self::from)
+    }
+}
+
+impl TryCastFrom<State> for Version {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(map) => map.values().all(Scalar::can_cast_from),
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(map) => BTreeMap::opt_cast_from(map).map(Map::from).map(Self::from),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
     }
 }
 
@@ -61,12 +96,6 @@ impl BlockData for Version {
     }
 }
 
-impl From<Map<Scalar>> for Version {
-    fn from(lib: Map<Scalar>) -> Self {
-        Self { lib }
-    }
-}
-
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "library version {}", self.lib)
@@ -97,14 +126,10 @@ impl DirItem for Library {
         &self,
         txn_id: TxnId,
         number: VersionNumber,
-        version: State,
+        version: Self::Version,
     ) -> TCResult<()> {
-        let version = Map::<Scalar>::try_cast_from(version, |s| {
-            TCError::bad_request("invalid library version", s)
-        })?;
-
         let mut file = self.file.write(txn_id).await?;
-        file.create_block(number, version.into(), 0).await?;
+        file.create_block(number, version, 0).await?;
         Ok(())
     }
 }

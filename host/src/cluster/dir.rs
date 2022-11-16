@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Persist};
@@ -46,13 +47,13 @@ pub trait DirCreateItem<T: DirItem> {
 pub trait DirItem:
     Persist<fs::Dir, Txn = Txn, Store = File, Schema = ()> + Transact + Clone + Send + Sync
 {
-    type Version: BlockData;
+    type Version: BlockData + TryCastFrom<State>;
 
     async fn create_version(
         &self,
         txn_id: TxnId,
         number: VersionNumber,
-        version: State,
+        version: Self::Version,
     ) -> TCResult<()>;
 }
 

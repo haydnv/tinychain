@@ -22,8 +22,8 @@ class LibraryTests(unittest.TestCase):
     def testCreateLib(self):
         self.hosts[0].put("/lib", "test", tc.URI("/lib/test"))
         self.hosts[0].put("/lib/test", "libhello", TestLibV0())
-        # self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
-        #
+        self.assertEqual(self.hosts[0].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+
         # self.host.stop()
         #
         # print()
