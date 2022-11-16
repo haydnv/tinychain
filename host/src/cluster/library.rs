@@ -91,6 +91,8 @@ impl Library {
 
 #[async_trait]
 impl DirItem for Library {
+    type Version = Version;
+
     async fn create_version(
         &self,
         txn_id: TxnId,

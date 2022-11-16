@@ -40,7 +40,7 @@ impl Store {
 
         if state.is_ref() {
             return Err(TCError::bad_request(
-                "cannot update Chain with reference: {}",
+                "cannot update Chain with reference",
                 state,
             ));
         }

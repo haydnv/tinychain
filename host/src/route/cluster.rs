@@ -5,13 +5,14 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::Tuple;
 
 use crate::chain::BlockChain;
-use crate::cluster::dir::{Dir, DirCreate, DirEntry};
+use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry};
 use crate::cluster::library::{Library, Version};
-use crate::cluster::{Cluster, Legacy, Replica, REPLICAS};
+use crate::cluster::{Cluster, DirItem, Legacy, Replica, REPLICAS};
+use crate::object::InstanceClass;
 use crate::route::*;
 use crate::state::State;
 
@@ -48,7 +49,14 @@ where
 
                     self.cluster.mutate(&txn, participant).await
                 } else {
-                    self.cluster.state().put(txn, &[], key, value).await
+                    let value = InstanceClass::try_cast_from(value, |v| {
+                        TCError::bad_request("invalid class definition", v)
+                    })?;
+
+                    self.cluster
+                        .state()
+                        .put(txn, &[], key, State::Object(value.into()))
+                        .await
                 }
             })
         }))
@@ -119,8 +127,9 @@ impl<'a, T> DirHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for DirHandler<'a, T>
 where
-    T: Send + Sync,
+    T: DirItem,
     Dir<T>: DirCreate,
+    Dir<T>: DirCreateItem<T>,
     DirEntry<T>: Route + Clone + fmt::Display,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -143,15 +152,27 @@ where
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
+                debug!("create new cluster {} at {}", value, key);
+
                 let name = key.try_cast_into(|v| {
                     TCError::bad_request("invalid path segment for directory entry", v)
                 })?;
 
-                if let Some(link) = value.opt_cast_into() {
-                    self.dir.create_dir(txn, link, name).await?;
-                    Ok(())
+                let class = InstanceClass::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Class", v)
+                })?;
+
+                let (link, lib) = class.into_inner();
+                let link =
+                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &lib))?;
+
+                if lib.is_empty() {
+                    self.dir.create_dir(txn, link, name).map_ok(|_dir| ()).await
                 } else {
-                    Err(TCError::not_implemented("Dir::PUT item"))
+                    self.dir
+                        .create_item(txn, link, name)
+                        .map_ok(|_cluster| ())
+                        .await
                 }
             })
         }))

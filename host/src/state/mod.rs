@@ -935,6 +935,7 @@ impl TryCastFrom<State> for InstanceClass {
         match state {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(Object::Class(_)) => true,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
     }
@@ -950,6 +951,7 @@ impl TryCastFrom<State> for InstanceClass {
                 Some(InstanceClass::anonymous(None, proto))
             }
             State::Object(Object::Class(class)) => Some(class),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
     }

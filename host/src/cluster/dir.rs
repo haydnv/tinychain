@@ -33,9 +33,21 @@ pub trait DirCreate: Sized {
 }
 
 #[async_trait]
+pub trait DirCreateItem<T: DirItem> {
+    async fn create_item(
+        &self,
+        txn: &Txn,
+        link: Link,
+        name: PathSegment,
+    ) -> TCResult<Cluster<BlockChain<T>>>;
+}
+
+#[async_trait]
 pub trait DirItem:
-    Persist<fs::Dir, Txn = Txn, Store = File> + Transact + Clone + Send + Sync
+    Persist<fs::Dir, Txn = Txn, Store = File, Schema = ()> + Transact + Clone + Send + Sync
 {
+    type Version: BlockData;
+
     async fn create_version(
         &self,
         txn_id: TxnId,
@@ -193,30 +205,36 @@ where
     }
 }
 
-impl<T> Dir<T>
+#[async_trait]
+impl<T> DirCreateItem<T> for Dir<T>
 where
+    T: DirItem + Route + fmt::Display,
     DirEntry<T>: Clone,
-    BlockChain<T>: Persist<fs::Dir, Txn = Txn, Schema = (), Store = fs::Dir>,
 {
-    pub async fn create_item(&self, txn: &Txn, link: &Link, name: PathSegment) -> TCResult<()> {
+    async fn create_item(
+        &self,
+        txn: &Txn,
+        link: Link,
+        name: PathSegment,
+    ) -> TCResult<Cluster<BlockChain<T>>> {
         let mut contents = self.contents.write(*txn.id()).await?;
         let mut cache = self.cache.write().await;
 
         let dir = cache
-            .create_dir(format!("{}.{}", name, super::library::Version::ext()))
+            .create_dir(format!("{}.{}", name, <T::Version as BlockData>::ext()))
             .map(fs::Dir::new)
             .map_err(fs::io_err)?;
 
         let cluster = link.clone().append(name.clone());
         let self_link = txn.link(cluster.path().clone());
 
-        let item = BlockChain::create(txn, ().into(), dir).await?;
+        let item = BlockChain::create(txn, (), dir).await?;
         let item = Cluster::with_state(self_link, cluster, item);
-        contents.insert(name.clone(), DirEntry::Item(item));
+        contents.insert(name.clone(), DirEntry::Item(item.clone()));
 
         self.record_delta(*txn.id(), name, Delta::Create).await;
 
-        Ok(())
+        Ok(item)
     }
 }
 

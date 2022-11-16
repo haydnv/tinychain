@@ -113,6 +113,84 @@ impl From<StateType> for InstanceClass {
     }
 }
 
+impl CastFrom<Link> for InstanceClass {
+    fn cast_from(value: Link) -> Self {
+        Self {
+            extends: Some(value),
+            link: None,
+            proto: Map::new(),
+        }
+    }
+}
+
+impl TryCastFrom<PostRef> for InstanceClass {
+    fn can_cast_from(value: &PostRef) -> bool {
+        match value {
+            (Subject::Link(_), _) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: PostRef) -> Option<Self> {
+        match value {
+            (Subject::Link(link), proto) => Some(Self {
+                extends: Some(link),
+                link: None,
+                proto,
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<OpRef> for InstanceClass {
+    fn can_cast_from(op_ref: &OpRef) -> bool {
+        match op_ref {
+            OpRef::Post(op_ref) => Self::can_cast_from(op_ref),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(op_ref: OpRef) -> Option<Self> {
+        match op_ref {
+            OpRef::Post(op_ref) => Self::opt_cast_from(op_ref),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<TCRef> for InstanceClass {
+    fn can_cast_from(tc_ref: &TCRef) -> bool {
+        match tc_ref {
+            TCRef::Op(op_ref) => Self::can_cast_from(op_ref),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(tc_ref: TCRef) -> Option<Self> {
+        match tc_ref {
+            TCRef::Op(op_ref) => Self::opt_cast_from(op_ref),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for InstanceClass {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(link) => Self::can_cast_from(link),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Self::opt_cast_from(link),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<InstanceClass> for StateType {
     fn can_cast_from(class: &InstanceClass) -> bool {
         if class.proto.is_empty() {
