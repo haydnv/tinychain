@@ -21,7 +21,7 @@ use crate::txn::Txn;
 use super::{hypothetical, Dispatch, Hosted, Hypothetical};
 
 /// The type of the library directory
-pub type Library = Cluster<BlockChain<Dir<BlockChain<crate::cluster::Library>>>>;
+pub type Library = Cluster<BlockChain<Dir<crate::cluster::Library>>>;
 
 /// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);

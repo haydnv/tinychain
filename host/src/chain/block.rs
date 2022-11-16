@@ -78,7 +78,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
 }
 
 #[async_trait]
-impl Replica for BlockChain<crate::cluster::Dir<BlockChain<crate::cluster::Library>>> {
+impl Replica for BlockChain<crate::cluster::Dir<crate::cluster::Library>> {
     async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
         Err(TCError::not_implemented("BlockChain::state"))
     }

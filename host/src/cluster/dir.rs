@@ -47,7 +47,7 @@ pub trait DirItem:
 #[derive(Clone)]
 pub enum DirEntry<T> {
     Dir(Cluster<BlockChain<Dir<T>>>),
-    Item(Cluster<T>),
+    Item(Cluster<BlockChain<T>>),
 }
 
 impl<T> fmt::Display for DirEntry<T> {
@@ -64,7 +64,7 @@ where
     T: Clone + Transact + Send + Sync,
 {
     Dir(<Cluster<BlockChain<Dir<T>>> as Transact>::Commit),
-    Item(<Cluster<T> as Transact>::Commit),
+    Item(<Cluster<BlockChain<T>> as Transact>::Commit),
 }
 
 #[async_trait]
@@ -196,7 +196,7 @@ where
 impl<T> Dir<T>
 where
     DirEntry<T>: Clone,
-    T: Persist<fs::Dir, Txn = Txn, Schema = (), Store = fs::Dir>,
+    BlockChain<T>: Persist<fs::Dir, Txn = Txn, Schema = (), Store = fs::Dir>,
 {
     pub async fn create_item(&self, txn: &Txn, link: &Link, name: PathSegment) -> TCResult<()> {
         let mut contents = self.contents.write(*txn.id()).await?;
@@ -210,7 +210,7 @@ where
         let cluster = link.clone().append(name.clone());
         let self_link = txn.link(cluster.path().clone());
 
-        let item = T::create(txn, ().into(), dir).await?;
+        let item = BlockChain::create(txn, ().into(), dir).await?;
         let item = Cluster::with_state(self_link, cluster, item);
         contents.insert(name.clone(), DirEntry::Item(item));
 
@@ -267,7 +267,7 @@ where
 }
 
 #[async_trait]
-impl Persist<fs::Dir> for Dir<BlockChain<Library>> {
+impl Persist<fs::Dir> for Dir<Library> {
     type Schema = Link;
     type Store = fs::Dir;
     type Txn = Txn;

@@ -158,7 +158,7 @@ where
     }
 }
 
-impl Route for Dir<BlockChain<Library>> {
+impl Route for Dir<Library> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         Some(Box::new(DirHandler::new(self, path)))
     }
@@ -206,7 +206,8 @@ impl Route for Library {
 
 impl<T> Route for DirEntry<T>
 where
-    Cluster<T>: Route + Send + Sync,
+    T: Send + Sync,
+    Cluster<BlockChain<T>>: Route + Send + Sync,
     Cluster<BlockChain<Dir<T>>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -291,7 +292,7 @@ impl Route for Cluster<BlockChain<Library>> {
     }
 }
 
-impl Route for Cluster<BlockChain<Dir<BlockChain<Library>>>> {
+impl Route for Cluster<BlockChain<Dir<Library>>> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match path {
             path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),

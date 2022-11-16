@@ -375,7 +375,7 @@ where
 }
 
 #[async_trait]
-impl Persist<fs::Dir> for Cluster<BlockChain<Dir<BlockChain<Library>>>> {
+impl Persist<fs::Dir> for Cluster<BlockChain<Dir<Library>>> {
     type Schema = Link;
     type Store = fs::Dir;
     type Txn = Txn;
