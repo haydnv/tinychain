@@ -183,7 +183,10 @@ where
     fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>> {
         match self.contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
-            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
+            Some(_) => Err(TCError::bad_request(
+                "expected a directory but found a file at",
+                name,
+            )),
             None => Ok(None),
         }
     }
@@ -215,7 +218,15 @@ where
                 .map(Some)
                 .ok_or_else(|| TCError::bad_request("unexpected file type", file)),
 
-            Some(other) => Err(TCError::bad_request("expected a file, not", other)),
+            Some(_) => {
+                #[cfg(debug_assertions)]
+                let name = format!("{} in {}", name, self.cache.path().to_str().expect("path"));
+
+                Err(TCError::bad_request(
+                    "expected a file but found a directory at",
+                    name,
+                ))
+            }
             None => Ok(None),
         }
     }
@@ -391,12 +402,6 @@ impl Dir {
     /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
     pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
         self.cache
-    }
-
-    /// Get an [`DirEntry`] from this [`Dir`] which can be a [`File`] or a sub-[`Dir`].
-    pub async fn get(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry>> {
-        let listing = self.listing.read(txn_id).await?;
-        Ok(listing.get(name).clone())
     }
 }
 

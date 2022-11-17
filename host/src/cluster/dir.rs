@@ -300,8 +300,17 @@ impl Persist<fs::Dir> for Dir<Library> {
     }
 
     async fn load(txn: &Txn, link: Link, dir: fs::Dir) -> TCResult<Self> {
-        // TODO
-        Self::create(txn, link, dir).await
+        let txn_id = *txn.id();
+        let _lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let mut contents = HashMap::new();
+
+        // TODO: fill in `contents` by iterating over the entries in `_lock`
+
+        Ok(Self {
+            cache: dir.into_inner(),
+            contents: TxnMapLock::with_contents("service directory", contents),
+            deltas: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 }
 
