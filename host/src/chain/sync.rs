@@ -112,7 +112,7 @@ where
         let backup =
             backup.try_cast_into(|backup| TCError::bad_request("not a valid backup", backup))?;
 
-        self.subject.restore(&backup, *txn.id()).await?;
+        self.subject.restore(*txn.id(), &backup).await?;
 
         let (mut pending, mut committed): (
             FileWriteGuard<_, ChainBlock>,
@@ -172,16 +172,14 @@ where
 impl<T> Persist<fs::Dir> for SyncChain<T>
 where
     T: Persist<fs::Dir, Txn = Txn> + Send + Sync,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
-    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
 {
-    type Schema = T::Schema;
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = T::Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::create");
 
+        let dir = fs::Dir::try_from(store)?;
         let mut dir = dir.write(*txn.id()).await?;
 
         let store = dir
@@ -218,9 +216,10 @@ where
         })
     }
 
-    async fn load(txn: &Txn, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::load");
 
+        let dir = fs::Dir::try_from(store)?;
         let mut dir = dir.write(*txn.id()).await?;
 
         let store = dir
@@ -250,11 +249,7 @@ where
                 .map_err(fs::io_err)?
         };
 
-        let subject_store = dir
-            .get_or_create_store(super::SUBJECT.into())
-            .try_into()
-            .map_err(TCError::from)?;
-
+        let subject_store = dir.get_or_create_store(super::SUBJECT.into());
         let subject = T::load_or_create(txn, schema, subject_store).await?;
 
         Ok(Self {

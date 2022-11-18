@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use async_trait::async_trait;
@@ -149,11 +150,11 @@ impl Transact for Library {
 
 #[async_trait]
 impl Persist<fs::Dir> for Library {
-    type Schema = ();
-    type Store = fs::File<VersionNumber, Version>;
     type Txn = Txn;
+    type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let file = super::dir::File::try_from(store)?;
         let versions = file.read(*txn.id()).await?;
         if versions.is_empty() {
             Ok(Self { file })
@@ -164,8 +165,8 @@ impl Persist<fs::Dir> for Library {
         }
     }
 
-    async fn load(_txn: &Self::Txn, _schema: Self::Schema, file: Self::Store) -> TCResult<Self> {
-        Ok(Self { file })
+    async fn load(_txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        store.try_into().map(|file| Self { file })
     }
 }
 

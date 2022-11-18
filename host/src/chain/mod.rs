@@ -1,6 +1,5 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -31,10 +30,10 @@ mod block;
 mod data;
 mod sync;
 
-const BLOCK_SIZE: usize = 1_000_000;
+const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const CHAIN: Label = label("chain");
-const SUBJECT: Label = label("subject");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
+const SUBJECT: Label = label("subject");
 
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
@@ -208,14 +207,11 @@ where
 impl<T> Persist<fs::Dir> for Chain<T>
 where
     T: Persist<fs::Dir, Txn = Txn> + Route + Public,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
-    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
 {
-    type Schema = (ChainType, T::Schema);
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = (ChainType, T::Schema);
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
             ChainType::Block => {
@@ -231,7 +227,7 @@ where
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
             ChainType::Block => {

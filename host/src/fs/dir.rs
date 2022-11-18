@@ -107,16 +107,44 @@ impl fmt::Display for DirEntry {
     }
 }
 
-pub struct Store {
-    name: PathSegment,
-    parent: DirWriteGuard,
+pub enum Store {
+    Create(DirWriteGuard, PathSegment),
+    Get(DirReadGuard, PathSegment),
+    GetOrCreate(DirWriteGuard, PathSegment),
+    Dir(Dir),
+    File(FileEntry),
+}
+
+impl From<Dir> for Store {
+    fn from(dir: Dir) -> Self {
+        Self::Dir(dir)
+    }
+}
+
+impl<K, V> From<File<K, V>> for Store
+where
+    FileEntry: From<File<K, V>>,
+{
+    fn from(file: File<K, V>) -> Self {
+        Self::File(FileEntry::from(file))
+    }
 }
 
 impl TryFrom<Store> for Dir {
     type Error = TCError;
 
-    fn try_from(mut store: Store) -> TCResult<Self> {
-        fs::DirCreate::get_or_create_dir(&mut store.parent, store.name)
+    fn try_from(store: Store) -> TCResult<Self> {
+        match store {
+            Store::Create(mut parent, name) => fs::DirCreate::create_dir(&mut parent, name),
+            Store::GetOrCreate(mut parent, name) => {
+                fs::DirCreate::get_or_create_dir(&mut parent, name)
+            }
+            Store::Get(parent, name) => {
+                fs::DirRead::get_dir(&parent, &name)?.ok_or_else(|| TCError::not_found(name))
+            }
+            Store::Dir(dir) => Ok(dir),
+            Store::File(file) => Err(TCError::bad_request("expected a directory but found", file)),
+        }
     }
 }
 
@@ -127,27 +155,56 @@ where
     CacheBlock: AsType<B>,
     DirWriteGuard: fs::DirCreateFile<File<K, B>>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    FileEntry: AsType<Self>,
 {
     type Error = TCError;
 
-    fn try_from(mut store: Store) -> TCResult<Self> {
-        fs::DirCreateFile::get_or_create_file(&mut store.parent, store.name)
+    fn try_from(store: Store) -> TCResult<Self> {
+        match store {
+            Store::Dir(dir) => Err(TCError::bad_request("expected a file but found", dir)),
+            Store::File(file) => file
+                .into_type()
+                .ok_or_else(|| TCError::unsupported("file is of unexpected type")),
+            Store::Create(mut parent, name) => fs::DirCreateFile::create_file(&mut parent, name),
+            Store::GetOrCreate(mut parent, name) => {
+                fs::DirCreateFile::get_or_create_file(&mut parent, name)
+            }
+            Store::Get(parent, name) => {
+                fs::DirReadFile::get_file(&parent, &name)?.ok_or_else(|| TCError::not_found(name))
+            }
+        }
     }
 }
 
 #[async_trait]
 impl fs::Store for Store {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        match self.parent.contents.get(&self.name) {
-            Some(DirEntry::Dir(dir)) => fs::Store::is_empty(&dir, txn_id).await,
-            Some(DirEntry::File(file)) => match file {
-                FileEntry::BTree(file) => fs::Store::is_empty(&file, txn_id).await,
-                FileEntry::Chain(file) => fs::Store::is_empty(&file, txn_id).await,
-                FileEntry::Library(file) => fs::Store::is_empty(&file, txn_id).await,
-                #[cfg(feature = "tensor")]
-                FileEntry::Tensor(file) => fs::Store::is_empty(&file, txn_id).await,
+        let entry = match self {
+            Self::Create(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
             },
-            None => Ok(true),
+            Self::GetOrCreate(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
+            },
+            Self::Get(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
+            },
+            Self::Dir(dir) => DirEntry::Dir(dir.clone()),
+            Self::File(file) => DirEntry::File(file.clone()),
+        };
+
+        match entry {
+            DirEntry::Dir(dir) => dir.is_empty(txn_id).await,
+            DirEntry::File(file) => match file {
+                FileEntry::BTree(file) => file.is_empty(txn_id).await,
+                FileEntry::Chain(file) => file.is_empty(txn_id).await,
+                FileEntry::Library(file) => file.is_empty(txn_id).await,
+                #[cfg(feature = "tensor")]
+                FileEntry::Tensor(file) => file.is_empty(txn_id).await,
+            },
         }
     }
 }
@@ -239,7 +296,8 @@ where
 {
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
-            return Err(TCError::bad_request("directory already exists", name));
+            // return Err(TCError::bad_request("directory already exists", name));
+            panic!("directory already exists: {}", name);
         }
 
         let dir = self
@@ -319,10 +377,38 @@ pub type DirReadGuard =
 pub type DirWriteGuard =
     DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
 
+impl DirReadGuard {
+    /// Get an entry in this directory without resolving it to a [`Dir`] or [`File`].
+    pub fn get_store(self, name: PathSegment) -> Option<Store> {
+        if self.contents.contains_key(&name) {
+            Some(Store::Get(self, name))
+        } else {
+            None
+        }
+    }
+}
+
 impl DirWriteGuard {
+    /// Create a new [`Store`] in this [`Dir`].
+    pub fn create_store(self, name: PathSegment) -> Store {
+        Store::Create(self, name)
+    }
+
     /// Access a [`Store`] in this [`Dir`] which can be resolved to either a [`Dir`] or [`File`].
     pub fn get_or_create_store(self, name: PathSegment) -> Store {
-        Store { name, parent: self }
+        Store::GetOrCreate(self, name)
+    }
+
+    /// Create a new [`Store`] in this [`Dir`] with a unique name.
+    pub fn create_store_unique(self) -> Store {
+        let name: PathSegment = loop {
+            let name = Uuid::new_v4().into();
+            if !self.contents.contains_key(&name) {
+                break name;
+            }
+        };
+
+        Store::Create(self, name)
     }
 }
 
@@ -397,6 +483,27 @@ impl Dir {
         })
     }
 
+    /// Convenience method create a new [`Store`]
+    pub async fn create_store(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.create_store(name))
+            .await
+    }
+
+    /// Convenience method to assign a unique name to a [`Store`] before creating it
+    pub async fn create_store_unique(&self, txn_id: TxnId) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.create_store_unique())
+            .await
+    }
+
+    /// Convenience method to get or create a new [`Store`]
+    pub async fn get_or_create_store(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.get_or_create_store(name))
+            .await
+    }
+
     /// Get this [`Dir`]'s underlying [`freqfs::DirLock`].
     ///
     /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
@@ -409,6 +516,7 @@ impl Dir {
 impl fs::Dir for Dir {
     type Read = DirReadGuard;
     type Write = DirWriteGuard;
+    type Store = Store;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;

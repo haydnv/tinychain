@@ -1,5 +1,6 @@
 //! A [`BTree`], an ordered transaction-aware collection of [`Key`]s
 
+use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Bound;
@@ -497,9 +498,10 @@ struct BTreeVisitor<F, D, T> {
 #[async_trait]
 impl<F, D, T> de::Visitor for BTreeVisitor<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<F>,
     Self: Send + Sync + 'static,
 {
     type Value = BTreeFile<F, D, T>;
@@ -514,7 +516,7 @@ where
             .await?
             .ok_or_else(|| de::Error::custom("expected BTree schema"))?;
 
-        let btree = BTreeFile::create(&self.txn, schema, self.file)
+        let btree = BTreeFile::create(&self.txn, schema, self.file.into())
             .map_err(de::Error::custom)
             .await?;
 
@@ -532,9 +534,10 @@ where
 #[async_trait]
 impl<F, D, T> de::FromStream for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<F>,
     Self: Send + Sync + 'static,
 {
     type Context = (T, F);
@@ -557,9 +560,10 @@ where
 #[async_trait]
 impl<F, D, T> de::FromStream for BTree<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<F>,
     Self: Send + Sync + 'static,
 {
     type Context = (T, F);
@@ -592,7 +596,7 @@ impl<F, D, T> fmt::Display for BTree<F, D, T> {
 #[async_trait]
 impl<'en, F, D, T> IntoView<'en, D> for BTree<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     Self: 'static,

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::convert::TryFrom;
 use std::fmt;
 #[cfg(debug_assertions)]
 use std::iter::FromIterator;
@@ -726,19 +727,20 @@ where
 #[async_trait]
 impl<F, D, T> Persist<D> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<F>,
 {
-    type Schema = RowSchema;
-    type Store = F;
     type Txn = T;
+    type Schema = RowSchema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         debug!("BTreeFile::create");
 
         let order = validate_schema(&schema)?;
 
+        let store = F::try_from(store)?;
         let mut file = store.write(*txn.id()).await?;
         trace!("BTreeFile::create got file write lock");
 
@@ -758,19 +760,20 @@ where
         Ok(BTreeFile::new(store, schema, order, root))
     }
 
-    async fn load(txn: &T, schema: RowSchema, file: F) -> TCResult<Self> {
+    async fn load(txn: &T, schema: RowSchema, store: D::Store) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
 
         let order = validate_schema(&schema)?;
 
         let txn_id = *txn.id();
-        let file_contents = file.read(txn_id).await?;
+        let file = F::try_from(store)?;
+        let blocks = file.read(txn_id).await?;
 
         let mut root = None;
-        for block_id in file_contents.block_ids() {
+        for block_id in blocks.block_ids() {
             debug!("BTreeFile::load block {}", block_id);
 
-            let block = file.read_block(txn_id, block_id).await?;
+            let block = blocks.read_block(block_id).await?;
 
             debug!("BTreeFile::loaded block {}", block_id);
 
@@ -782,7 +785,7 @@ where
         let root =
             root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
 
-        if file_contents.contains(&root) {
+        if blocks.contains(&root) {
             Ok(BTreeFile::new(file, schema, order, root))
         } else {
             Err(TCError::internal("BTree corrupted (missing root block)"))
@@ -793,11 +796,12 @@ where
 #[async_trait]
 impl<F, D, T> Restore<D> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<F>,
 {
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
             return Err(TCError::unsupported(
                 "cannot restore a BTree from a backup with a different schema",
@@ -824,15 +828,16 @@ where
 #[async_trait]
 impl<F, D, T, I> CopyFrom<D, I> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node>,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     I: BTreeInstance + 'static,
+    D::Store: From<F>,
 {
-    async fn copy_from(source: I, file: F, txn: &T) -> TCResult<Self> {
+    async fn copy_from(txn: &T, store: D::Store, source: I) -> TCResult<Self> {
         let txn_id = *txn.id();
         let schema = source.schema().clone();
-        let dest = Self::create(txn, schema, file).await?;
+        let dest = Self::create(txn, schema, store).await?;
         let keys = source.keys(txn_id).await?;
         dest.try_insert_from(txn_id, keys).await?;
         Ok(dest)

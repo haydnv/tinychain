@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -51,34 +50,29 @@ impl Instance for CollectionBase {
 
 #[async_trait]
 impl Persist<fs::Dir> for CollectionBase {
-    type Schema = CollectionSchema;
-    type Store = fs::Store;
     type Txn = Txn;
+    type Schema = CollectionSchema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
             CollectionSchema::BTree(btree_schema) => {
-                let store = store.try_into()?;
                 BTreeFile::create(txn, btree_schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
             CollectionSchema::Table(table_schema) => {
-                let store = store.try_into()?;
                 TableIndex::create(txn, table_schema, store)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
             CollectionSchema::Dense(tensor_schema) => {
-                let store = store.try_into()?;
                 DenseTensor::create(txn, tensor_schema, store)
                     .map_ok(Self::Dense)
                     .await
             }
             #[cfg(feature = "tensor")]
             CollectionSchema::Sparse(tensor_schema) => {
-                let store = store.try_into()?;
                 SparseTensor::create(txn, tensor_schema, store)
                     .map_ok(Self::Sparse)
                     .await
@@ -86,30 +80,26 @@ impl Persist<fs::Dir> for CollectionBase {
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
             CollectionSchema::BTree(btree_schema) => {
-                let store = store.try_into()?;
                 BTreeFile::load(txn, btree_schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
             CollectionSchema::Table(table_schema) => {
-                let store = store.try_into()?;
                 TableIndex::load(txn, table_schema, store)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
             CollectionSchema::Dense(tensor_schema) => {
-                let store = store.try_into()?;
                 DenseTensor::load(txn, tensor_schema, store)
                     .map_ok(Self::Dense)
                     .await
             }
             #[cfg(feature = "tensor")]
             CollectionSchema::Sparse(tensor_schema) => {
-                let store = store.try_into()?;
                 SparseTensor::load(txn, tensor_schema, store)
                     .map_ok(Self::Sparse)
                     .await
@@ -120,31 +110,27 @@ impl Persist<fs::Dir> for CollectionBase {
 
 #[async_trait]
 impl CopyFrom<fs::Dir, Collection> for CollectionBase {
-    async fn copy_from(instance: Collection, store: Self::Store, txn: &Txn) -> TCResult<Self> {
+    async fn copy_from(txn: &Txn, store: fs::Store, instance: Collection) -> TCResult<Self> {
         match instance {
             Collection::BTree(btree) => {
-                let store = store.try_into()?;
-                BTreeFile::copy_from(btree, store, txn)
+                BTreeFile::copy_from(txn, store, btree)
                     .map_ok(Self::BTree)
                     .await
             }
             Collection::Table(table) => {
-                let store = store.try_into()?;
-                TableIndex::copy_from(table, store, txn)
+                TableIndex::copy_from(txn, store, table)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let store = store.try_into()?;
-                    DenseTensor::copy_from(dense, store, txn)
+                    DenseTensor::copy_from(txn, store, dense)
                         .map_ok(Self::Dense)
                         .await
                 }
                 Tensor::Sparse(sparse) => {
-                    let store = store.try_into()?;
-                    SparseTensor::copy_from(sparse, store, txn)
+                    SparseTensor::copy_from(txn, store, sparse)
                         .map_ok(Self::Sparse)
                         .await
                 }
@@ -155,14 +141,14 @@ impl CopyFrom<fs::Dir, Collection> for CollectionBase {
 
 #[async_trait]
 impl Restore<fs::Dir> for CollectionBase {
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
-            (Self::BTree(btree), Self::BTree(backup)) => btree.restore(backup, txn_id).await,
-            (Self::Table(table), Self::Table(backup)) => table.restore(backup, txn_id).await,
+            (Self::BTree(btree), Self::BTree(backup)) => btree.restore(txn_id, backup).await,
+            (Self::Table(table), Self::Table(backup)) => table.restore(txn_id, backup).await,
             #[cfg(feature = "tensor")]
-            (Self::Dense(tensor), Self::Dense(backup)) => tensor.restore(backup, txn_id).await,
+            (Self::Dense(tensor), Self::Dense(backup)) => tensor.restore(txn_id, backup).await,
             #[cfg(feature = "tensor")]
-            (Self::Sparse(tensor), Self::Sparse(backup)) => tensor.restore(backup, txn_id).await,
+            (Self::Sparse(tensor), Self::Sparse(backup)) => tensor.restore(txn_id, backup).await,
             (collection, backup) => Err(TCError::unsupported(format!(
                 "cannot restore {} from {}",
                 collection, backup

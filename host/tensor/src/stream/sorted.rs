@@ -21,12 +21,12 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D: Dir,
+    T: Transaction<D>,
     C: Stream<Item = TCResult<Coords>> + Unpin + Send,
+    D::Write: DirCreateFile<FD>,
 {
     let txn_id = *txn.id();
     let file: FD = txn.context().create_file_unique(txn_id).await?;
@@ -55,7 +55,7 @@ where
     FS: File<Key = NodeId, Block = Node>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     debug!("sort values by coordinate for {}", source);
 

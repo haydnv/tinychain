@@ -247,6 +247,9 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// The type of write guard used by this `Dir`
     type Write: DirCreate<Lock = Self>;
 
+    /// A type which can be resolved to either a directory or a file within this `Dir`
+    type Store: Store;
+
     /// Lock this [`Dir`] for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
 
@@ -272,28 +275,27 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
 #[async_trait]
-pub trait Store: Send + Sync {
+pub trait Store: Send + Sync + 'static {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 }
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
 pub trait Persist<D: Dir>: Sized {
-    type Schema: Clone + Send + Sync;
-    type Store: Store;
     type Txn: Transaction<D>;
+    type Schema: Clone + Send + Sync;
 
     /// Create a new instance of [`Self`] from an empty [`Self::Store`].
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
 
     /// Load a saved instance of [`Self`] from persistent storage.
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
 
     /// Load a saved instance of [`Self`] from persistent storage if present, or create a new one.
     async fn load_or_create(
         txn: &Self::Txn,
         schema: Self::Schema,
-        store: Self::Store,
+        store: D::Store,
     ) -> TCResult<Self> {
         if store.is_empty(*txn.id()).await? {
             Self::create(txn, schema, store).await
@@ -308,9 +310,9 @@ pub trait Persist<D: Dir>: Sized {
 pub trait CopyFrom<D: Dir, I>: Persist<D> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
-        instance: I,
-        store: <Self as Persist<D>>::Store,
         txn: &<Self as Persist<D>>::Txn,
+        store: D::Store,
+        instance: I,
     ) -> TCResult<Self>;
 }
 
@@ -318,5 +320,5 @@ pub trait CopyFrom<D: Dir, I>: Persist<D> {
 #[async_trait]
 pub trait Restore<D: Dir>: Persist<D> {
     /// Restore this persistent state from a backup.
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()>;
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()>;
 }

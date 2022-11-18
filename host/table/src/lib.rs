@@ -1,5 +1,6 @@
 //! A [`Table`], an ordered collection of [`Row`]s which supports `BTree`-based indexing
 
+use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -208,7 +209,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     fn key(&self) -> &[Column] {
@@ -254,7 +254,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     type OrderBy = Self;
@@ -312,7 +311,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
@@ -332,7 +330,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     type Limit = Self;
@@ -393,7 +390,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     type Slice = Self;
@@ -429,7 +425,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
     Self: Send + Sync,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
@@ -469,11 +464,12 @@ where
 #[async_trait]
 impl<F, D, Txn> de::FromStream for Table<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node>,
-    D: Dir,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,
     D::Write: DirCreateFile<F>,
+    D::Store: From<D> + From<F>,
 {
     type Context = Txn;
 
@@ -487,10 +483,11 @@ where
 #[async_trait]
 impl<'en, F, D, Txn> IntoView<'en, D> for Table<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node>,
-    D: Dir,
+    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Write: DirCreateFile<F>,
+    D::Store: From<F>,
 {
     type Txn = Txn;
     type View = TableView<'en>;

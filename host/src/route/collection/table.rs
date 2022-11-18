@@ -7,7 +7,7 @@ use tc_table::{
     Bounds, ColumnBound, Key, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
     TableType, TableWrite,
 };
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::Transaction;
 use tc_value::{Bound, Value};
 use tcgeneric::{label, Id, Map, PathSegment};
@@ -47,8 +47,8 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let txn_id = *txn.id();
 
-                let dir = txn.context().create_dir_unique(*txn.id()).await?;
-                let table = TableIndex::create(txn, schema, dir).await?;
+                let store = txn.context().create_store_unique(*txn.id()).await?;
+                let table = TableIndex::create(txn, schema, store).await?;
 
                 let rows = source.into_stream(txn.clone()).await?;
                 rows.map(|r| {
@@ -94,8 +94,8 @@ impl<'a> Handler<'a> for CreateHandler {
                     TCError::bad_request("invalid Table schema", v)
                 })?;
 
-                let dir = txn.context().create_dir_unique(*txn.id()).await?;
-                TableIndex::create(txn, schema, dir)
+                let store = txn.context().create_store_unique(*txn.id()).await?;
+                TableIndex::create(txn, schema, store)
                     .map_ok(Collection::from)
                     .map_ok(State::from)
                     .await

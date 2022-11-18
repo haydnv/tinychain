@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use log::debug;
 
 use tc_transact::fs::Persist;
-use tc_transact::{Transact, Transaction};
+use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
 use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
@@ -117,8 +117,8 @@ impl<'a, C, T> ChainHandler<'a, C, T> {
 
 impl<'a, C, T> Handler<'a> for ChainHandler<'a, C, T>
 where
-    C: ChainInstance<T> + Replica + Clone + Send + Sync + 'a,
     T: Send + Sync + 'a,
+    C: ChainInstance<T> + Replica + Clone + Send + Sync + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -135,7 +135,7 @@ where
 
 impl<T> Route for Chain<T>
 where
-    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + Send + Sync + fmt::Display,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -153,7 +153,7 @@ where
 
 impl<T> Route for BlockChain<T>
 where
-    T: Transact + Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display + Clone,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + Send + Sync + fmt::Display,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

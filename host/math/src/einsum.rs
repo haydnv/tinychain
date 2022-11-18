@@ -333,7 +333,7 @@ where
     D: Dir,
     Txn: Transaction<D>,
     T: TensorAccess
-        + TensorMath<D, T, LeftCombine = T>
+        + TensorMath<T, LeftCombine = T>
         + TensorReduce<D, Txn = Txn, Reduce = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + Clone
@@ -402,7 +402,7 @@ pub fn einsum<D, T>(format: &str, tensors: Vec<T>) -> TCResult<T>
 where
     D: Dir,
     T: TensorAccess
-        + TensorMath<D, T, LeftCombine = T>
+        + TensorMath<T, LeftCombine = T>
         + TensorTransform<Broadcast = T, Expand = T, Transpose = T>
         + TensorReduce<D, Reduce = T>
         + Clone

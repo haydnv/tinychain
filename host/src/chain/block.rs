@@ -2,7 +2,7 @@
 //!
 //! Each block in the chain begins with the hash of the previous block.
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -13,7 +13,7 @@ use futures::join;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
@@ -115,40 +115,31 @@ impl Replica for BlockChain<CollectionBase> {
 impl<T> Persist<fs::Dir> for BlockChain<T>
 where
     T: Route + Public + Persist<fs::Dir, Txn = Txn>,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
-    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
 {
-    type Schema = T::Schema;
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = T::Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        let mut dir = store.write(*txn.id()).await?;
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
 
-        let history = dir.create_dir(HISTORY.into())?;
+        let history = dir.get_or_create_store(txn_id, HISTORY.into()).await?;
         let history = History::create(txn, (), history).await?;
 
-        let store = dir
-            .get_or_create_store(SUBJECT.into())
-            .try_into()
-            .map_err(TCError::from)?;
-
+        let store = dir.get_or_create_store(txn_id, SUBJECT.into()).await?;
         let subject = T::create(txn, schema.clone(), store).await?;
 
         Ok(BlockChain::new(subject, history))
     }
 
-    async fn load(txn: &Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        let mut dir = store.write(*txn.id()).await?;
+    async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
 
-        let history = dir.get_or_create_dir(HISTORY.into())?;
+        let history = dir.get_or_create_store(txn_id, HISTORY.into()).await?;
         let history = History::load(txn, (), history).await?;
 
-        let store = dir
-            .get_or_create_store(SUBJECT.into())
-            .try_into()
-            .map_err(TCError::from)?;
-
+        let store = dir.get_or_create_store(txn_id, SUBJECT.into()).await?;
         let subject = T::load(txn, schema.clone(), store).await?;
 
         let write_ahead_log = history.read_log().await?;

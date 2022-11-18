@@ -9,7 +9,7 @@ use log::debug;
 
 use tc_btree::{BTreeFile, BTreeInstance, Node, NodeId};
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreateFile, File};
+use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, TCBoxTryStream};
@@ -186,7 +186,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
 {
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
@@ -246,10 +245,11 @@ where
     }
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableInstance
-    for Limited<F, D, Txn>
+impl<F, D, Txn> TableInstance for Limited<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     fn key(&self) -> &[Column] {
         self.source.key()
@@ -265,10 +265,11 @@ where
 }
 
 #[async_trait]
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableStream
-    for Limited<F, D, Txn>
+impl<F, D, Txn> TableStream for Limited<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
@@ -305,9 +306,11 @@ pub enum MergeSource<F, D, Txn> {
     Merge(Box<Merged<F, D, Txn>>),
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> MergeSource<F, D, Txn>
+impl<F, D, Txn> MergeSource<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     fn bounds(&'_ self) -> &'_ Bounds {
         match self {
@@ -372,9 +375,11 @@ pub struct Merged<F, D, Txn> {
     bounds: Bounds,
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> Merged<F, D, Txn>
+impl<F, D, Txn> Merged<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     /// Create a new merge of the given `IndexSlice` with the given `MergeSource`.
     pub fn new(left: MergeSource<F, D, Txn>, right: IndexSlice<F, D, Txn>) -> TCResult<Self> {
@@ -422,10 +427,11 @@ where
     }
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableInstance
-    for Merged<F, D, Txn>
+impl<F, D, Txn> TableInstance for Merged<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     fn key(&self) -> &[Column] {
         self.left.key()
@@ -447,10 +453,11 @@ where
 }
 
 #[async_trait]
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableStream
-    for Merged<F, D, Txn>
+impl<F, D, Txn> TableStream for Merged<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
@@ -481,10 +488,11 @@ where
     }
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableOrder
-    for Merged<F, D, Txn>
+impl<F, D, Txn> TableOrder for Merged<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type OrderBy = Self;
     type Reverse = Self;
@@ -512,10 +520,11 @@ where
     }
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> super::TableSlice
-    for Merged<F, D, Txn>
+impl<F, D, Txn> super::TableSlice for Merged<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type Slice = Self;
 
@@ -703,7 +712,6 @@ where
     Txn: Transaction<D>,
     T: TableStream,
     Table<F, D, Txn>: From<Self>,
-    D::Write: DirCreateFile<F>,
 {
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
@@ -757,9 +765,11 @@ pub struct TableSlice<F, D, Txn> {
     slice: IndexSlice<F, D, Txn>,
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> TableSlice<F, D, Txn>
+impl<F, D, Txn> TableSlice<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     pub fn new(table: TableIndex<F, D, Txn>, bounds: Bounds) -> TCResult<TableSlice<F, D, Txn>> {
         super::TableSlice::validate_bounds(&table, &bounds)?;
@@ -813,7 +823,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
 {
     fn key(&self) -> &[Column] {
         self.source().key()
@@ -833,7 +842,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
 {
     type OrderBy = Merged<F, D, Txn>;
     type Reverse = TableSlice<F, D, Txn>;
@@ -862,7 +870,6 @@ where
     F: File<Key = NodeId, Block = Node>,
     D: Dir,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
 {
     type Limit = Limited<F, D, Txn>;
     type Selection = Selection<F, D, Txn, Self>;
@@ -884,10 +891,11 @@ where
     }
 }
 
-impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> super::TableSlice
-    for TableSlice<F, D, Txn>
+impl<F, D, Txn> super::TableSlice for TableSlice<F, D, Txn>
 where
-    D::Write: DirCreateFile<F>,
+    F: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
 {
     type Slice = Merged<F, D, Txn>;
 

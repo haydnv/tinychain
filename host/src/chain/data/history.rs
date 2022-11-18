@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -264,12 +265,12 @@ impl History {
 
 #[async_trait]
 impl Persist<fs::Dir> for History {
-    type Schema = ();
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let txn_id = txn.id();
+        let dir = fs::Dir::try_from(store)?;
 
         let store = {
             let mut dir = dir.write(*txn_id).await?;
@@ -293,8 +294,9 @@ impl Persist<fs::Dir> for History {
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 
-    async fn load(txn: &Txn, _schema: Self::Schema, dir: Self::Store) -> TCResult<Self> {
+    async fn load(txn: &Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let txn_id = txn.id();
+        let dir = fs::Dir::try_from(store)?;
 
         let store = {
             let mut dir = dir.write(*txn_id).await?;

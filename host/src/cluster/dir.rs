@@ -1,4 +1,5 @@
 use std::collections::hash_map::{self, HashMap};
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +46,7 @@ pub trait DirCreateItem<T: DirItem> {
 
 #[async_trait]
 pub trait DirItem:
-    Persist<fs::Dir, Txn = Txn, Store = File, Schema = ()> + Transact + Clone + Send + Sync
+    Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
     type Version: BlockData + TryCastFrom<State>;
 
@@ -170,7 +171,7 @@ impl<T> DirCreate for Dir<T>
 where
     T: Send + Sync,
     DirEntry<T>: Clone,
-    BlockChain<Self>: Persist<fs::Dir, Txn = Txn, Schema = Link, Store = fs::Dir>,
+    BlockChain<Self>: Persist<fs::Dir, Txn = Txn, Schema = Link>,
     Cluster<BlockChain<Self>>: Clone,
     Self: Route + fmt::Display,
 {
@@ -195,7 +196,7 @@ where
 
         let self_link = txn.link(link.path().clone());
 
-        let dir = BlockChain::create(txn, link.clone(), dir).await?;
+        let dir = BlockChain::create(txn, link.clone(), fs::Store::from(dir)).await?;
         let dir = Cluster::with_state(self_link, link, dir);
 
         contents.insert(name.clone(), DirEntry::Dir(dir.clone()));
@@ -229,7 +230,7 @@ where
         let cluster = link.clone().append(name.clone());
         let self_link = txn.link(cluster.path().clone());
 
-        let item = BlockChain::create(txn, (), dir).await?;
+        let item = BlockChain::create(txn, (), fs::Store::from(dir)).await?;
         let item = Cluster::with_state(self_link, cluster, item);
         contents.insert(name.clone(), DirEntry::Item(item.clone()));
 
@@ -287,11 +288,12 @@ where
 
 #[async_trait]
 impl Persist<fs::Dir> for Dir<Library> {
-    type Schema = Link;
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = Link;
 
-    async fn create(_txn: &Txn, _schema: Link, dir: fs::Dir) -> TCResult<Self> {
+    async fn create(_txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
         Ok(Self {
             cache: dir.into_inner(),
             contents: TxnMapLock::new("service directory"),
@@ -299,12 +301,13 @@ impl Persist<fs::Dir> for Dir<Library> {
         })
     }
 
-    async fn load(txn: &Txn, link: Link, dir: fs::Dir) -> TCResult<Self> {
+    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
         let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
         let _lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
-        let mut contents = HashMap::new();
+        let contents = HashMap::new();
 
-        // TODO: fill in `contents` by iterating over the entries in `_lock`
+        // TODO: fill in `contents` by iterating over the entries in `lock`
 
         Ok(Self {
             cache: dir.into_inner(),

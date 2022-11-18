@@ -204,17 +204,18 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
-    let library = {
+    let library: kernel::Library = {
         let link = if let Some(host) = config.replicate {
             (host, kernel::LIB.into()).into()
         } else {
             kernel::LIB.into()
         };
 
-        use tc_transact::fs::*;
-        let mut data_dir = data_dir.write(txn_id).await?;
-        let lib_dir = data_dir.get_or_create_dir(tcgeneric::label(kernel::LIB[0]).into())?;
-        kernel::Library::load(&txn, link, lib_dir).await?
+        let store = data_dir
+            .get_or_create_store(txn_id, tcgeneric::label(kernel::LIB[0]).into())
+            .await?;
+
+        tc_transact::fs::Persist::load(&txn, link, store).await?
     };
 
     data_dir.commit(&txn_id).await;

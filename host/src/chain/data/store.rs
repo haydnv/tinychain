@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
-use log::{debug, error};
+use log::debug;
 use safecast::*;
 
 use tc_btree::BTreeInstance;
@@ -54,7 +54,7 @@ impl Store {
         debug!("computed hash of {}: {}", state, hash);
 
         let txn_id = *txn.id();
-        let mut dir = self.dir.write(txn_id).await?;
+        let dir = self.dir.write(txn_id).await?;
 
         // TODO: it should be possible to lock the directory listing,
         // to combine the calls to `self.dir.contains` with `self.dir.create...`
@@ -67,9 +67,8 @@ impl Store {
                     if dir.contains(&hash) {
                         debug!("BTree with hash {} is already saved", hash);
                     } else {
-                        let file = dir.create_file(hash.clone())?;
-
-                        BTreeFile::copy_from(btree, file, txn).await?;
+                        let store = dir.create_store(hash.clone());
+                        BTreeFile::copy_from(txn, store, btree).await?;
                         debug!("saved BTree with hash {}", hash);
                     }
 
@@ -87,8 +86,8 @@ impl Store {
                     if dir.contains(&hash) {
                         debug!("Table with hash {} is already saved", hash);
                     } else {
-                        let dir = dir.create_dir(hash.clone())?;
-                        TableIndex::copy_from(table, dir, txn).await?;
+                        let store = dir.create_store(hash.clone());
+                        TableIndex::copy_from(txn, store, table).await?;
                         debug!("saved Table with hash {}", hash);
                     }
 
@@ -118,15 +117,15 @@ impl Store {
                                     dense
                                 );
 
-                                let file = dir.create_file(hash.clone())?;
+                                let store = dir.create_store(hash.clone());
 
                                 debug!("chain data store created destination file for {}", dense);
-                                DenseTensor::copy_from(dense, file, txn).await?;
+                                DenseTensor::copy_from(txn, store, dense).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
                             Tensor::Sparse(sparse) => {
-                                let dir = dir.create_dir(hash.clone())?;
-                                SparseTensor::copy_from(sparse, dir, txn).await?;
+                                let store = dir.create_store(hash.clone());
+                                SparseTensor::copy_from(txn, store, sparse).await?;
                                 debug!("saved Tensor with hash {}", hash);
                             }
                         };
@@ -160,8 +159,6 @@ impl Store {
                     .map_ok(State::from)
                     .await
             } else {
-                error!("invalid subject for historical Chain state {}", tc_ref);
-
                 Err(TCError::internal(format!(
                     "invalid subject for historical Chain state {}",
                     tc_ref
@@ -195,12 +192,13 @@ impl Store {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let file = dir.get_file(&hash)?.ok_or_else(|| {
-                    TCError::internal(format!("Chain is missing historical state {}", hash))
-                })?;
+                let store = dir
+                    .get_store(hash)
+                    .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                let btree = BTreeFile::load(txn, schema, file).await?;
-                Ok(Collection::BTree(btree.into()))
+                BTreeFile::load(txn, schema, store)
+                    .map_ok(|btree| Collection::BTree(btree.into()))
+                    .await
             }
 
             CollectionType::Table(_) => {
@@ -214,13 +212,13 @@ impl Store {
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
                 let schema = schema.try_cast_into(|v| schema_err(v))?;
 
-                let dir = dir.get_dir(&hash)?;
-                let dir = dir.ok_or_else(|| {
-                    TCError::internal(format!("missing historical Chain state {}", hash))
-                })?;
+                let store = dir
+                    .get_store(hash)
+                    .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                let table = TableIndex::load(txn, schema, dir).await?;
-                Ok(Collection::Table(table.into()))
+                TableIndex::load(txn, schema, store)
+                    .map_ok(|table| Collection::Table(table.into()))
+                    .await
             }
 
             #[cfg(feature = "tensor")]
@@ -228,28 +226,29 @@ impl Store {
                 let schema: Value = schema.try_cast_into(|s| {
                     TCError::internal(format!("invalid Tensor schema: {}", s))
                 })?;
+
                 let schema = schema.try_cast_into(|v| {
                     TCError::internal(format!("invalid Tensor schema: {}", v))
                 })?;
 
                 match tt {
                     TensorType::Dense => {
-                        let file = dir.get_file(&hash)?;
-                        let file = file.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
+                        let store = dir
+                            .get_store(hash)
+                            .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        let tensor = DenseTensor::load(txn, schema, file).await?;
-                        Ok(Collection::Tensor(tensor.into()))
+                        DenseTensor::load(txn, schema, store)
+                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
+                            .await
                     }
                     TensorType::Sparse => {
-                        let dir = dir.get_dir(&hash)?;
-                        let dir = dir.ok_or_else(|| {
-                            TCError::internal(format!("missing historical Chain state {}", hash))
-                        })?;
+                        let store = dir
+                            .get_store(hash)
+                            .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        let tensor = SparseTensor::load(txn, schema, dir).await?;
-                        Ok(Collection::Tensor(tensor.into()))
+                        SparseTensor::load(txn, schema, store)
+                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
+                            .await
                     }
                 }
             }

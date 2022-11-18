@@ -176,7 +176,10 @@ impl TCError {
         panic!("{}", info);
 
         #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::Internal, info)
+        {
+            log::error!("{}", info);
+            Self::new(ErrorType::Internal, info)
+        }
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
