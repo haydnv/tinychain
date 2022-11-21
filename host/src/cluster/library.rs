@@ -14,6 +14,7 @@ use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
 
 use crate::fs;
+use crate::object::Object;
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
@@ -51,6 +52,7 @@ impl TryCastFrom<State> for Version {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
+            State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
@@ -59,6 +61,10 @@ impl TryCastFrom<State> for Version {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Map(map) => BTreeMap::opt_cast_from(map).map(Map::from).map(Self::from),
+            State::Object(Object::Class(class)) => {
+                let (_extends, proto) = class.into_inner();
+                Some(Self::from(proto))
+            }
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }

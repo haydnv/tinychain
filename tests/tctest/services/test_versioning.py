@@ -12,6 +12,14 @@ class TestLibV0(tc.app.Library):
         return "Hello, World!"
 
 
+class TestLibV1(tc.app.Library):
+    __uri__ = tc.URI("/lib/test/libhello")
+
+    @tc.get
+    def hello(self, name: tc.String):
+        return tc.String("Hello, {{name}}!").render(name=name)
+
+
 class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -37,6 +45,9 @@ class LibraryTests(unittest.TestCase):
         print()
 
         self.assertEqual(self.hosts[0].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+
+        self.hosts[0].put("/lib/test/libhello", "0.0.1", TestLibV1())
+        self.assertEqual(self.hosts[0].get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")
 
     @classmethod
     def tearDownClass(cls) -> None:
