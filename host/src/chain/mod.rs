@@ -33,7 +33,6 @@ mod sync;
 const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
-const SUBJECT: Label = label("subject");
 
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]

@@ -1,7 +1,6 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
 
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use async_trait::async_trait;
@@ -26,10 +25,10 @@ use crate::txn::Txn;
 
 use super::{null_hash, ChainBlock, ChainInstance};
 
-const BLOCKS: Label = label("blocks");
+const BLOCKS: Label = label(".blocks");
 const COMMITTED: &str = "committed.chain_block";
 const PENDING: &str = "pending.chain_block";
-const STORE: Label = label("store");
+const STORE: Label = label(".store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -179,17 +178,21 @@ where
     async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::create");
 
-        let dir = fs::Dir::try_from(store)?;
-        let mut dir = dir.write(*txn.id()).await?;
+        let subject = T::create(txn, schema, store).await?;
+
+        let mut dir = subject.dir().write().await;
 
         let store = dir
-            .get_or_create_dir(STORE.into())
+            .create_dir(STORE.to_string())
+            .map_err(fs::io_err)
+            .map(fs::Dir::new)
             .map(super::data::Store::new)?;
 
-        let mut blocks_dir = {
-            let file: fs::File<Id, ChainBlock> = dir.get_or_create_file(BLOCKS.into())?;
-            file.into_inner().write().await
-        };
+        let mut blocks_dir = dir
+            .create_dir(BLOCKS.to_string())
+            .map_err(fs::io_err)?
+            .write()
+            .await;
 
         let block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
         let pending = blocks_dir
@@ -200,13 +203,6 @@ where
         let committed = blocks_dir
             .create_file(COMMITTED.to_string(), block, Some(0))
             .map_err(fs::io_err)?;
-
-        let subject_store = dir
-            .get_or_create_store(super::SUBJECT.into())
-            .try_into()
-            .map_err(TCError::from)?;
-
-        let subject = T::create(txn, schema, subject_store).await?;
 
         Ok(Self {
             subject,
@@ -219,17 +215,21 @@ where
     async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::load");
 
-        let dir = fs::Dir::try_from(store)?;
-        let mut dir = dir.write(*txn.id()).await?;
+        let subject = T::load_or_create(txn, schema, store).await?;
+
+        let mut dir = subject.dir().write().await;
 
         let store = dir
-            .get_or_create_dir(STORE.into())
+            .get_or_create_dir(STORE.to_string())
+            .map_err(fs::io_err)
+            .map(fs::Dir::new)
             .map(super::data::Store::new)?;
 
-        let mut blocks_dir = {
-            let file: fs::File<Id, ChainBlock> = dir.get_or_create_file(BLOCKS.into())?;
-            file.into_inner().write().await
-        };
+        let mut blocks_dir = dir
+            .get_or_create_dir(BLOCKS.to_string())
+            .map_err(fs::io_err)?
+            .write()
+            .await;
 
         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
             file
@@ -249,9 +249,6 @@ where
                 .map_err(fs::io_err)?
         };
 
-        let subject_store = dir.get_or_create_store(super::SUBJECT.into());
-        let subject = T::load_or_create(txn, schema, subject_store).await?;
-
         Ok(Self {
             subject,
             pending,
@@ -261,7 +258,7 @@ where
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
-        todo!("SyncChain::dir")
+        self.subject.dir()
     }
 }
 
@@ -273,11 +270,7 @@ where
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let subject = txn
-            .subcontext(super::SUBJECT.into())
-            .map_err(de::Error::custom)
-            .and_then(|txn| T::from_stream(txn, decoder))
-            .await?;
+        let subject = T::from_stream(txn.clone(), decoder).await?;
 
         let mut dir = txn
             .context()

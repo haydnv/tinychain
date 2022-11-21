@@ -2,7 +2,6 @@
 //!
 //! Each block in the chain begins with the hash of the previous block.
 
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -27,9 +26,9 @@ use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::History;
-use super::{Chain, ChainInstance, CHAIN, SUBJECT};
+use super::{Chain, ChainInstance, CHAIN};
 
-const HISTORY: Label = label("history");
+const HISTORY: Label = label(".history");
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
 #[derive(Clone)]
@@ -120,27 +119,30 @@ where
     type Schema = T::Schema;
 
     async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
-        let dir = fs::Dir::try_from(store)?;
-
-        let history = dir.get_or_create_store(txn_id, HISTORY.into()).await?;
-        let history = History::create(txn, (), history).await?;
-
-        let store = dir.get_or_create_store(txn_id, SUBJECT.into()).await?;
         let subject = T::create(txn, schema.clone(), store).await?;
+        let mut dir = subject.dir().write().await;
+
+        let history = dir
+            .create_dir(HISTORY.to_string())
+            .map(fs::Dir::new)
+            .map_err(fs::io_err)?;
+
+        let history = History::create(txn, (), history.into()).await?;
 
         Ok(BlockChain::new(subject, history))
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
-        let dir = fs::Dir::try_from(store)?;
-
-        let history = dir.get_or_create_store(txn_id, HISTORY.into()).await?;
-        let history = History::load(txn, (), history).await?;
-
-        let store = dir.get_or_create_store(txn_id, SUBJECT.into()).await?;
         let subject = T::load(txn, schema.clone(), store).await?;
+
+        let mut dir = subject.dir().write().await;
+
+        let history = dir
+            .get_or_create_dir(HISTORY.to_string())
+            .map(fs::Dir::new)
+            .map_err(fs::io_err)?;
+
+        let history = History::load(txn, (), history.into()).await?;
 
         let write_ahead_log = history.read_log().await?;
         for (past_txn_id, mutations) in &write_ahead_log.mutations {
@@ -201,13 +203,7 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let txn = self
-            .txn
-            .subcontext(SUBJECT.into())
-            .map_err(de::Error::custom)
-            .await?;
-
-        let subject = seq.next_element::<T>(txn).await?;
+        let subject = seq.next_element::<T>(self.txn.clone()).await?;
         let subject = subject.ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
 
         let txn = self

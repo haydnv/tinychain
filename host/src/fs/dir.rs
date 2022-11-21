@@ -441,6 +441,8 @@ impl Dir {
                 if name.starts_with('.') {
                     debug!("Dir::load skipping hidden filesystem entry {}", name);
                     continue;
+                } else {
+                    debug!("Dir::load entry {}", name);
                 }
 
                 let fs_cache = match fs_cache {
@@ -650,7 +652,7 @@ fn ext_class(name: &str) -> Option<StateType> {
         return None;
     }
 
-    let i = name.rfind('.').map(|i| i + 1).unwrap_or(0);
+    let i = name.rfind('.').map(|i| i + 1)?;
 
     match &name[i..] {
         "node" => Some(BTreeType::default().into()),
