@@ -642,7 +642,7 @@ where
 
 impl<FD, FS, D, T> TensorInstance for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -668,7 +668,7 @@ where
 
 impl<FD, FS, D, T> TensorBoolean<Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -701,7 +701,7 @@ where
 
 impl<FD, FS, D, T> TensorBooleanConst for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -734,7 +734,7 @@ where
 
 impl<FD, FS, D, T> TensorCompare<Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -788,7 +788,7 @@ where
 
 impl<FD, FS, D, T> TensorCompareConst for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -842,8 +842,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDiagonal<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -864,7 +864,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -921,8 +921,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIndex<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -949,8 +949,8 @@ where
 
 impl<FD, FS, D, T> TensorMath<Self> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner>,
     D: Dir,
     T: Transaction<D>,
     D::Write: DirCreateFile<FD>,
@@ -1003,7 +1003,7 @@ where
 
 impl<FD, FS, D, T> TensorMathConst for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1057,7 +1057,7 @@ where
 
 impl<FD, FS, D, T> TensorReduce<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1125,7 +1125,7 @@ where
 
 impl<FD, FS, D, T> TensorTransform for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1226,7 +1226,7 @@ macro_rules! trig {
 
 impl<FD, FS, D, T> TensorTrig for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1253,7 +1253,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorUnary<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1314,7 +1314,7 @@ where
 
 impl<FD, FS, D, T, B> From<DenseTensor<FD, FS, D, T, B>> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1328,7 +1328,7 @@ where
 
 impl<FD, FS, D, T, A> From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1343,8 +1343,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -1379,8 +1379,8 @@ impl<FD, FS, D, T> TensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for TensorVisitor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -1420,7 +1420,7 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,

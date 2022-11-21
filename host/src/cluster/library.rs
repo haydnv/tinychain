@@ -8,7 +8,7 @@ use futures::future::TryFutureExt;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, File, FileRead, FileWrite, Persist};
+use tc_transact::fs::{BlockData, Dir, File, FileRead, FileWrite, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
@@ -167,6 +167,10 @@ impl Persist<fs::Dir> for Library {
 
     async fn load(_txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         store.try_into().map(|file| Self { file })
+    }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        self.file.clone().into_inner()
     }
 }
 

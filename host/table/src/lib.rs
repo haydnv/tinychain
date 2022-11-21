@@ -464,7 +464,7 @@ where
 #[async_trait]
 impl<F, D, Txn> de::FromStream for Table<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,
@@ -483,11 +483,9 @@ where
 #[async_trait]
 impl<'en, F, D, Txn> IntoView<'en, D> for Table<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
-    D::Write: DirCreateFile<F>,
-    D::Store: From<F>,
 {
     type Txn = Txn;
     type View = TableView<'en>;

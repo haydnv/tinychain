@@ -498,7 +498,7 @@ struct BTreeVisitor<F, D, T> {
 #[async_trait]
 impl<F, D, T> de::Visitor for BTreeVisitor<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Store: From<F>,
@@ -534,7 +534,7 @@ where
 #[async_trait]
 impl<F, D, T> de::FromStream for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Store: From<F>,
@@ -560,7 +560,7 @@ where
 #[async_trait]
 impl<F, D, T> de::FromStream for BTree<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Store: From<F>,

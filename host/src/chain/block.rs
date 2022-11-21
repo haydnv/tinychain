@@ -13,7 +13,7 @@ use futures::join;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
@@ -148,6 +148,10 @@ where
         }
 
         Ok(BlockChain::new(subject, history))
+    }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        todo!("BlockChain::dir")
     }
 }
 

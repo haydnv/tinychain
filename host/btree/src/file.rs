@@ -727,7 +727,7 @@ where
 #[async_trait]
 impl<F, D, T> Persist<D> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Store: From<F>,
@@ -791,12 +791,16 @@ where
             Err(TCError::internal("BTree corrupted (missing root block)"))
         }
     }
+
+    fn dir(&self) -> F::Inner {
+        self.inner.file.clone().into_inner()
+    }
 }
 
 #[async_trait]
 impl<F, D, T> Restore<D> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Store: From<F>,
@@ -828,7 +832,7 @@ where
 #[async_trait]
 impl<F, D, T, I> CopyFrom<D, I> for BTreeFile<F, D, T>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     I: BTreeInstance + 'static,

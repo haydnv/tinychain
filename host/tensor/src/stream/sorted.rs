@@ -21,7 +21,7 @@ pub async fn sorted_coords<FD, FS, D, T, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<Coords>> + Unpin>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -49,10 +49,10 @@ pub async fn sorted_values<'a, FD, FS, T, D, A, C>(
     coords: C,
 ) -> TCResult<impl Stream<Item = TCResult<(Coord, Number)>>>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     A: TensorAccess + ReadValueAt<D, Txn = T> + Clone + fmt::Display + 'a,
     C: Stream<Item = TCResult<Coords>> + Send + Unpin + 'a,
     D::Write: DirCreateFile<FD>,
@@ -79,7 +79,7 @@ async fn sort_coords<FD, FS, D, T, S>(
     shape: Shape,
 ) -> TCResult<BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,

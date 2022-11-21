@@ -91,7 +91,7 @@ where
 #[async_trait]
 pub trait DenseWrite<FD, FS, D, T>: DenseAccess<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -168,10 +168,10 @@ impl<FD, FS, D, T> TensorAccess for DenseAccessor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Write: DirCreateFile<FD>,
 {
     type Slice = Self;
@@ -210,10 +210,10 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for DenseAccessor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Write: DirCreateFile<FD>,
 {
     async fn write<V: DenseAccess<FD, FS, D, T>>(
@@ -238,10 +238,10 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for DenseAccessor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Write: DirCreateFile<FD>,
 {
     type Txn = T;
@@ -281,7 +281,7 @@ pub struct BlockListCombine<FD, FS, D, T, L, R> {
 
 impl<FD, FS, D, T, L, R> BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -339,7 +339,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, L, R> DenseAccess<FD, FS, D, T> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -462,7 +462,7 @@ where
 
 impl<FD, FS, D, T, L, R> ReadValueAt<D> for BlockListCombine<FD, FS, D, T, L, R>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -549,7 +549,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListConst<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -617,10 +617,10 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListConst<FD, FS, D, T, B>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
     D::Write: DirCreateFile<FD>,
 {
@@ -696,7 +696,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -767,7 +767,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListBroadcast<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -804,7 +804,7 @@ pub struct BlockListCast<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -844,7 +844,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -892,7 +892,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListCast<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -967,7 +967,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1065,7 +1065,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListExpand<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1100,7 +1100,7 @@ pub struct BlockListFlip<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1141,7 +1141,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1223,7 +1223,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListFlip<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1305,7 +1305,7 @@ pub struct BlockListReduce<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1389,7 +1389,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1494,7 +1494,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReduce<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1568,10 +1568,10 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListReshape<FD, FS, D, T, B>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
     D::Write: DirCreateFile<FD>,
 {
@@ -1622,7 +1622,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListReshape<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1652,7 +1652,7 @@ pub struct BlockListTranspose<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1693,7 +1693,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1768,7 +1768,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListTranspose<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1825,7 +1825,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> DenseAccess<FD, FS, D, T> for BlockListSparse<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1926,7 +1926,7 @@ pub struct BlockListUnary<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1973,7 +1973,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> DenseAccess<FD, FS, D, T> for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -2041,7 +2041,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for BlockListUnary<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,

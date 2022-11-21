@@ -74,7 +74,7 @@ impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -225,7 +225,7 @@ where
 impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -258,13 +258,17 @@ where
             dense: PhantomData,
         })
     }
+
+    fn dir(&self) -> D::Inner {
+        self.table.dir()
+    }
 }
 
 #[async_trait]
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>> for SparseTable<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -301,7 +305,7 @@ where
 impl<FD, FS, D, T> Restore<D> for SparseTable<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -316,10 +320,10 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for SparseTable<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS>,
     D::Store: From<FS>,
@@ -386,7 +390,7 @@ impl<FD, FS, D, T> TensorAccess for SparseTableSlice<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTableSlice<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -503,7 +507,7 @@ struct SparseTableVisitor<FD, FS, D, T> {
 impl<FD, FS, D, T> de::Visitor for SparseTableVisitor<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,

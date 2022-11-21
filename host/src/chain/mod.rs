@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -236,6 +236,13 @@ where
                     .await
             }
             ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+        }
+    }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        match self {
+            Self::Block(chain) => chain.dir(),
+            Self::Sync(chain) => chain.dir(),
         }
     }
 }

@@ -146,14 +146,17 @@ pub trait File: Store + Clone + 'static {
     /// The type of write guard used by this `File`
     type Write: FileWrite<File = Self>;
 
-    /// A read lock on a block in this file.
+    /// A read lock on a block in this file
     type BlockRead: BlockRead<Self::Block>;
 
-    /// An exclusive read lock on a block in this file.
+    /// An exclusive read lock on a block in this file
     type BlockReadExclusive: BlockReadExclusive<File = Self>;
 
-    /// A write lock on a block in this file.
+    /// A write lock on a block in this file
     type BlockWrite: BlockWrite<File = Self>;
+
+    /// The underlying filesystem directory which contains this [`File`]'s blocks
+    type Inner;
 
     /// Lock the contents of this file for reading at the given `txn_id`.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
@@ -182,6 +185,8 @@ pub trait File: Store + Clone + 'static {
         let file = self.read(txn_id).await?;
         file.write_block(name).await
     }
+
+    fn into_inner(self) -> Self::Inner;
 }
 
 /// A read lock on a [`Dir`]
@@ -203,7 +208,7 @@ pub trait DirRead: Send {
 }
 
 /// A read lock on a [`Dir`], used to read the files it stores
-pub trait DirReadFile<F: File>: DirRead {
+pub trait DirReadFile<F: File<Inner = <Self::Lock as Dir>::Inner>>: DirRead {
     /// Get a [`File`] in this `Dir`.
     fn get_file(&self, name: &PathSegment) -> TCResult<Option<F>>;
 }
@@ -227,7 +232,7 @@ pub trait DirCreate: DirRead {
 }
 
 /// A write lock on a [`Dir`] used to create a file
-pub trait DirCreateFile<F: File>: DirRead {
+pub trait DirCreateFile<F: File<Inner = <Self::Lock as Dir>::Inner>>: DirRead {
     /// Create a new [`File`].
     fn create_file(&mut self, name: PathSegment) -> TCResult<F>;
 
@@ -250,6 +255,9 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// A type which can be resolved to either a directory or a file within this `Dir`
     type Store: Store;
 
+    /// The underlying filesystem directory type
+    type Inner;
+
     /// Lock this [`Dir`] for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
 
@@ -265,12 +273,14 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// Convenience method to create a temporary file
     async fn create_file_unique<F>(&self, txn_id: TxnId) -> TCResult<F>
     where
-        F: File,
+        F: File<Inner = Self::Inner>,
         Self::Write: DirCreateFile<F>,
     {
         let mut dir = self.write(txn_id).await?;
         dir.create_file_unique()
     }
+
+    fn into_inner(self) -> Self::Inner;
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
@@ -303,6 +313,9 @@ pub trait Persist<D: Dir>: Sized {
             Self::load(txn, schema, store).await
         }
     }
+
+    /// Access the filesystem directory in which stores this persistent state.
+    fn dir(&self) -> D::Inner;
 }
 
 /// Defines how to copy a base state from another instance, possibly a view.

@@ -13,7 +13,7 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate, DirCreateFile, Persist, Restore};
+use tc_transact::fs::{Dir, DirCreate, DirCreateFile, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label};
@@ -216,7 +216,7 @@ where
         })
     }
 
-        async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::load");
 
         let dir = fs::Dir::try_from(store)?;
@@ -258,6 +258,10 @@ where
             committed,
             store,
         })
+    }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        todo!("SyncChain::dir")
     }
 }
 

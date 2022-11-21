@@ -65,7 +65,7 @@ impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B> {
 
 impl<FD, FS, D, T, B> DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -117,7 +117,7 @@ where
 
 impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -165,7 +165,7 @@ where
 
 impl<FD, FS, D, T> DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -265,7 +265,7 @@ impl<FD, FS, D, T, B> TensorInstance for DenseTensor<FD, FS, D, T, B> {
 impl<FD, FS, D, T, B, O> TensorBoolean<DenseTensor<FD, FS, D, T, O>>
     for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -291,7 +291,7 @@ where
 
 impl<FD, FS, D, T, B> TensorBoolean<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -325,7 +325,7 @@ where
 
 impl<FD, FS, D, T, B> TensorBooleanConst for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -366,7 +366,7 @@ where
 impl<FD, FS, D, T, B, O> TensorCompare<DenseTensor<FD, FS, D, T, O>>
     for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -428,7 +428,7 @@ where
 
 impl<FD, FS, D, T, B> TensorCompare<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -483,7 +483,7 @@ where
 
 impl<FD, FS, D, T, B> TensorCompareConst for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -568,7 +568,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> TensorDiagonal<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -650,7 +650,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> TensorIO<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -683,7 +683,7 @@ where
 impl<FD, FS, D, T, B> TensorDualIO<D, DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>>
     for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -706,7 +706,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> TensorIndex<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -777,7 +777,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> TensorDualIO<D, Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -817,7 +817,7 @@ where
 
 impl<FD, FS, D, T, B, O> TensorMath<DenseTensor<FD, FS, D, T, O>> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -898,8 +898,8 @@ where
 
 impl<FD, FS, D, T, B> TensorMath<Tensor<FD, FS, D, T>> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
@@ -953,7 +953,7 @@ where
 
 impl<FD, FS, D, T, B> TensorMathConst for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1032,7 +1032,7 @@ where
 
 impl<FD, FS, D, T, B> ReadValueAt<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1048,7 +1048,7 @@ where
 
 impl<FD, FS, D, T, B> TensorReduce<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1147,7 +1147,7 @@ where
 
 impl<FD, FS, D, T, B> TensorTransform for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1219,7 +1219,7 @@ macro_rules! trig {
 #[async_trait]
 impl<FD, FS, D, T, B> TensorTrig for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1247,7 +1247,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, B> TensorUnary<D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1361,7 +1361,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1382,13 +1382,17 @@ where
             .map_ok(Self::from)
             .await
     }
+
+    fn dir(&self) -> FD::Inner {
+        BlockListFile::dir(&self.blocks)
+    }
 }
 
 #[async_trait]
 impl<FD, FS, D, T, B> CopyFrom<D, DenseTensor<FD, FS, D, T, B>>
     for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1409,7 +1413,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Restore<D> for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1433,7 +1437,7 @@ impl<FD, FS, D, T, B> From<B> for DenseTensor<FD, FS, D, T, B> {
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for DenseTensor<FD, FS, D, T, BlockListFile<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1525,7 +1529,7 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T, B> IntoView<'en, D> for DenseTensor<FD, FS, D, T, B>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,

@@ -53,7 +53,7 @@ impl<FD, FS, D, T> BlockListFile<FD, FS, D, T> {
 
 impl<FD, FS, D, T> BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -338,7 +338,7 @@ impl<FD, FS, D, T> TensorAccess for BlockListFile<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -417,7 +417,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -595,7 +595,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -626,12 +626,16 @@ where
 
         Ok(Self::new(file, schema))
     }
+
+    fn dir(&self) -> FD::Inner {
+        self.file.clone().into_inner()
+    }
 }
 
 #[async_trait]
 impl<FD, FS, D, T, B> CopyFrom<D, B> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -651,7 +655,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T> Restore<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1028,7 +1032,7 @@ impl<FD, FS, D, T> TensorAccess for BlockListFileSlice<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,

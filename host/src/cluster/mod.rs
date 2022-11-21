@@ -374,6 +374,7 @@ where
     }
 }
 
+// TODO: only impl Persist for Cluster once
 #[async_trait]
 impl Persist<fs::Dir> for Cluster<BlockChain<Dir<Library>>> {
     type Txn = Txn;
@@ -391,6 +392,10 @@ impl Persist<fs::Dir> for Cluster<BlockChain<Dir<Library>>> {
         BlockChain::load(txn, link.clone(), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        BlockChain::dir(&self.inner.state)
     }
 }
 
@@ -413,6 +418,10 @@ impl Persist<fs::Dir> for Cluster<BlockChain<Library>> {
         BlockChain::load(txn, (), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        BlockChain::dir(&self.inner.state)
     }
 }
 

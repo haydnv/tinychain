@@ -295,7 +295,7 @@ impl Persist<fs::Dir> for Dir<Library> {
         let dir = fs::Dir::try_from(store)?;
 
         Ok(Self {
-            cache: dir.into_inner(),
+            cache: tc_transact::fs::Dir::into_inner(dir),
             contents: TxnMapLock::new("service directory"),
             deltas: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -310,10 +310,14 @@ impl Persist<fs::Dir> for Dir<Library> {
         // TODO: fill in `contents` by iterating over the entries in `lock`
 
         Ok(Self {
-            cache: dir.into_inner(),
+            cache: tc_transact::fs::Dir::into_inner(dir),
             contents: TxnMapLock::with_contents("service directory", contents),
             deltas: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        self.cache.clone()
     }
 }
 

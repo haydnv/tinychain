@@ -159,8 +159,8 @@ where
 
 impl<FD, FS, D, T> SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -283,7 +283,7 @@ where
 
 impl<FD, FS, D, T, A> TensorBoolean<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -406,7 +406,7 @@ where
 
 impl<FD, FS, D, T, A> TensorCompare<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -514,8 +514,8 @@ impl<FD, FS, D, T, A> TensorCompareConst for SparseTensor<FD, FS, D, T, A> {
 #[async_trait]
 impl<FD, FS, D, T, A> TensorDiagonal<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -578,7 +578,7 @@ where
 impl<FD, FS, D, T, L> TensorDualIO<D, SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>>
     for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -621,8 +621,8 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorDualIO<D, Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T> + SparseWrite,
@@ -668,14 +668,14 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorIndex<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
+    A: SparseAccess<FD, FS, D, T> + SparseWrite,
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS>,
     D::Store: From<D> + From<FS>,
-    A: SparseAccess<FD, FS, D, T> + SparseWrite,
 {
     type Txn = T;
     type Index = SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>;
@@ -831,8 +831,8 @@ where
 
 impl<FD, FS, D, T, L, R> TensorMath<SparseTensor<FD, FS, D, T, R>> for SparseTensor<FD, FS, D, T, L>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner>,
     D: Dir,
     T: Transaction<D>,
     L: SparseAccess<FD, FS, D, T>,
@@ -894,8 +894,8 @@ where
 
 impl<FD, FS, D, T, A> TensorMath<Tensor<FD, FS, D, T>> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner>,
     D: Dir,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -949,7 +949,7 @@ where
 
 impl<FD, FS, D, T, A> TensorMathConst for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1004,7 +1004,7 @@ where
 
 impl<FD, FS, D, T, A> TensorReduce<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1097,7 +1097,7 @@ where
 
 impl<FD, FS, D, T, A> TensorTransform for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1171,7 +1171,7 @@ macro_rules! trig {
 #[async_trait]
 impl<FD, FS, D, T, A> TensorTrig for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1198,7 +1198,7 @@ where
 #[async_trait]
 impl<FD, FS, D, T, A> TensorUnary<D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1281,7 +1281,7 @@ where
 impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -1302,14 +1302,18 @@ where
             .map_ok(Self::from)
             .await
     }
+
+    fn dir(&self) -> D::Inner {
+        self.accessor.dir()
+    }
 }
 
 #[async_trait]
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>>
     for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     A: SparseAccess<FD, FS, D, T>,
@@ -1332,7 +1336,7 @@ where
 impl<FD, FS, D, T> Restore<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -1387,7 +1391,7 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T, A> IntoView<'en, D> for SparseTensor<FD, FS, D, T, A>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -1411,7 +1415,7 @@ where
 impl<FD, FS, D, T> de::FromStream for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
@@ -1447,7 +1451,7 @@ impl<FD, FS, D, T> SparseTensorVisitor<FD, FS, D, T> {
 impl<FD, FS, D, T> de::Visitor for SparseTensorVisitor<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,

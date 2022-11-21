@@ -106,6 +106,17 @@ impl Persist<fs::Dir> for CollectionBase {
             }
         }
     }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        match self {
+            Self::BTree(btree) => btree.dir(),
+            Self::Table(table) => table.dir(),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.dir(),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => sparse.dir(),
+        }
+    }
 }
 
 #[async_trait]

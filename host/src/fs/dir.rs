@@ -503,13 +503,6 @@ impl Dir {
             .map_ok(|lock| lock.get_or_create_store(name))
             .await
     }
-
-    /// Get this [`Dir`]'s underlying [`freqfs::DirLock`].
-    ///
-    /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
-    pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
-        self.cache
-    }
 }
 
 #[async_trait]
@@ -517,6 +510,7 @@ impl fs::Dir for Dir {
     type Read = DirReadGuard;
     type Write = DirWriteGuard;
     type Store = Store;
+    type Inner = freqfs::DirLock<CacheBlock>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;
@@ -528,6 +522,10 @@ impl fs::Dir for Dir {
         let contents = self.listing.write(txn_id).await?;
         let cache = self.cache.write().await;
         Ok(DirGuard { cache, contents })
+    }
+
+    fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
+        self.cache
     }
 }
 

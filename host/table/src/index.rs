@@ -303,7 +303,7 @@ where
 #[async_trait]
 impl<F, D, Txn> Persist<D> for Index<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Store: From<F>,
@@ -322,12 +322,16 @@ where
             .map_ok(|btree| Self { schema, btree })
             .await
     }
+
+    fn dir(&self) -> F::Inner {
+        BTreeFile::dir(&self.btree)
+    }
 }
 
 #[async_trait]
 impl<F, D, Txn> Restore<D> for Index<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Store: From<F>,
@@ -347,6 +351,7 @@ struct Inner<F, D, Txn> {
     schema: TableSchema,
     primary: Index<F, D, Txn>,
     auxiliary: Vec<(Id, Index<F, D, Txn>)>,
+    dir: D,
 }
 
 /// The base type of a [`Table`].
@@ -357,7 +362,7 @@ pub struct TableIndex<F, D, Txn> {
 
 impl<F, D, Txn> TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Write: DirCreateFile<F>,
@@ -898,7 +903,7 @@ where
 #[async_trait]
 impl<F, D, Txn> Persist<D> for TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,
@@ -909,11 +914,11 @@ where
     type Schema = TableSchema;
 
     async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        let store = D::try_from(store)?;
+        let dir = D::try_from(store)?;
         let txn_id = *txn.id();
-        let mut dir = store.write(txn_id).await?;
+        let mut dir_lock = dir.write(txn_id).await?;
 
-        let primary_file = dir.create_file(PRIMARY_INDEX.into())?;
+        let primary_file = dir_lock.create_file(PRIMARY_INDEX.into())?;
         let primary = Index::create(txn, schema.primary().clone(), primary_file.into()).await?;
 
         let primary_schema = schema.primary();
@@ -926,7 +931,7 @@ where
                 ));
             }
 
-            let file = dir.create_file(name.clone())?;
+            let file = dir_lock.create_file(name.clone())?;
             let index = Self::create_index(txn, primary_schema, file, column_names.to_vec())
                 .map_ok(move |index| (name.clone(), index))
                 .await?;
@@ -939,15 +944,16 @@ where
                 schema,
                 primary,
                 auxiliary,
+                dir,
             }),
         })
     }
 
     async fn load(txn: &Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        let store = D::try_from(store)?;
-        let dir = store.read(*txn.id()).await?;
+        let dir = D::try_from(store)?;
+        let dir_lock = dir.read(*txn.id()).await?;
 
-        let file = dir
+        let file = dir_lock
             .get_file(&PRIMARY_INDEX.into())?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
@@ -955,7 +961,7 @@ where
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
-            let file = dir.get_file(name)?.ok_or_else(|| {
+            let file = dir_lock.get_file(name)?.ok_or_else(|| {
                 TCError::internal(format!("cannot load Table: missing index {}", name))
             })?;
 
@@ -970,15 +976,20 @@ where
                 schema,
                 primary,
                 auxiliary,
+                dir,
             }),
         })
+    }
+
+    fn dir(&self) -> D::Inner {
+        self.inner.dir.clone().into_inner()
     }
 }
 
 #[async_trait]
 impl<F, D, Txn> Restore<D> for TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,
@@ -1016,7 +1027,7 @@ where
 #[async_trait]
 impl<F, D, Txn, I> CopyFrom<D, I> for TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     I: TableStream + 'static,
@@ -1051,7 +1062,7 @@ struct TableVisitor<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transactio
 #[async_trait]
 impl<F, D, Txn> de::Visitor for TableVisitor<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,
@@ -1094,7 +1105,7 @@ struct RowVisitor<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<
 #[async_trait]
 impl<F, D, Txn> de::Visitor for RowVisitor<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Write: DirCreateFile<F>,
@@ -1128,7 +1139,7 @@ where
 #[async_trait]
 impl<F, D, Txn> de::FromStream for RowVisitor<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Write: DirCreateFile<F>,
@@ -1148,7 +1159,7 @@ where
 #[async_trait]
 impl<F, D, Txn> de::FromStream for TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + TryFrom<D::Store, Error = TCError>,
+    F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir + TryFrom<D::Store, Error = TCError>,
     Txn: Transaction<D>,
     D::Read: DirReadFile<F>,

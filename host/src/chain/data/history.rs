@@ -338,6 +338,10 @@ impl Persist<fs::Dir> for History {
         let latest = if latest == 0 { 0 } else { latest - 1 };
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
+
+    fn dir(&self) -> DirLock<CacheBlock> {
+        self.file.clone()
+    }
 }
 
 async fn get_or_create_block<I: fmt::Display>(
