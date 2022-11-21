@@ -24,6 +24,7 @@ use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 use crate::chain::{ChainBlock, ChainType};
 use crate::cluster::library;
 use crate::collection::CollectionType;
+use crate::fs::file_ext;
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
@@ -296,13 +297,20 @@ where
 {
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
-            // return Err(TCError::bad_request("directory already exists", name));
-            panic!("directory already exists: {}", name);
+            return Err(TCError::bad_request("directory already exists", name));
+        }
+
+        let fs_name = name.to_string();
+        if ext_class(&fs_name).is_some() {
+            return Err(TCError::bad_request(
+                "a directory name may not end with a file extension",
+                name,
+            ));
         }
 
         let dir = self
             .cache
-            .create_dir(name.to_string())
+            .create_dir(fs_name)
             .map(Dir::new)
             .map_err(io_err)?;
 
@@ -421,6 +429,9 @@ pub struct Dir {
 
 impl Dir {
     pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+        let lock = cache.try_read().expect("filesystem cache dir lock");
+        assert!(file_ext(lock.path()).is_none());
+
         let lock_name = "contents of a transactional filesystem directory";
 
         Self {
@@ -450,11 +461,12 @@ impl Dir {
                     _ => return Err(TCError::internal(format!("{} is not a directory", name))),
                 };
 
-                let (name, entry) = if is_file(name, &fs_cache).await {
+                let (name, entry) = if is_file(name).await {
                     let (name, class) = file_class(name)?;
                     let entry = FileEntry::load(fs_cache, class, txn_id).await?;
                     (name, DirEntry::File(entry))
                 } else if is_dir(&fs_cache).await {
+                    assert!(ext_class(name).is_none());
                     let subdir = Dir::load(fs_cache, txn_id).await?;
                     let name = name.parse().map_err(TCError::internal)?;
                     (name, DirEntry::Dir(subdir))
@@ -599,6 +611,13 @@ impl Transact for Dir {
 
 impl fmt::Display for Dir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        #[cfg(debug_assertions)]
+        {
+            if let Ok(dir) = self.cache.try_read() {
+                return write!(f, "a transactional directory at {:?}", dir.path());
+            }
+        }
+
         f.write_str("a transactional directory")
     }
 }
@@ -617,22 +636,8 @@ async fn is_dir(fs_cache: &freqfs::DirLock<CacheBlock>) -> bool {
     true
 }
 
-async fn is_file(name: &str, fs_cache: &freqfs::DirLock<CacheBlock>) -> bool {
-    if ext_class(name).is_none() {
-        return false;
-    }
-
-    for (name, entry) in fs_cache.read().await.iter() {
-        if name.starts_with('.') {
-            continue;
-        }
-
-        if let freqfs::DirEntry::Dir(_) = entry {
-            return false;
-        }
-    }
-
-    true
+async fn is_file(name: &str) -> bool {
+    ext_class(name).is_some()
 }
 
 fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {

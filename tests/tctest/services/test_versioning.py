@@ -24,19 +24,19 @@ class LibraryTests(unittest.TestCase):
         self.hosts[0].put("/lib/test", "libhello", TestLibV0())
         self.assertEqual(self.hosts[0].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
 
-        # self.host.stop()
-        #
-        # print()
-        # print("host stopped")
-        # print()
-        #
-        # self.host.start()
-        #
-        # print()
-        # print("host started")
-        # print()
-        #
-        # self.assertEqual(self.host.get("/lib/test/libhello/0.0.1/hello"), "Hello, World!")
+        self.hosts[0].stop()
+
+        print()
+        print("host stopped")
+        print()
+
+        self.hosts[0].start()
+
+        print()
+        print("host started")
+        print()
+
+        self.assertEqual(self.hosts[0].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
 
     @classmethod
     def tearDownClass(cls) -> None:

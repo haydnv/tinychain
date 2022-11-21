@@ -220,17 +220,17 @@ where
         name: PathSegment,
     ) -> TCResult<Cluster<BlockChain<T>>> {
         let mut contents = self.contents.write(*txn.id()).await?;
-        let mut cache = self.cache.write().await;
-
-        let dir = cache
-            .create_dir(format!("{}.{}", name, <T::Version as BlockData>::ext()))
-            .map(fs::Dir::new)
-            .map_err(fs::io_err)?;
 
         let cluster = link.clone().append(name.clone());
         let self_link = txn.link(cluster.path().clone());
 
-        let item = BlockChain::create(txn, (), fs::Store::from(dir)).await?;
+        let store = {
+            let dir = fs::Dir::new(self.cache.clone());
+            let dir = tc_transact::fs::Dir::write(&dir, *txn.id()).await?;
+            dir.create_store(name.clone())
+        };
+
+        let item = BlockChain::create(txn, (), store).await?;
         let item = Cluster::with_state(self_link, cluster, item);
         contents.insert(name.clone(), DirEntry::Item(item.clone()));
 
@@ -301,13 +301,34 @@ impl Persist<fs::Dir> for Dir<Library> {
         })
     }
 
-    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
+    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
         let txn_id = *txn.id();
         let dir = fs::Dir::try_from(store)?;
-        let _lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
-        let contents = HashMap::new();
+        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let mut contents = HashMap::new();
 
-        // TODO: fill in `contents` by iterating over the entries in `lock`
+        for (name, entry) in lock.iter() {
+            let link = link.clone().append(name.clone());
+
+            match entry {
+                fs::DirEntry::Dir(dir) => {
+                    let dir = Cluster::load(txn, link, dir.into()).await?;
+                    contents.insert(name.clone(), DirEntry::Dir(dir));
+                }
+                fs::DirEntry::File(file) => match file {
+                    fs::FileEntry::Library(file) => {
+                        let lib = Cluster::load(txn, link, file.into()).await?;
+                        contents.insert(name.clone(), DirEntry::Item(lib));
+                    }
+                    file => {
+                        return Err(TCError::internal(format!(
+                            "{} is in the library directory but {} is not a library",
+                            name, file
+                        )))
+                    }
+                },
+            }
+        }
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),

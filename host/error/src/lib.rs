@@ -154,7 +154,14 @@ impl TCError {
 
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
-        Self::new(ErrorType::BadRequest, format!("{}: {}", message, cause))
+        let info = format!("{}: {}", message, cause);
+
+        #[cfg(debug_assertions)]
+        if info.starts_with("expected") {
+            panic!("{}", info)
+        }
+
+        Self::new(ErrorType::BadRequest, info)
     }
 
     /// Error indicating that the request depends on a resource which is exclusively locked
