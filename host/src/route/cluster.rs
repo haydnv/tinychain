@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
-use log::debug;
+use log::{debug, info, warn};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -134,6 +134,8 @@ where
     Dir<T>: DirCreate,
     Dir<T>: DirCreateItem<T>,
     DirEntry<T>: Route + Clone + fmt::Display,
+    BlockChain<T>: Replica,
+    BlockChain<Dir<T>>: Replica,
     Cluster<BlockChain<T>>: Public,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -162,6 +164,13 @@ where
                     TCError::bad_request("invalid path segment for directory entry", v)
                 })?;
 
+                if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
+                    return Err(TCError::bad_request(
+                        "there is already a directory entry at",
+                        name,
+                    ))?;
+                }
+
                 let class = InstanceClass::try_cast_from(value, |v| {
                     TCError::bad_request("invalid Class", v)
                 })?;
@@ -171,9 +180,12 @@ where
                     link.ok_or_else(|| TCError::bad_request("missing cluster link for", &lib))?;
 
                 if lib.is_empty() {
-                    self.dir.create_dir(txn, link, name).map_ok(|_dir| ()).await
+                    info!("create new cluster directory {}", link);
+                    let _cluster = self.dir.create_dir(txn, name, link).await?;
+                    Ok(())
                 } else {
-                    let cluster = self.dir.create_item(txn, link, name).await?;
+                    info!("create new cluster directory item {}", link);
+                    let cluster = self.dir.create_item(txn, name, link).await?;
 
                     cluster
                         .put(txn, &[], VersionNumber::default().into(), lib.into())
@@ -335,6 +347,7 @@ impl Route for Cluster<BlockChain<Library>> {
     }
 }
 
+// TODO: consolidate impl Route for Cluster into just one impl
 impl Route for Cluster<BlockChain<Dir<Library>>> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match path {

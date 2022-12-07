@@ -40,6 +40,30 @@ pub struct SyncChain<T> {
     store: super::data::Store,
 }
 
+impl<T> SyncChain<T> {
+    async fn write_ahead(&self, txn_id: &TxnId) {
+        self.store.commit(txn_id).await;
+
+        {
+            let (mut pending, mut committed): (
+                FileWriteGuard<_, ChainBlock>,
+                FileWriteGuard<_, ChainBlock>,
+            ) = try_join!(
+                self.pending.write().map_err(fs::io_err),
+                self.committed.write().map_err(fs::io_err)
+            )
+            .expect("SyncChain blocks");
+
+            if let Some(mutations) = pending.mutations.remove(txn_id) {
+                committed.mutations.insert(*txn_id, mutations);
+            }
+        }
+
+        try_join!(self.pending.sync(false), self.committed.sync(false))
+            .expect("sync SyncChain blocks");
+    }
+}
+
 #[async_trait]
 impl<T> ChainInstance<T> for SyncChain<T>
 where
@@ -70,28 +94,6 @@ where
 
     fn subject(&self) -> &T {
         &self.subject
-    }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        self.store.commit(txn_id).await;
-
-        {
-            let (mut pending, mut committed): (
-                FileWriteGuard<_, ChainBlock>,
-                FileWriteGuard<_, ChainBlock>,
-            ) = try_join!(
-                self.pending.write().map_err(fs::io_err),
-                self.committed.write().map_err(fs::io_err)
-            )
-            .expect("SyncChain blocks");
-
-            if let Some(mutations) = pending.mutations.remove(txn_id) {
-                committed.mutations.insert(*txn_id, mutations);
-            }
-        }
-
-        try_join!(self.pending.sync(false), self.committed.sync(false))
-            .expect("sync SyncChain blocks");
     }
 }
 
@@ -129,14 +131,16 @@ where
 }
 
 #[async_trait]
-impl<T> Transact for SyncChain<T>
+impl<T: Transact + Send + Sync> Transact for SyncChain<T>
 where
-    T: Transact + Send + Sync,
+    Self: ChainInstance<T>,
 {
     type Commit = T::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("SyncChain::commit");
+
+        self.write_ahead(txn_id).await;
 
         let guard = self.subject.commit(txn_id).await;
 

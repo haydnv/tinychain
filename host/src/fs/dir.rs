@@ -432,6 +432,10 @@ impl Dir {
         let lock = cache.try_read().expect("filesystem cache dir lock");
         assert!(file_ext(lock.path()).is_none());
 
+        #[cfg(debug_assertions)]
+        let lock_name = format!("contents of {:?}", lock.path());
+
+        #[cfg(not(debug_assertions))]
         let lock_name = "contents of a transactional filesystem directory";
 
         Self {

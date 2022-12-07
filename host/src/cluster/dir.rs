@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -29,8 +29,8 @@ pub trait DirCreate: Sized {
     async fn create_dir(
         &self,
         txn: &Txn,
-        link: Link,
         name: PathSegment,
+        link: Link,
     ) -> TCResult<Cluster<BlockChain<Self>>>;
 }
 
@@ -39,8 +39,8 @@ pub trait DirCreateItem<T: DirItem> {
     async fn create_item(
         &self,
         txn: &Txn,
-        link: Link,
         name: PathSegment,
+        link: Link,
     ) -> TCResult<Cluster<BlockChain<T>>>;
 }
 
@@ -64,11 +64,23 @@ pub enum DirEntry<T> {
     Item(Cluster<BlockChain<T>>),
 }
 
-impl<T> fmt::Display for DirEntry<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+#[async_trait]
+impl<T: Send + Sync> Replica for DirEntry<T>
+where
+    BlockChain<T>: Replica,
+    BlockChain<Dir<T>>: Replica,
+{
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         match self {
-            Self::Dir(dir) => dir.fmt(f),
-            Self::Item(item) => item.fmt(f),
+            Self::Dir(dir) => dir.state().state(txn_id).await,
+            Self::Item(item) => item.state().state(txn_id).await,
+        }
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        match self {
+            Self::Dir(dir) => dir.state().replicate(txn, source).await,
+            Self::Item(item) => item.state().replicate(txn, source).await,
         }
     }
 }
@@ -103,6 +115,15 @@ where
     }
 }
 
+impl<T> fmt::Display for DirEntry<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dir(dir) => dir.fmt(f),
+            Self::Item(item) => item.fmt(f),
+        }
+    }
+}
+
 enum Delta {
     Create,
 }
@@ -130,26 +151,27 @@ impl<T> Dir<T> {
     }
 }
 
-impl<T> Dir<T>
+impl<T: Clone> Dir<T>
 where
-    T: Clone,
     BlockChain<Dir<T>>: ChainInstance<Dir<T>>,
 {
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
-        assert!(!path.is_empty());
+    ) -> TCResult<Option<(&'a [PathSegment], DirEntry<T>)>> {
+        if path.is_empty() {
+            return Ok(None);
+        }
 
         // IMPORTANT! Only use synchronous lock acquisition!
         // async lock acquisition here could cause deadlocks
         // and make services in this `Dir` impossible to update
         let contents = self.contents.try_read(txn_id)?;
         match contents.get(&path[0]) {
-            Some(DirEntry::Item(item)) => Ok((&path[1..], DirEntry::Item(item))),
-            Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]),
-            None => Err(TCError::not_found(&path[0])),
+            Some(DirEntry::Item(item)) => Ok(Some((&path[1..], DirEntry::Item(item)))),
+            Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]).map(Some),
+            None => Ok(None),
         }
     }
 }
@@ -167,9 +189,8 @@ where
 }
 
 #[async_trait]
-impl<T> DirCreate for Dir<T>
+impl<T: Send + Sync> DirCreate for Dir<T>
 where
-    T: Send + Sync,
     DirEntry<T>: Clone,
     BlockChain<Self>: Persist<fs::Dir, Txn = Txn, Schema = Link>,
     Cluster<BlockChain<Self>>: Clone,
@@ -178,8 +199,8 @@ where
     async fn create_dir(
         &self,
         txn: &Txn,
-        link: Link,
         name: PathSegment,
+        link: Link,
     ) -> TCResult<Cluster<BlockChain<Self>>> {
         if link.path().last() != Some(&name) {
             return Err(TCError::unsupported(format!(
@@ -208,16 +229,15 @@ where
 }
 
 #[async_trait]
-impl<T> DirCreateItem<T> for Dir<T>
+impl<T: DirItem + Route + fmt::Display> DirCreateItem<T> for Dir<T>
 where
-    T: DirItem + Route + fmt::Display,
     DirEntry<T>: Clone,
 {
     async fn create_item(
         &self,
         txn: &Txn,
-        link: Link,
         name: PathSegment,
+        link: Link,
     ) -> TCResult<Cluster<BlockChain<T>>> {
         let mut contents = self.contents.write(*txn.id()).await?;
 
@@ -241,23 +261,31 @@ where
 }
 
 #[async_trait]
-impl<T> Replica for Dir<T>
+impl<T: Clone + Send + Sync> Replica for Dir<T>
 where
-    T: Replica + Transact + Clone + Send + Sync,
+    DirEntry<T>: Replica,
 {
     async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("cluster::Dir::state"))
+        Err(TCError::not_implemented(
+            "replication state of a cluster directory",
+        ))
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("cluster::Dir::replicate"))
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let contents = self.contents.read(*txn.id()).await?;
+        let mut futures = Vec::with_capacity(contents.len());
+        for (name, entry) in contents.iter() {
+            let source = source.clone().append(name.clone());
+            futures.push(async move { entry.replicate(txn, source).await })
+        }
+
+        try_join_all(futures).map_ok(|_| ()).await
     }
 }
 
 #[async_trait]
-impl<T> Transact for Dir<T>
+impl<T: Transact + Clone + Send + Sync> Transact for Dir<T>
 where
-    T: Transact + Clone + Send + Sync,
     DirEntry<T>: Clone,
 {
     type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry<T>>;
@@ -272,7 +300,7 @@ where
         } {
             let commits = deltas
                 .into_iter()
-                .map(|(name, _delta)| guard.get(name).expect("dir entry"))
+                .filter_map(|(name, _delta)| guard.get(name))
                 .map(|entry| async move { entry.commit(txn_id).await });
 
             join_all(commits).await;

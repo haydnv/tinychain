@@ -10,23 +10,25 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
+use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::{IntoView, Transact};
-use tc_value::{Link, Value};
-use tcgeneric::{label, Label};
+use tc_value::{Link, Value, Version as VersionNumber};
+use tcgeneric::{label, Label, Map};
 
 use crate::cluster::Replica;
 use crate::collection::CollectionBase;
 use crate::fs;
 use crate::route::{Public, Route};
-use crate::state::State;
+use crate::scalar::Scalar;
+use crate::state::{State, ToStateAsync};
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::History;
-use super::{Chain, ChainInstance, CHAIN};
+use super::{ChainInstance, CHAIN};
 
 const HISTORY: Label = label(".history");
 
@@ -59,31 +61,43 @@ where
     fn subject(&self) -> &T {
         &self.subject
     }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        self.history.write_ahead(txn_id).await
-    }
 }
 
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Library> {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("BlockChain::<Library>::state"))
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        self.subject.to_state(txn_id).await
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("BlockChain::<Library>::replicate"))
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let state = txn.get(source.append(CHAIN.into()), Value::None).await?;
+        let library: Map<Map<Scalar>> =
+            state.try_cast_into(|s| TCError::bad_request("invalid library version history", s))?;
+
+        let latest_version = self.subject.latest(*txn.id()).await?;
+        for (number, version) in library {
+            let number: VersionNumber = number.as_str().parse()?;
+            if let Some(latest) = latest_version {
+                if number > latest {
+                    self.put(txn, &[], number.into(), version.into()).await?;
+                }
+            } else {
+                self.put(txn, &[], number.into(), version.into()).await?;
+            }
+        }
+
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Dir<crate::cluster::Library>> {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("BlockChain::state"))
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        self.subject.state(txn_id).await
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("BlockChain::::replicate"))
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        self.subject.replicate(txn, source).await
     }
 }
 
@@ -94,15 +108,13 @@ impl Replica for BlockChain<CollectionBase> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let chain = match txn.get(source.append(CHAIN.into()), Value::None).await? {
-            State::Chain(Chain::Block(chain)) => chain,
-            other => {
-                return Err(TCError::bad_request(
-                    "blockchain expected to replicate a chain of blocks, but found",
-                    other,
-                ))
-            }
-        };
+        let chain = txn.get(source.append(CHAIN.into()), Value::None).await?;
+        let chain: Self = chain.try_cast_into(|s| {
+            TCError::bad_request(
+                "blockchain expected to replicate a chain of blocks but found",
+                s,
+            )
+        })?;
 
         self.history
             .replicate(txn, &self.subject, chain.history)
@@ -153,19 +165,19 @@ where
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
-        todo!("BlockChain::dir")
+        self.subject.dir()
     }
 }
 
 #[async_trait]
-impl<T> Transact for BlockChain<T>
-where
-    T: Transact + Send + Sync,
-{
+impl<T: Transact + Send + Sync> Transact for BlockChain<T> {
     type Commit = T::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("BlockChain::commit");
+
+        self.history.write_ahead(txn_id).await;
+
         let guard = self.subject.commit(txn_id).await;
         // make sure `self.subject` is committed before moving mutations out of the write-ahead log
         self.history.commit(txn_id).await;

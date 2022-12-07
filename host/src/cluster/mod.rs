@@ -83,13 +83,15 @@ impl<T> Cluster<T> {
     // TODO: set visibility to private
     pub fn with_state(self_link: Link, cluster: Link, state: T) -> Self {
         assert!(self_link.host().is_some());
+
         let cluster = if self_link == cluster {
             cluster.path().clone().into()
         } else {
             cluster
         };
 
-        let replicas = [&self_link].iter().map(|link| Link::clone(link)).collect();
+        let mut replicas = HashSet::new();
+        replicas.insert(self_link);
 
         Self {
             inner: Arc::new(Inner {
@@ -255,7 +257,12 @@ where
         debug!("cluster at {} adding replica {}...", self_link, replica);
 
         if replica == self_link {
-            if self.link().host().is_none() || self.link() == &self_link {
+            if self.link() == &self_link {
+                if let Some(host) = self.link().host() {
+                    debug!("{} at {} cannot replicate itself", self, host);
+                    return Ok(());
+                }
+            } else if self.link().host().is_none() {
                 debug!("{} cannot replicate itself", self);
                 return Ok(());
             }
@@ -324,6 +331,8 @@ where
         F: Future<Output = TCResult<()>> + Send,
         W: Fn(Link) -> F + Send,
     {
+        // this lock needs to be held for the duration of the write
+        // to make sure that any future write to this Cluster is replicated to the new replica
         let replicas = self.inner.replicas.read(*txn.id()).await?;
         assert!(!replicas.is_empty());
         if replicas.len() == 1 {
@@ -436,11 +445,10 @@ where
         txn_id: TxnId,
         path: &'a [PathSegment],
     ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
-        if path.is_empty() {
-            return Ok((path, DirEntry::Dir(self.clone())));
+        match self.state().subject().lookup(txn_id, path)? {
+            Some((path, entry)) => Ok((path, entry)),
+            None => Ok((path, DirEntry::Dir(self.clone()))),
         }
-
-        self.state().subject().lookup(txn_id, path)
     }
 }
 
@@ -516,10 +524,6 @@ impl Legacy {
     pub fn ns(&self) -> impl Iterator<Item = &Id> {
         self.chains.keys().chain(self.classes.keys())
     }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.write_ahead(txn_id))).await;
-    }
 }
 
 #[async_trait]
@@ -551,8 +555,6 @@ impl Transact for Legacy {
     type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) {
-        self.write_ahead(txn_id).await;
-
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
     }
 

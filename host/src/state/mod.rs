@@ -17,11 +17,11 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{Chain, ChainType, ChainVisitor};
+use crate::chain::{BlockChain, Chain, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -34,17 +34,31 @@ pub use view::StateView;
 
 mod view;
 
-/// Trait defining a `State` representation of a (possibly non-`State`) value.
+/// Trait to define a [`State`] representation of a (possibly non-[`State`]) value
 pub trait ToState {
     fn to_state(&self) -> State;
 }
 
 impl<T: Clone> ToState for T
 where
+    T: Clone,
     State: From<T>,
 {
     fn to_state(&self) -> State {
         self.clone().into()
+    }
+}
+
+/// An async version of [`ToState`]
+#[async_trait]
+pub trait ToStateAsync {
+    async fn to_state(&self, txn_id: TxnId) -> TCResult<State>;
+}
+
+#[async_trait]
+impl<T: ToState + Send + Sync> ToStateAsync for T {
+    async fn to_state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Ok(self.to_state())
     }
 }
 
@@ -773,6 +787,40 @@ impl TryFrom<State> for Value {
                 .map(Value::Tuple),
 
             other => Err(TCError::bad_request("expected Value but found", other)),
+        }
+    }
+}
+
+// TODO: impl<T> TryCastFrom<State> for Chain<T> where T: TryCastFrom<State>
+impl TryCastFrom<State> for Chain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(chain) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
+// TODO: impl<T> TryCastFrom<State> for BlockChain<T> where T: TryCastFrom<State>
+impl TryCastFrom<State> for BlockChain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(Chain::Block(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Block(chain)) => Some(chain),
+            _ => None,
         }
     }
 }

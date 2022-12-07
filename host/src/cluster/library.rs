@@ -16,7 +16,7 @@ use tcgeneric::{Map, PathSegment};
 use crate::fs;
 use crate::object::Object;
 use crate::scalar::Scalar;
-use crate::state::State;
+use crate::state::{State, ToStateAsync};
 use crate::txn::Txn;
 
 use super::DirItem;
@@ -71,6 +71,18 @@ impl TryCastFrom<State> for Version {
     }
 }
 
+impl From<Version> for Scalar {
+    fn from(version: Version) -> Scalar {
+        Scalar::Map(version.lib)
+    }
+}
+
+impl From<Version> for State {
+    fn from(version: Version) -> State {
+        State::Scalar(version.into())
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Version {
     type Context = ();
@@ -115,6 +127,13 @@ pub struct Library {
 }
 
 impl Library {
+    pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
+        self.file
+            .read(txn_id)
+            .map_ok(|file| file.block_ids().last().cloned())
+            .await
+    }
+
     pub async fn get_version(
         &self,
         txn_id: TxnId,
@@ -177,6 +196,13 @@ impl Persist<fs::Dir> for Library {
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
         self.file.clone().into_inner()
+    }
+}
+
+#[async_trait]
+impl ToStateAsync for Library {
+    async fn to_state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("Library::to_state"))
     }
 }
 

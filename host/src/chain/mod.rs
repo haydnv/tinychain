@@ -45,9 +45,6 @@ pub trait ChainInstance<T> {
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &T;
-
-    /// Write the mutation ops in the current transaction to the write-ahead log.
-    async fn write_ahead(&self, txn_id: &TxnId);
 }
 
 /// The type of a [`Chain`].
@@ -149,13 +146,6 @@ where
             Self::Sync(chain) => chain.subject(),
         }
     }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        match self {
-            Self::Block(chain) => chain.write_ahead(txn_id).await,
-            Self::Sync(chain) => chain.write_ahead(txn_id).await,
-        }
-    }
 }
 
 #[async_trait]
@@ -181,9 +171,10 @@ where
 }
 
 #[async_trait]
-impl<T> Transact for Chain<T>
+impl<T: Transact + Send + Sync> Transact for Chain<T>
 where
-    T: Transact + Send + Sync,
+    BlockChain<T>: ChainInstance<T>,
+    SyncChain<T>: ChainInstance<T>,
 {
     type Commit = T::Commit;
 

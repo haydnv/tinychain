@@ -319,6 +319,7 @@ where
                 cluster,
                 TCPath::from(path)
             );
+
             return Ok(());
         }
 
