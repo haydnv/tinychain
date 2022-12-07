@@ -11,7 +11,6 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
-use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
@@ -21,7 +20,7 @@ use crate::txn::Txn;
 use super::{hypothetical, Dispatch, Hosted, Hypothetical};
 
 /// The type of the library directory
-pub type Library = Cluster<BlockChain<Dir<crate::cluster::Library>>>;
+pub type Library = Cluster<Dir<crate::cluster::Library>>;
 
 /// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);

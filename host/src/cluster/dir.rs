@@ -14,7 +14,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::PathSegment;
 
-use crate::chain::{BlockChain, ChainInstance};
+use crate::chain::BlockChain;
 use crate::fs;
 use crate::route::Route;
 use crate::state::State;
@@ -26,12 +26,8 @@ pub type File = fs::File<VersionNumber, super::library::Version>;
 
 #[async_trait]
 pub trait DirCreate: Sized {
-    async fn create_dir(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        link: Link,
-    ) -> TCResult<Cluster<BlockChain<Self>>>;
+    async fn create_dir(&self, txn: &Txn, name: PathSegment, link: Link)
+        -> TCResult<Cluster<Self>>;
 }
 
 #[async_trait]
@@ -60,15 +56,15 @@ pub trait DirItem:
 
 #[derive(Clone)]
 pub enum DirEntry<T> {
-    Dir(Cluster<BlockChain<Dir<T>>>),
+    Dir(Cluster<Dir<T>>),
     Item(Cluster<BlockChain<T>>),
 }
 
 #[async_trait]
 impl<T: Send + Sync> Replica for DirEntry<T>
 where
+    T: Clone,
     BlockChain<T>: Replica,
-    BlockChain<Dir<T>>: Replica,
 {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         match self {
@@ -89,7 +85,7 @@ pub enum DirEntryCommitGuard<T>
 where
     T: Clone + Transact + Send + Sync,
 {
-    Dir(<Cluster<BlockChain<Dir<T>>> as Transact>::Commit),
+    Dir(<Cluster<Dir<T>> as Transact>::Commit),
     Item(<Cluster<BlockChain<T>> as Transact>::Commit),
 }
 
@@ -151,10 +147,7 @@ impl<T> Dir<T> {
     }
 }
 
-impl<T: Clone> Dir<T>
-where
-    BlockChain<Dir<T>>: ChainInstance<Dir<T>>,
-{
+impl<T: Clone> Dir<T> {
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
@@ -192,16 +185,15 @@ where
 impl<T: Send + Sync> DirCreate for Dir<T>
 where
     DirEntry<T>: Clone,
-    BlockChain<Self>: Persist<fs::Dir, Txn = Txn, Schema = Link>,
-    Cluster<BlockChain<Self>>: Clone,
-    Self: Route + fmt::Display,
+    Cluster<Self>: Clone,
+    Self: Persist<fs::Dir, Txn = Txn, Schema = Link> + Route + fmt::Display,
 {
     async fn create_dir(
         &self,
         txn: &Txn,
         name: PathSegment,
         link: Link,
-    ) -> TCResult<Cluster<BlockChain<Self>>> {
+    ) -> TCResult<Cluster<Self>> {
         if link.path().last() != Some(&name) {
             return Err(TCError::unsupported(format!(
                 "cluster directory link for {} must end with {} (found {})",
@@ -217,7 +209,7 @@ where
 
         let self_link = txn.link(link.path().clone());
 
-        let dir = BlockChain::create(txn, link.clone(), fs::Store::from(dir)).await?;
+        let dir = Self::create(txn, link.clone(), fs::Store::from(dir)).await?;
         let dir = Cluster::with_state(self_link, link, dir);
 
         contents.insert(name.clone(), DirEntry::Dir(dir.clone()));

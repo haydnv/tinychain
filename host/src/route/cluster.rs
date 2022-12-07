@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
-use log::{debug, info, warn};
+use log::{debug, info};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -131,11 +131,9 @@ impl<'a, T> DirHandler<'a, T> {
 impl<'a, T> Handler<'a> for DirHandler<'a, T>
 where
     T: DirItem,
-    Dir<T>: DirCreate,
-    Dir<T>: DirCreateItem<T>,
+    Dir<T>: DirCreateItem<T> + DirCreate + Replica,
     DirEntry<T>: Route + Clone + fmt::Display,
     BlockChain<T>: Replica,
-    BlockChain<Dir<T>>: Replica,
     Cluster<BlockChain<T>>: Public,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -263,7 +261,7 @@ impl<T> Route for DirEntry<T>
 where
     T: Send + Sync,
     Cluster<BlockChain<T>>: Route + Send + Sync,
-    Cluster<BlockChain<Dir<T>>>: Route + Send + Sync,
+    Cluster<Dir<T>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
@@ -348,7 +346,7 @@ impl Route for Cluster<BlockChain<Library>> {
 }
 
 // TODO: consolidate impl Route for Cluster into just one impl
-impl Route for Cluster<BlockChain<Dir<Library>>> {
+impl Route for Cluster<Dir<Library>> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match path {
             path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),

@@ -20,7 +20,7 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
-use crate::chain::{BlockChain, Chain, ChainInstance};
+use crate::chain::{BlockChain, Chain};
 use crate::collection::CollectionBase;
 use crate::fs;
 use crate::object::InstanceClass;
@@ -385,26 +385,26 @@ where
 
 // TODO: only impl Persist for Cluster once
 #[async_trait]
-impl Persist<fs::Dir> for Cluster<BlockChain<Dir<Library>>> {
+impl Persist<fs::Dir> for Cluster<Dir<Library>> {
     type Txn = Txn;
     type Schema = Link;
 
     async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        BlockChain::create(txn, link.clone(), store)
+        Dir::create(txn, link.clone(), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 
     async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
         let self_link = txn.link(link.path().clone());
-        BlockChain::load(txn, link.clone(), store)
+        Dir::load(txn, link.clone(), store)
             .map_ok(|state| Self::with_state(self_link, link, state))
             .await
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
-        BlockChain::dir(&self.inner.state)
+        Dir::dir(&self.inner.state)
     }
 }
 
@@ -434,25 +434,23 @@ impl Persist<fs::Dir> for Cluster<BlockChain<Library>> {
     }
 }
 
-impl<T> Cluster<BlockChain<Dir<T>>>
+impl<T> Cluster<Dir<T>>
 where
     T: Clone,
-    BlockChain<Dir<T>>: ChainInstance<Dir<T>>,
-    Self: Clone,
 {
     pub fn lookup<'a>(
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
     ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
-        match self.state().subject().lookup(txn_id, path)? {
+        match self.state().lookup(txn_id, path)? {
             Some((path, entry)) => Ok((path, entry)),
             None => Ok((path, DirEntry::Dir(self.clone()))),
         }
     }
 }
 
-impl<T> Instance for Cluster<BlockChain<Dir<T>>>
+impl<T> Instance for Cluster<Dir<T>>
 where
     T: Send + Sync,
 {
