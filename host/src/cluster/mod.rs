@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, warn};
+use log::debug;
 use safecast::TryCastFrom;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -257,6 +257,7 @@ where
         debug!("cluster at {} adding replica {}...", self_link, replica);
 
         if replica == self_link {
+            // make sure there's a different source to replicate from
             if self.link() == &self_link {
                 if let Some(host) = self.link().host() {
                     debug!("{} at {} cannot replicate itself", self, host);
@@ -267,13 +268,15 @@ where
                 return Ok(());
             }
 
+            // handle the case that this is a new replica and its state needs to be sync'd
+
             debug!(
                 "{} replica at {} got add request for self: {}",
                 self, replica, self_link
             );
 
             let replicas = txn
-                .get(self.link().clone().append(REPLICAS.into()), Value::None)
+                .get(self.link().clone().append(REPLICAS), Value::None)
                 .await?;
 
             if replicas.is_some() {
@@ -283,21 +286,27 @@ where
 
                 debug!("{} has replicas: {}", self, replicas);
 
-                let mut replicas: HashSet<Link> = HashSet::from_iter(replicas);
-                replicas.remove(&self_link);
-
-                try_join_all(replicas.iter().map(|replica| {
-                    txn.put(
-                        replica.clone().append(REPLICAS.into()),
-                        Value::None,
-                        self_link.clone().into(),
-                    )
-                }))
-                .await?;
+                let replicas: HashSet<Link> = HashSet::from_iter(replicas);
+                if !replicas.contains(&self_link) {
+                    try_join_all(replicas.iter().map(|replica| {
+                        txn.put(
+                            replica.clone().append(REPLICAS),
+                            Value::None,
+                            self_link.clone().into(),
+                        )
+                    }))
+                    .await?;
+                }
 
                 (*self.inner.replicas.write(*txn.id()).await?).extend(replicas);
             } else {
-                warn!("{} has no other replicas", self);
+                // this case is most likely adding the first replica to a load balancer
+                txn.put(
+                    self.link().clone().append(REPLICAS),
+                    Value::None,
+                    self_link.into(),
+                )
+                .await?;
             }
 
             self.inner.state.replicate(txn, self.link().clone()).await?;
@@ -348,7 +357,10 @@ where
             let mut results: FuturesUnordered<_> = replicas
                 .iter()
                 .filter(|replica| *replica != &self_link)
-                .map(|link| write(link.clone()).map(move |result| (link, result)))
+                .map(|link| {
+                    debug!("replicate write to {}", link);
+                    write(link.clone()).map(move |result| (link, result))
+                })
                 .collect();
 
             while let Some((replica, result)) = results.next().await {
@@ -373,9 +385,11 @@ where
 
         if !failed.is_empty() {
             let failed = Value::from_iter(failed);
-            try_join_all(succeeded.into_iter().map(|replica| {
-                txn.delete(replica.clone().append(REPLICAS.into()), failed.clone())
-            }))
+            try_join_all(
+                succeeded
+                    .into_iter()
+                    .map(|replica| txn.delete(replica.clone().append(REPLICAS), failed.clone())),
+            )
             .await?;
         }
 

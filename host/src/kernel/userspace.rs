@@ -101,7 +101,7 @@ impl Dispatch for UserSpace {
                     .put(&txn, suffix, key.clone(), value.clone())
                     .await?;
 
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 if suffix.is_empty() {
                     // it's a synchronization message
                     return Ok(());
@@ -111,6 +111,7 @@ impl Dispatch for UserSpace {
                         self_link,
                         TCPath::from(suffix)
                     );
+
                     return Ok(());
                 }
 
@@ -180,7 +181,7 @@ impl Dispatch for UserSpace {
 
             if suffix.is_empty() && params.is_empty() {
                 // it's a commit message
-                return cluster.post(txn, &path[1..], params).await;
+                return cluster.post(txn, suffix, params).await;
             }
 
             match cluster {
@@ -219,7 +220,7 @@ impl Dispatch for UserSpace {
                     txn
                 };
 
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 if suffix.is_empty() {
                     // it's a synchronization message
                     return Ok(());
@@ -399,11 +400,11 @@ where
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 txn.put(owner.clone(), Value::None, self_link.into())
                     .await?;
             } else {
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 debug!(
                     "{} is not leading this transaction, no need to notify owner",
                     self_link
@@ -448,11 +449,11 @@ fn execute_legacy<
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 txn.put(owner.clone(), Value::None, self_link.into())
                     .await?;
             } else {
-                let self_link = txn.link(cluster.path().to_vec().into());
+                let self_link = txn.link(cluster.link().path().clone());
                 debug!(
                     "{} is not leading this transaction, no need to notify owner",
                     self_link

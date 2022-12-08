@@ -335,7 +335,7 @@ impl Link {
     }
 
     /// Append the given [`PathSegment`] to this `Link` and return it.
-    pub fn append(mut self, segment: PathSegment) -> Self {
+    pub fn append<S: Into<PathSegment>>(mut self, segment: S) -> Self {
         self.path = self.path.append(segment);
         self
     }

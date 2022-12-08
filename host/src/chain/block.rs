@@ -70,7 +70,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let state = txn.get(source.append(CHAIN.into()), Value::None).await?;
+        let state = txn.get(source.append(CHAIN), Value::None).await?;
         let library: Map<Map<Scalar>> =
             state.try_cast_into(|s| TCError::bad_request("invalid library version history", s))?;
 
@@ -108,7 +108,7 @@ impl Replica for BlockChain<CollectionBase> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let chain = txn.get(source.append(CHAIN.into()), Value::None).await?;
+        let chain = txn.get(source.append(CHAIN), Value::None).await?;
         let chain: Self = chain.try_cast_into(|s| {
             TCError::bad_request(
                 "blockchain expected to replicate a chain of blocks but found",

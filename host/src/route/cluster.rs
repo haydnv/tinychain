@@ -179,11 +179,18 @@ where
 
                 if lib.is_empty() {
                     info!("create new cluster directory {}", link);
-                    let _cluster = self.dir.create_dir(txn, name, link).await?;
-                    Ok(())
+
+                    let cluster = self.dir.create_dir(txn, name, link).await?;
+                    debug!("created new cluster directory");
+
+                    cluster
+                        .add_replica(txn, txn.link(cluster.link().path().clone()))
+                        .await
                 } else {
                     info!("create new cluster directory item {}", link);
+
                     let cluster = self.dir.create_item(txn, name, link).await?;
+                    debug!("created new cluster directory item");
 
                     cluster
                         .put(txn, &[], VersionNumber::default().into(), lib.into())
