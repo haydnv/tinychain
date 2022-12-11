@@ -58,7 +58,7 @@ impl Hypothetical {
             let mut participants = self.participants.write(*txn.id()).await?;
             let mut rollbacks: FuturesUnordered<_> = participants
                 .drain()
-                .map(|link| txn.delete(link, Value::None))
+                .map(|link| txn.delete(link, Value::default()))
                 .collect();
 
             while let Some(result) = rollbacks.next().await {

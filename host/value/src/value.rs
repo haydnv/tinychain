@@ -774,6 +774,20 @@ impl<T1: CastInto<Value>, T2: CastInto<Value>> CastFrom<(T1, T2)> for Value {
     }
 }
 
+impl TryFrom<Value> for bool {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(number) => match number {
+                Number::Bool(b) => Ok(b.into()),
+                number => Ok(number == number.class().zero()),
+            },
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for Number {
     type Error = TCError;
 

@@ -167,6 +167,10 @@ impl TCError {
     /// Error indicating that the request depends on a resource which is exclusively locked
     /// by another request.
     pub fn conflict<M: fmt::Display>(message: M) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}", message);
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorType::Conflict, message)
     }
 

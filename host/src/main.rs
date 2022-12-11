@@ -15,7 +15,6 @@ use tc_error::*;
 use tc_transact::TxnId;
 use tc_value::{LinkHost, LinkProtocol};
 
-use tinychain::cluster::Replica;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
@@ -245,11 +244,6 @@ async fn replicate(gateway: Arc<Gateway>, library: Library) -> TCResult<()> {
 
     library
         .add_replica(&txn, txn.link(library.link().path().clone()))
-        .await?;
-
-    library
-        .state()
-        .replicate(&txn, library.link().clone())
         .await?;
 
     library.distribute_commit(&txn).await

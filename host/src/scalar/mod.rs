@@ -2,7 +2,7 @@
 
 use async_hash::Hash;
 use std::collections::{BTreeMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
@@ -640,6 +640,17 @@ impl From<usize> for Scalar {
 impl From<u64> for Scalar {
     fn from(n: u64) -> Self {
         Self::Value(n.into())
+    }
+}
+
+impl TryFrom<Scalar> for bool {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+        match scalar {
+            Scalar::Value(value) => value.try_into(),
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
     }
 }
 

@@ -303,7 +303,7 @@ impl State {
     }
 
     /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
-    pub fn try_into_map<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Map<State>> {
+    pub fn try_into_map<Err, OnErr: Fn(State) -> Err>(self, err: OnErr) -> Result<Map<State>, Err> {
         match self {
             State::Map(states) => Ok(states),
             State::Scalar(Scalar::Map(states)) => Ok(states
@@ -715,6 +715,17 @@ where
             ]
             .into(),
         )
+    }
+}
+
+impl TryFrom<State> for bool {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        match state {
+            State::Scalar(scalar) => scalar.try_into(),
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
     }
 }
 

@@ -59,7 +59,7 @@ impl Owner {
 
         let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dependent| {
             debug!("sending commit message to dependency at {}", dependent);
-            txn.delete(dependent.clone(), Value::None)
+            txn.delete(dependent.clone(), Value::default())
                 .map(|result| (dependent, result))
         }));
 

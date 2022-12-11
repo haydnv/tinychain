@@ -177,6 +177,28 @@ where
         Ok(())
     }
 
+    /// Claim leadership of this [`Txn`], then commit all replicas.
+    pub async fn lead_and_distribute_commit(&self, txn: Txn) -> TCResult<()> {
+        let owner = txn
+            .owner()
+            .cloned()
+            .ok_or_else(|| TCError::internal("ownerless transaction"))?;
+
+        let self_link = txn.link(self.link().path().clone());
+
+        if owner.path() == self_link.path() {
+            return self.distribute_commit(&txn).await;
+        } else if txn.leader(self.path()).is_some() {
+            return self.distribute_commit(&txn).await;
+        }
+
+        let txn = txn
+            .lead(&self.inner.actor, self.link().path().clone())
+            .await?;
+
+        self.distribute_commit(&txn).await
+    }
+
     /// Commit the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
         debug!("distribute commit of {}", self);
@@ -230,7 +252,7 @@ where
                     .filter(|replica| *replica != &self_link)
                     .map(|replica| {
                         debug!("roll back replica {} of {}", replica, self);
-                        txn.delete(replica.clone(), Value::None)
+                        txn.delete(replica.clone(), Value::default())
                     });
 
                 join_all(replicas).await;
@@ -252,6 +274,13 @@ where
 
     /// Add a replica to this `Cluster`.
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
+        if replica.path() != self.path() {
+            return Err(TCError::unsupported(format!(
+                "tried to replicate {} from {}",
+                self, replica
+            )));
+        }
+
         let self_link = txn.link(self.link().path().clone());
 
         debug!("cluster at {} adding replica {}...", self_link, replica);
@@ -276,7 +305,7 @@ where
             );
 
             let replicas = txn
-                .get(self.link().clone().append(REPLICAS), Value::None)
+                .get(self.link().clone().append(REPLICAS), Value::default())
                 .await?;
 
             if replicas.is_some() {
@@ -291,7 +320,7 @@ where
                     try_join_all(replicas.iter().map(|replica| {
                         txn.put(
                             replica.clone().append(REPLICAS),
-                            Value::None,
+                            Value::default(),
                             self_link.clone().into(),
                         )
                     }))
@@ -303,7 +332,7 @@ where
                 // this case is most likely adding the first replica to a load balancer
                 txn.put(
                     self.link().clone().append(REPLICAS),
-                    Value::None,
+                    Value::default(),
                     self_link.into(),
                 )
                 .await?;
@@ -316,6 +345,31 @@ where
         }
 
         Ok(())
+    }
+
+    /// Claim leadership of the given [`Txn`] and add a replica to this `Cluster`.
+    pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<()> {
+        let owner = txn
+            .owner()
+            .cloned()
+            .ok_or_else(|| TCError::internal("ownerless transaction"))?;
+
+        let self_link = txn.link(self.link().path().clone());
+
+        if owner.path() == self_link.path() {
+            return self.add_replica(&txn, self_link).await;
+        } else if txn.leader(self.path()).is_some() {
+            return self.add_replica(&txn, self_link).await;
+        }
+
+        let txn = txn
+            .lead(&self.inner.actor, self.link().path().clone())
+            .await?;
+
+        txn.put(owner.clone(), Value::None, self_link.clone().into())
+            .await?;
+
+        self.add_replica(&txn, self_link).await
     }
 
     /// Remove one or more replicas from this `Cluster`.
@@ -491,12 +545,16 @@ where
     type Commit = TxnLockCommitGuard<HashSet<Link>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        debug!("commit {}", self);
+
         let guard = self.inner.replicas.commit(txn_id).await;
         self.inner.state.commit(txn_id).await;
         guard
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("finalize {}", self);
+
         self.inner.state.finalize(txn_id).await;
         self.inner.owned.write().await.remove(txn_id);
         self.inner.replicas.finalize(txn_id).await

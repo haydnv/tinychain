@@ -4,15 +4,16 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
-use safecast::TryCastFrom;
+use futures::future::{join_all, FutureExt, TryFutureExt};
+use log::debug;
+use safecast::{CastInto, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Persist};
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, Version as VersionNumber};
-use tcgeneric::PathSegment;
+use tc_value::{Link, Value, Version as VersionNumber};
+use tcgeneric::{label, Label, Map, PathSegment};
 
 use crate::chain::BlockChain;
 use crate::fs;
@@ -22,7 +23,11 @@ use crate::txn::Txn;
 
 use super::{Cluster, Library, Replica};
 
+/// The type of file stored in a [`library`] directory
 pub type File = fs::File<VersionNumber, super::library::Version>;
+
+/// The name of the endpoint which lists the names of each entry in a [`Dir`]
+pub const ENTRIES: Label = label("entries");
 
 #[async_trait]
 pub trait DirCreate: Sized {
@@ -58,27 +63,6 @@ pub trait DirItem:
 pub enum DirEntry<T> {
     Dir(Cluster<Dir<T>>),
     Item(Cluster<BlockChain<T>>),
-}
-
-#[async_trait]
-impl<T: Send + Sync> Replica for DirEntry<T>
-where
-    T: Clone,
-    BlockChain<T>: Replica,
-{
-    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        match self {
-            Self::Dir(dir) => dir.state().state(txn_id).await,
-            Self::Item(item) => item.state().state(txn_id).await,
-        }
-    }
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        match self {
-            Self::Dir(dir) => dir.state().replicate(txn, source).await,
-            Self::Item(item) => item.state().replicate(txn, source).await,
-        }
-    }
 }
 
 pub enum DirEntryCommitGuard<T>
@@ -253,25 +237,58 @@ where
 }
 
 #[async_trait]
-impl<T: Clone + Send + Sync> Replica for Dir<T>
-where
-    DirEntry<T>: Replica,
-{
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented(
-            "replication state of a cluster directory",
-        ))
+impl Replica for Dir<Library> {
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        let contents = self.contents.read(txn_id).await?;
+        let mut state = Map::<State>::new();
+        for (name, entry) in contents.iter() {
+            let class = match entry {
+                DirEntry::Dir(_) => true.into(),
+                DirEntry::Item(_) => false.into(),
+            };
+
+            state.insert(name.clone(), class);
+        }
+
+        debug!("directory state to replicate is {}", state);
+
+        Ok(State::Map(state.cast_into()))
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let contents = self.contents.read(*txn.id()).await?;
-        let mut futures = Vec::with_capacity(contents.len());
-        for (name, entry) in contents.iter() {
-            let source = source.clone().append(name.clone());
-            futures.push(async move { entry.replicate(txn, source).await })
+        let entries = txn
+            .get(source.clone().append(ENTRIES), Value::default())
+            .await?;
+
+        let entries = entries.try_into_map(|s| {
+            TCError::bad_gateway(format!("{} listed invalid directory entries {}", source, s))
+        })?;
+
+        debug!("directory entries to replicate are {}", entries);
+
+        let entries = entries
+            .into_iter()
+            .map(|(name, is_dir)| bool::try_from(is_dir).map(|is_dir| (name, is_dir)))
+            .collect::<TCResult<Map<bool>>>()?;
+
+        for (name, is_dir) in entries {
+            let link = source.clone().append(name.clone());
+
+            if let Some(entry) = self.entry(*txn.id(), &name).await? {
+                match entry {
+                    DirEntry::Dir(dir) => dir.lead_and_add_replica(txn.clone()).await?,
+                    DirEntry::Item(item) => item.lead_and_add_replica(txn.clone()).await?,
+                };
+            } else if is_dir {
+                let dir = self.create_dir(txn, name, link).await?;
+                dir.lead_and_add_replica(txn.clone()).await?;
+            } else {
+                let item = self.create_item(txn, name, link).await?;
+                item.lead_and_add_replica(txn.clone()).await?;
+            }
         }
 
-        try_join_all(futures).map_ok(|_| ()).await
+        Ok(())
     }
 }
 
@@ -283,6 +300,8 @@ where
     type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry<T>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        debug!("commit {}", self);
+
         let guard = self.contents.commit(txn_id).await;
 
         if let Some(deltas) = {

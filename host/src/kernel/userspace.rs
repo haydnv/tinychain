@@ -401,7 +401,7 @@ where
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
                 let self_link = txn.link(cluster.link().path().clone());
-                txn.put(owner.clone(), Value::None, self_link.into())
+                txn.put(owner.clone(), Value::default(), self_link.into())
                     .await?;
             } else {
                 let self_link = txn.link(cluster.link().path().clone());
@@ -450,7 +450,7 @@ fn execute_legacy<
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
                 let self_link = txn.link(cluster.link().path().clone());
-                txn.put(owner.clone(), Value::None, self_link.into())
+                txn.put(owner.clone(), Value::default(), self_link.into())
                     .await?;
             } else {
                 let self_link = txn.link(cluster.link().path().clone());

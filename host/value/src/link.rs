@@ -353,6 +353,16 @@ impl Ord for Link {
     }
 }
 
+impl PartialEq<[PathSegment]> for Link {
+    fn eq(&self, other: &[PathSegment]) -> bool {
+        if self.host.is_some() {
+            return false;
+        }
+
+        &self.path == other
+    }
+}
+
 impl PartialOrd for Link {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.to_string().partial_cmp(&other.to_string())

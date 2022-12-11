@@ -9,7 +9,7 @@ use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::Tuple;
 
 use crate::chain::BlockChain;
-use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry};
+use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::library::{Library, Version};
 use crate::cluster::{Cluster, DirItem, Legacy, Replica, REPLICAS};
 use crate::object::{InstanceClass, Object};
@@ -80,7 +80,14 @@ where
                     ));
                 }
 
-                if txn.is_leader(self.cluster.path()) {
+                if !txn.has_leader(self.cluster.path()) {
+                    // in this case, the kernel did not claim leadership
+                    // since a POST request is not necessarily a write
+                    // but there's no need to notify the txn owner
+                    // because it has already sent a commit message
+                    // so just claim leadership on this host and replicate the commit
+                    self.cluster.lead_and_distribute_commit(txn.clone()).await?;
+                } else if txn.is_leader(self.cluster.path()) {
                     self.cluster.distribute_commit(txn).await?;
                 } else {
                     self.cluster.commit(txn.id()).await;
@@ -201,9 +208,37 @@ where
     }
 }
 
+struct EntriesHandler<'a, T> {
+    dir: &'a Dir<T>,
+}
+
+impl<'a, T: Clone + Send + Sync> Handler<'a> for EntriesHandler<'a, T>
+where
+    Dir<T>: Replica,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |txn, key| {
+            if key.is_none() {
+                Box::pin(self.dir.state(*txn.id()))
+            } else {
+                Box::pin(future::ready(Err(TCError::not_implemented(
+                    "cluster entry range query",
+                ))))
+            }
+        }))
+    }
+}
+
 impl Route for Dir<Library> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        Some(Box::new(DirHandler::new(self, path)))
+        if path.len() == 1 && &path[0] == &ENTRIES {
+            Some(Box::new(EntriesHandler { dir: self }))
+        } else {
+            Some(Box::new(DirHandler::new(self, path)))
+        }
     }
 }
 
@@ -315,7 +350,7 @@ where
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.add_replica(&txn, link).await
+                self.cluster.add_replica(txn, link).await
             })
         }))
     }
