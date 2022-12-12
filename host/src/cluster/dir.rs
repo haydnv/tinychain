@@ -1,10 +1,9 @@
-use std::collections::hash_map::{self, HashMap};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::future::{FutureExt, TryFutureExt};
 use log::debug;
 use safecast::{CastInto, TryCastFrom};
 
@@ -104,31 +103,10 @@ impl<T> fmt::Display for DirEntry<T> {
     }
 }
 
-enum Delta {
-    Create,
-}
-
 #[derive(Clone)]
 pub struct Dir<T> {
     cache: freqfs::DirLock<fs::CacheBlock>,
     contents: TxnMapLock<PathSegment, DirEntry<T>>,
-    deltas: Arc<Mutex<HashMap<TxnId, HashMap<PathSegment, Delta>>>>,
-}
-
-impl<T> Dir<T> {
-    async fn record_delta(&self, txn_id: TxnId, name: PathSegment, delta: Delta) {
-        let mut deltas = self.deltas.lock().expect("dir deltas");
-        match deltas.entry(txn_id) {
-            hash_map::Entry::Occupied(mut entry) => {
-                entry.get_mut().insert(name, delta);
-            }
-            hash_map::Entry::Vacant(entry) => {
-                let mut deltas = HashMap::new();
-                deltas.insert(name, delta);
-                entry.insert(deltas);
-            }
-        };
-    }
 }
 
 impl<T: Clone> Dir<T> {
@@ -198,8 +176,6 @@ where
 
         contents.insert(name.clone(), DirEntry::Dir(dir.clone()));
 
-        self.record_delta(*txn.id(), name, Delta::Create).await;
-
         Ok(dir)
     }
 }
@@ -215,9 +191,16 @@ where
         name: PathSegment,
         link: Link,
     ) -> TCResult<Cluster<BlockChain<T>>> {
+        if link.path().last() != Some(&name) {
+            return Err(TCError::unsupported(format!(
+                "cluster link for {} must end with {} (found {})",
+                name, name, link
+            )));
+        }
+
         let mut contents = self.contents.write(*txn.id()).await?;
 
-        let cluster = link.clone().append(name.clone());
+        let cluster = link;
         let self_link = txn.link(cluster.path().clone());
 
         let store = {
@@ -229,8 +212,6 @@ where
         let item = BlockChain::create(txn, (), store).await?;
         let item = Cluster::with_state(self_link, cluster, item);
         contents.insert(name.clone(), DirEntry::Item(item.clone()));
-
-        self.record_delta(*txn.id(), name, Delta::Create).await;
 
         Ok(item)
     }
@@ -302,22 +283,7 @@ where
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
-        let guard = self.contents.commit(txn_id).await;
-
-        if let Some(deltas) = {
-            let mut deltas = self.deltas.lock().expect("dir commit deltas");
-            let txn_deltas = deltas.remove(txn_id);
-            txn_deltas
-        } {
-            let commits = deltas
-                .into_iter()
-                .filter_map(|(name, _delta)| guard.get(name))
-                .map(|entry| async move { entry.commit(txn_id).await });
-
-            join_all(commits).await;
-        }
-
-        guard
+        self.contents.commit(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -336,7 +302,6 @@ impl Persist<fs::Dir> for Dir<Library> {
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
             contents: TxnMapLock::new("service directory"),
-            deltas: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -372,7 +337,6 @@ impl Persist<fs::Dir> for Dir<Library> {
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
             contents: TxnMapLock::with_contents("service directory", contents),
-            deltas: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 

@@ -55,6 +55,10 @@ impl FromStr for Version {
     type Err = TCError;
 
     fn from_str(s: &str) -> TCResult<Self> {
+        if s.find('.').is_none() {
+            return Err(TCError::bad_request("not a valid version number", s));
+        }
+
         let mut parts = s.split('.');
 
         let major = if let Some(major) = parts.next() {

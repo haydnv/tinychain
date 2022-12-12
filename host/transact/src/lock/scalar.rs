@@ -715,8 +715,10 @@ impl<T: PartialEq + Clone + Send + Sync> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("TxnLock::commit {} at {}", self.inner.name, txn_id);
 
-        let mut versions = self.inner.versions.lock().await;
-        let guard = versions.commit(*txn_id).await;
+        let guard = {
+            let mut versions = self.inner.versions.lock().await;
+            versions.commit(*txn_id).await
+        };
 
         {
             let mut lock_state = self.inner.state.lock().expect("TxnLock::commit");

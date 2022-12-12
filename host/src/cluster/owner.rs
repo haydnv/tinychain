@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use futures::future::{try_join_all, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use tokio::sync::RwLock;
 
 use tc_error::*;
@@ -29,7 +29,11 @@ impl Owner {
 
     pub async fn mutate(&self, participant: Link) {
         let mut mutated = self.mutated.write().await;
-        mutated.insert(participant);
+        if mutated.contains(&participant) {
+            log::warn!("got duplicate participant {}", participant);
+        } else {
+            mutated.insert(participant);
+        }
     }
 
     pub async fn commit(&self, txn: &Txn) -> TCResult<()> {
@@ -41,7 +45,7 @@ impl Owner {
 
         let mutated = mutated.drain();
         try_join_all(mutated.into_iter().map(|link| {
-            debug!("sending commit message to dependency at {}", link);
+            info!("sending commit message to dependency at {}", link);
             txn.post(link, Map::<State>::default().into())
         }))
         .await?;

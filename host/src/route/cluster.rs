@@ -80,6 +80,20 @@ where
                     ));
                 }
 
+                if txn.is_owner(self.cluster.path()) {
+                    return Err(TCError::internal(format!(
+                        "{} got commit message for itself",
+                        txn.link(self.cluster.link().path().clone())
+                    )));
+                }
+
+                #[cfg(debug_assertions)]
+                info!(
+                    "{} got commit message for {}",
+                    txn.link(self.cluster.link().path().clone()),
+                    txn.id()
+                );
+
                 if !txn.has_leader(self.cluster.path()) {
                     // in this case, the kernel did not claim leadership
                     // since a POST request is not necessarily a write

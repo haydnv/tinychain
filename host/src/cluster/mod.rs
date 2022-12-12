@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::debug;
+use log::{debug, info};
 use safecast::TryCastFrom;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -201,16 +201,22 @@ where
 
     /// Commit the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
-        debug!("distribute commit of {}", self);
+        let self_link = txn.link(self.inner.link.path().clone());
+
+        info!(
+            "{} will distribute commit {} of {}...",
+            self_link,
+            txn.id(),
+            self
+        );
+
+        let replicas = self.commit(txn.id()).await;
+
+        if let Some(owner) = self.inner.owned.read().await.get(txn.id()) {
+            owner.commit(txn).await?;
+        }
 
         {
-            let replicas = self.inner.replicas.read(*txn.id()).await?;
-
-            if let Some(owner) = self.inner.owned.read().await.get(txn.id()) {
-                owner.commit(txn).await?;
-            }
-
-            let self_link = txn.link(self.inner.link.path().clone());
             let mut replica_commits: FuturesUnordered<_> = replicas
                 .iter()
                 .filter(|replica| *replica != &self_link)
@@ -228,7 +234,7 @@ where
             }
         }
 
-        self.commit(txn.id()).await;
+        info!("{} distributed commit {} of {}", self_link, txn.id(), self);
 
         Ok(())
     }
@@ -365,6 +371,13 @@ where
         let txn = txn
             .lead(&self.inner.actor, self.link().path().clone())
             .await?;
+
+        info!(
+            "{} claimed leadership of txn {} with owner {}",
+            self_link,
+            txn.id(),
+            owner
+        );
 
         txn.put(owner.clone(), Value::None, self_link.clone().into())
             .await?;
