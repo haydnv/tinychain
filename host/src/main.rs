@@ -4,15 +4,15 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use clap::Parser;
 use destream::de::FromStream;
 use futures::future::{self, TryFutureExt};
 use futures::stream;
 use futures::try_join;
-use structopt::StructOpt;
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{Transact, TxnId};
 use tc_value::{LinkHost, LinkProtocol};
 
 use tinychain::gateway::Gateway;
@@ -50,71 +50,70 @@ fn duration(flag: &str) -> TCResult<Duration> {
         .map_err(|_| TCError::bad_request("invalid duration", flag))
 }
 
-// TODO: replace structopt with clap
-#[derive(Clone, StructOpt)]
+#[derive(Clone, Parser)]
 struct Config {
-    #[structopt(
-        long = "address",
-        about = "the IP address to bind",
-        default_value = "0.0.0.0"
-    )]
+    #[arg(long, default_value = "0.0.0", help = "the IP address to bind")]
     pub address: IpAddr,
 
-    #[structopt(
+    #[arg(
         long = "cache_size",
-        about = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
+        value_parser = data_size,
         default_value = "1G",
-        parse(try_from_str = data_size),
+        help = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
     )]
     pub cache_size: usize,
 
     // TODO: delete
-    #[structopt(
+    #[arg(
         long = "cluster",
-        about = "path(s) to cluster configuration files (this flag can be repeated)"
+        help = "(DEPRECATED) path(s) to cluster configuration files (this flag can be repeated)"
     )]
     pub clusters: Vec<PathBuf>,
 
-    #[structopt(long = "data_dir", about = "persistent data directory")]
+    #[arg(
+        long = "data_dir",
+        help = "the directory to use for persistent data storage"
+    )]
     pub data_dir: Option<PathBuf>,
 
-    #[structopt(
+    #[arg(
         long = "http_port",
-        about = "the port that the HTTP server should listen on",
-        default_value = "8702"
+        default_value = "8702",
+        help = "the port for the HTTP server to bind"
     )]
     pub http_port: u16,
 
-    #[structopt(
+    #[arg(
         long = "log_level",
-        about = "the log message level to write (options are trace, debug, warn, or error)",
-        default_value = "warn"
+        default_value = "warn",
+        value_parser = ["trace", "debug", "warn", "error"],
+        help = "the log message level to write",
     )]
     pub log_level: String,
 
-    #[structopt(long = "replicate", about = "cluster to replicate from")]
+    #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<LinkHost>,
 
-    #[structopt(
+    #[arg(
         long = "request_ttl",
-        about = "maximum allowed request duration",
+        value_parser = duration,
         default_value = "30",
-        parse(try_from_str = duration),
+        help = "maximum allowed request duration",
     )]
     pub request_ttl: Duration,
 
-    #[structopt(
+    #[arg(
         long = "stack_size",
-        about = "the size of the stack of each worker thread (in bytes)",
+        value_parser = data_size,
         default_value = "4M",
-        parse(try_from_str = data_size),
+        help = "the size of the stack of each worker thread (in bytes)",
     )]
     pub stack_size: usize,
 
-    #[structopt(
-        long = "workspace",
-        about = "the directory to use as a temporary workspace in case of a cache overflow",
-        default_value = "/tmp/tc/tmp"
+    #[arg(
+        long,
+        default_value = "/tmp/tc/tmp",
+        help = "the directory to use as a temporary workspace in case of a cache overflow"
     )]
     pub workspace: PathBuf,
 }
@@ -145,12 +144,11 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         std::fs::create_dir_all(&config.workspace)?;
     }
 
-    let cache_size = config.cache_size as usize;
-    if cache_size < MIN_CACHE_SIZE {
+    if config.cache_size < MIN_CACHE_SIZE {
         return Err(TCError::bad_request("the minimum cache size is", MIN_CACHE_SIZE).into());
     }
 
-    let cache = freqfs::Cache::new(config.cache_size as usize, Duration::from_secs(1), None);
+    let cache = freqfs::Cache::new(config.cache_size.into(), Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace).await?;
     let txn_id = TxnId::new(Gateway::time());
 
@@ -221,6 +219,8 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         tc_transact::fs::Persist::load(&txn, link, store).await?
     };
 
+    data_dir.commit(&txn_id).await;
+
     let kernel = tinychain::Kernel::with_userspace(library.clone(), clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
@@ -250,7 +250,7 @@ async fn replicate(gateway: Arc<Gateway>, library: Library) -> TCResult<()> {
 }
 
 fn main() {
-    let config = Config::from_args();
+    let config = Config::parse();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()

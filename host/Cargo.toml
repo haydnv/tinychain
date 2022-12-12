@@ -26,6 +26,7 @@ tensor = ["tc-math", "tc-tensor", "tc-transact/tensor"]
 async-hash = "~0.3.1"
 async-trait = "0.1"
 bytes = "1.0"
+clap = { version = "4.0", features = ["derive"] }
 destream = "0.5"
 destream_json = { version = "0.9", features = ["tokio-io"] }
 env_logger = "0.9"
@@ -42,7 +43,6 @@ safecast = "~0.1.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 sha2 = "0.10"
-structopt = "0.3"
 tbon = "~0.3.5"
 tc-btree = { path = "btree" }
 tc-error = { path = "error" }
