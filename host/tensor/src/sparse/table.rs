@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -38,14 +38,7 @@ pub struct SparseTable<FD, FS, D, T> {
     dense: PhantomData<FD>,
 }
 
-impl<FD, FS, D, T> SparseTable<FD, FS, D, T>
-where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
-    T: Transaction<D>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
-{
+impl<FD, FS, D, T> SparseTable<FD, FS, D, T> {
     fn table_schema(schema: &Schema) -> TableSchema {
         let ndim = schema.shape.len();
         let u64_type = NumberType::uint64();
@@ -81,11 +74,11 @@ impl<FD, FS, D, T> TensorAccess for SparseTable<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTable<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
 
@@ -170,14 +163,12 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T> SparseWrite<FD, FS, D, T> for SparseTable<FD, FS, D, T>
+impl<FD, FS, D, T> SparseWrite for SparseTable<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
-    Self: SparseAccess<FD, FS, D, T>,
+    TableIndex<FS, D, T>: TableWrite,
+    Self: TensorAccess + Send + Sync,
 {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.shape().validate_coord(&coord)?;
@@ -187,11 +178,11 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for SparseTable<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D: Dir,
+    T: Transaction<D>,
+    Self: TensorAccess,
 {
     type Txn = T;
 
@@ -231,20 +222,64 @@ where
 }
 
 #[async_trait]
+impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
+where
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
+    T: Transaction<D>,
+    D::Read: DirReadFile<FS>,
+    D::Write: DirCreateFile<FS>,
+    D::Store: From<FS>,
+{
+    type Txn = T;
+    type Schema = Schema;
+
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        schema.validate("create sparse tensor")?;
+
+        let table_schema = Self::table_schema(&schema);
+        let table = TableIndex::create(txn, table_schema, store).await?;
+        Ok(Self {
+            table,
+            schema,
+            dense: PhantomData,
+        })
+    }
+
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        schema.validate("create sparse tensor")?;
+
+        let table_schema = Self::table_schema(&schema);
+        let table = TableIndex::load(txn, table_schema, store).await?;
+        Ok(Self {
+            table,
+            schema,
+            dense: PhantomData,
+        })
+    }
+
+    fn dir(&self) -> D::Inner {
+        self.table.dir()
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T, A> CopyFrom<D, SparseTensor<FD, FS, D, T, A>> for SparseTable<FD, FS, D, T>
 where
-    D: Dir,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
     D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FS>,
+    D::Store: From<FS>,
 {
     async fn copy_from(
-        instance: SparseTensor<FD, FS, D, T, A>,
-        store: D,
         txn: &T,
+        store: D::Store,
+        instance: SparseTensor<FD, FS, D, T, A>,
     ) -> TCResult<Self> {
         debug!("SparseTable::copy_from {}", instance.accessor);
 
@@ -267,68 +302,31 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
-where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
-{
-    type Schema = Schema;
-    type Store = D;
-    type Txn = T;
-
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        schema.validate("create sparse tensor")?;
-
-        let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::create(txn, table_schema, store).await?;
-        Ok(Self {
-            table,
-            schema,
-            dense: PhantomData,
-        })
-    }
-
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        schema.validate("create sparse tensor")?;
-
-        let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::load(txn, table_schema, store).await?;
-        Ok(Self {
-            table,
-            schema,
-            dense: PhantomData,
-        })
-    }
-}
-
-#[async_trait]
 impl<FD, FS, D, T> Restore<D> for SparseTable<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
+    T: Transaction<D>,
     D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FS>,
+    D::Store: From<FS>,
 {
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
-        self.table.restore(&backup.table, txn_id).await
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        self.table.restore(txn_id, &backup.table).await
     }
 }
 
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for SparseTable<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FS>,
+    D::Store: From<FS>,
 {
     type Context = (Self, TxnId);
 
@@ -392,11 +390,11 @@ impl<FD, FS, D, T> TensorAccess for SparseTableSlice<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> SparseAccess<FD, FS, D, T> for SparseTableSlice<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Slice = SparseAccessor<FD, FS, D, T>;
 
@@ -480,7 +478,6 @@ where
     T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -509,12 +506,13 @@ struct SparseTableVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for SparseTableVisitor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FS>,
+    D::Store: From<FS>,
 {
     type Value = SparseTable<FD, FS, D, T>;
 
@@ -540,13 +538,12 @@ async fn filled_at<'a, FD, FS, D, Txn, T>(
     table: T,
 ) -> TCResult<impl Stream<Item = TCResult<Coord>> + Send + Unpin>
 where
-    D: Dir,
-    Txn: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    Txn: Transaction<D>,
     T: TableStream,
     T::Selection: TableStream,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
 {
     assert!(!axes.is_empty());
     let order: Vec<Id> = axes.into_iter().map(Id::from).collect();

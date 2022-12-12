@@ -577,6 +577,8 @@ where
                 continue;
             }
 
+            trace!("File::load found block {}", name);
+
             if name.len() < B::ext().len() + 1 || !name.ends_with(B::ext()) {
                 return Err(TCError::internal(format!(
                     "block has invalid extension: {}",
@@ -621,10 +623,6 @@ where
             blocks: TxnMapLock::with_contents(Self::lock_name(&fs_dir), blocks),
             phantom: Default::default(),
         })
-    }
-
-    pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
-        self.canon
     }
 
     async fn version(&self, txn_id: &TxnId) -> TCResult<freqfs::DirLock<CacheBlock>> {
@@ -675,6 +673,7 @@ where
     type BlockRead = BlockReadGuard<B>;
     type BlockReadExclusive = BlockReadGuardExclusive<K, B>;
     type BlockWrite = BlockWriteGuard<K, B>;
+    type Inner = freqfs::DirLock<CacheBlock>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         debug!("File::read");
@@ -725,6 +724,10 @@ where
                 }
             })
             .await
+    }
+
+    fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
+        self.canon
     }
 }
 

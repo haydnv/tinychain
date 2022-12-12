@@ -20,7 +20,7 @@ use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::{OpRef, Refer, Scalar};
 use crate::txn::{Actor, Txn, TxnId};
 
-use super::Cluster;
+use super::{Cluster, Legacy};
 
 /// Load a cluster from the filesystem, or instantiate a new one.
 pub async fn instantiate(
@@ -28,7 +28,7 @@ pub async fn instantiate(
     host: LinkHost,
     class: InstanceClass,
     data_dir: fs::Dir,
-) -> TCResult<InstanceExt<Cluster>> {
+) -> TCResult<InstanceExt<Cluster<Legacy>>> {
     let (link, proto) = class.into_inner();
     let link = link.ok_or_else(|| {
         TCError::unsupported("cluster config must specify a Link to the cluster to host")
@@ -112,10 +112,7 @@ pub async fn instantiate(
     }
 
     let txn_id = *txn.id();
-    let mut dir = {
-        let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
-        dir.write(txn_id).await?
-    };
+    let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
 
     trace!("Cluster::load got write lock on data directory");
 
@@ -126,8 +123,8 @@ pub async fn instantiate(
     for (id, (class, schema)) in chain_schema.into_iter() {
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
-        let dir = dir.get_or_create_dir(id.clone())?;
-        let chain = Chain::load_or_create(txn, (class, schema), dir).await?;
+        let store = dir.get_or_create_store(txn_id, id.clone()).await?;
+        let chain = Chain::load_or_create(txn, (class, schema), store).await?;
         trace!("loaded chain {}", id);
 
         chains.insert(id, chain);
@@ -136,12 +133,13 @@ pub async fn instantiate(
     let actor_id = Value::from(Link::default());
 
     let cluster = Cluster {
-        link: link.clone(),
-        actor: Arc::new(Actor::new(actor_id)),
-        chains,
-        classes,
-        owned: RwLock::new(HashMap::new()),
-        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
+        inner: Arc::new(super::Inner {
+            link: link.clone(),
+            actor: Arc::new(Actor::new(actor_id)),
+            owned: RwLock::new(HashMap::new()),
+            replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
+            state: Legacy { chains, classes },
+        }),
     };
 
     let class = InstanceClass::new(Some(link), cluster_proto.into());

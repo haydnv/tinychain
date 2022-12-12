@@ -274,6 +274,25 @@ impl TryFrom<Link> for LinkHost {
     }
 }
 
+impl<'de> Deserialize<'de> for LinkHost {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for LinkHost {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
 impl fmt::Display for LinkHost {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(port) = self.port() {
@@ -292,6 +311,14 @@ pub struct Link {
 }
 
 impl Link {
+    /// Create a new [`Link`] with the given [`LinkHost`] and [`TCPathBuf`].
+    pub fn new(host: LinkHost, path: TCPathBuf) -> Self {
+        Self {
+            host: Some(host),
+            path,
+        }
+    }
+
     /// Consume this `Link` and return its path.
     pub fn into_path(self) -> TCPathBuf {
         self.path
@@ -308,7 +335,7 @@ impl Link {
     }
 
     /// Append the given [`PathSegment`] to this `Link` and return it.
-    pub fn append(mut self, segment: PathSegment) -> Self {
+    pub fn append<S: Into<PathSegment>>(mut self, segment: S) -> Self {
         self.path = self.path.append(segment);
         self
     }
@@ -323,6 +350,16 @@ impl Extend<PathSegment> for Link {
 impl Ord for Link {
     fn cmp(&self, other: &Self) -> Ordering {
         self.to_string().cmp(&other.to_string())
+    }
+}
+
+impl PartialEq<[PathSegment]> for Link {
+    fn eq(&self, other: &[PathSegment]) -> bool {
+        if self.host.is_some() {
+            return false;
+        }
+
+        &self.path == other
     }
 }
 

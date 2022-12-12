@@ -38,10 +38,10 @@ where
     T: Route + Public,
 {
     match mutation {
-        Mutation::Delete(path, key) => subject.delete(txn, path, key.clone()).await,
-        Mutation::Put(path, key, value) => {
+        Mutation::Delete(key) => subject.delete(txn, &[], key.clone()).await,
+        Mutation::Put(key, value) => {
             let value = store.resolve(txn, value.clone()).await?;
-            subject.put(txn, path, key.clone(), value.clone()).await
+            subject.put(txn, &[], key.clone(), value.clone()).await
         }
     }
 }

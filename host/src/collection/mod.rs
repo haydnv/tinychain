@@ -14,7 +14,7 @@ use tc_error::*;
 use tc_table::{TableStream, TableView};
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorView};
-use tc_transact::fs::{CopyFrom, Dir, DirCreate, DirCreateFile};
+use tc_transact::fs::CopyFrom;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel};
 
@@ -91,20 +91,17 @@ impl Collection {
         name: Id,
         source: Collection,
     ) -> TCResult<Collection> {
-        let txn_id = *txn.id();
-        let mut lock = container.write(txn_id).await?;
+        let store = container.create_store(*txn.id(), name).await?;
 
         match source {
             Collection::BTree(source) => {
-                let file = lock.create_file(name)?;
-                BTreeFile::copy_from(source, file, txn)
+                BTreeFile::copy_from(txn, store, source)
                     .map_ok(BTree::from)
                     .map_ok(Collection::BTree)
                     .await
             }
             Collection::Table(source) => {
-                let dir = lock.create_dir(name)?;
-                TableIndex::copy_from(source, dir, txn)
+                TableIndex::copy_from(txn, store, source)
                     .map_ok(Table::from)
                     .map_ok(Collection::Table)
                     .await
@@ -112,15 +109,13 @@ impl Collection {
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let file = lock.create_file(name)?;
-                    DenseTensor::copy_from(dense, file, txn)
+                    DenseTensor::copy_from(txn, store, dense)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)
                         .await
                 }
                 Tensor::Sparse(sparse) => {
-                    let dir = lock.create_dir(name)?;
-                    SparseTensor::copy_from(sparse, dir, txn)
+                    SparseTensor::copy_from(txn, store, sparse)
                         .map_ok(Tensor::from)
                         .map_ok(Collection::Tensor)
                         .await

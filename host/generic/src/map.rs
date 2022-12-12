@@ -122,6 +122,14 @@ impl<T> DerefMut for Map<T> {
     }
 }
 
+impl<T> Extend<(Id, T)> for Map<T> {
+    fn extend<I: IntoIterator<Item = (Id, T)>>(&mut self, iter: I) {
+        for (key, value) in iter.into_iter() {
+            self.insert(key, value);
+        }
+    }
+}
+
 impl<T> IntoIterator for Map<T> {
     type Item = (Id, T);
     type IntoIter = <BTreeMap<Id, T> as IntoIterator>::IntoIter;

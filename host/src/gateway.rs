@@ -16,7 +16,7 @@ use tc_value::{Link, LinkHost, LinkProtocol, Value};
 use tcgeneric::{NetworkTime, TCBoxTryFuture, TCPathBuf};
 
 use crate::http;
-use crate::kernel::Kernel;
+use crate::kernel::{Dispatch, Kernel};
 use crate::state::State;
 use crate::txn::*;
 
@@ -222,6 +222,7 @@ impl Gateway {
         })
     }
 
+    // TODO: delete
     async fn replicate(self: Arc<Self>) -> Result<(), Error> {
         let result = async move {
             for cluster in self.kernel.hosted() {

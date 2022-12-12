@@ -71,7 +71,7 @@ impl TCPathBuf {
     }
 
     /// Appends `suffix` to this `TCPathBuf`.
-    pub fn append<T: Into<PathSegment>>(mut self, suffix: T) -> Self {
+    pub fn append<S: Into<PathSegment>>(mut self, suffix: S) -> Self {
         self.segments.push(suffix.into());
         self
     }

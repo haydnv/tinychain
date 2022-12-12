@@ -154,12 +154,23 @@ impl TCError {
 
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
-        Self::new(ErrorType::BadRequest, format!("{}: {}", message, cause))
+        let info = format!("{}: {}", message, cause);
+
+        #[cfg(debug_assertions)]
+        if info.starts_with("expected") {
+            panic!("{}", info)
+        }
+
+        Self::new(ErrorType::BadRequest, info)
     }
 
     /// Error indicating that the request depends on a resource which is exclusively locked
     /// by another request.
     pub fn conflict<M: fmt::Display>(message: M) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}", message);
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorType::Conflict, message)
     }
 
@@ -176,7 +187,10 @@ impl TCError {
         panic!("{}", info);
 
         #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::Internal, info)
+        {
+            log::error!("{}", info);
+            Self::new(ErrorType::Internal, info)
+        }
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
@@ -185,6 +199,10 @@ impl TCError {
         subject: S,
         path: P,
     ) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}{} does not support {}", subject, path, method);
+
+        #[cfg(not(debug_assertions))]
         Self::new(
             ErrorType::MethodNotAllowed,
             format!("{} endpoint {} does not support {}", subject, path, method),

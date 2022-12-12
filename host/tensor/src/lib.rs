@@ -1,4 +1,5 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
 use std::marker::PhantomData;
@@ -23,8 +24,6 @@ use tcgeneric::{
     label, path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryFuture,
     TCPathBuf, Tuple,
 };
-
-use stream::ReadValueAt;
 
 pub use afarray::{print_af_info, Array};
 pub use bounds::{AxisBounds, Bounds, Shape};
@@ -317,7 +316,7 @@ pub trait TensorIndex<D: Dir> {
 }
 
 /// [`Tensor`] math operations
-pub trait TensorMath<D: Dir, O> {
+pub trait TensorMath<O> {
     /// The result type of a math operation
     type Combine: TensorInstance;
 
@@ -582,11 +581,7 @@ pub enum Tensor<FD, FS, D, T> {
 
 impl<FD, FS, D, T> Tensor<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    Self: TensorAccess,
 {
     /// Get the [`Schema`] of this [`Tensor`]
     pub fn schema(&self) -> Schema {
@@ -597,12 +592,9 @@ where
     }
 }
 
-impl<
-        FD: File<Key = u64, Block = Array>,
-        FS: File<Key = NodeId, Block = Node>,
-        D: Dir,
-        T: Transaction<D>,
-    > Instance for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> Instance for Tensor<FD, FS, D, T>
+where
+    Self: Send + Sync,
 {
     type Class = TensorType;
 
@@ -616,11 +608,8 @@ impl<
 
 impl<FD, FS, D, T> TensorAccess for Tensor<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>: TensorAccess,
+    SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>: TensorAccess,
 {
     fn dtype(&self) -> NumberType {
         match self {
@@ -653,11 +642,11 @@ where
 
 impl<FD, FS, D, T> TensorInstance for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Dense = Self;
     type Sparse = Self;
@@ -679,11 +668,11 @@ where
 
 impl<FD, FS, D, T> TensorBoolean<Self> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -712,11 +701,11 @@ where
 
 impl<FD, FS, D, T> TensorBooleanConst for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -745,11 +734,11 @@ where
 
 impl<FD, FS, D, T> TensorCompare<Self> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Compare = Self;
     type Dense = Self;
@@ -799,11 +788,11 @@ where
 
 impl<FD, FS, D, T> TensorCompareConst for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Compare = Self;
 
@@ -853,13 +842,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDiagonal<D> for Tensor<FD, FS, D, T>
 where
-    D: Dir,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
-    SparseTable<FD, FS, D, T>: ReadValueAt<D, Txn = T>,
+    D::Write: DirCreateFile<FD> + DirCreateFile<FS>,
+    D::Store: From<D> + From<FS>,
 {
     type Txn = T;
     type Diagonal = Self;
@@ -875,11 +864,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIO<D> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Txn = T;
 
@@ -910,16 +899,16 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorDualIO<D, Self> for Tensor<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D: Dir,
+    T: Transaction<D>,
+    DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>: TensorDualIO<D, Self, Txn = T>,
+    SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>: TensorDualIO<D, Self, Txn = T>,
 {
     type Txn = T;
 
-    async fn write(self, txn: T, bounds: Bounds, value: Tensor<FD, FS, D, T>) -> TCResult<()> {
+    async fn write(self, txn: T, bounds: Bounds, value: Self) -> TCResult<()> {
         debug!("Tensor::write {} to {}", value, bounds);
 
         match self {
@@ -932,12 +921,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorIndex<D> for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Store: From<D> + From<FS>,
 {
     type Txn = T;
     type Index = Self;
@@ -957,14 +947,13 @@ where
     }
 }
 
-impl<FD, FS, D, T> TensorMath<D, Self> for Tensor<FD, FS, D, T>
+impl<FD, FS, D, T> TensorMath<Self> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Read: DirReadFile<FS>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -1014,11 +1003,11 @@ where
 
 impl<FD, FS, D, T> TensorMathConst for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Combine = Self;
     type DenseCombine = Self;
@@ -1068,11 +1057,11 @@ where
 
 impl<FD, FS, D, T> TensorReduce<D> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Txn = T;
     type Reduce = Self;
@@ -1136,11 +1125,11 @@ where
 
 impl<FD, FS, D, T> TensorTransform for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Broadcast = Self;
     type Cast = Self;
@@ -1237,11 +1226,11 @@ macro_rules! trig {
 
 impl<FD, FS, D, T> TensorTrig for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Unary = Self;
 
@@ -1264,11 +1253,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> TensorUnary<D> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Txn = T;
     type Unary = Self;
@@ -1325,12 +1314,12 @@ where
 
 impl<FD, FS, D, T, B> From<DenseTensor<FD, FS, D, T, B>> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     B: DenseAccess<FD, FS, D, T>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     fn from(dense: DenseTensor<FD, FS, D, T, B>) -> Self {
         Self::Dense(dense.into_inner().accessor().into())
@@ -1339,12 +1328,12 @@ where
 
 impl<FD, FS, D, T, A> From<SparseTensor<FD, FS, D, T, A>> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
     A: SparseAccess<FD, FS, D, T>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     fn from(sparse: SparseTensor<FD, FS, D, T, A>) -> Self {
         Self::Sparse(sparse.into_inner().accessor().into())
@@ -1354,13 +1343,13 @@ where
 #[async_trait]
 impl<FD, FS, D, T> de::FromStream for Tensor<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Store: From<D> + From<FD> + From<FS>,
 {
     type Context = T;
 
@@ -1390,13 +1379,13 @@ impl<FD, FS, D, T> TensorVisitor<FD, FS, D, T> {
 #[async_trait]
 impl<FD, FS, D, T> de::Visitor for TensorVisitor<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    D: Dir + TryFrom<D::Store, Error = TCError>,
     T: Transaction<D>,
     D::Read: DirReadFile<FS>,
     D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Store: From<D> + From<FD> + From<FS>,
 {
     type Value = Tensor<FD, FS, D, T>;
 
@@ -1431,11 +1420,11 @@ where
 #[async_trait]
 impl<'en, FD, FS, D, T> IntoView<'en, D> for Tensor<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Txn = T;
     type View = TensorView<'en>;
@@ -1465,11 +1454,8 @@ impl<'en> en::IntoStream<'en> for TensorView<'en> {
 
 impl<FD, FS, D, T> fmt::Debug for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
-    T: Transaction<D>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>: fmt::Display,
+    SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
@@ -1478,11 +1464,8 @@ where
 
 impl<FD, FS, D, T> fmt::Display for Tensor<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
-    T: Transaction<D>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    DenseTensor<FD, FS, D, T, DenseAccessor<FD, FS, D, T>>: fmt::Display,
+    SparseTensor<FD, FS, D, T, SparseAccessor<FD, FS, D, T>>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

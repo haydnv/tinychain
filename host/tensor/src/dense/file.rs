@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
@@ -52,7 +53,7 @@ impl<FD, FS, D, T> BlockListFile<FD, FS, D, T> {
 
 impl<FD, FS, D, T> BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
@@ -289,7 +290,10 @@ where
             .map_err(array_err)
     }
 
-    async fn overwrite<B: DenseAccess<FD, FS, D, T>>(&self, txn: T, value: B) -> TCResult<()> {
+    async fn overwrite<B: DenseAccess<FD, FS, D, T>>(&self, txn: T, value: B) -> TCResult<()>
+    where
+        D::Write: DirCreateFile<FD>,
+    {
         if value.shape() != self.shape() {
             return Err(TCError::unsupported(format!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
@@ -313,7 +317,7 @@ where
     }
 }
 
-impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS, D, T> {
+impl<FD, FS, D, T> TensorAccess for BlockListFile<FD, FS, D, T> {
     fn dtype(&self) -> NumberType {
         self.schema.dtype
     }
@@ -334,11 +338,11 @@ impl<FD: Send, FS: Send, D: Send, T: Send> TensorAccess for BlockListFile<FD, FS
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Slice = BlockListFileSlice<FD, FS, D, T>;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -413,11 +417,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseWrite<FD, FS, D, T> for BlockListFile<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     async fn write<B: DenseAccess<FD, FS, D, T>>(
         &self,
@@ -543,11 +547,10 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFile<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D: Dir,
+    T: Transaction<D>,
 {
     type Txn = T;
 
@@ -590,15 +593,57 @@ where
 }
 
 #[async_trait]
+impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
+where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
+    FS: File<Key = NodeId, Block = Node>,
+    D: Dir,
+    T: Transaction<D>,
+    D::Store: From<FD>,
+{
+    type Txn = T;
+    type Schema = Schema;
+
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        schema.validate("create dense tensor")?;
+        let file = FD::try_from(store)?;
+        Self::constant(file, *txn.id(), schema.shape, schema.dtype.zero()).await
+    }
+
+    async fn load(txn: &T, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        schema.validate("load dense tensor")?;
+
+        let file = FD::try_from(store)?;
+
+        let txn_id = *txn.id();
+        let blocks = file.read(txn_id).await?;
+
+        for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
+            if !blocks.contains(i) {
+                return Err(TCError::bad_request("tensor is missing block", i));
+            }
+        }
+
+        Ok(Self::new(file, schema))
+    }
+
+    fn dir(&self) -> FD::Inner {
+        self.file.clone().into_inner()
+    }
+}
+
+#[async_trait]
 impl<FD, FS, D, T, B> CopyFrom<D, B> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
     B: DenseAccess<FD, FS, D, T>,
+    D::Store: From<FD>,
 {
-    async fn copy_from(other: B, file: FD, txn: &T) -> TCResult<Self> {
+    async fn copy_from(txn: &T, store: D::Store, other: B) -> TCResult<Self> {
+        let file = FD::try_from(store)?;
         let txn_id = *txn.id();
         let dtype = other.dtype();
         let shape = other.shape().clone();
@@ -608,47 +653,15 @@ where
 }
 
 #[async_trait]
-impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
-where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
-    T: Transaction<D>,
-{
-    type Schema = Schema;
-    type Store = FD;
-    type Txn = T;
-
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        schema.validate("create dense tensor")?;
-        Self::constant(store, *txn.id(), schema.shape, schema.dtype.zero()).await
-    }
-
-    async fn load(txn: &T, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
-        schema.validate("load dense tensor")?;
-
-        let txn_id = *txn.id();
-        let file = store.read(txn_id).await?;
-
-        for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
-            if !file.contains(i) {
-                return Err(TCError::bad_request("tensor is missing block", i));
-            }
-        }
-
-        Ok(Self::new(store, schema))
-    }
-}
-
-#[async_trait]
 impl<FD, FS, D, T> Restore<D> for BlockListFile<FD, FS, D, T>
 where
-    FD: File<Key = u64, Block = Array>,
+    FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
     FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
+    D::Store: From<FD>,
 {
-    async fn restore(&self, backup: &Self, txn_id: TxnId) -> TCResult<()> {
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.schema.shape != backup.schema.shape {
             return Err(TCError::bad_request(
                 "cannot restore a dense Tensor from a backup with a different shape",
@@ -998,13 +1011,7 @@ where
     }
 }
 
-impl<FD, FS, D, T> TensorAccess for BlockListFileSlice<FD, FS, D, T>
-where
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D: Dir,
-    T: Transaction<D>,
-{
+impl<FD, FS, D, T> TensorAccess for BlockListFileSlice<FD, FS, D, T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1025,11 +1032,11 @@ where
 #[async_trait]
 impl<FD, FS, D, T> DenseAccess<FD, FS, D, T> for BlockListFileSlice<FD, FS, D, T>
 where
+    FD: File<Key = u64, Block = Array, Inner = D::Inner>,
+    FS: File<Key = NodeId, Block = Node>,
     D: Dir,
     T: Transaction<D>,
-    FD: File<Key = u64, Block = Array>,
-    FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D::Write: DirCreateFile<FD>,
 {
     type Slice = Self;
     type Transpose = BlockListTranspose<FD, FS, D, T, Self>;
@@ -1097,11 +1104,10 @@ where
 
 impl<FD, FS, D, T> ReadValueAt<D> for BlockListFileSlice<FD, FS, D, T>
 where
-    D: Dir,
-    T: Transaction<D>,
     FD: File<Key = u64, Block = Array>,
     FS: File<Key = NodeId, Block = Node>,
-    D::Write: DirCreateFile<FS> + DirCreateFile<FD>,
+    D: Dir,
+    T: Transaction<D>,
 {
     type Txn = T;
 

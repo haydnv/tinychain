@@ -21,6 +21,7 @@ use crate::collection::{
     Collection, DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor,
 };
 use crate::fs;
+use crate::fs::File;
 use crate::object::Object;
 use crate::route::{AttributeHandler, GetHandler, PostHandler, PutHandler, SelfHandlerOwned};
 use crate::scalar::Scalar;
@@ -323,16 +324,15 @@ impl<'a> Handler<'a> for CopyFromHandler {
 
                 let copy = match source {
                     Tensor::Dense(source) => {
-                        let file = txn.context().create_file_unique(*txn.id()).await?;
-
+                        let store = txn.context().create_store_unique(*txn.id()).await?;
                         let blocks =
-                            BlockListFile::copy_from(source.into_inner(), file, txn).await?;
+                            BlockListFile::copy_from(txn, store, source.into_inner()).await?;
 
                         DenseTensor::from(blocks.accessor()).into()
                     }
                     Tensor::Sparse(source) => {
-                        let dir = txn.context().create_dir_unique(*txn.id()).await?;
-                        let table = SparseTable::copy_from(source, dir, txn).await?;
+                        let store = txn.context().create_store_unique(*txn.id()).await?;
+                        let table = SparseTable::copy_from(txn, store, source).await?;
                         SparseTensor::from(table.accessor()).into()
                     }
                 };
@@ -1515,8 +1515,10 @@ impl<B: DenseWrite<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> 
     }
 }
 
-impl<A: SparseWrite<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>> Route
-    for SparseTensor<A>
+impl<A> Route for SparseTensor<A>
+where
+    A: SparseAccess<fs::File<u64, Array>, File<NodeId, Node>, fs::Dir, Txn> + SparseWrite,
+    Self: Clone,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
@@ -1539,7 +1541,7 @@ where
         + TensorDualIO<fs::Dir, Tensor, Txn = Txn>
         + TensorIndex<fs::Dir, Txn = Txn>
         + TensorIO<fs::Dir, Txn = Txn>
-        + TensorMath<fs::Dir, Tensor, Combine = Tensor>
+        + TensorMath<Tensor, Combine = Tensor>
         + TensorReduce<fs::Dir, Txn = Txn>
         + TensorTransform
         + TensorTrig
@@ -1887,9 +1889,8 @@ async fn constant(
 }
 
 async fn create_sparse(txn: &Txn, schema: Schema) -> TCResult<SparseTensor<SparseTable>> {
-    let txn_id = *txn.id();
-    let dir = txn.context().create_dir_unique(txn_id).await?;
-    SparseTensor::create(txn, schema, dir).await
+    let store = txn.context().create_store_unique(*txn.id()).await?;
+    SparseTensor::create(txn, schema, store).await
 }
 
 async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>

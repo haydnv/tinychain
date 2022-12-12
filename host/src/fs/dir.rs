@@ -18,10 +18,13 @@ use tc_tensor::{Array, TensorType};
 use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
+use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 
 use crate::chain::{ChainBlock, ChainType};
+use crate::cluster::library;
 use crate::collection::CollectionType;
+use crate::scalar::ScalarType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
 
@@ -32,6 +35,7 @@ use super::{io_err, CacheBlock, File};
 pub enum FileEntry {
     BTree(File<NodeId, Node>),
     Chain(File<Id, ChainBlock>),
+    Library(File<VersionNumber, library::Version>),
 
     #[cfg(feature = "tensor")]
     Tensor(File<u64, Array>),
@@ -62,6 +66,7 @@ impl FileEntry {
                 },
             },
             StateType::Chain(_) => File::load(cache, txn_id).map_ok(Self::Chain).await,
+            StateType::Scalar(_) => File::load(cache, txn_id).map_ok(Self::Library).await,
             other => Err(err(other)),
         }
     }
@@ -69,6 +74,7 @@ impl FileEntry {
 
 as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
+as_type!(FileEntry, Library, File<VersionNumber, library::Version>);
 #[cfg(feature = "tensor")]
 as_type!(FileEntry, Tensor, File<u64, Array>);
 
@@ -77,6 +83,7 @@ impl fmt::Display for FileEntry {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Library(library) => fmt::Display::fmt(library, f),
 
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
@@ -100,16 +107,44 @@ impl fmt::Display for DirEntry {
     }
 }
 
-pub struct Store {
-    name: PathSegment,
-    parent: DirWriteGuard,
+pub enum Store {
+    Create(DirWriteGuard, PathSegment),
+    Get(DirReadGuard, PathSegment),
+    GetOrCreate(DirWriteGuard, PathSegment),
+    Dir(Dir),
+    File(FileEntry),
+}
+
+impl From<Dir> for Store {
+    fn from(dir: Dir) -> Self {
+        Self::Dir(dir)
+    }
+}
+
+impl<K, V> From<File<K, V>> for Store
+where
+    FileEntry: From<File<K, V>>,
+{
+    fn from(file: File<K, V>) -> Self {
+        Self::File(FileEntry::from(file))
+    }
 }
 
 impl TryFrom<Store> for Dir {
     type Error = TCError;
 
-    fn try_from(mut store: Store) -> TCResult<Self> {
-        fs::DirCreate::get_or_create_dir(&mut store.parent, store.name)
+    fn try_from(store: Store) -> TCResult<Self> {
+        match store {
+            Store::Create(mut parent, name) => fs::DirCreate::create_dir(&mut parent, name),
+            Store::GetOrCreate(mut parent, name) => {
+                fs::DirCreate::get_or_create_dir(&mut parent, name)
+            }
+            Store::Get(parent, name) => {
+                fs::DirRead::get_dir(&parent, &name)?.ok_or_else(|| TCError::not_found(name))
+            }
+            Store::Dir(dir) => Ok(dir),
+            Store::File(file) => Err(TCError::bad_request("expected a directory but found", file)),
+        }
     }
 }
 
@@ -120,26 +155,56 @@ where
     CacheBlock: AsType<B>,
     DirWriteGuard: fs::DirCreateFile<File<K, B>>,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    FileEntry: AsType<Self>,
 {
     type Error = TCError;
 
-    fn try_from(mut store: Store) -> TCResult<Self> {
-        fs::DirCreateFile::get_or_create_file(&mut store.parent, store.name)
+    fn try_from(store: Store) -> TCResult<Self> {
+        match store {
+            Store::Dir(dir) => Err(TCError::bad_request("expected a file but found", dir)),
+            Store::File(file) => file
+                .into_type()
+                .ok_or_else(|| TCError::unsupported("file is of unexpected type")),
+            Store::Create(mut parent, name) => fs::DirCreateFile::create_file(&mut parent, name),
+            Store::GetOrCreate(mut parent, name) => {
+                fs::DirCreateFile::get_or_create_file(&mut parent, name)
+            }
+            Store::Get(parent, name) => {
+                fs::DirReadFile::get_file(&parent, &name)?.ok_or_else(|| TCError::not_found(name))
+            }
+        }
     }
 }
 
 #[async_trait]
 impl fs::Store for Store {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        match self.parent.contents.get(&self.name) {
-            Some(DirEntry::Dir(dir)) => fs::Store::is_empty(&dir, txn_id).await,
-            Some(DirEntry::File(file)) => match file {
-                FileEntry::BTree(file) => fs::Store::is_empty(&file, txn_id).await,
-                FileEntry::Chain(file) => fs::Store::is_empty(&file, txn_id).await,
-                #[cfg(feature = "tensor")]
-                FileEntry::Tensor(file) => fs::Store::is_empty(&file, txn_id).await,
+        let entry = match self {
+            Self::Create(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
             },
-            None => Ok(true),
+            Self::GetOrCreate(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
+            },
+            Self::Get(parent, name) => match parent.contents.get(name) {
+                None => return Ok(true),
+                Some(entry) => entry,
+            },
+            Self::Dir(dir) => DirEntry::Dir(dir.clone()),
+            Self::File(file) => DirEntry::File(file.clone()),
+        };
+
+        match entry {
+            DirEntry::Dir(dir) => dir.is_empty(txn_id).await,
+            DirEntry::File(file) => match file {
+                FileEntry::BTree(file) => file.is_empty(txn_id).await,
+                FileEntry::Chain(file) => file.is_empty(txn_id).await,
+                FileEntry::Library(file) => file.is_empty(txn_id).await,
+                #[cfg(feature = "tensor")]
+                FileEntry::Tensor(file) => file.is_empty(txn_id).await,
+            },
         }
     }
 }
@@ -148,6 +213,17 @@ impl fs::Store for Store {
 pub struct DirGuard<C, L> {
     cache: C,
     contents: L,
+}
+
+impl<C, L> DirGuard<C, L>
+where
+    C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
+    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+{
+    // Iterate over the contents of this directory
+    pub fn iter(&self) -> tc_transact::lock::Iter<PathSegment, DirEntry> {
+        self.contents.iter()
+    }
 }
 
 impl<C, L> fs::DirRead for DirGuard<C, L>
@@ -164,13 +240,20 @@ where
     fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>> {
         match self.contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
-            Some(other) => Err(TCError::bad_request("expected a directory, not", other)),
+            Some(_) => Err(TCError::bad_request(
+                "expected a directory but found a file at",
+                name,
+            )),
             None => Ok(None),
         }
     }
 
     fn is_empty(&self) -> bool {
         self.contents.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.contents.len()
     }
 }
 
@@ -192,7 +275,15 @@ where
                 .map(Some)
                 .ok_or_else(|| TCError::bad_request("unexpected file type", file)),
 
-            Some(other) => Err(TCError::bad_request("expected a file, not", other)),
+            Some(_) => {
+                #[cfg(debug_assertions)]
+                let name = format!("{} in {}", name, self.cache.path().to_str().expect("path"));
+
+                Err(TCError::bad_request(
+                    "expected a file but found a directory at",
+                    name,
+                ))
+            }
             None => Ok(None),
         }
     }
@@ -208,9 +299,17 @@ where
             return Err(TCError::bad_request("directory already exists", name));
         }
 
+        let fs_name = name.to_string();
+        if ext_class(&fs_name).is_some() {
+            return Err(TCError::bad_request(
+                "a directory name may not end with a file extension",
+                name,
+            ));
+        }
+
         let dir = self
             .cache
-            .create_dir(name.to_string())
+            .create_dir(fs_name)
             .map(Dir::new)
             .map_err(io_err)?;
 
@@ -285,10 +384,38 @@ pub type DirReadGuard =
 pub type DirWriteGuard =
     DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
 
+impl DirReadGuard {
+    /// Get an entry in this directory without resolving it to a [`Dir`] or [`File`].
+    pub fn get_store(self, name: PathSegment) -> Option<Store> {
+        if self.contents.contains_key(&name) {
+            Some(Store::Get(self, name))
+        } else {
+            None
+        }
+    }
+}
+
 impl DirWriteGuard {
+    /// Create a new [`Store`] in this [`Dir`].
+    pub fn create_store(self, name: PathSegment) -> Store {
+        Store::Create(self, name)
+    }
+
     /// Access a [`Store`] in this [`Dir`] which can be resolved to either a [`Dir`] or [`File`].
     pub fn get_or_create_store(self, name: PathSegment) -> Store {
-        Store { name, parent: self }
+        Store::GetOrCreate(self, name)
+    }
+
+    /// Create a new [`Store`] in this [`Dir`] with a unique name.
+    pub fn create_store_unique(self) -> Store {
+        let name: PathSegment = loop {
+            let name = Uuid::new_v4().into();
+            if !self.contents.contains_key(&name) {
+                break name;
+            }
+        };
+
+        Store::Create(self, name)
     }
 }
 
@@ -301,6 +428,13 @@ pub struct Dir {
 
 impl Dir {
     pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+        #[cfg(debug_assertions)]
+        let lock_name = {
+            let lock = cache.try_read().expect("filesystem cache dir lock");
+            format!("contents of {:?}", lock.path())
+        };
+
+        #[cfg(not(debug_assertions))]
         let lock_name = "contents of a transactional filesystem directory";
 
         Self {
@@ -321,6 +455,8 @@ impl Dir {
                 if name.starts_with('.') {
                     debug!("Dir::load skipping hidden filesystem entry {}", name);
                     continue;
+                } else {
+                    debug!("Dir::load entry {}", name);
                 }
 
                 let fs_cache = match fs_cache {
@@ -328,11 +464,12 @@ impl Dir {
                     _ => return Err(TCError::internal(format!("{} is not a directory", name))),
                 };
 
-                let (name, entry) = if is_file(name, &fs_cache).await {
+                let (name, entry) = if is_file(name).await {
                     let (name, class) = file_class(name)?;
                     let entry = FileEntry::load(fs_cache, class, txn_id).await?;
                     (name, DirEntry::File(entry))
                 } else if is_dir(&fs_cache).await {
+                    assert!(ext_class(name).is_none());
                     let subdir = Dir::load(fs_cache, txn_id).await?;
                     let name = name.parse().map_err(TCError::internal)?;
                     (name, DirEntry::Dir(subdir))
@@ -363,11 +500,25 @@ impl Dir {
         })
     }
 
-    /// Get this [`Dir`]'s underlying [`freqfs::DirLock`].
-    ///
-    /// Callers of this method must explicitly manage the transactional state of this [`Dir`].
-    pub fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
-        self.cache
+    /// Convenience method create a new [`Store`]
+    pub async fn create_store(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.create_store(name))
+            .await
+    }
+
+    /// Convenience method to assign a unique name to a [`Store`] before creating it
+    pub async fn create_store_unique(&self, txn_id: TxnId) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.create_store_unique())
+            .await
+    }
+
+    /// Convenience method to get or create a new [`Store`]
+    pub async fn get_or_create_store(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Store> {
+        fs::Dir::write(self, txn_id)
+            .map_ok(|lock| lock.get_or_create_store(name))
+            .await
     }
 }
 
@@ -375,6 +526,8 @@ impl Dir {
 impl fs::Dir for Dir {
     type Read = DirReadGuard;
     type Write = DirWriteGuard;
+    type Store = Store;
+    type Inner = freqfs::DirLock<CacheBlock>;
 
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;
@@ -386,6 +539,10 @@ impl fs::Dir for Dir {
         let contents = self.listing.write(txn_id).await?;
         let cache = self.cache.write().await;
         Ok(DirGuard { cache, contents })
+    }
+
+    fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
+        self.cache
     }
 }
 
@@ -417,6 +574,9 @@ impl Transact for Dir {
                     FileEntry::Chain(file) => {
                         file.commit(txn_id).await;
                     }
+                    FileEntry::Library(file) => {
+                        file.commit(txn_id).await;
+                    }
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => {
                         file.commit(txn_id).await;
@@ -430,24 +590,23 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let listing = self
-            .listing
-            .read_exclusive(*txn_id)
-            .await
-            .expect("dir listing");
+        {
+            let listing = self.listing.read(*txn_id).await.expect("dir listing");
 
-        join_all(listing.iter().map(|(_, entry)| async move {
-            match entry {
-                DirEntry::Dir(dir) => dir.finalize(txn_id).await,
-                DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.finalize(txn_id).await,
-                    FileEntry::Chain(file) => file.finalize(txn_id).await,
-                    #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.finalize(txn_id).await,
-                },
-            }
-        }))
-        .await;
+            join_all(listing.iter().map(|(_, entry)| async move {
+                match entry {
+                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
+                    DirEntry::File(file) => match file {
+                        FileEntry::BTree(file) => file.finalize(txn_id).await,
+                        FileEntry::Chain(file) => file.finalize(txn_id).await,
+                        FileEntry::Library(file) => file.finalize(txn_id).await,
+                        #[cfg(feature = "tensor")]
+                        FileEntry::Tensor(file) => file.finalize(txn_id).await,
+                    },
+                }
+            }))
+            .await;
+        }
 
         self.listing.finalize(txn_id).await;
     }
@@ -455,6 +614,13 @@ impl Transact for Dir {
 
 impl fmt::Display for Dir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        #[cfg(debug_assertions)]
+        {
+            if let Ok(dir) = self.cache.try_read() {
+                return write!(f, "a transactional directory at {:?}", dir.path());
+            }
+        }
+
         f.write_str("a transactional directory")
     }
 }
@@ -473,22 +639,8 @@ async fn is_dir(fs_cache: &freqfs::DirLock<CacheBlock>) -> bool {
     true
 }
 
-async fn is_file(name: &str, fs_cache: &freqfs::DirLock<CacheBlock>) -> bool {
-    if ext_class(name).is_none() {
-        return false;
-    }
-
-    for (name, entry) in fs_cache.read().await.iter() {
-        if name.starts_with('.') {
-            continue;
-        }
-
-        if let freqfs::DirEntry::Dir(_) = entry {
-            return false;
-        }
-    }
-
-    true
+async fn is_file(name: &str) -> bool {
+    ext_class(name).is_some()
 }
 
 fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
@@ -508,11 +660,12 @@ fn ext_class(name: &str) -> Option<StateType> {
         return None;
     }
 
-    let i = name.rfind('.').map(|i| i + 1).unwrap_or(0);
+    let i = name.rfind('.').map(|i| i + 1)?;
 
     match &name[i..] {
         "node" => Some(BTreeType::default().into()),
         "chain_block" => Some(ChainType::default().into()),
+        "lib" => Some(ScalarType::default().into()),
         #[cfg(feature = "tensor")]
         "array" => Some(TensorType::Dense.into()),
         _ => None,

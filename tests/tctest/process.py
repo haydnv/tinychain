@@ -76,7 +76,10 @@ def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_ti
             f"Dockerfile at {DOCKERFILE} not found--use the TC_DOCKER environment variable to set a different path")
 
     port = DEFAULT_PORT
-    if host_uri is not None and host_uri.port():
+    if flags.get("http_port"):
+        port = flags["http_port"]
+        del flags["http_port"]
+    elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
     config_dir = os.getcwd()
@@ -172,7 +175,10 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
     deps = tc.app.dependencies(app_or_library) if isinstance(app_or_library, tc.app.Library) else app_or_library
 
     port = DEFAULT_PORT
-    if host_uri is not None and host_uri.port():
+    if flags.get("http_port"):
+        port = flags["http_port"]
+        del flags["http_port"]
+    elif host_uri is not None and host_uri.port():
         port = host_uri.port()
     elif deps and tc.URI(deps[0]).port():
         port = tc.URI(deps[0]).port()
@@ -188,7 +194,7 @@ def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wai
         tc.app.write_config(dep, app_path, overwrite)
         app_configs.append(app_path)
 
-    data_dir = f"/tmp/tc/tmp/{port}/{name}"
+    data_dir = f"/tmp/tc/data/{port}/{name}"
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 

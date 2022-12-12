@@ -105,6 +105,8 @@ pub trait TxnMapRead<K, V> {
     fn is_empty(&self) -> bool;
 
     fn keys(&self) -> Keys<K>;
+
+    fn len(&self) -> usize;
 }
 
 impl<G, K, V> TxnMapRead<K, V> for G
@@ -117,6 +119,7 @@ where
         self.borrow().contains(key.borrow())
     }
 
+    // TODO: this should return a borrowed value
     fn get<Q: Borrow<K>>(&self, key: Q) -> Option<V> {
         let mut values = self.values().lock().expect("TxnMapLock state");
         let version = values.get_mut(key.borrow())?;
@@ -139,6 +142,10 @@ where
         Keys {
             iter: self.borrow().iter(),
         }
+    }
+
+    fn len(&self) -> usize {
+        self.borrow().len()
     }
 }
 
@@ -387,12 +394,18 @@ pub struct TxnMapLock<K, V> {
 }
 
 impl<K, V> TxnMapLock<K, V> {
+    /// Create a new [`TxnMapLock`].
     pub fn new<I: fmt::Display>(name: I) -> Self {
         Self {
             name: Arc::new(name.to_string()),
             keys: TxnLock::new(format!("{} keys", name), BTreeSet::new()),
             values: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Get the [`TxnId`] of the last commit to this [`TxnMapLock`].
+    pub fn last_commit(&self) -> TxnId {
+        self.keys.last_commit()
     }
 }
 

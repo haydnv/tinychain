@@ -21,7 +21,7 @@ use tc_transact::Transaction;
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{Chain, ChainType, ChainVisitor};
+use crate::chain::{BlockChain, Chain, ChainType, ChainVisitor};
 use crate::closure::*;
 use crate::collection::*;
 use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
@@ -34,13 +34,14 @@ pub use view::StateView;
 
 mod view;
 
-/// Trait defining a `State` representation of a (possibly non-`State`) value.
+/// Trait to define a [`State`] representation of a (possibly non-[`State`]) value
 pub trait ToState {
     fn to_state(&self) -> State;
 }
 
 impl<T: Clone> ToState for T
 where
+    T: Clone,
     State: From<T>,
 {
     fn to_state(&self) -> State {
@@ -289,7 +290,7 @@ impl State {
     }
 
     /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
-    pub fn try_into_map<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Map<State>> {
+    pub fn try_into_map<Err, OnErr: Fn(State) -> Err>(self, err: OnErr) -> Result<Map<State>, Err> {
         match self {
             State::Map(states) => Ok(states),
             State::Scalar(Scalar::Map(states)) => Ok(states
@@ -501,6 +502,12 @@ impl From<Collection> for State {
     }
 }
 
+impl From<CollectionBase> for State {
+    fn from(collection: CollectionBase) -> Self {
+        Self::Collection(collection.into())
+    }
+}
+
 impl From<Link> for State {
     fn from(link: Link) -> Self {
         Self::Scalar(Scalar::from(link))
@@ -698,6 +705,17 @@ where
     }
 }
 
+impl TryFrom<State> for bool {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        match state {
+            State::Scalar(scalar) => scalar.try_into(),
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
+    }
+}
+
 impl TryFrom<State> for Collection {
     type Error = TCError;
 
@@ -767,6 +785,40 @@ impl TryFrom<State> for Value {
                 .map(Value::Tuple),
 
             other => Err(TCError::bad_request("expected Value but found", other)),
+        }
+    }
+}
+
+// TODO: impl<T> TryCastFrom<State> for Chain<T> where T: TryCastFrom<State>
+impl TryCastFrom<State> for Chain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(chain) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
+// TODO: impl<T> TryCastFrom<State> for BlockChain<T> where T: TryCastFrom<State>
+impl TryCastFrom<State> for BlockChain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(Chain::Block(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Block(chain)) => Some(chain),
+            _ => None,
         }
     }
 }
@@ -929,6 +981,7 @@ impl TryCastFrom<State> for InstanceClass {
         match state {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(Object::Class(_)) => true,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
     }
@@ -944,6 +997,7 @@ impl TryCastFrom<State> for InstanceClass {
                 Some(InstanceClass::anonymous(None, proto))
             }
             State::Object(Object::Class(class)) => Some(class),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
     }

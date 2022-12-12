@@ -744,6 +744,12 @@ impl From<Vec<Value>> for Value {
     }
 }
 
+impl From<Version> for Value {
+    fn from(version: Version) -> Self {
+        Self::Version(version)
+    }
+}
+
 impl From<i64> for Value {
     fn from(n: i64) -> Self {
         Self::Number(n.into())
@@ -765,6 +771,20 @@ impl From<u64> for Value {
 impl<T1: CastInto<Value>, T2: CastInto<Value>> CastFrom<(T1, T2)> for Value {
     fn cast_from(value: (T1, T2)) -> Self {
         Value::Tuple(vec![value.0.cast_into(), value.1.cast_into()].into())
+    }
+}
+
+impl TryFrom<Value> for bool {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(number) => match number {
+                Number::Bool(b) => Ok(b.into()),
+                number => Ok(number == number.class().zero()),
+            },
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
     }
 }
 

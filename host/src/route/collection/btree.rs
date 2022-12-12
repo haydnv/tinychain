@@ -5,7 +5,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_btree::{BTreeInstance, BTreeType, BTreeWrite, Range};
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{label, Map, PathSegment};
@@ -45,9 +45,8 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let txn_id = *txn.id();
 
-                let file = txn.context().create_file_unique(*txn.id()).await?;
-
-                let btree = BTreeFile::create(txn, schema, file).await?;
+                let store = txn.context().create_store_unique(*txn.id()).await?;
+                let btree = BTreeFile::create(txn, schema, store).await?;
 
                 let keys = source.into_stream(txn.clone()).await?;
                 keys.map(|r| {
@@ -86,9 +85,8 @@ impl<'a> Handler<'a> for CreateHandler {
                     TCError::bad_request("invalid BTree schema", v)
                 })?;
 
-                let file = txn.context().create_file_unique(*txn.id()).await?;
-
-                BTreeFile::create(txn, schema, file)
+                let store = txn.context().create_store_unique(*txn.id()).await?;
+                BTreeFile::create(txn, schema, store)
                     .map_ok(Collection::from)
                     .map_ok(State::from)
                     .await

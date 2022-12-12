@@ -1,28 +1,27 @@
 //! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 
-use std::convert::TryFrom;
 use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use safecast::TryCastFrom;
 use sha2::digest::generic_array::GenericArray;
 use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Persist, Restore};
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
+use crate::cluster::Replica;
 use crate::fs;
+use crate::route::{Public, Route};
 use crate::state::State;
 use crate::txn::Txn;
 
-use crate::route::{Public, Route};
 pub use block::BlockChain;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
@@ -31,34 +30,21 @@ mod block;
 mod data;
 mod sync;
 
-const BLOCK_SIZE: usize = 1_000_000;
+const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const CHAIN: Label = label("chain");
-const SUBJECT: Label = label("subject");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance<T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()>;
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()>;
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &T;
-
-    /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
-
-    /// Write the mutation ops in the current transaction to the write-ahead log.
-    async fn write_ahead(&self, txn_id: &TxnId);
 }
 
 /// The type of a [`Chain`].
@@ -138,30 +124,19 @@ where
 #[async_trait]
 impl<T> ChainInstance<T> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn>
-        + Restore<fs::Dir>
-        + TryCastFrom<State>
-        + Route
-        + Public
-        + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display,
 {
-    async fn append_delete(&self, txn_id: TxnId, path: TCPathBuf, key: Value) -> TCResult<()> {
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_delete(txn_id, path, key).await,
-            Self::Sync(chain) => chain.append_delete(txn_id, path, key).await,
+            Self::Block(chain) => chain.append_delete(txn_id, key).await,
+            Self::Sync(chain) => chain.append_delete(txn_id, key).await,
         }
     }
 
-    async fn append_put(
-        &self,
-        txn: &Txn,
-        path: TCPathBuf,
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
+    async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_put(txn, path, key, value).await,
-            Self::Sync(chain) => chain.append_put(txn, path, key, value).await,
+            Self::Block(chain) => chain.append_put(txn, key, value).await,
+            Self::Sync(chain) => chain.append_put(txn, key, value).await,
         }
     }
 
@@ -171,6 +146,21 @@ where
             Self::Sync(chain) => chain.subject(),
         }
     }
+}
+
+#[async_trait]
+impl<T> Replica for Chain<T>
+where
+    T: Transact + Send + Sync,
+    BlockChain<T>: Replica,
+    SyncChain<T>: Replica,
+{
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        match self {
+            Self::Block(chain) => chain.state(txn_id).await,
+            Self::Sync(chain) => chain.state(txn_id).await,
+        }
+    }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         match self {
@@ -178,19 +168,13 @@ where
             Self::Sync(chain) => chain.replicate(txn, source).await,
         }
     }
-
-    async fn write_ahead(&self, txn_id: &TxnId) {
-        match self {
-            Self::Block(chain) => chain.write_ahead(txn_id).await,
-            Self::Sync(chain) => chain.write_ahead(txn_id).await,
-        }
-    }
 }
 
 #[async_trait]
-impl<T> Transact for Chain<T>
+impl<T: Transact + Send + Sync> Transact for Chain<T>
 where
-    T: Transact + Send + Sync,
+    BlockChain<T>: ChainInstance<T>,
+    SyncChain<T>: ChainInstance<T>,
 {
     type Commit = T::Commit;
 
@@ -213,14 +197,11 @@ where
 impl<T> Persist<fs::Dir> for Chain<T>
 where
     T: Persist<fs::Dir, Txn = Txn> + Route + Public,
-    <T as Persist<fs::Dir>>::Store: TryFrom<fs::Store>,
-    TCError: From<<<T as Persist<fs::Dir>>::Store as TryFrom<fs::Store>>::Error>,
 {
-    type Schema = (ChainType, T::Schema);
-    type Store = fs::Dir;
     type Txn = Txn;
+    type Schema = (ChainType, T::Schema);
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
             ChainType::Block => {
@@ -228,11 +209,15 @@ where
                     .map_ok(Self::Block)
                     .await
             }
-            ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+            ChainType::Sync => {
+                SyncChain::create(txn, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: Self::Store) -> TCResult<Self> {
+    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
             ChainType::Block => {
@@ -241,6 +226,13 @@ where
                     .await
             }
             ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+        }
+    }
+
+    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+        match self {
+            Self::Block(chain) => chain.dir(),
+            Self::Sync(chain) => chain.dir(),
         }
     }
 }
@@ -259,12 +251,18 @@ where
     }
 }
 
-impl<T> fmt::Display for Chain<T>
-where
-    Self: Instance,
-{
+impl<T> fmt::Display for Chain<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "instance of {}", self.class())
+        match self {
+            Self::Block(chain) => fmt::Display::fmt(chain, f),
+            Self::Sync(chain) => fmt::Display::fmt(chain, f),
+        }
+    }
+}
+
+impl<T> From<BlockChain<T>> for Chain<T> {
+    fn from(chain: BlockChain<T>) -> Self {
+        Self::Block(chain)
     }
 }
 

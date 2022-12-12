@@ -2,7 +2,7 @@
 
 use async_hash::Hash;
 use std::collections::{BTreeMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
@@ -26,6 +26,7 @@ use crate::route::Public;
 use crate::state::{State, ToState};
 use crate::txn::Txn;
 
+use crate::object::InstanceClass;
 pub use op::*;
 pub use reference::*;
 pub use tc_value as value;
@@ -642,6 +643,17 @@ impl From<u64> for Scalar {
     }
 }
 
+impl TryFrom<Scalar> for bool {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+        match scalar {
+            Scalar::Value(value) => value.try_into(),
+            other => Err(TCError::bad_request("expected a boolean but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Scalar> for Map<Scalar> {
     type Error = TCError;
 
@@ -682,6 +694,24 @@ impl TryCastFrom<Scalar> for Closure {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         OpDef::opt_cast_from(scalar).map(Self::from)
+    }
+}
+
+impl TryCastFrom<Scalar> for InstanceClass {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
     }
 }
 

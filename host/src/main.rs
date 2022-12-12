@@ -1,17 +1,20 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use destream::de::FromStream;
-use futures::{future, stream, TryFutureExt};
+use futures::future::{self, TryFutureExt};
+use futures::stream;
+use futures::try_join;
 use structopt::StructOpt;
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_transact::{Transact, TxnId};
-
+use tc_transact::TxnId;
 use tc_value::{LinkHost, LinkProtocol};
+
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
@@ -47,6 +50,7 @@ fn duration(flag: &str) -> TCResult<Duration> {
         .map_err(|_| TCError::bad_request("invalid duration", flag))
 }
 
+// TODO: replace structopt with clap
 #[derive(Clone, StructOpt)]
 struct Config {
     #[structopt(
@@ -57,46 +61,39 @@ struct Config {
     pub address: IpAddr,
 
     #[structopt(
+        long = "cache_size",
+        about = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
+        default_value = "1G",
+        parse(try_from_str = data_size),
+    )]
+    pub cache_size: usize,
+
+    // TODO: delete
+    #[structopt(
+        long = "cluster",
+        about = "path(s) to cluster configuration files (this flag can be repeated)"
+    )]
+    pub clusters: Vec<PathBuf>,
+
+    #[structopt(long = "data_dir", about = "persistent data directory")]
+    pub data_dir: Option<PathBuf>,
+
+    #[structopt(
+        long = "http_port",
+        about = "the port that the HTTP server should listen on",
+        default_value = "8702"
+    )]
+    pub http_port: u16,
+
+    #[structopt(
         long = "log_level",
         about = "the log message level to write (options are trace, debug, warn, or error)",
         default_value = "warn"
     )]
     pub log_level: String,
 
-    #[structopt(
-        long = "workspace",
-        about = "the directory to use as a temporary workspace in case of a cache overflow",
-        default_value = "/tmp/tc/tmp"
-    )]
-    pub workspace: PathBuf,
-
-    #[structopt(
-        long = "cache_size",
-        about="the maximum size of the in-memory transactional filesystem cache (in bytes)",
-        default_value = "1G",
-        parse(try_from_str = data_size),
-    )]
-    pub cache_size: usize,
-
-    #[structopt(
-        long = "stack_size",
-        about="the size of the stack of each worker thread (in bytes)",
-        default_value = "4M",
-        parse(try_from_str = data_size),
-    )]
-    pub stack_size: usize,
-
-    #[structopt(
-        long = "data_dir",
-        about = "data directory (required to host a Cluster)"
-    )]
-    pub data_dir: Option<PathBuf>,
-
-    #[structopt(
-        long = "cluster",
-        about = "path(s) to cluster configuration files (this flag can be repeated)"
-    )]
-    pub clusters: Vec<PathBuf>,
+    #[structopt(long = "replicate", about = "cluster to replicate from")]
+    pub replicate: Option<LinkHost>,
 
     #[structopt(
         long = "request_ttl",
@@ -107,11 +104,19 @@ struct Config {
     pub request_ttl: Duration,
 
     #[structopt(
-        long = "http_port",
-        about = "the port that the HTTP server should listen on",
-        default_value = "8702"
+        long = "stack_size",
+        about = "the size of the stack of each worker thread (in bytes)",
+        default_value = "4M",
+        parse(try_from_str = data_size),
     )]
-    pub http_port: u16,
+    pub stack_size: usize,
+
+    #[structopt(
+        long = "workspace",
+        about = "the directory to use as a temporary workspace in case of a cache overflow",
+        default_value = "/tmp/tc/tmp"
+    )]
+    pub workspace: PathBuf,
 }
 
 impl Config {
@@ -124,6 +129,7 @@ impl Config {
     }
 }
 
+// TODO: split into startup, run, and shutdown functions
 async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let gateway_config = config.gateway();
 
@@ -154,12 +160,10 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
 
         let data_dir = cache.load(data_dir).await?;
-        tinychain::fs::Dir::load(data_dir, txn_id)
-            .map_ok(Some)
-            .await?
+        tinychain::fs::Dir::load(data_dir, txn_id).await
     } else {
-        None
-    };
+        Err(TCError::internal("the --data-dir option is required"))
+    }?;
 
     #[cfg(feature = "tensor")]
     {
@@ -168,18 +172,15 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
+
+    let kernel = tinychain::Kernel::bootstrap();
+    let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
+    let token = gateway.new_token(&txn_id)?;
+    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
+
+    // TODO: delete
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
-        let txn_server = txn_server.clone();
-        let kernel = tinychain::Kernel::new(std::iter::empty());
-        let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
-        let token = gateway.new_token(&txn_id)?;
-        let txn = txn_server.new_txn(gateway, txn_id, token).await?;
-
-        let data_dir = data_dir.ok_or_else(|| {
-            TCError::internal("the --data_dir option is required to host a Cluster")
-        })?;
-
         let host = LinkHost::from((
             LinkProtocol::HTTP,
             config.address.clone(),
@@ -204,11 +205,23 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
             clusters.push(cluster);
         }
-
-        data_dir.commit(&txn_id).await;
     }
 
-    let kernel = tinychain::Kernel::new(clusters);
+    let library: kernel::Library = {
+        let link = if let Some(host) = config.replicate {
+            (host, kernel::LIB.into()).into()
+        } else {
+            kernel::LIB.into()
+        };
+
+        let store = data_dir
+            .get_or_create_store(txn_id, tcgeneric::label(kernel::LIB[0]).into())
+            .await?;
+
+        tc_transact::fs::Persist::load(&txn, link, store).await?
+    };
+
+    let kernel = tinychain::Kernel::with_userspace(library.clone(), clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
@@ -217,7 +230,23 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         config.cache_size
     );
 
-    gateway.listen().await
+    try_join!(
+        gateway.clone().listen().map_err(TokioError::from),
+        replicate(gateway, library).map_err(TokioError::from)
+    )?;
+
+    Ok(())
+}
+
+async fn replicate(gateway: Arc<Gateway>, library: Library) -> TCResult<()> {
+    let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
+    let txn = library.claim(&txn).await?;
+
+    library
+        .add_replica(&txn, txn.link(library.link().path().clone()))
+        .await?;
+
+    library.distribute_commit(&txn).await
 }
 
 fn main() {

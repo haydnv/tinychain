@@ -68,10 +68,10 @@ impl NativeClass for OpRefType {
 impl fmt::Display for OpRefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get => write!(f, "GET Op ref"),
-            Self::Put => write!(f, "PUT Op ref"),
-            Self::Post => write!(f, "POST Op ref"),
-            Self::Delete => write!(f, "DELETE Op ref"),
+            Self::Get => write!(f, "GET"),
+            Self::Put => write!(f, "PUT"),
+            Self::Post => write!(f, "POST"),
+            Self::Delete => write!(f, "DELETE"),
         }
     }
 }

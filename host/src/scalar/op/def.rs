@@ -387,7 +387,7 @@ impl FromStream for OpDef {
 
 impl<'en> ToStream<'en> for OpDef {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
-        let class = self.class().to_string();
+        let class = self.class().path().to_string();
         let mut map = e.encode_map(Some(1))?;
 
         match self {
