@@ -428,10 +428,11 @@ pub struct Dir {
 
 impl Dir {
     pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
-        let lock = cache.try_read().expect("filesystem cache dir lock");
-
         #[cfg(debug_assertions)]
-        let lock_name = format!("contents of {:?}", lock.path());
+        let lock_name = {
+            let lock = cache.try_read().expect("filesystem cache dir lock");
+            format!("contents of {:?}", lock.path())
+        };
 
         #[cfg(not(debug_assertions))]
         let lock_name = "contents of a transactional filesystem directory";
