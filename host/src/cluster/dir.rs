@@ -164,6 +164,14 @@ where
         }
 
         let mut contents = self.contents.write(*txn.id()).await?;
+
+        if contents.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "there is already a directory at",
+                name,
+            ));
+        }
+
         let mut cache = self.cache.write().await;
 
         let dir = cache.create_dir(name.to_string()).map_err(fs::io_err)?;
@@ -199,6 +207,10 @@ where
         }
 
         let mut contents = self.contents.write(*txn.id()).await?;
+
+        if contents.contains_key(&name) {
+            return Err(TCError::bad_request("there is already a cluster at", name));
+        }
 
         let cluster = link;
         let self_link = txn.link(cluster.path().clone());

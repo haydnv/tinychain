@@ -23,7 +23,7 @@ use crate::collection::CollectionBase;
 use crate::fs;
 use crate::route::{Public, Route};
 use crate::scalar::Scalar;
-use crate::state::{State, ToStateAsync};
+use crate::state::State;
 use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 

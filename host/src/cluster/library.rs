@@ -5,6 +5,7 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use log::{error, info};
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -16,7 +17,7 @@ use tcgeneric::{Map, PathSegment};
 use crate::fs;
 use crate::object::Object;
 use crate::scalar::Scalar;
-use crate::state::{State, ToStateAsync};
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
@@ -142,6 +143,18 @@ impl Library {
         let file = self.file.read(txn_id).await?;
         file.read_block(&number).await
     }
+
+    pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
+        let file = self.file.read(txn_id).await?;
+
+        let mut map = Map::new();
+        for number in file.block_ids() {
+            let block = file.read_block(number).await?;
+            map.insert(number.clone().into(), (&*block).clone().into());
+        }
+
+        Ok(State::Map(map))
+    }
 }
 
 #[async_trait]
@@ -155,8 +168,17 @@ impl DirItem for Library {
         version: Self::Version,
     ) -> TCResult<()> {
         let mut file = self.file.write(txn_id).await?;
-        file.create_block(number, version, 0).await?;
-        Ok(())
+        if file.contains(&number) {
+            error!("duplicate library version {}", number);
+
+            Err(TCError::unsupported(format!(
+                "{} already has a version {}",
+                self, number
+            )))
+        } else {
+            info!("create new library version {}", number);
+            file.create_block(number, version, 0).map_ok(|_| ()).await
+        }
     }
 }
 
@@ -185,7 +207,7 @@ impl Persist<fs::Dir> for Library {
             Ok(Self { file })
         } else {
             Err(TCError::unsupported(
-                "cannot create a new Library from a non-empty file",
+                "cannot create a new library from a non-empty file",
             ))
         }
     }
@@ -199,13 +221,6 @@ impl Persist<fs::Dir> for Library {
     }
 }
 
-#[async_trait]
-impl ToStateAsync for Library {
-    async fn to_state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("Library::to_state"))
-    }
-}
-
 impl From<fs::File<VersionNumber, Version>> for Library {
     fn from(file: fs::File<VersionNumber, Version>) -> Self {
         Self { file }
@@ -214,6 +229,6 @@ impl From<fs::File<VersionNumber, Version>> for Library {
 
 impl fmt::Display for Library {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a Library")
+        f.write_str("library")
     }
 }

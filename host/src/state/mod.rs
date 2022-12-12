@@ -17,7 +17,7 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::{Transaction, TxnId};
+use tc_transact::Transaction;
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -46,19 +46,6 @@ where
 {
     fn to_state(&self) -> State {
         self.clone().into()
-    }
-}
-
-/// An async version of [`ToState`]
-#[async_trait]
-pub trait ToStateAsync {
-    async fn to_state(&self, txn_id: TxnId) -> TCResult<State>;
-}
-
-#[async_trait]
-impl<T: ToState + Send + Sync> ToStateAsync for T {
-    async fn to_state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Ok(self.to_state())
     }
 }
 

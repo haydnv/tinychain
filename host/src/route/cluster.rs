@@ -60,7 +60,7 @@ where
                     value
                 };
 
-                self.cluster.state().put(txn, &[], key, value).await
+                self.cluster.state().put(&txn, &[], key, value).await
             })
         }))
     }
@@ -198,6 +198,13 @@ where
                 let link =
                     link.ok_or_else(|| TCError::bad_request("missing cluster link for", &lib))?;
 
+                if link.path().len() <= 1 {
+                    return Err(TCError::bad_request(
+                        "cannot create a new cluster at {}",
+                        link.path(),
+                    ));
+                }
+
                 if lib.is_empty() {
                     info!("create new cluster directory {}", link);
 
@@ -208,14 +215,25 @@ where
                         .add_replica(txn, txn.link(cluster.link().path().clone()))
                         .await
                 } else {
-                    info!("create new cluster directory item {}", link);
+                    let self_link = txn.link(link.path().clone());
+                    let replicate_from_this_host = self_link == link;
+                    info!(
+                        "create new cluster directory item at {} to replicate {}",
+                        self_link, link
+                    );
 
                     let cluster = self.dir.create_item(txn, name, link).await?;
                     debug!("created new cluster directory item");
 
-                    cluster
-                        .put(txn, &[], VersionNumber::default().into(), lib.into())
-                        .await
+                    if replicate_from_this_host {
+                        cluster
+                            .put(txn, &[], VersionNumber::default().into(), lib.into())
+                            .await
+                    } else {
+                        cluster
+                            .add_replica(txn, txn.link(cluster.link().path().clone()))
+                            .await
+                    }
                 }
             })
         }))

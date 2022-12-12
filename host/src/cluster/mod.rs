@@ -203,14 +203,15 @@ where
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
         let self_link = txn.link(self.inner.link.path().clone());
 
+        let replicas = self.commit(txn.id()).await;
+
         info!(
-            "{} will distribute commit {} of {}...",
+            "{} will distribute commit {} of {} to replica set {}...",
             self_link,
             txn.id(),
-            self
+            self,
+            replicas.iter().collect::<Tuple<&Link>>(),
         );
-
-        let replicas = self.commit(txn.id()).await;
 
         if let Some(owner) = self.inner.owned.read().await.get(txn.id()) {
             owner.commit(txn).await?;
@@ -582,7 +583,7 @@ impl<T> ToState for Cluster<T> {
 
 impl<T> fmt::Display for Cluster<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Cluster {}", self.link().path())
+        write!(f, "cluster at {}", self.link().path())
     }
 }
 

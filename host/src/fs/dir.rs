@@ -24,7 +24,6 @@ use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 use crate::chain::{ChainBlock, ChainType};
 use crate::cluster::library;
 use crate::collection::CollectionType;
-use crate::fs::file_ext;
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
@@ -430,7 +429,6 @@ pub struct Dir {
 impl Dir {
     pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
         let lock = cache.try_read().expect("filesystem cache dir lock");
-        assert!(file_ext(lock.path()).is_none());
 
         #[cfg(debug_assertions)]
         let lock_name = format!("contents of {:?}", lock.path());
