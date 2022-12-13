@@ -125,6 +125,17 @@ class Host(object):
 
         return self._handle(request)
 
+    def install(self, library):
+        """Install the given `library` on this host"""
+
+        path = str(library.URI.path()).split('/')
+        self.put('/'.join(path[:-1]), path[-1], library)
+
+    def update(self, library):
+        """Update the version of given `library` on this host"""
+
+        self.put(library.URI.path(), library.VERSION, library)
+
 
 class Local(Host):
     """A local TinyChain host."""

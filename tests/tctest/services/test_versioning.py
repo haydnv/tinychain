@@ -56,7 +56,7 @@ class LibraryVersionTests(unittest.TestCase):
             print(f"host {i} replicas", hosts[i].get("/lib/test/replicas"))
             print()
 
-        hosts[0].put("/lib/test", "libhello", TestLibV0())
+        hosts[0].install(TestLibV0())
         print()
 
         hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
@@ -79,7 +79,7 @@ class LibraryVersionTests(unittest.TestCase):
         for host in hosts:
             self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
 
-        hosts[1].put("/lib/test/libhello", "0.0.1", TestLibV1())
+        hosts[1].update(TestLibV1())
 
         hosts.append(start_host(NAME, [], http_port=8706, replicate=LEAD))
 
