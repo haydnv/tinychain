@@ -9,6 +9,7 @@ use destream::{de, en};
 use safecast::{CastFrom, TryCastFrom};
 use sha2::digest::Output;
 use sha2::Digest;
+use tc_transact::fs::BlockData;
 
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, NativeClass, PathLabel, TCPathBuf};
@@ -107,6 +108,12 @@ impl tcgeneric::Instance for InstanceClass {
     }
 }
 
+impl BlockData for InstanceClass {
+    fn ext() -> &'static str {
+        "class"
+    }
+}
+
 impl From<StateType> for InstanceClass {
     fn from(st: StateType) -> Self {
         Self::extend(st.path().into(), None, Map::default())
@@ -175,6 +182,24 @@ impl TryCastFrom<TCRef> for InstanceClass {
     }
 }
 
+impl TryCastFrom<Scalar> for InstanceClass {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for InstanceClass {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -217,15 +242,36 @@ impl TryCastFrom<InstanceClass> for StateType {
     }
 }
 
-impl CastFrom<InstanceClass> for Scalar {
-    fn cast_from(class: InstanceClass) -> Self {
-        Self::Map(class.proto)
+impl TryCastFrom<InstanceClass> for Scalar {
+    fn can_cast_from(class: &InstanceClass) -> bool {
+        class.extends.is_some()
+    }
+
+    fn opt_cast_from(class: InstanceClass) -> Option<Self> {
+        let extends = class.extends?;
+        if class.proto.is_empty() {
+            Some(Self::Value(extends.into()))
+        } else {
+            Some(Self::Ref(Box::new(TCRef::Op(OpRef::Post((
+                extends.into(),
+                class.proto,
+            ))))))
+        }
     }
 }
 
-impl CastFrom<InstanceClass> for Value {
-    fn cast_from(class: InstanceClass) -> Self {
-        class.extends.into()
+impl TryCastFrom<InstanceClass> for Value {
+    fn can_cast_from(class: &InstanceClass) -> bool {
+        class.proto.is_empty() && class.extends.is_some()
+    }
+
+    fn opt_cast_from(class: InstanceClass) -> Option<Self> {
+        let extends = class.extends?;
+        if class.proto.is_empty() {
+            Some(extends.into())
+        } else {
+            None
+        }
     }
 }
 
@@ -238,16 +284,30 @@ impl de::FromStream for InstanceClass {
     }
 }
 
+impl<'en> en::ToStream<'en> for InstanceClass {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        if let Some(class) = &self.extends {
+            use en::EncodeMap;
+
+            let mut map = encoder.encode_map(Some(1))?;
+            map.encode_entry(class.to_string(), &self.proto)?;
+            map.end()
+        } else {
+            self.proto.to_stream(encoder)
+        }
+    }
+}
+
 impl<'en> en::IntoStream<'en> for InstanceClass {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         if let Some(class) = self.extends {
             use en::EncodeMap;
 
             let mut map = encoder.encode_map(Some(1))?;
-            map.encode_entry(class.to_string(), self.proto.into_inner())?;
+            map.encode_entry(class.to_string(), self.proto)?;
             map.end()
         } else {
-            self.proto.into_inner().into_stream(encoder)
+            self.proto.into_stream(encoder)
         }
     }
 }

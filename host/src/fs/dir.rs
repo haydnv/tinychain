@@ -24,6 +24,7 @@ use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
 use crate::chain::{ChainBlock, ChainType};
 use crate::cluster::library;
 use crate::collection::CollectionType;
+use crate::object::InstanceClass;
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 use crate::transact::fs::BlockData;
@@ -35,6 +36,7 @@ use super::{io_err, CacheBlock, File};
 pub enum FileEntry {
     BTree(File<NodeId, Node>),
     Chain(File<Id, ChainBlock>),
+    Class(File<Id, InstanceClass>),
     Library(File<VersionNumber, library::Version>),
 
     #[cfg(feature = "tensor")]
@@ -74,6 +76,7 @@ impl FileEntry {
 
 as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
+as_type!(FileEntry, Class, File<Id, InstanceClass>);
 as_type!(FileEntry, Library, File<VersionNumber, library::Version>);
 #[cfg(feature = "tensor")]
 as_type!(FileEntry, Tensor, File<u64, Array>);
@@ -83,6 +86,7 @@ impl fmt::Display for FileEntry {
         match self {
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Class(class) => fmt::Display::fmt(class, f),
             Self::Library(library) => fmt::Display::fmt(library, f),
 
             #[cfg(feature = "tensor")]
@@ -201,6 +205,7 @@ impl fs::Store for Store {
             DirEntry::File(file) => match file {
                 FileEntry::BTree(file) => file.is_empty(txn_id).await,
                 FileEntry::Chain(file) => file.is_empty(txn_id).await,
+                FileEntry::Class(file) => file.is_empty(txn_id).await,
                 FileEntry::Library(file) => file.is_empty(txn_id).await,
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.is_empty(txn_id).await,
@@ -574,6 +579,9 @@ impl Transact for Dir {
                     FileEntry::Chain(file) => {
                         file.commit(txn_id).await;
                     }
+                    FileEntry::Class(file) => {
+                        file.commit(txn_id).await;
+                    }
                     FileEntry::Library(file) => {
                         file.commit(txn_id).await;
                     }
@@ -599,6 +607,7 @@ impl Transact for Dir {
                     DirEntry::File(file) => match file {
                         FileEntry::BTree(file) => file.finalize(txn_id).await,
                         FileEntry::Chain(file) => file.finalize(txn_id).await,
+                        FileEntry::Class(file) => file.finalize(txn_id).await,
                         FileEntry::Library(file) => file.finalize(txn_id).await,
                         #[cfg(feature = "tensor")]
                         FileEntry::Tensor(file) => file.finalize(txn_id).await,
