@@ -7,17 +7,14 @@ from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..scalar.number import Number, Bool, UInt, F32, Int
 from ..scalar.ref import after, cond, while_loop, Get
-from ..scalar.value import Value
+from ..scalar.value import Value, Version
 from ..state import Stream
 from ..uri import URI
 
 from .base import product
 
 # from "Numerical Recipes in C" p. 65
-EPS = 10**-6
-
-# TODO: update to use a Library at /lib
-LIB_URI = URI("/legacy/linalg")
+EPS = F32(10**-6)
 
 
 def diagonal(tensor):
@@ -75,7 +72,10 @@ class PLUFactorization(Map):
 
 
 class LinearAlgebra(Library):
-    __uri__ = LIB_URI
+    URI = URI("/lib/linalg")
+    VERSION = Version("0.0.0")
+
+    __uri__ = URI + VERSION
 
     # TODO: vectorize to support a `Tensor` containing a batch of matrices
     @post
@@ -222,7 +222,7 @@ class LinearAlgebra(Library):
 
     @post
     def det(self, x: Tensor) -> F32:
-        """Computes the determinant of square `matrix`.
+        """Computes the determinant of a square matrix `x`.
 
         Args:
             `x`: a matrix with shape `[N, N]`
@@ -280,7 +280,7 @@ class LinearAlgebra(Library):
         return Tensor(sign).reshape(cxt.batch_shape), Tensor(determinants).reshape(cxt.batch_shape)
 
     @post
-    def svd_matrix(self, cxt, A: Tensor, l: UInt = 0, epsilon: F32 = 1e-5, max_iter: UInt = 30) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    def svd_matrix(self, cxt, A: Tensor, l=UInt(0), epsilon=EPS, max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
         """
         Compute the singular value decomposition of the given matrix `A`
 
@@ -355,7 +355,7 @@ class LinearAlgebra(Library):
 
     # TODO: update to support `Tensor` (not just `Dense`) after `Sparse.concatenate` is implemented
     @post
-    def svd_parallel(self, txn, A: Tensor, l: UInt = 0, epsilon: F32 = 1e-5, max_iter: UInt = 30) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    def svd_parallel(self, txn, A: Tensor, l=UInt(0), epsilon=EPS, max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
         """
         Given a `Tensor` of `matrices`, return the singular value decomposition `(s, u, v)` of each matrix.
 
@@ -397,7 +397,7 @@ class LinearAlgebra(Library):
         )
 
     @post
-    def svd(self, A: Tensor, l=UInt(0), epsilon=F32(1e-5), max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
+    def svd(self, A: Tensor, l=UInt(0), epsilon=EPS, max_iter=UInt(30)) -> typing.Tuple[Tensor, Tensor, Tensor]:
         """
         Computes `svd_matrix` for each matrix in `A`.
 

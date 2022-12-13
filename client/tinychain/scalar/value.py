@@ -115,3 +115,12 @@ class Version(Value):
 
     __uri__ = URI(Value) + "/version"
 
+    def __str__(self):
+        if is_literal(self):
+            version = deref(self)
+            if isinstance(version, tuple):
+                return '.'.join(version)
+            else:
+                return str(version)
+        else:
+            return Value.__str__(self)

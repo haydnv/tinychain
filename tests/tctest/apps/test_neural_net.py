@@ -9,6 +9,8 @@ BATCH_SIZE = 20
 
 
 class NeuralNetTester(tc.app.Library):
+    URI = URI
+
     __uri__ = URI
 
     ml = tc.ml.service.ML()

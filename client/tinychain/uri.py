@@ -53,7 +53,6 @@ class URI(object):
         self._path = path
 
     def __add__(self, other):
-        assert str(other) == other
         other = str(other)
 
         if other.__contains__("://"):

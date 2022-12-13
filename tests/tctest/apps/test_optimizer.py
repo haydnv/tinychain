@@ -5,11 +5,12 @@ import tinychain as tc
 
 from ..process import start_host
 
-URI = tc.URI("/test/ml/optimizer")
 BATCH_SIZE = 20
 
 
 class OptimizerTester(tc.app.Library):
+    URI = tc.URI("/test/ml/optimizer")
+
     __uri__ = URI
 
     ml = tc.ml.service.ML()

@@ -278,7 +278,7 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return {str(self.__uri__): form}
+        return {str(self.URI): form}
 
 
 class App(Library):

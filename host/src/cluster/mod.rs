@@ -142,8 +142,12 @@ impl<T> Cluster<T> {
 
     /// Claim leadership of the given [`Txn`].
     pub async fn lead(&self, txn: Txn) -> TCResult<Txn> {
-        txn.lead(&self.inner.actor, self.inner.link.path().clone())
-            .await
+        if txn.is_leader(self.path()) {
+            Ok(txn)
+        } else {
+            txn.lead(&self.inner.actor, self.inner.link.path().clone())
+                .await
+        }
     }
 }
 

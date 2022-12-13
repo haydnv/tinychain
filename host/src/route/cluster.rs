@@ -215,19 +215,30 @@ where
                         .add_replica(txn, txn.link(cluster.link().path().clone()))
                         .await
                 } else {
-                    let self_link = txn.link(link.path().clone());
-                    let replicate_from_this_host = self_link == link;
-                    info!(
-                        "create new cluster directory item at {} to replicate {}",
-                        self_link, link
-                    );
-
-                    let cluster = self.dir.create_item(txn, name, link).await?;
+                    let cluster = self.dir.create_item(txn, name, link.clone()).await?;
                     debug!("created new cluster directory item");
 
+                    let replicate_from_this_host = {
+                        if cluster.link().host().is_none() {
+                            true
+                        } else {
+                            let self_link = txn.link(link.path().clone());
+                            self_link == link
+                        }
+                    };
+
                     if replicate_from_this_host {
+                        let txn = cluster.lead(txn.clone()).await?;
+                        let owner = txn
+                            .owner()
+                            .cloned()
+                            .ok_or_else(|| TCError::internal("ownerless transaction"))?;
+
+                        txn.put(owner, Value::default(), cluster.link().clone().into())
+                            .await?;
+
                         cluster
-                            .put(txn, &[], VersionNumber::default().into(), lib.into())
+                            .put(&txn, &[], VersionNumber::default().into(), lib.into())
                             .await
                     } else {
                         cluster
@@ -274,18 +285,18 @@ impl Route for Dir<Library> {
     }
 }
 
-struct LibHandler<'a> {
+struct LibraryHandler<'a> {
     lib: &'a Library,
     path: &'a [PathSegment],
 }
 
-impl<'a> LibHandler<'a> {
+impl<'a> LibraryHandler<'a> {
     fn new(lib: &'a Library, path: &'a [PathSegment]) -> Self {
         Self { lib, path }
     }
 }
 
-impl<'a> Handler<'a> for LibHandler<'a> {
+impl<'a> Handler<'a> for LibraryHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -312,14 +323,48 @@ impl<'a> Handler<'a> for LibHandler<'a> {
         'b: 'a,
     {
         Some(Box::new(|txn, key, value| {
+            if self.path.is_empty() {
+                Box::pin(async move {
+                    let number =
+                        key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+
+                    let version = value
+                        .try_cast_into(|s| TCError::bad_request("invalid Library version", s))?;
+
+                    self.lib.create_version(*txn.id(), number, version).await
+                })
+            } else {
+                Box::pin(async move {
+                    let number = self.path[0].as_str().parse()?;
+                    let version = self.lib.get_version(*txn.id(), number).await?;
+                    version.put(txn, &self.path[1..], key, value).await
+                })
+            }
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, params| {
             Box::pin(async move {
-                let number =
-                    key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+                let number = self.path[0].as_str().parse()?;
+                let version = self.lib.get_version(*txn.id(), number).await?;
+                version.post(txn, &self.path[1..], params).await
+            })
+        }))
+    }
 
-                let version =
-                    value.try_cast_into(|s| TCError::bad_request("invalid Library version", s))?;
-
-                self.lib.create_version(*txn.id(), number, version).await
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let number = self.path[0].as_str().parse()?;
+                let version = self.lib.get_version(*txn.id(), number).await?;
+                version.delete(txn, &self.path[1..], key).await
             })
         }))
     }
@@ -327,7 +372,7 @@ impl<'a> Handler<'a> for LibHandler<'a> {
 
 impl Route for Library {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        Some(Box::new(LibHandler::new(self, path)))
+        Some(Box::new(LibraryHandler::new(self, path)))
     }
 }
 
@@ -441,42 +486,12 @@ impl Route for Cluster<Legacy> {
     }
 }
 
-struct VersionHandler<'a> {
-    version: &'a Version,
-    path: &'a [PathSegment],
-}
-
-impl<'a> VersionHandler<'a> {
-    fn new(version: &'a Version, path: &'a [PathSegment]) -> Self {
-        Self { version, path }
-    }
-}
-
-impl<'a> Handler<'a> for VersionHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        if self.path.is_empty() {
-            todo!("library replication")
-        }
-
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                let attr = self
-                    .version
-                    .attribute(&self.path[0])
-                    .ok_or_else(|| TCError::not_found(&self.path[0]))?;
-
-                attr.get(txn, &self.path[1..], key).await
-            })
-        }))
-    }
-}
-
 impl Route for Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        Some(Box::new(VersionHandler::new(self, path)))
+        assert!(!path.is_empty());
+
+        let attr = self.attribute(&path[0])?;
+        attr.route(&path[1..])
     }
 }
 

@@ -52,7 +52,7 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, Parser)]
 struct Config {
-    #[arg(long, default_value = "0.0.0", help = "the IP address to bind")]
+    #[arg(long, default_value = "0.0.0.0", help = "the IP address to bind")]
     pub address: IpAddr,
 
     #[arg(

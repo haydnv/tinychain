@@ -70,6 +70,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
+# TODO: remove the `app_or_library` parameter
 def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1., **flags):
     if not os.path.exists(DOCKERFILE):
         raise RuntimeError(
@@ -167,6 +168,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
+# TODO: remove the `app_or_library` parameter
 def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
     if not os.path.isfile(TC_PATH):
         hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"

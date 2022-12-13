@@ -41,6 +41,8 @@ class Baz(Bar, tc.app.Dynamic):
 
 
 class TestLib(tc.app.Library):
+    URI = URI
+
     __uri__ = URI
 
     Foo = Foo

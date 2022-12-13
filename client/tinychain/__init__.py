@@ -50,7 +50,7 @@ from tinychain.scalar.ref import (
     same_as,
     switch_case,
     while_loop,
-)  # TODO: replace with helper methods
-from tinychain.scalar.value import EmailAddress, Id, String, Value
+)
+from tinychain.scalar.value import EmailAddress, Id, String, Value, Version
 from tinychain.state import Class, Instance, State, Stream
 from tinychain.uri import URI

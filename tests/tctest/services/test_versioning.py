@@ -9,7 +9,10 @@ DIR = tc.URI(LEAD + "/lib/test")
 
 
 class TestLibV0(tc.app.Library):
-    __uri__ = DIR + "libhello"
+    URI = DIR + "libhello"
+    VERSION = tc.Version("0.0.0")
+
+    __uri__ = URI + VERSION
 
     @tc.get
     def hello(self) -> tc.String:
@@ -17,14 +20,17 @@ class TestLibV0(tc.app.Library):
 
 
 class TestLibV1(tc.app.Library):
-    __uri__ = DIR + "libhello"
+    URI = DIR + "libhello"
+    VERSION = tc.Version("0.0.1")
+
+    __uri__ = URI + VERSION
 
     @tc.get
     def hello(self, name: tc.String) -> tc.String:
         return tc.String("Hello, {{name}}!").render(name=name)
 
 
-class LibraryTests(unittest.TestCase):
+class LibraryVersionTests(unittest.TestCase):
     def testCreateLib(self):
         hosts = [
             start_host(NAME, [], http_port=8702, replicate=LEAD),

@@ -6,7 +6,9 @@ from .optimizer import Adam, GradientDescent, Optimizer
 
 
 class ML(Library):
-    __uri__ = LIB_URI
+    URI = LIB_URI
+
+    __uri__ = URI
 
     # models (headers)
     Layer = Layer
