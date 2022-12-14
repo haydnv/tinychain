@@ -34,6 +34,7 @@ pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
 
+pub mod class;
 pub mod dir;
 pub mod library;
 mod load; // TODO: delete

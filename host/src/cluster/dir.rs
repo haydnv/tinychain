@@ -5,10 +5,10 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::future::{FutureExt, TryFutureExt};
 use log::debug;
-use safecast::{CastInto, TryCastFrom};
+use safecast::CastInto;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
@@ -48,7 +48,7 @@ pub trait DirCreateItem<T: DirItem> {
 pub trait DirItem:
     Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
-    type Version: BlockData + TryCastFrom<State>;
+    type Version;
 
     async fn create_version(
         &self,
