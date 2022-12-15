@@ -21,9 +21,12 @@ from .uri import URI
 
 
 def class_name(object_):
-    """A snake case representation of the class name. You can pass a Class or object as
-    an argument.
     """
+    A snake case representation of the class name.
+
+    Accepts a `Class` or `object` as an argument.
+    """
+
     if isinstance(object_, type):
         name = object_.__name__
     else:
@@ -240,6 +243,8 @@ def _model(cls):
 
 
 class Library(object):
+    __uri__ = URI("/lib")
+
     def __init__(self):
         self._methods = {}
 
@@ -278,7 +283,7 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return {str(self.URI): form}
+        return {str(URI(self)[:-1]): form}
 
 
 class App(Library):
