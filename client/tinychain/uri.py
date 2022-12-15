@@ -148,27 +148,30 @@ class URI(object):
         else:
             return root
 
-    def append(self, name):
+    def append(self, suffix):
         """
-        Construct a new `URI` beginning with this `URI` and ending with the given `name` segment.
+        Construct a new `URI` beginning with this `URI` and ending with the given `suffix`.
 
         Example:
             .. highlight:: python
             .. code-block:: python
 
-                value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
+                value = OpRef.Get(URI("http://example.com/myapp").append("value/name"))
         """
 
-        if str(name) in ["", "/"]:
+        suffix = str(suffix)
+
+        if suffix in ["", "/"]:
             return self
 
-        name = validate(name)
+        if "://" in suffix:
+            raise ValueError(f"cannot append {suffix} to {self}")
 
-        if "://" in name:
-            raise ValueError(f"cannot append {name} to {self}")
+        if suffix.startswith('/'):
+            suffix = suffix[1:]
 
         path = list(self._path)
-        path.append(name)
+        path.extend(suffix.split('/'))
 
         return URI(self._subject, *path)
 

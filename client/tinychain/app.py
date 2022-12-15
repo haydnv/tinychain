@@ -283,7 +283,11 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        return {str(URI(self)[:-1]): form}
+        # TODO: delete this condition
+        if hasattr(self, "VERSION"):
+            return {str(URI(self)[:-1]): form}
+        else:
+            return {str(URI(self)): form}
 
 
 class App(Library):

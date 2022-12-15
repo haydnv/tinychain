@@ -143,7 +143,7 @@ impl Dispatch for UserSpace {
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             // TODO: delete this clause
             debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
-            cluster.get(&txn, suffix, key).await
+            Public::get(cluster, &txn, suffix, key).await
         } else if &path[..1] == &LIB[..] {
             Dispatch::get(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
