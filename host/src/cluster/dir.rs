@@ -4,7 +4,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use futures::future::{FutureExt, TryFutureExt};
-use log::debug;
+use log::{debug, warn};
 use safecast::CastInto;
 
 use tc_error::*;
@@ -236,7 +236,8 @@ impl Replica for Dir<Class> {
     }
 
     async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("cluster::Dir<Class>::replicate"))
+        warn!("not implemented: cluster::Dir::<Class>::replicate");
+        Ok(())
     }
 }
 
@@ -328,8 +329,22 @@ impl Persist<fs::Dir> for Dir<Class> {
         })
     }
 
-    async fn load(_txn: &Txn, _link: Link, _store: fs::Store) -> TCResult<Self> {
-        Err(TCError::not_implemented("cluster::Dir::<Class>::load"))
+    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        let lock = tc_transact::fs::Dir::read(&dir, *txn.id()).await?;
+        let contents = HashMap::with_capacity(tc_transact::fs::DirRead::len(&lock));
+
+        for _entry in lock.iter() {
+            return Err(TCError::not_implemented(
+                "load a cluster::Dir of class sets",
+            ));
+        }
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::with_contents("class directory", contents),
+        })
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {

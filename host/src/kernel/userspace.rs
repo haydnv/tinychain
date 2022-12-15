@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use futures::future::Future;
 use log::debug;
 
+use crate::chain::BlockChain;
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
@@ -19,8 +20,14 @@ use crate::txn::Txn;
 
 use super::{hypothetical, Dispatch, Hosted, Hypothetical};
 
+/// The type of the class directory
+pub type Class = Cluster<Dir<crate::cluster::Class>>;
+
 /// The type of the library directory
 pub type Library = Cluster<Dir<crate::cluster::Library>>;
+
+/// The class directory path
+pub const CLASS: PathLabel = path_label(&["class"]);
 
 /// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);
@@ -29,18 +36,20 @@ pub const LIB: PathLabel = path_label(&["lib"]);
 pub struct UserSpace {
     hosted: Hosted, // TODO: delete
     hypothetical: Hypothetical,
+    class: Class,
     library: Library,
 }
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(library: Library, clusters: I) -> Self
+    pub fn new<I>(class: Class, library: Library, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
         Self {
             hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
+            class,
             library,
         }
     }
@@ -50,7 +59,8 @@ impl UserSpace {
             return false;
         }
 
-        &path[..1] == &LIB[..]
+        &path[..1] == &CLASS[..]
+            || &path[..1] == &LIB[..]
             || &path[..] == &hypothetical::PATH[..]
             || self.hosted.contains(&path[0])
     }
@@ -63,6 +73,69 @@ impl UserSpace {
 }
 
 #[async_trait]
+impl<T: Transact + Clone + Send + Sync> Dispatch for Cluster<Dir<T>>
+where
+    Cluster<BlockChain<T>>: Route,
+    BlockChain<T>: Replica,
+    Dir<T>: Replica,
+    Self: Route,
+{
+    async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+        debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
+        Public::get(&cluster, txn, suffix, key).await
+    }
+
+    async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+        debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
+        let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+
+        if suffix.is_empty() && key.is_none() {
+            // it's a synchronization message
+            Public::put(&cluster, txn, suffix, key, value).await
+        } else {
+            match cluster {
+                DirEntry::Dir(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
+                DirEntry::Item(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
+            }
+        }
+    }
+
+    async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
+        let params: Map<State> = data.try_into()?;
+        let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+        debug!("POST {}: {} to {}", TCPath::from(suffix), params, cluster);
+
+        if suffix.is_empty() && params.is_empty() {
+            // it's a commit message
+            Public::post(&cluster, txn, suffix, params).await
+        } else {
+            match cluster {
+                DirEntry::Dir(cluster) => execute_post(&cluster, txn, suffix, params).await,
+                DirEntry::Item(cluster) => execute_post(&cluster, txn, suffix, params).await,
+            }
+        }
+    }
+
+    async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
+        debug!("DELETE {}: {}", TCPath::from(path), key);
+
+        let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+
+        if suffix.is_empty() && key.is_none() {
+            // it's a rollback message
+            Public::delete(&cluster, txn, path, key).await
+        } else {
+            match cluster {
+                DirEntry::Dir(cluster) => execute_delete(&cluster, txn, suffix, key).await,
+                DirEntry::Item(cluster) => execute_delete(&cluster, txn, suffix, key).await,
+            }
+        }
+    }
+}
+
+// TODO: consolidate redundant if..else clauses
+#[async_trait]
 impl Dispatch for UserSpace {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path == &hypothetical::PATH[..] {
@@ -72,9 +145,9 @@ impl Dispatch for UserSpace {
             debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
             cluster.get(&txn, suffix, key).await
         } else if &path[..1] == &LIB[..] {
-            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
-            debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
-            cluster.get(&txn, suffix, key).await
+            Dispatch::get(&self.library, txn, &path[1..], key).await
+        } else if &path[..1] == &CLASS[..] {
+            Dispatch::get(&self.class, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -133,18 +206,9 @@ impl Dispatch for UserSpace {
             })
             .await
         } else if &path[..1] == &LIB[..] {
-            debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
-            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
-
-            if suffix.is_empty() && key.is_none() {
-                // it's a synchronization message
-                return cluster.put(txn, suffix, key, value).await;
-            }
-
-            match cluster {
-                DirEntry::Dir(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
-                DirEntry::Item(cluster) => execute_put(&cluster, txn, suffix, key, value).await,
-            }
+            Dispatch::put(&self.library, txn, &path[1..], key, value).await
+        } else if &path[..1] == &CLASS[..] {
+            Dispatch::put(&self.class, txn, &path[1..], key, value).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -175,19 +239,9 @@ impl Dispatch for UserSpace {
                 .await
             }
         } else if &path[..1] == &LIB[..] {
-            let params: Map<State> = data.try_into()?;
-            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
-            debug!("POST {}: {} to {}", TCPath::from(suffix), params, cluster);
-
-            if suffix.is_empty() && params.is_empty() {
-                // it's a commit message
-                return cluster.post(txn, suffix, params).await;
-            }
-
-            match cluster {
-                DirEntry::Dir(cluster) => execute_post(&cluster, txn, suffix, params).await,
-                DirEntry::Item(cluster) => execute_post(&cluster, txn, suffix, params).await,
-            }
+            Dispatch::post(&self.library, txn, &path[1..], data).await
+        } else if &path[..1] == &CLASS[..] {
+            Dispatch::post(&self.class, txn, &path[1..], data).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -252,19 +306,9 @@ impl Dispatch for UserSpace {
             })
             .await
         } else if &path[..1] == &LIB[..] {
-            let (suffix, cluster) = self.library.lookup(*txn.id(), &path[1..])?;
-
-            if suffix.is_empty() && key.is_none() {
-                // it's a rollback message
-                return self.library.delete(&txn, path, key).await;
-            }
-
-            debug!("DELETE {}: {}", TCPath::from(path), key);
-
-            match cluster {
-                DirEntry::Dir(cluster) => execute_delete(&cluster, txn, suffix, key).await,
-                DirEntry::Item(cluster) => execute_delete(&cluster, txn, suffix, key).await,
-            }
+            Dispatch::delete(&self.library, txn, &path[1..], key).await
+        } else if &path[..1] == &CLASS[..] {
+            Dispatch::delete(&self.library, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }

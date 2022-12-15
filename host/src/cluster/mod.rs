@@ -474,6 +474,58 @@ where
 
 // TODO: only impl Persist for Cluster once
 #[async_trait]
+impl Persist<fs::Dir> for Cluster<BlockChain<Class>> {
+    type Txn = Txn;
+    type Schema = Link;
+
+    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+
+        BlockChain::create(txn, (), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+
+    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+
+        BlockChain::load(txn, (), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        BlockChain::dir(&self.inner.state)
+    }
+}
+
+// TODO: only impl Persist for Cluster once
+#[async_trait]
+impl Persist<fs::Dir> for Cluster<Dir<Class>> {
+    type Txn = Txn;
+    type Schema = Link;
+
+    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+        Dir::create(txn, link.clone(), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+
+    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+        let self_link = txn.link(link.path().clone());
+        Dir::load(txn, link.clone(), store)
+            .map_ok(|state| Self::with_state(self_link, link, state))
+            .await
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        Dir::dir(&self.inner.state)
+    }
+}
+
+// TODO: only impl Persist for Cluster once
+#[async_trait]
 impl Persist<fs::Dir> for Cluster<Dir<Library>> {
     type Txn = Txn;
     type Schema = Link;
@@ -497,6 +549,7 @@ impl Persist<fs::Dir> for Cluster<Dir<Library>> {
     }
 }
 
+// TODO: only impl Persist for Cluster once
 #[async_trait]
 impl Persist<fs::Dir> for Cluster<BlockChain<Library>> {
     type Txn = Txn;

@@ -7,16 +7,20 @@ use bytes::Bytes;
 use clap::Parser;
 use destream::de::FromStream;
 use futures::future::{self, TryFutureExt};
-use futures::stream;
-use futures::try_join;
+use futures::{stream, try_join};
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_transact::{Transact, TxnId};
-use tc_value::{LinkHost, LinkProtocol};
+use tc_transact::fs::Persist;
+use tc_transact::{Transact, Transaction, TxnId};
+use tc_value::{Link, LinkHost, LinkProtocol};
+use tcgeneric::PathLabel;
 
+use tinychain::cluster::{Cluster, Replica};
+use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
+use tinychain::txn::Txn;
 use tinychain::*;
 
 type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -132,7 +136,7 @@ impl Config {
 async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let gateway_config = config.gateway();
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
     if !config.workspace.exists() {
@@ -149,10 +153,10 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     }
 
     let cache = freqfs::Cache::new(config.cache_size.into(), Duration::from_secs(1), None);
-    let workspace = cache.clone().load(config.workspace).await?;
+    let workspace = cache.clone().load(config.workspace.clone()).await?;
     let txn_id = TxnId::new(Gateway::time());
 
-    let data_dir = if let Some(data_dir) = config.data_dir {
+    let data_dir = if let Some(data_dir) = config.data_dir.clone() {
         if !data_dir.exists() {
             panic!("{:?} does not exist--create it or provide a different path for the --data_dir flag", data_dir);
         }
@@ -185,7 +189,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
             Some(config.http_port),
         ));
 
-        for path in config.clusters {
+        for path in &config.clusters {
             let config = tokio::fs::read(&path)
                 .await
                 .expect(&format!("read from {:?}", &path));
@@ -205,23 +209,12 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
-    let library: kernel::Library = {
-        let link = if let Some(host) = config.replicate {
-            (host, kernel::LIB.into()).into()
-        } else {
-            kernel::LIB.into()
-        };
-
-        let store = data_dir
-            .get_or_create_store(txn_id, tcgeneric::label(kernel::LIB[0]).into())
-            .await?;
-
-        tc_transact::fs::Persist::load(&txn, link, store).await?
-    };
+    let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
+    let class: kernel::Class = load(&config, &data_dir, &txn, kernel::CLASS).await?;
 
     data_dir.commit(&txn_id).await;
 
-    let kernel = tinychain::Kernel::with_userspace(library.clone(), clusters);
+    let kernel = tinychain::Kernel::with_userspace(class.clone(), library.clone(), clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
@@ -232,21 +225,51 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     try_join!(
         gateway.clone().listen().map_err(TokioError::from),
-        replicate(gateway, library).map_err(TokioError::from)
+        replicate(gateway, class, library).map_err(TokioError::from)
     )?;
 
     Ok(())
 }
 
-async fn replicate(gateway: Arc<Gateway>, library: Library) -> TCResult<()> {
-    let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
-    let txn = library.claim(&txn).await?;
-
-    library
-        .add_replica(&txn, txn.link(library.link().path().clone()))
+async fn load<T>(config: &Config, data_dir: &Dir, txn: &Txn, path: PathLabel) -> TCResult<T>
+where
+    T: Persist<Dir, Txn = Txn, Schema = Link>,
+{
+    let store = data_dir
+        .get_or_create_store(*txn.id(), tcgeneric::label(path[0]).into())
         .await?;
 
-    library.distribute_commit(&txn).await
+    let link: Link = if let Some(host) = &config.replicate {
+        (host.clone(), path.into()).into()
+    } else {
+        path.into()
+    };
+
+    tc_transact::fs::Persist::load(txn, link, store).await
+}
+
+async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCResult<()> {
+    let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
+
+    async fn replicate_cluster<T>(txn: &Txn, cluster: Cluster<T>) -> TCResult<()>
+    where
+        T: Replica + Transact + Send + Sync,
+    {
+        let txn = cluster.claim(&txn).await?;
+
+        cluster
+            .add_replica(&txn, txn.link(cluster.link().path().clone()))
+            .await?;
+
+        cluster.distribute_commit(&txn).await
+    }
+
+    try_join!(
+        replicate_cluster(&txn, class),
+        replicate_cluster(&txn, library)
+    )?;
+
+    Ok(())
 }
 
 fn main() {
