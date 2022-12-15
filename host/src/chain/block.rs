@@ -64,6 +64,17 @@ where
 }
 
 #[async_trait]
+impl Replica for BlockChain<crate::cluster::Class> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("BlockChain::<Class>::state"))
+    }
+
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("BlockChain::<Class>::state"))
+    }
+}
+
+#[async_trait]
 impl Replica for BlockChain<crate::cluster::Library> {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         self.subject.to_state(txn_id).await

@@ -10,8 +10,7 @@ use tcgeneric::Tuple;
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
-use crate::cluster::library::{Library, Version};
-use crate::cluster::{Cluster, DirItem, Legacy, Replica, REPLICAS};
+use crate::cluster::{class, library, Class, Cluster, DirItem, Legacy, Library, Replica, REPLICAS};
 use crate::object::{InstanceClass, Object};
 use crate::route::*;
 use crate::state::State;
@@ -275,13 +274,87 @@ where
     }
 }
 
-impl Route for Dir<Library> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.len() == 1 && &path[0] == &ENTRIES {
-            Some(Box::new(EntriesHandler { dir: self }))
-        } else {
-            Some(Box::new(DirHandler::new(self, path)))
+macro_rules! route_dir {
+    ($t:ty) => {
+        impl Route for Dir<$t> {
+            fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+                if path.len() == 1 && &path[0] == &ENTRIES {
+                    Some(Box::new(EntriesHandler { dir: self }))
+                } else {
+                    Some(Box::new(DirHandler::new(self, path)))
+                }
+            }
         }
+    };
+}
+
+route_dir!(Class);
+route_dir!(Library);
+
+struct ClassHandler<'a> {
+    class: &'a Class,
+    path: &'a [PathSegment],
+}
+
+impl<'a> ClassHandler<'a> {
+    fn new(class: &'a Class, path: &'a [PathSegment]) -> Self {
+        Self { class, path }
+    }
+}
+
+impl<'a> Handler<'a> for ClassHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        assert!(!self.path.is_empty());
+
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let number = self.path[0].as_str().parse()?;
+                let version = self.class.get_version(*txn.id(), &number).await?;
+                version.get(txn, &self.path[1..], key).await
+            })
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                if self.path.is_empty() {
+                    let number =
+                        key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+
+                    let version = value.try_into_map(|s| {
+                        TCError::bad_request("expected a Map of Classes but found", s)
+                    })?;
+                    let version = version
+                        .into_iter()
+                        .map(|(name, class)| {
+                            InstanceClass::try_cast_from(class, |s| {
+                                TCError::bad_request("expected a Class but found", s)
+                            })
+                            .map(|class| (name, class))
+                        })
+                        .collect::<TCResult<Map<InstanceClass>>>()?;
+
+                    self.class.create_version(*txn.id(), number, version).await
+                } else {
+                    let number = self.path[0].as_str().parse()?;
+                    let version = self.class.get_version(*txn.id(), &number).await?;
+                    version.put(txn, &self.path[1..], key, value).await
+                }
+            })
+        }))
+    }
+}
+
+impl Route for Class {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(ClassHandler::new(self, path)))
     }
 }
 
@@ -312,7 +385,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                 );
 
                 let number = self.path[0].as_str().parse()?;
-                let version = self.lib.get_version(*txn.id(), number).await?;
+                let version = self.lib.get_version(*txn.id(), &number).await?;
                 version.get(txn, &self.path[1..], key).await
             })
         }))
@@ -336,7 +409,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
             } else {
                 Box::pin(async move {
                     let number = self.path[0].as_str().parse()?;
-                    let version = self.lib.get_version(*txn.id(), number).await?;
+                    let version = self.lib.get_version(*txn.id(), &number).await?;
                     version.put(txn, &self.path[1..], key, value).await
                 })
             }
@@ -350,7 +423,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
                 let number = self.path[0].as_str().parse()?;
-                let version = self.lib.get_version(*txn.id(), number).await?;
+                let version = self.lib.get_version(*txn.id(), &number).await?;
                 version.post(txn, &self.path[1..], params).await
             })
         }))
@@ -363,7 +436,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 let number = self.path[0].as_str().parse()?;
-                let version = self.lib.get_version(*txn.id(), number).await?;
+                let version = self.lib.get_version(*txn.id(), &number).await?;
                 version.delete(txn, &self.path[1..], key).await
             })
         }))
@@ -454,7 +527,30 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
     }
 }
 
+// TODO: consolidate impl Route for Cluster into just one impl
+impl Route for Cluster<BlockChain<Class>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
+        }
+    }
+}
+
+// TODO: consolidate impl Route for Cluster into just one impl
 impl Route for Cluster<BlockChain<Library>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
+        }
+    }
+}
+
+// TODO: consolidate impl Route for Cluster into just one impl
+impl Route for Cluster<Dir<Class>> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match path {
             path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
@@ -486,11 +582,50 @@ impl Route for Cluster<Legacy> {
     }
 }
 
-impl Route for Version {
+struct ClassVersionHandler<'a> {
+    class: &'a class::Version,
+    path: &'a [PathSegment],
+}
+
+impl<'a> ClassVersionHandler<'a> {
+    fn new(class: &'a class::Version, path: &'a [PathSegment]) -> Self {
+        Self { class, path }
+    }
+}
+
+impl<'a> Handler<'a> for ClassVersionHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if self.path.is_empty() {
+                    let name =
+                        key.try_cast_into(|v| TCError::bad_request("invalid class name", v))?;
+
+                    let class = self.class.get_class(*txn.id(), &name).await?;
+                    Ok(State::Object(class.clone().into()))
+                } else {
+                    let class = self.class.get_class(*txn.id(), &self.path[0]).await?;
+                    class.get(txn, &self.path[1..], key).await
+                }
+            })
+        }))
+    }
+}
+
+impl Route for class::Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        Some(Box::new(ClassVersionHandler::new(self, path)))
+    }
+}
+
+impl Route for library::Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         assert!(!path.is_empty());
 
-        let attr = self.attribute(&path[0])?;
+        let attr = self.get_attribute(&path[0])?;
         attr.route(&path[1..])
     }
 }

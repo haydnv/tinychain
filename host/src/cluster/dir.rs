@@ -20,7 +20,7 @@ use crate::route::Route;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{Cluster, Library, Replica};
+use super::{Class, Cluster, Library, Replica};
 
 /// The type of file stored in a [`library`] directory
 pub type File = fs::File<VersionNumber, super::library::Version>;
@@ -230,6 +230,17 @@ where
 }
 
 #[async_trait]
+impl Replica for Dir<Class> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("cluster::Dir<Class>::state"))
+    }
+
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("cluster::Dir<Class>::replicate"))
+    }
+}
+
+#[async_trait]
 impl Replica for Dir<Library> {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let contents = self.contents.read(txn_id).await?;
@@ -304,6 +315,29 @@ where
 }
 
 #[async_trait]
+impl Persist<fs::Dir> for Dir<Class> {
+    type Txn = Txn;
+    type Schema = Link;
+
+    async fn create(_txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::new("class directory"),
+        })
+    }
+
+    async fn load(_txn: &Txn, _link: Link, _store: fs::Store) -> TCResult<Self> {
+        Err(TCError::not_implemented("cluster::Dir::<Class>::load"))
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        self.cache.clone()
+    }
+}
+
+#[async_trait]
 impl Persist<fs::Dir> for Dir<Library> {
     type Txn = Txn;
     type Schema = Link;
@@ -313,7 +347,7 @@ impl Persist<fs::Dir> for Dir<Library> {
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnMapLock::new("service directory"),
+            contents: TxnMapLock::new("library directory"),
         })
     }
 

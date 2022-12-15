@@ -28,7 +28,7 @@ pub struct Version {
 }
 
 impl Version {
-    pub fn attribute(&self, name: &PathSegment) -> Option<&Scalar> {
+    pub fn get_attribute(&self, name: &PathSegment) -> Option<&Scalar> {
         self.lib.get(name)
     }
 }
@@ -138,13 +138,13 @@ impl Library {
     pub async fn get_version(
         &self,
         txn_id: TxnId,
-        number: VersionNumber,
+        number: &VersionNumber,
     ) -> TCResult<fs::BlockReadGuard<Version>> {
         let file = self.file.read(txn_id).await?;
         if file.is_empty() {
             Err(TCError::internal("library has no versions"))
         } else {
-            file.read_block(&number).await
+            file.read_block(number).await
         }
     }
 

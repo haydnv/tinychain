@@ -30,6 +30,7 @@ use crate::txn::{Actor, Txn, TxnId};
 
 use owner::Owner;
 
+pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
@@ -51,13 +52,14 @@ pub trait Replica {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
+// TODO: delete
 /// The [`Class`] of a [`Cluster`].
 pub enum ClusterType {
     Dir,
     Legacy,
 }
 
-impl Class for ClusterType {}
+impl tcgeneric::Class for ClusterType {}
 
 impl fmt::Display for ClusterType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

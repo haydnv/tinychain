@@ -1,9 +1,10 @@
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::{Dir, File, FileRead, Persist};
 use tc_transact::{Transact, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, Map};
@@ -18,6 +19,17 @@ use super::DirItem;
 #[derive(Clone)]
 pub struct Version {
     classes: fs::File<Id, InstanceClass>,
+}
+
+impl Version {
+    pub async fn get_class(
+        &self,
+        txn_id: TxnId,
+        name: &Id,
+    ) -> TCResult<impl Deref<Target = InstanceClass>> {
+        let file = self.classes.read(txn_id).await?;
+        file.read_block(name).await
+    }
 }
 
 impl fmt::Display for Version {
@@ -39,7 +51,7 @@ impl Class {
     pub async fn get_version(
         &self,
         _txn_id: TxnId,
-        _number: VersionNumber,
+        _number: &VersionNumber,
     ) -> TCResult<fs::BlockReadGuard<Version>> {
         Err(TCError::not_implemented("cluster::Class::get_version"))
     }
