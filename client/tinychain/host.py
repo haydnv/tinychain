@@ -142,11 +142,13 @@ class Host(object):
             if issubclass(cls, Library):
                 deps.append(cls)
             elif issubclass(cls, State):
-                if cls.NS == library.NS:
-                    if URI(cls) == (URI("/class") + library.NS).append(library.NAME).append(cls.__name__):
+                if cls.NS == library.NS.append(library.NAME):
+                    expected_uri = (URI("/class") + library.NS).extend(library.NAME, cls.VERSION, cls.__name__)
+
+                    if URI(cls) == expected_uri:
                         classes[cls.__name__] = cls
                     else:
-                        raise ValueError(f"{library} class {cls} has invalid URI {URI(cls)}")
+                        raise ValueError(f"{library} class {cls} has invalid URI {URI(cls)}, expected {expected_uri}")
                 else:
                     raise ValueError(
                         f"{library} may not depend on {cls} directly but must depend on its Library in {cls.NS}")
@@ -155,10 +157,8 @@ class Host(object):
 
         if deps:
             logging.info(f"installing {library} which depends on {deps}...")
-
-        # TODO: don't hard-code URI("/class")
-        if classes:
-            self.put(URI("/class") + library.NS, library.NAME, classes)
+        else:
+            logging.info(f"installing {library}")
 
         self.put(URI(library).path()[:-2], library.NAME, library)
 

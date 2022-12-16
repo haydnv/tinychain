@@ -273,13 +273,11 @@ class Library(object):
             elif isinstance(attr, Library):
                 continue
 
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+            if inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
             elif _is_mutable(attr):
-                raise RuntimeError(f"{self.__class__.__name__} is a Library and must not contain mutable state")
+                raise RuntimeError(f"{self} is a Library and must not contain mutable state")
             else:
                 form[name] = to_json(attr)
 

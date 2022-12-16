@@ -31,11 +31,11 @@ class URI(object):
     """
 
     @staticmethod
-    def join(components):
-        """Join the given components together to make a new URI."""
+    def join(segments):
+        """Join the given segments together to make a new URI."""
 
-        if components:
-            return URI(components[0], *components[1:])
+        if segments:
+            return URI(segments[0], *segments[1:])
         else:
             return URI('/')
 
@@ -86,12 +86,12 @@ class URI(object):
         return str(self) == str(other)
 
     def __getitem__(self, item):
-        components = self.split()
+        segments = self.split()
 
         if isinstance(item, int):
-            return components[item]
+            return segments[item]
         elif isinstance(item, slice):
-            return URI.join(components[item])
+            return URI.join(segments[item])
 
     def __gt__(self, other):
         return self.startswith(other) and len(self) > len(other)
@@ -175,6 +175,25 @@ class URI(object):
 
         return URI(self._subject, *path)
 
+    def extend(self, *segments):
+        validated = []
+        for segment in segments:
+            segment = str(segment)
+
+            if "://" in segment:
+                raise ValueError(f"cannot append {segment} to {self}")
+
+            if segment.startswith('/'):
+                segment = segment[1:]
+
+            if '/' in segment:
+                for subsegment in segment.split('/'):
+                    validated.append(validate(subsegment))
+            else:
+                validated.append(validate(segment))
+
+        return URI(self._subject, *list(self._path) + validated)
+
     def id(self):
         """Return the ID segment of this `URI`, if present."""
 
@@ -254,15 +273,15 @@ class URI(object):
 
     def split(self):
         """
-        Split this URI into its individual components.
+        Split this URI into its individual segments.
 
-        The host (if absolute) or ID (if relative) is treated as the first component, if present.
+        The host (if absolute) or ID (if relative) is treated as the first segment, if present.
         """
 
         if self.startswith('/'):
-            components = str(self)[1:].split('/')
-            components[0] = f"/{components[0]}"
-            return components
+            segments = str(self)[1:].split('/')
+            segments[0] = f"/{segments[0]}"
+            return segments
         elif self.startswith('$'):
             return str(self).split('/')
         else:
