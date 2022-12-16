@@ -508,9 +508,21 @@ impl From<CollectionBase> for State {
     }
 }
 
+impl From<InstanceClass> for State {
+    fn from(class: InstanceClass) -> Self {
+        Self::Object(class.into())
+    }
+}
+
 impl From<Link> for State {
     fn from(link: Link) -> Self {
         Self::Scalar(Scalar::from(link))
+    }
+}
+
+impl From<Map<InstanceClass>> for State {
+    fn from(map: Map<InstanceClass>) -> Self {
+        Self::Map(map.into_iter().map(|(id, class)| (id, State::from(class))).collect())
     }
 }
 

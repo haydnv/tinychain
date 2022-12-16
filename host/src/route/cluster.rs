@@ -148,7 +148,7 @@ impl<'a, T> DirHandler<'a, T> {
     }
 }
 
-impl<'a, T> Handler<'a> for DirHandler<'a, T>
+impl<'a, T> DirHandler<'a, T>
 where
     T: DirItem,
     Dir<T>: DirCreateItem<T> + DirCreate + Replica,
@@ -156,7 +156,7 @@ where
     BlockChain<T>: Replica,
     Cluster<BlockChain<T>>: Public,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get_entry<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
     {
@@ -168,6 +168,65 @@ where
                 }
             })
         }))
+    }
+
+    async fn create_item_or_dir<Item>(
+        &self,
+        txn: &Txn,
+        link: Link,
+        name: PathSegment,
+        item: Option<Item>,
+    ) -> TCResult<()> where T::Version: From<Item>, State: From<Item> {
+        if let Some(item) = item {
+            let cluster = self.dir.create_item(txn, name, link.clone()).await?;
+            debug!("created new cluster directory item");
+
+            let replicate_from_this_host = {
+                if cluster.link().host().is_none() {
+                    true
+                } else {
+                    let self_link = txn.link(link.path().clone());
+                    self_link == link
+                }
+            };
+
+            if replicate_from_this_host {
+                let txn = cluster.lead(txn.clone()).await?;
+                let owner = txn
+                    .owner()
+                    .cloned()
+                    .ok_or_else(|| TCError::internal("ownerless transaction"))?;
+
+                txn.put(owner, Value::default(), cluster.link().clone().into())
+                    .await?;
+
+                cluster
+                    .put(&txn, &[], VersionNumber::default().into(), item.into())
+                    .await
+            } else {
+                cluster
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
+                    .await
+            }
+        } else {
+            info!("create new cluster directory {}", link);
+
+            let cluster = self.dir.create_dir(txn, name, link).await?;
+            debug!("created new cluster directory");
+
+            cluster
+                .add_replica(txn, txn.link(cluster.link().path().clone()))
+                .await
+        }
+    }
+}
+
+impl<'a> Handler<'a> for DirHandler<'a, Library> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        self.get_entry()
     }
 
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
@@ -204,47 +263,55 @@ where
                     ));
                 }
 
-                if lib.is_empty() {
-                    info!("create new cluster directory {}", link);
+                let item = if lib.is_empty() { None } else { Some(lib) };
+                self.create_item_or_dir(txn, link, name, item).await
+            })
+        }))
+    }
+}
 
-                    let cluster = self.dir.create_dir(txn, name, link).await?;
-                    debug!("created new cluster directory");
+impl<'a> Handler<'a> for DirHandler<'a, Class> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        self.get_entry()
+    }
 
-                    cluster
-                        .add_replica(txn, txn.link(cluster.link().path().clone()))
-                        .await
-                } else {
-                    let cluster = self.dir.create_item(txn, name, link.clone()).await?;
-                    debug!("created new cluster directory item");
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                debug!("create new cluster {} at {}", value, key);
 
-                    let replicate_from_this_host = {
-                        if cluster.link().host().is_none() {
-                            true
-                        } else {
-                            let self_link = txn.link(link.path().clone());
-                            self_link == link
-                        }
-                    };
+                let name = key.try_cast_into(|v| {
+                    TCError::bad_request("invalid path segment for directory entry", v)
+                })?;
 
-                    if replicate_from_this_host {
-                        let txn = cluster.lead(txn.clone()).await?;
-                        let owner = txn
-                            .owner()
-                            .cloned()
-                            .ok_or_else(|| TCError::internal("ownerless transaction"))?;
-
-                        txn.put(owner, Value::default(), cluster.link().clone().into())
-                            .await?;
-
-                        cluster
-                            .put(&txn, &[], VersionNumber::default().into(), lib.into())
-                            .await
-                    } else {
-                        cluster
-                            .add_replica(txn, txn.link(cluster.link().path().clone()))
-                            .await
-                    }
+                if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
+                    return Err(TCError::bad_request(
+                        "there is already a directory entry at",
+                        name,
+                    ))?;
                 }
+
+                let classes = value.try_into_map(|s| {
+                    TCError::bad_request("expected a map of classes but found", s)
+                })?;
+
+                let _classes = classes
+                    .into_iter()
+                    .map(|(name, class)| {
+                        InstanceClass::try_cast_from(class, |s| {
+                            TCError::bad_request("expected a Class but found", s)
+                        })
+                        .map(|class| (name, class))
+                    })
+                    .collect::<TCResult<Map<InstanceClass>>>()?;
+
+                Err(TCError::not_implemented("create new class set cluster"))
             })
         }))
     }
