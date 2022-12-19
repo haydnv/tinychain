@@ -199,14 +199,13 @@ impl TCError {
         subject: S,
         path: P,
     ) -> Self {
+        let message = format!("{} endpoint {} does not support {}", subject, path, method);
+
         #[cfg(debug_assertions)]
-        panic!("{}{} does not support {}", subject, path, method);
+        panic!("{}", message);
 
         #[cfg(not(debug_assertions))]
-        Self::new(
-            ErrorType::MethodNotAllowed,
-            format!("{} endpoint {} does not support {}", subject, path, method),
-        )
+        Self::new(ErrorType::MethodNotAllowed, message)
     }
 
     /// Error indicating that the requested resource does not exist at the specified location.

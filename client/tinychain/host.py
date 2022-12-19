@@ -1,14 +1,19 @@
 """Utilities for communicating with a TinyChain host."""
 
 import abc
+import inspect
+import logging
+
 import json
 import requests
 import urllib.parse
 
+from .app import Library
+from .context import to_json
 from .error import *
 from .scalar.value import Nil
+from .state import State
 from .uri import URI
-from .context import to_json
 
 
 DEFAULT_PORT = 8702
@@ -124,6 +129,43 @@ class Host(object):
             request = lambda: requests.delete(url, headers=headers)
 
         return self._handle(request)
+
+    def install(self, library):
+        """Install the given `library` on this host"""
+
+        if not URI(library).path().startswith(str(URI(Library))):
+            raise ValueError(f"not a library: {library}")
+
+        deps = []
+        classes = {}
+        for name, cls in inspect.getmembers(library, inspect.isclass):
+            if issubclass(cls, Library):
+                deps.append(cls)
+            elif issubclass(cls, State):
+                if cls.NS == library.NS.append(library.NAME):
+                    expected_uri = (URI("/class") + library.NS).extend(library.NAME, cls.VERSION, cls.__name__)
+
+                    if URI(cls) == expected_uri:
+                        classes[cls.__name__] = cls
+                    else:
+                        raise ValueError(f"{library} class {cls} has invalid URI {URI(cls)}, expected {expected_uri}")
+                else:
+                    raise ValueError(
+                        f"{library} may not depend on {cls} directly but must depend on its Library in {cls.NS}")
+            else:
+                logging.info(f"install {library} will skip dependency {cls} since it's not a Library or a State")
+
+        if deps:
+            logging.info(f"installing {library} which depends on {deps}...")
+        else:
+            logging.info(f"installing {library}")
+
+        self.put(URI(library).path()[:-2], library.NAME, library)
+
+    def update(self, library):
+        """Update the version of given `library` on this host"""
+
+        self.put(library.URI.path(), library.VERSION, library)
 
 
 class Local(Host):

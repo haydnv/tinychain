@@ -5,10 +5,10 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::future::{FutureExt, TryFutureExt};
 use log::debug;
-use safecast::{CastInto, TryCastFrom};
+use safecast::CastInto;
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
@@ -20,7 +20,7 @@ use crate::route::Route;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{Cluster, Library, Replica};
+use super::{Class, Cluster, Library, Replica};
 
 /// The type of file stored in a [`library`] directory
 pub type File = fs::File<VersionNumber, super::library::Version>;
@@ -48,7 +48,7 @@ pub trait DirCreateItem<T: DirItem> {
 pub trait DirItem:
     Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
-    type Version: BlockData + TryCastFrom<State>;
+    type Version;
 
     async fn create_version(
         &self,
@@ -230,7 +230,13 @@ where
 }
 
 #[async_trait]
-impl Replica for Dir<Library> {
+impl<T: DirItem + Route + fmt::Display> Replica for Dir<T>
+where
+    BlockChain<T>: Replica,
+    DirEntry<T>: Clone,
+    Cluster<Self>: Clone,
+    Self: Persist<fs::Dir, Txn = Txn, Schema = Link> + Route + fmt::Display,
+{
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let contents = self.contents.read(txn_id).await?;
         let mut state = Map::<State>::new();
@@ -304,6 +310,43 @@ where
 }
 
 #[async_trait]
+impl Persist<fs::Dir> for Dir<Class> {
+    type Txn = Txn;
+    type Schema = Link;
+
+    async fn create(_txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::new("class directory"),
+        })
+    }
+
+    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        let lock = tc_transact::fs::Dir::read(&dir, *txn.id()).await?;
+        let contents = HashMap::with_capacity(tc_transact::fs::DirRead::len(&lock));
+
+        for _entry in lock.iter() {
+            return Err(TCError::not_implemented(
+                "load a cluster::Dir of class sets",
+            ));
+        }
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::with_contents("class directory", contents),
+        })
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        self.cache.clone()
+    }
+}
+
+#[async_trait]
 impl Persist<fs::Dir> for Dir<Library> {
     type Txn = Txn;
     type Schema = Link;
@@ -313,7 +356,7 @@ impl Persist<fs::Dir> for Dir<Library> {
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnMapLock::new("service directory"),
+            contents: TxnMapLock::new("library directory"),
         })
     }
 

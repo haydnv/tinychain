@@ -629,7 +629,7 @@ class Dense(Tensor, typing.Generic[DType]):
                     return default
 
         args = {"shape": shape, "mean": mean, "std": std}
-        op_ref = ref.Post(URI(cls, "random/normal"), args)
+        op_ref = ref.Post(URI(cls, "random", "normal"), args)
         return RandomNormal(form=op_ref)
 
     @classmethod

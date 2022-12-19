@@ -5,11 +5,17 @@ import tinychain as tc
 from ..process import start_host
 
 
-URI = tc.URI("/test/lib")
+NS = tc.URI("/test_inheritance")
+NAME = "test_lib"
+VERSION = tc.Version("0.0.0")
 
 
 class Foo(tc.app.Model):
-    __uri__ = URI.append("Foo")
+    NS = NS.append(NAME)
+    NAME = "Foo"
+
+    # TODO: replace URI("/class") with URI(tc.app.Model)
+    __uri__ = (tc.URI("/class") + NS).extend(VERSION, NAME)
 
     name = tc.String
 
@@ -22,7 +28,11 @@ class Foo(tc.app.Model):
 
 
 class Bar(Foo):
-    __uri__ = URI.append("Bar")
+    NS = NS.append(NAME)
+    NAME = "Bar"
+
+    # TODO: replace URI("/class") with URI(tc.app.Model)
+    __uri__ = (tc.URI("/class") + NS).extend(VERSION, NAME)
 
     @tc.get
     def greet(self):
@@ -41,9 +51,11 @@ class Baz(Bar, tc.app.Dynamic):
 
 
 class TestLib(tc.app.Library):
-    URI = URI
+    NS = NS
+    NAME = NAME
+    VERSION = VERSION
 
-    __uri__ = URI
+    __uri__ = (tc.URI(tc.app.Library) + NS).extend(NAME, VERSION)
 
     Foo = Foo
     Bar = Bar
@@ -68,19 +80,24 @@ class TestLib(tc.app.Library):
 class InheritanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_inheritance", [TestLib()])
+        cls.host = start_host(str(NS)[1:], [])
+        cls.host.put(tc.URI(tc.app.Library), "test_inheritance", tc.URI(tc.app.Library) + NS)
+        cls.host.put(tc.URI(TestLib)[:-2], NAME, TestLib())
+
+    def _get(self, endpoint):
+        return self.host.get(tc.URI(TestLib).append(endpoint))
 
     def testApp(self):
         expected = "my name is foo"
-        actual = self.host.get("/test/lib/check_foo")
+        actual = self._get("check_foo")
         self.assertEqual(expected, actual)
 
         expected = "their name is bar"
-        actual = self.host.get("/test/lib/check_bar")
+        actual = self._get("check_bar")
         self.assertEqual(expected, actual)
 
         expected = "hello baz x3"
-        actual = self.host.get("/test/lib/check_baz")
+        actual = self._get("check_baz")
         self.assertEqual(expected, actual)
 
     @classmethod

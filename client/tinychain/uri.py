@@ -8,7 +8,7 @@ def validate(name, state=None):
     name = str(name)
     name = str(name[1:]) if name.startswith('$') else name
 
-    if not name or '<' in name or '>' in name or ' ' in name or '$' in name:
+    if not name or '/' in name or '$' in name or '<' in name or '>' in name or ' ' in name:
         if state:
             raise KeyError(f"invalid ID for {state}: {name}")
         else:
@@ -30,6 +30,15 @@ class URI(object):
             URI("/state/scalar/value/none")
     """
 
+    @staticmethod
+    def join(segments):
+        """Join the given segments together to make a new URI."""
+
+        if segments:
+            return URI(segments[0], *segments[1:])
+        else:
+            return URI('/')
+
     def __init__(self, subject, *path):
         path = [validate(segment) for segment in path if str(segment)]
 
@@ -40,8 +49,6 @@ class URI(object):
             return
 
         if isinstance(subject, str):
-            validate(subject)
-
             if subject.startswith("$$"):
                 raise ValueError(f"invalid reference: {subject}")
             elif subject.startswith('$'):
@@ -55,15 +62,19 @@ class URI(object):
     def __add__(self, other):
         other = str(other)
 
+        assert not other.startswith('$')
+
         if other.__contains__("://"):
             raise ValueError(f"cannot append {other} to {self}")
 
         if not other or other == "/":
             return self
-        else:
-            path = list(self._path)
-            path.append(other[1:] if other.startswith('/') or other.startswith('$') else other)
-            return URI(self._subject, *path)
+        elif other.startswith('/'):
+            other = other[1:]
+
+        path = list(self._path)
+        path.extend(other.split('/'))
+        return URI(self._subject, *path)
 
     def __radd__(self, other):
         return URI(other) + str(self)
@@ -73,6 +84,14 @@ class URI(object):
 
     def __eq__(self, other):
         return str(self) == str(other)
+
+    def __getitem__(self, item):
+        segments = self.split()
+
+        if isinstance(item, int):
+            return segments[item]
+        elif isinstance(item, slice):
+            return URI.join(segments[item])
 
     def __gt__(self, other):
         return self.startswith(other) and len(self) > len(other)
@@ -129,29 +148,51 @@ class URI(object):
         else:
             return root
 
-    def append(self, name):
+    def append(self, suffix):
         """
-        Construct a new `URI` beginning with this `URI` and ending with the given `name` segment.
+        Construct a new `URI` beginning with this `URI` and ending with the given `suffix`.
 
         Example:
             .. highlight:: python
             .. code-block:: python
 
-                value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))
+                value = OpRef.Get(URI("http://example.com/myapp").append("value/name"))
         """
 
-        if str(name) in ["", "/"]:
+        suffix = str(suffix)
+
+        if suffix in ["", "/"]:
             return self
 
-        name = validate(name)
+        if "://" in suffix:
+            raise ValueError(f"cannot append {suffix} to {self}")
 
-        if "://" in name:
-            raise ValueError(f"cannot append {name} to {self}")
+        if suffix.startswith('/'):
+            suffix = suffix[1:]
 
         path = list(self._path)
-        path.append(name)
+        path.extend(suffix.split('/'))
 
         return URI(self._subject, *path)
+
+    def extend(self, *segments):
+        validated = []
+        for segment in segments:
+            segment = str(segment)
+
+            if "://" in segment:
+                raise ValueError(f"cannot append {segment} to {self}")
+
+            if segment.startswith('/'):
+                segment = segment[1:]
+
+            if '/' in segment:
+                for subsegment in segment.split('/'):
+                    validated.append(validate(subsegment))
+            else:
+                validated.append(validate(segment))
+
+        return URI(self._subject, *list(self._path) + validated)
 
     def id(self):
         """Return the ID segment of this `URI`, if present."""
@@ -229,6 +270,23 @@ class URI(object):
             i = uri.index("://")
             if i > 0:
                 return uri[:i]
+
+    def split(self):
+        """
+        Split this URI into its individual segments.
+
+        The host (if absolute) or ID (if relative) is treated as the first segment, if present.
+        """
+
+        if self.startswith('/'):
+            segments = str(self)[1:].split('/')
+            segments[0] = f"/{segments[0]}"
+            return segments
+        elif self.startswith('$'):
+            return str(self).split('/')
+        else:
+            host = f"{self.host()}:{self.port()}" if self.port() else self.host()
+            return [f"{self.protocol()}://{host}"] + str(self.path()).split('/')[1:]
 
     def startswith(self, prefix):
         """Return `True` if this :class:`URI` starts with the given `prefix`."""

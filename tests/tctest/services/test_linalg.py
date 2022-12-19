@@ -13,7 +13,7 @@ class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.host = start_host("test_linalg", [])
-        cls.host.put("/lib", "linalg", tc.math.linalg.LinearAlgebra())
+        cls.host.install(tc.math.linalg.LinearAlgebra())
 
     def testQR_1(self):
         self._check_qr(4, 3, 1e-5)

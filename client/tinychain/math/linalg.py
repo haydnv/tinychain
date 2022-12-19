@@ -72,10 +72,11 @@ class PLUFactorization(Map):
 
 
 class LinearAlgebra(Library):
-    URI = URI("/lib/linalg")
+    NS = URI("/")
+    NAME = "linalg"
     VERSION = Version("0.0.0")
 
-    __uri__ = URI + VERSION
+    __uri__ = URI(Library) + NS.append(NAME) + VERSION
 
     # TODO: vectorize to support a `Tensor` containing a batch of matrices
     @post

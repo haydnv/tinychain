@@ -244,6 +244,7 @@ pub trait DirCreateFile<F: File<Inner = <Self::Lock as Dir>::Inner>>: DirRead {
 }
 
 /// A transactional directory
+// TODO: support a key type parameter
 #[async_trait]
 pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// The type of read guard used by this `Dir`

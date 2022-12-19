@@ -16,11 +16,11 @@ use crate::state::State;
 use crate::txn::Txn;
 
 #[derive(Clone)]
-pub struct Owner {
+pub struct Leader {
     mutated: Arc<RwLock<HashSet<Link>>>,
 }
 
-impl Owner {
+impl Leader {
     pub fn new() -> Self {
         Self {
             mutated: Arc::new(RwLock::new(HashSet::new())),
@@ -41,6 +41,7 @@ impl Owner {
 
         if mutated.is_empty() {
             debug!("no dependencies to commit");
+            return Ok(());
         }
 
         let mutated = mutated.drain();
@@ -62,7 +63,7 @@ impl Owner {
         }
 
         let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dependent| {
-            debug!("sending commit message to dependency at {}", dependent);
+            debug!("sending rollback message to dependency at {}", dependent);
             txn.delete(dependent.clone(), Value::default())
                 .map(|result| (dependent, result))
         }));

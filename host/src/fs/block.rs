@@ -16,6 +16,7 @@ use tc_tensor::Array;
 
 use crate::chain::ChainBlock;
 use crate::cluster::library;
+use crate::object::InstanceClass;
 
 use super::file_ext;
 
@@ -24,6 +25,7 @@ use super::file_ext;
 pub enum CacheBlock {
     BTree(Node),
     Chain(ChainBlock),
+    Class(InstanceClass),
     Library(library::Version),
     #[cfg(feature = "tensor")]
     Tensor(Array),
@@ -77,6 +79,7 @@ impl freqfs::FileLoad for CacheBlock {
         match self {
             Self::BTree(node) => persist(node, file).await,
             Self::Chain(block) => persist(block, file).await,
+            Self::Class(class) => persist(class, file).await,
             Self::Library(library) => persist(library, file).await,
             #[cfg(feature = "tensor")]
             Self::Tensor(array) => persist(array, file).await,
@@ -86,6 +89,7 @@ impl freqfs::FileLoad for CacheBlock {
 
 as_type!(CacheBlock, BTree, Node);
 as_type!(CacheBlock, Chain, ChainBlock);
+as_type!(CacheBlock, Class, InstanceClass);
 as_type!(CacheBlock, Library, library::Version);
 #[cfg(feature = "tensor")]
 as_type!(CacheBlock, Tensor, Array);
