@@ -4,7 +4,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use futures::future::{FutureExt, TryFutureExt};
-use log::{debug, warn};
+use log::debug;
 use safecast::CastInto;
 
 use tc_error::*;
@@ -230,19 +230,13 @@ where
 }
 
 #[async_trait]
-impl Replica for Dir<Class> {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("cluster::Dir<Class>::state"))
-    }
-
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        warn!("not implemented: cluster::Dir::<Class>::replicate");
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Replica for Dir<Library> {
+impl<T: DirItem + Route + fmt::Display> Replica for Dir<T>
+where
+    BlockChain<T>: Replica,
+    DirEntry<T>: Clone,
+    Cluster<Self>: Clone,
+    Self: Persist<fs::Dir, Txn = Txn, Schema = Link> + Route + fmt::Display,
+{
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let contents = self.contents.read(txn_id).await?;
         let mut state = Map::<State>::new();
