@@ -180,13 +180,10 @@ where
         item: Option<Item>,
     ) -> TCResult<()>
     where
-        T::Version: From<Item> + fmt::Display,
         State: From<Item>,
     {
         if let Some(item) = item {
-            let item = item.into();
             let cluster = self.dir.create_item(txn, name, link.clone()).await?;
-            debug!("created new cluster directory item {}", item);
 
             let replicate_from_this_host = {
                 if cluster.link().host().is_none() {
@@ -211,7 +208,7 @@ where
                 txn.put(leader, Value::default(), link.into()).await?;
 
                 cluster
-                    .put(&txn, &[], VersionNumber::default().into(), item)
+                    .put(&txn, &[], VersionNumber::default().into(), item.into())
                     .await
             } else {
                 cluster
@@ -281,7 +278,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new cluster {} at {}", value, key);
+                debug!("{} <- {}: {}", self.dir, key, value);
 
                 let name = key.try_cast_into(|v| {
                     TCError::bad_request("invalid path segment for cluster directory entry", v)
@@ -294,13 +291,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                     ))?;
                 }
 
-                let class = InstanceClass::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid Class", v)
-                })?;
-
-                let (link, mut lib) = class.into_inner();
-                let link =
-                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &lib))?;
+                let (link, lib) = LibraryHandler::lib_version(value)?;
 
                 if link.path().len() <= 1 {
                     return Err(TCError::bad_request(
@@ -337,24 +328,9 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                         .await;
                 }
 
-                let deps = lib
-                    .iter()
-                    .filter(|(_, scalar)| scalar.is_ref())
-                    .map(|(name, _)| name.clone())
-                    .collect::<Vec<Id>>();
+                let (lib, classes) = LibraryHandler::lib_classes(lib)?;
 
-                let classes = deps
-                    .into_iter()
-                    .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
-                    .map(|(name, dep)| {
-                        InstanceClass::try_cast_from(dep, |s| {
-                            TCError::bad_request("unable to resolve Library dependency", s)
-                        })
-                        .map(|class| (name, State::Object(class.into())))
-                    })
-                    .collect::<TCResult<Map<State>>>()?;
-
-                if txn.is_leader(parent_dir_path) {
+                if !classes.is_empty() && txn.is_leader(parent_dir_path) {
                     txn.put(
                         class_dir_path.into(),
                         name.clone().into(),
@@ -363,7 +339,10 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                     .await?;
                 }
 
-                self.create_item_or_dir(txn, link, name, Some(lib)).await
+                let version = InstanceClass::anonymous(Some(link.clone()), lib);
+
+                self.create_item_or_dir(txn, link, name, Some(version))
+                    .await
             })
         }))
     }
@@ -563,6 +542,38 @@ impl<'a> LibraryHandler<'a> {
     fn new(lib: &'a Library, path: &'a [PathSegment]) -> Self {
         Self { lib, path }
     }
+
+    fn lib_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Map<InstanceClass>)> {
+        let deps = lib
+            .iter()
+            .filter(|(_, scalar)| scalar.is_ref())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<Id>>();
+
+        let classes = deps
+            .into_iter()
+            .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
+            .map(|(name, dep)| {
+                InstanceClass::try_cast_from(dep, |s| {
+                    TCError::bad_request("unable to resolve Library dependency", s)
+                })
+                .map(|class| (name, class))
+            })
+            .collect::<TCResult<Map<InstanceClass>>>()?;
+
+        Ok((lib, classes))
+    }
+
+    fn lib_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
+        let class =
+            InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))?;
+
+        let (link, version) = class.into_inner();
+        let link =
+            link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
+
+        Ok((link, version))
+    }
 }
 
 impl<'a> Handler<'a> for LibraryHandler<'a> {
@@ -594,11 +605,22 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
         Some(Box::new(|txn, key, value| {
             if self.path.is_empty() {
                 Box::pin(async move {
-                    let number =
-                        key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+                    debug!("{} <- {}: {}", self.lib, key, value);
 
-                    let version = value
-                        .try_cast_into(|s| TCError::bad_request("invalid Library version", s))?;
+                    let number = VersionNumber::try_cast_from(key, |v| {
+                        TCError::bad_request("invalid version number", v)
+                    })?;
+
+                    let (link, version) = Self::lib_version(value)?;
+                    let (version, classes) = Self::lib_classes(version)?;
+
+                    if !classes.is_empty() && txn.is_leader(link.path()) {
+                        let mut class_path = TCPathBuf::from(CLASS);
+                        class_path.extend(link.path()[1..].iter().cloned());
+
+                        txn.put(class_path.into(), number.clone().into(), classes.into())
+                            .await?;
+                    }
 
                     self.lib.create_version(*txn.id(), number, version).await
                 })

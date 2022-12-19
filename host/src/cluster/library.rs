@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
@@ -15,7 +14,6 @@ use tc_value::Version as VersionNumber;
 use tcgeneric::{Map, PathSegment};
 
 use crate::fs;
-use crate::object::Object;
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
@@ -46,29 +44,6 @@ impl TryCastFrom<Scalar> for Version {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         Map::<Scalar>::opt_cast_from(scalar).map(Self::from)
-    }
-}
-
-impl TryCastFrom<State> for Version {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Map(map) => map.values().all(Scalar::can_cast_from),
-            State::Object(Object::Class(_)) => true,
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Map(map) => BTreeMap::opt_cast_from(map).map(Map::from).map(Self::from),
-            State::Object(Object::Class(class)) => {
-                let (_extends, proto) = class.into_inner();
-                Some(Self::from(proto))
-            }
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
     }
 }
 
@@ -159,7 +134,7 @@ impl Library {
 
 #[async_trait]
 impl DirItem for Library {
-    type Version = Version;
+    type Version = Map<Scalar>;
 
     async fn create_version(
         &self,
@@ -177,7 +152,9 @@ impl DirItem for Library {
             )))
         } else {
             info!("create new library version {}", number);
-            file.create_block(number, version, 0).map_ok(|_| ()).await
+            file.create_block(number, version.into(), 0)
+                .map_ok(|_| ())
+                .await
         }
     }
 }
