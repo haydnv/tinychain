@@ -1,11 +1,12 @@
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, FileRead, Persist};
-use tc_transact::{Transact, TxnId};
+use tc_transact::fs::*;
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, Map};
 
@@ -22,6 +23,22 @@ pub struct Version {
 }
 
 impl Version {
+    fn with_file(classes: fs::File<Id, InstanceClass>) -> Self {
+        Self { classes }
+    }
+
+    async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
+        let file = self.classes.read(txn_id).await?;
+
+        let mut classes = Map::new();
+        for block_id in file.block_ids() {
+            let class = file.read_block(block_id).await?;
+            classes.insert(block_id.clone().into(), class.clone().into());
+        }
+
+        Ok(State::Map(classes))
+    }
+
     pub async fn get_class(
         &self,
         txn_id: TxnId,
@@ -44,20 +61,47 @@ pub struct Class {
 }
 
 impl Class {
-    pub async fn latest(&self, _txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        Err(TCError::not_implemented("cluster::Class::latest"))
+    pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
+        let dir = self.dir.read(txn_id).await?;
+        if dir.is_empty() {
+            Ok(None)
+        } else {
+            let zero = VersionNumber::default().into();
+            dir.file_names()
+                .fold(&zero, Ord::max)
+                .as_str()
+                .parse()
+                .map(Some)
+        }
     }
 
-    pub async fn get_version(
-        &self,
-        _txn_id: TxnId,
-        _number: &VersionNumber,
-    ) -> TCResult<fs::BlockReadGuard<Version>> {
-        Err(TCError::not_implemented("cluster::Class::get_version"))
+    pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
+        let dir = self.dir.read(txn_id).await?;
+        if let Some(file) = dir.get_file(&number.clone().into())? {
+            Ok(Version::with_file(file))
+        } else {
+            Err(TCError::not_found(number))
+        }
     }
 
-    pub async fn to_state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("cluster::Class::get_version"))
+    pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
+        let dir = self.dir.read(txn_id).await?;
+
+        let mut versions = Map::new();
+        for (number, file) in dir.iter() {
+            let file = match file {
+                fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file),
+                other => Err(TCError::internal(format!(
+                    "class directory contains invalid file: {}",
+                    other
+                ))),
+            }?;
+
+            let version = Version::with_file(file).to_state(txn_id).await?;
+            versions.insert(number.clone(), version);
+        }
+
+        Ok(State::Map(versions))
     }
 }
 
@@ -67,11 +111,19 @@ impl DirItem for Class {
 
     async fn create_version(
         &self,
-        _txn_id: TxnId,
-        _number: VersionNumber,
-        _version: Self::Version,
+        txn_id: TxnId,
+        number: VersionNumber,
+        version: Self::Version,
     ) -> TCResult<()> {
-        Err(TCError::not_implemented("Class::create_version"))
+        let mut dir = self.dir.write(txn_id).await?;
+        let file = dir.create_file(number.into())?;
+        let mut blocks = file.write(txn_id).await?;
+
+        for (name, class) in version {
+            blocks.create_block(name, class, 0).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -93,8 +145,17 @@ impl Persist<fs::Dir> for Class {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(_txn: &Self::Txn, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {
-        Err(TCError::not_implemented("cluster::Class::create"))
+    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        let contents = dir.read(*txn.id()).await?;
+        if contents.is_empty() {
+            Ok(Self { dir })
+        } else {
+            Err(TCError::unsupported(
+                "cannot create a new Class cluster with a non-empty directory",
+            ))
+        }
     }
 
     async fn load(_txn: &Self::Txn, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {

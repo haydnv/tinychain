@@ -1,19 +1,21 @@
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
 use log::{debug, info};
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
-use tcgeneric::Tuple;
+use tcgeneric::{TCPathBuf, Tuple};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{class, library, Class, Cluster, DirItem, Legacy, Library, Replica, REPLICAS};
 use crate::object::{InstanceClass, Object};
 use crate::route::*;
+use crate::scalar::{OpRefType, Scalar};
 use crate::state::State;
+use crate::CLASS;
 
 pub struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
@@ -176,10 +178,15 @@ where
         link: Link,
         name: PathSegment,
         item: Option<Item>,
-    ) -> TCResult<()> where T::Version: From<Item>, State: From<Item> {
+    ) -> TCResult<()>
+    where
+        T::Version: From<Item> + fmt::Display,
+        State: From<Item>,
+    {
         if let Some(item) = item {
+            let item = item.into();
             let cluster = self.dir.create_item(txn, name, link.clone()).await?;
-            debug!("created new cluster directory item");
+            debug!("created new cluster directory item {}", item);
 
             let replicate_from_this_host = {
                 if cluster.link().host().is_none() {
@@ -192,16 +199,19 @@ where
 
             if replicate_from_this_host {
                 let txn = cluster.lead(txn.clone()).await?;
-                let owner = txn
-                    .owner()
-                    .cloned()
-                    .ok_or_else(|| TCError::internal("ownerless transaction"))?;
+                let dir_path = TCPathBuf::from(link.path()[..link.path().len() - 1].to_vec());
+                debug_assert_eq!(dir_path.len(), link.path().len() - 1);
 
-                txn.put(owner, Value::default(), cluster.link().clone().into())
-                    .await?;
+                let leader = if let Some(host) = link.host() {
+                    (host.clone(), dir_path).into()
+                } else {
+                    dir_path.into()
+                };
+
+                txn.put(leader, Value::default(), link.into()).await?;
 
                 cluster
-                    .put(&txn, &[], VersionNumber::default().into(), item.into())
+                    .put(&txn, &[], VersionNumber::default().into(), item)
                     .await
             } else {
                 cluster
@@ -217,6 +227,42 @@ where
             cluster
                 .add_replica(txn, txn.link(cluster.link().path().clone()))
                 .await
+        }
+    }
+
+    fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
+        self: Box<Self>,
+        method: OpRefType,
+    ) -> Box<
+        dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
+            + Send
+            + 'a,
+    >
+    where
+        'b: 'a,
+    {
+        if self.path.is_empty() {
+            Box::new(move |_, _| {
+                Box::pin(future::ready(Err(TCError::method_not_allowed(
+                    method,
+                    self.dir,
+                    TCPath::from(self.path),
+                ))))
+            })
+        } else {
+            Box::new(move |txn, _: A| {
+                Box::pin(async move {
+                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
+                        Err(TCError::internal(format!(
+                            "bad routing for {} in {}",
+                            TCPath::from(self.path),
+                            self.dir
+                        )))
+                    } else {
+                        Err(TCError::not_found(&self.path[0]))
+                    }
+                })
+            })
         }
     }
 }
@@ -238,7 +284,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 debug!("create new cluster {} at {}", value, key);
 
                 let name = key.try_cast_into(|v| {
-                    TCError::bad_request("invalid path segment for directory entry", v)
+                    TCError::bad_request("invalid path segment for cluster directory entry", v)
                 })?;
 
                 if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
@@ -252,21 +298,88 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                     TCError::bad_request("invalid Class", v)
                 })?;
 
-                let (link, lib) = class.into_inner();
+                let (link, mut lib) = class.into_inner();
                 let link =
                     link.ok_or_else(|| TCError::bad_request("missing cluster link for", &lib))?;
 
                 if link.path().len() <= 1 {
                     return Err(TCError::bad_request(
-                        "cannot create a new cluster at {}",
+                        "cannot create a new cluster at",
                         link.path(),
                     ));
                 }
 
-                let item = if lib.is_empty() { None } else { Some(lib) };
-                self.create_item_or_dir(txn, link, name, item).await
+                let mut class_path = TCPathBuf::from(CLASS);
+                class_path.extend(link.path()[1..].iter().cloned());
+
+                let class_link: Link = if let Some(host) = link.host() {
+                    (host.clone(), class_path.clone()).into()
+                } else {
+                    class_path.clone().into()
+                };
+
+                let class_dir_path = TCPathBuf::from(class_path[..class_path.len() - 1].to_vec());
+
+                let parent_dir_path = &link.path()[..link.path().len() - 1];
+
+                if lib.is_empty() {
+                    if txn.is_leader(parent_dir_path) {
+                        txn.put(
+                            class_dir_path.into(),
+                            name.clone().into(),
+                            class_link.into(),
+                        )
+                        .await?;
+                    }
+
+                    return self
+                        .create_item_or_dir::<Map<Scalar>>(txn, link, name, None)
+                        .await;
+                }
+
+                let deps = lib
+                    .iter()
+                    .filter(|(_, scalar)| scalar.is_ref())
+                    .map(|(name, _)| name.clone())
+                    .collect::<Vec<Id>>();
+
+                let classes = deps
+                    .into_iter()
+                    .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
+                    .map(|(name, dep)| {
+                        InstanceClass::try_cast_from(dep, |s| {
+                            TCError::bad_request("unable to resolve Library dependency", s)
+                        })
+                        .map(|class| (name, State::Object(class.into())))
+                    })
+                    .collect::<TCResult<Map<State>>>()?;
+
+                if txn.is_leader(parent_dir_path) {
+                    txn.put(
+                        class_dir_path.into(),
+                        name.clone().into(),
+                        (class_link, classes).cast_into(),
+                    )
+                    .await?;
+                }
+
+                self.create_item_or_dir(txn, link, name, Some(lib)).await
             })
         }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }
 
@@ -286,34 +399,49 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
             Box::pin(async move {
                 debug!("create new cluster {} at {}", value, key);
 
-                let name = key.try_cast_into(|v| {
-                    TCError::bad_request("invalid path segment for directory entry", v)
+                let name = PathSegment::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid path segment for class directory entry", v)
                 })?;
 
-                if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
-                    return Err(TCError::bad_request(
-                        "there is already a directory entry at",
-                        name,
-                    ))?;
-                }
+                let (link, classes): (Link, Option<Map<InstanceClass>>) =
+                    if Link::can_cast_from(&value) {
+                        let link = value.opt_cast_into().expect("class dir link");
+                        (link, None)
+                    } else {
+                        let (link, classes): (Link, Map<State>) = value.try_cast_into(|s| {
+                            TCError::bad_request("expected a tuple (Link, (Class...)) but found", s)
+                        })?;
 
-                let classes = value.try_into_map(|s| {
-                    TCError::bad_request("expected a map of classes but found", s)
-                })?;
+                        let classes = classes
+                            .into_iter()
+                            .map(|(name, class)| {
+                                InstanceClass::try_cast_from(class, |s| {
+                                    TCError::bad_request("invalid Class definition", s)
+                                })
+                                .map(|class| (name, class))
+                            })
+                            .collect::<TCResult<_>>()?;
 
-                let _classes = classes
-                    .into_iter()
-                    .map(|(name, class)| {
-                        InstanceClass::try_cast_from(class, |s| {
-                            TCError::bad_request("expected a Class but found", s)
-                        })
-                        .map(|class| (name, class))
-                    })
-                    .collect::<TCResult<Map<InstanceClass>>>()?;
+                        (link, Some(classes))
+                    };
 
-                Err(TCError::not_implemented("create new class set cluster"))
+                self.create_item_or_dir(txn, link, name, classes).await
             })
         }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }
 
@@ -398,6 +526,7 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
                     let version = value.try_into_map(|s| {
                         TCError::bad_request("expected a Map of Classes but found", s)
                     })?;
+
                     let version = version
                         .into_iter()
                         .map(|(name, class)| {

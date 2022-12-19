@@ -141,11 +141,7 @@ impl Library {
         number: &VersionNumber,
     ) -> TCResult<fs::BlockReadGuard<Version>> {
         let file = self.file.read(txn_id).await?;
-        if file.is_empty() {
-            Err(TCError::internal("library has no versions"))
-        } else {
-            file.read_block(number).await
-        }
+        file.read_block(number).await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {

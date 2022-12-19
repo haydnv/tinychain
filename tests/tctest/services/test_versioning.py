@@ -61,29 +61,29 @@ class LibraryVersionTests(unittest.TestCase):
         hosts[0].install(TestLibV0())
         print()
 
-        # hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
-        #
-        # for i in range(len(hosts)):
-        #     self.assertEqual(hosts[i].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+        hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
 
-        # hosts[2].stop()
-        #
-        # print()
-        # print("host stopped")
-        # print()
-        #
-        # hosts[2].start()
-        #
-        # print()
-        # print("host started")
-        # print()
-        #
-        # for host in hosts:
-        #     self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
-        #
-        # hosts[1].update(TestLibV1())
-        #
-        # hosts.append(start_host(NAME, [], http_port=8706, replicate=LEAD))
-        #
-        # for host in hosts:
-        #     self.assertEqual(host.get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")
+        for i in range(len(hosts)):
+            self.assertEqual(hosts[i].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+
+        hosts[2].stop()
+
+        print()
+        print("host stopped")
+        print()
+
+        hosts[2].start()
+
+        print()
+        print("host started")
+        print()
+
+        for host in hosts:
+            self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+
+        hosts[1].update(TestLibV1())
+
+        hosts.append(start_host(NAME, [], http_port=8706, replicate=LEAD))
+
+        for host in hosts:
+            self.assertEqual(host.get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")

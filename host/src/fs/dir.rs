@@ -226,6 +226,11 @@ where
     L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
 {
     // Iterate over the contents of this directory
+    pub fn file_names(&self) -> tc_transact::lock::Keys<PathSegment> {
+        self.contents.keys()
+    }
+
+    // Iterate over the contents of this directory
     pub fn iter(&self) -> tc_transact::lock::Iter<PathSegment, DirEntry> {
         self.contents.iter()
     }

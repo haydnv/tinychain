@@ -21,6 +21,7 @@ use tcgeneric::{label, Label, Map};
 use crate::cluster::Replica;
 use crate::collection::CollectionBase;
 use crate::fs;
+use crate::object::InstanceClass;
 use crate::route::{Public, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
@@ -65,12 +66,29 @@ where
 
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Class> {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("BlockChain::<Class>::state"))
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        self.subject.to_state(txn_id).await
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("BlockChain::<Class>::state"))
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let state = txn.get(source.append(CHAIN), Value::default()).await?;
+        let classes: Map<Map<InstanceClass>> =
+            state.try_cast_into(|s| TCError::bad_request("invalid class version history", s))?;
+
+        // TODO: verify equality of existing versions
+        let latest_version = self.subject.latest(*txn.id()).await?;
+        for (number, version) in classes {
+            let number: VersionNumber = number.as_str().parse()?;
+            if let Some(latest) = latest_version {
+                if number > latest {
+                    self.put(txn, &[], number.into(), version.into()).await?;
+                }
+            } else {
+                self.put(txn, &[], number.into(), version.into()).await?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -85,6 +103,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
         let library: Map<Map<Scalar>> =
             state.try_cast_into(|s| TCError::bad_request("invalid library version history", s))?;
 
+        // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
         for (number, version) in library {
             let number: VersionNumber = number.as_str().parse()?;

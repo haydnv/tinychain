@@ -522,7 +522,11 @@ impl From<Link> for State {
 
 impl From<Map<InstanceClass>> for State {
     fn from(map: Map<InstanceClass>) -> Self {
-        Self::Map(map.into_iter().map(|(id, class)| (id, State::from(class))).collect())
+        Self::Map(
+            map.into_iter()
+                .map(|(id, class)| (id, State::from(class)))
+                .collect(),
+        )
     }
 }
 
@@ -991,7 +995,6 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
 impl TryCastFrom<State> for InstanceClass {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
@@ -1000,14 +1003,6 @@ impl TryCastFrom<State> for InstanceClass {
 
     fn opt_cast_from(state: State) -> Option<InstanceClass> {
         match state {
-            State::Map(map) => {
-                let proto = map
-                    .into_iter()
-                    .map(|(id, state)| Scalar::opt_cast_from(state).map(|scalar| (id, scalar)))
-                    .collect::<Option<Map<Scalar>>>()?;
-
-                Some(InstanceClass::anonymous(None, proto))
-            }
             State::Object(Object::Class(class)) => Some(class),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
@@ -1087,6 +1082,24 @@ impl TryCastFrom<State> for Value {
     }
 }
 
+impl TryCastFrom<State> for Link {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Object(Object::Class(class)) => Self::can_cast_from(class),
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Object(Object::Class(class)) => Self::opt_cast_from(class).map(Self::from),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar).map(Self::from),
+            _ => None,
+        }
+    }
+}
+
 macro_rules! from_scalar {
     ($t:ty) => {
         impl TryCastFrom<State> for $t {
@@ -1111,7 +1124,6 @@ from_scalar!(Bytes);
 from_scalar!(Float);
 from_scalar!(Id);
 from_scalar!(IdRef);
-from_scalar!(Link);
 from_scalar!(Number);
 from_scalar!(OpDef);
 from_scalar!(OpRef);

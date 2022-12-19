@@ -24,8 +24,8 @@ const PATH: PathLabel = path_label(&["state", "class"]);
 /// A user-defined class.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
-    extends: Option<Link>,
-    link: Option<Link>,
+    extends: Option<Link>, // TODO: this should just be a Link with a default value, not an Option
+    link: Option<Link>,    // TODO: DELETE
     proto: Map<Scalar>,
 }
 
@@ -200,6 +200,23 @@ impl TryCastFrom<Scalar> for InstanceClass {
     }
 }
 
+impl CastFrom<InstanceClass> for Scalar {
+    fn cast_from(class: InstanceClass) -> Self {
+        let extends = class
+            .extends
+            .unwrap_or(class.link.unwrap_or(ObjectType::Class.path().into()));
+
+        if class.proto.is_empty() {
+            Self::Value(extends.into())
+        } else {
+            Self::Ref(Box::new(TCRef::Op(OpRef::Post((
+                extends.into(),
+                class.proto,
+            )))))
+        }
+    }
+}
+
 impl TryCastFrom<Value> for InstanceClass {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -242,25 +259,7 @@ impl TryCastFrom<InstanceClass> for StateType {
     }
 }
 
-impl TryCastFrom<InstanceClass> for Scalar {
-    fn can_cast_from(class: &InstanceClass) -> bool {
-        class.extends.is_some()
-    }
-
-    fn opt_cast_from(class: InstanceClass) -> Option<Self> {
-        let extends = class.extends?;
-        if class.proto.is_empty() {
-            Some(Self::Value(extends.into()))
-        } else {
-            Some(Self::Ref(Box::new(TCRef::Op(OpRef::Post((
-                extends.into(),
-                class.proto,
-            ))))))
-        }
-    }
-}
-
-impl TryCastFrom<InstanceClass> for Value {
+impl TryCastFrom<InstanceClass> for Link {
     fn can_cast_from(class: &InstanceClass) -> bool {
         class.proto.is_empty() && class.extends.is_some()
     }
@@ -272,6 +271,16 @@ impl TryCastFrom<InstanceClass> for Value {
         } else {
             None
         }
+    }
+}
+
+impl TryCastFrom<InstanceClass> for Value {
+    fn can_cast_from(class: &InstanceClass) -> bool {
+        Link::can_cast_from(class)
+    }
+
+    fn opt_cast_from(class: InstanceClass) -> Option<Self> {
+        Link::opt_cast_from(class).map(Self::Link)
     }
 }
 
@@ -312,16 +321,6 @@ impl<'en> en::IntoStream<'en> for InstanceClass {
     }
 }
 
-impl From<InstanceClass> for Link {
-    fn from(ic: InstanceClass) -> Link {
-        if let Some(link) = ic.extends {
-            link
-        } else {
-            TCPathBuf::from(PATH).into()
-        }
-    }
-}
-
 impl fmt::Debug for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
@@ -333,9 +332,23 @@ impl fmt::Display for InstanceClass {
         if let Some(link) = &self.link {
             write!(f, "class {}", link)
         } else if let Some(link) = &self.extends {
-            write!(f, "anonymous subclass of {}", link)
+            #[cfg(debug_assertions)]
+            {
+                write!(f, "anonymous subclass of {}: {}", link, self.proto)
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                write!(f, "anonymous subclass of {}", link)
+            }
         } else {
-            f.write_str("Object")
+            #[cfg(debug_assertions)]
+            {
+                write!(f, "anonymous class: {}", self.proto)
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                f.write_str("anonymous class")
+            }
         }
     }
 }

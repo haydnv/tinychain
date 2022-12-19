@@ -72,6 +72,8 @@ class Docker(tc.host.Local.Process):
 
 # TODO: remove the `app_or_library` parameter
 def start_docker(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1., **flags):
+    # TODO: rename `name` to `ns` and assert ns.startswith('/')
+
     if not os.path.exists(DOCKERFILE):
         raise RuntimeError(
             f"Dockerfile at {DOCKERFILE} not found--use the TC_DOCKER environment variable to set a different path")
@@ -170,6 +172,8 @@ class Local(tc.host.Local.Process):
 
 # TODO: remove the `app_or_library` parameter
 def start_local_host(name, app_or_library=[], overwrite=True, host_uri=None, wait_time=1, **flags):
+    # TODO: rename `name` to `ns` and assert ns.startswith('/')
+
     if not os.path.isfile(TC_PATH):
         hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"
         raise RuntimeError(f"invalid executable path: {TC_PATH} ({hint})")

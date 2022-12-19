@@ -395,6 +395,7 @@ where
         }
     }
 
+    // TODO: make `size_hint` an `Option` and use `DeepSizeOf` to calculate an initial estimate
     async fn create_block(
         &mut self,
         block_id: K,
