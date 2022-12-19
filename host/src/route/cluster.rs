@@ -525,6 +525,28 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
             })
         }))
     }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, params| {
+            Box::pin(async move {
+                if self.path.len() < 2 {
+                    return Err(TCError::method_not_allowed(
+                        OpRefType::Post,
+                        self.class,
+                        TCPath::from(self.path),
+                    ));
+                }
+
+                let number = self.path[0].as_str().parse()?;
+                let version = self.class.get_version(*txn.id(), &number).await?;
+                let class = version.get_class(*txn.id(), &self.path[1]).await?;
+                class.post(txn, &self.path[2..], params).await
+            })
+        }))
+    }
 }
 
 impl Route for Class {
