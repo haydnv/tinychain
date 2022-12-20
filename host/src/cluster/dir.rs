@@ -52,7 +52,7 @@ pub trait DirItem:
 
     async fn create_version(
         &self,
-        txn_id: TxnId,
+        txn: &Txn,
         number: VersionNumber,
         version: Self::Version,
     ) -> TCResult<()>;

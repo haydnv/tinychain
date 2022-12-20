@@ -126,6 +126,7 @@ where
         Some(version.read(*self.id()))
     }
 
+    // TODO: this should iterate through borrowed values
     fn iter(&self) -> Iter<K, V> {
         Iter {
             txn_id: *self.id(),

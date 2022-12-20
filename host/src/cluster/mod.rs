@@ -33,11 +33,14 @@ pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
+pub use service::Service;
 
 pub mod class;
 pub mod dir;
-mod leader;
 pub mod library;
+pub mod service;
+
+mod leader;
 mod load; // TODO: delete
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.

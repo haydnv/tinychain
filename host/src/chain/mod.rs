@@ -11,7 +11,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::{CopyFrom, Dir, Persist};
 use tc_transact::{IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -233,6 +233,31 @@ where
         match self {
             Self::Block(chain) => chain.dir(),
             Self::Sync(chain) => chain.dir(),
+        }
+    }
+}
+
+#[async_trait]
+impl<T> CopyFrom<fs::Dir, Chain<T>> for Chain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public,
+{
+    async fn copy_from(
+        txn: &<Self as Persist<fs::Dir>>::Txn,
+        store: fs::Store,
+        instance: Chain<T>,
+    ) -> TCResult<Self> {
+        match instance {
+            Chain::Block(chain) => {
+                BlockChain::copy_from(txn, store, chain)
+                    .map_ok(Chain::Block)
+                    .await
+            }
+            Chain::Sync(chain) => {
+                SyncChain::copy_from(txn, store, chain)
+                    .map_ok(Chain::Sync)
+                    .await
+            }
         }
     }
 }
