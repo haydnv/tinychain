@@ -125,13 +125,13 @@ impl Replica for BlockChain<crate::cluster::Library> {
 }
 
 #[async_trait]
-impl Replica for BlockChain<crate::cluster::Dir<crate::cluster::Library>> {
-    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        self.subject.state(txn_id).await
+impl Replica for BlockChain<crate::cluster::Service> {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        Err(TCError::not_implemented("replication state of a Service"))
     }
 
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        self.subject.replicate(txn, source).await
+    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
+        Err(TCError::not_implemented("replicate a Service"))
     }
 }
 

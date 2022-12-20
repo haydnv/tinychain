@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt;
 
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
@@ -78,7 +79,7 @@ impl Version {
         Ok(Self { attrs })
     }
 
-    pub fn attr(&self, name: &Id) -> Option<&Attr> {
+    pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
     }
 }
@@ -168,11 +169,27 @@ impl Transact for Version {
     }
 }
 
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a hosted Service")
+    }
+}
+
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,
     schema: fs::File<VersionNumber, super::library::Version>,
     versions: TxnMapLock<VersionNumber, Version>,
+}
+
+impl Service {
+    pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
+        let versions = self.versions.read(txn_id).await?;
+
+        versions
+            .get(number)
+            .ok_or_else(|| TCError::not_found(number))
+    }
 }
 
 #[async_trait]
@@ -325,5 +342,11 @@ impl Persist<fs::Dir> for Service {
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
         self.dir.clone().into_inner()
+    }
+}
+
+impl fmt::Display for Service {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a versioned hosted Service")
     }
 }

@@ -15,6 +15,7 @@ use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map, PathSegment};
 
 use crate::chain::BlockChain;
+use crate::cluster::Service;
 use crate::fs;
 use crate::route::Route;
 use crate::state::State;
@@ -393,6 +394,37 @@ impl Persist<fs::Dir> for Dir<Library> {
             cache: tc_transact::fs::Dir::into_inner(dir),
             contents: TxnMapLock::with_contents("service directory", contents),
         })
+    }
+
+    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
+        self.cache.clone()
+    }
+}
+
+#[async_trait]
+impl Persist<fs::Dir> for Dir<Service> {
+    type Txn = Txn;
+    type Schema = Link;
+
+    async fn create(_txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::new("service directory"),
+        })
+    }
+
+    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
+        let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
+        let _lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+
+        // Ok(Self {
+        //     cache: tc_transact::fs::Dir::into_inner(dir),
+        //     contents: TxnMapLock::with_contents("service directory", contents),
+        // })
+        Err(TCError::not_implemented("load a service directory"))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {

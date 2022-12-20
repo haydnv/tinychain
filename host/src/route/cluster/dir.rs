@@ -8,7 +8,7 @@ use tcgeneric::TCPathBuf;
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
-use crate::cluster::{Class, Cluster, DirItem, Library, Replica};
+use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
 use crate::route::*;
 use crate::scalar::OpRefType;
 use crate::state::State;
@@ -26,11 +26,7 @@ impl<'a, T> DirHandler<'a, T> {
 
 impl<'a, T> DirHandler<'a, T>
 where
-    T: DirItem,
-    Dir<T>: DirCreateItem<T> + DirCreate + Replica,
     DirEntry<T>: Route + Clone + fmt::Display,
-    BlockChain<T>: Replica,
-    Cluster<BlockChain<T>>: Public,
 {
     pub(super) fn get_entry<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -45,7 +41,56 @@ where
             })
         }))
     }
+}
 
+impl<'a, T> DirHandler<'a, T>
+where
+    T: DirItem,
+{
+    pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
+        self: Box<Self>,
+        method: OpRefType,
+    ) -> Box<
+        dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
+            + Send
+            + 'a,
+    >
+    where
+        'b: 'a,
+    {
+        if self.path.is_empty() {
+            Box::new(move |_, _| {
+                Box::pin(future::ready(Err(TCError::method_not_allowed(
+                    method,
+                    self.dir,
+                    TCPath::from(self.path),
+                ))))
+            })
+        } else {
+            Box::new(move |txn, _: A| {
+                Box::pin(async move {
+                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
+                        Err(TCError::internal(format!(
+                            "bad routing for {} in {}",
+                            TCPath::from(self.path),
+                            self.dir
+                        )))
+                    } else {
+                        Err(TCError::not_found(&self.path[0]))
+                    }
+                })
+            })
+        }
+    }
+}
+
+impl<'a, T> DirHandler<'a, T>
+where
+    T: DirItem,
+    Dir<T>: DirCreateItem<T> + DirCreate + Replica,
+    BlockChain<T>: Replica,
+    Cluster<BlockChain<T>>: Public,
+{
     pub(super) async fn create_item_or_dir<Item>(
         &self,
         txn: &Txn,
@@ -100,42 +145,6 @@ where
                 .await
         }
     }
-
-    pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
-        self: Box<Self>,
-        method: OpRefType,
-    ) -> Box<
-        dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
-            + Send
-            + 'a,
-    >
-    where
-        'b: 'a,
-    {
-        if self.path.is_empty() {
-            Box::new(move |_, _| {
-                Box::pin(future::ready(Err(TCError::method_not_allowed(
-                    method,
-                    self.dir,
-                    TCPath::from(self.path),
-                ))))
-            })
-        } else {
-            Box::new(move |txn, _: A| {
-                Box::pin(async move {
-                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
-                        Err(TCError::internal(format!(
-                            "bad routing for {} in {}",
-                            TCPath::from(self.path),
-                            self.dir
-                        )))
-                    } else {
-                        Err(TCError::not_found(&self.path[0]))
-                    }
-                })
-            })
-        }
-    }
 }
 
 struct EntriesHandler<'a, T> {
@@ -178,6 +187,7 @@ macro_rules! route_dir {
 
 route_dir!(Class);
 route_dir!(Library);
+route_dir!(Service);
 
 impl<T> Route for DirEntry<T>
 where

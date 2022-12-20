@@ -6,17 +6,20 @@ use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
+use tcgeneric::{PathSegment, Tuple};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::Dir;
-use crate::cluster::{Class, Cluster, Legacy, Library, Replica, REPLICAS};
+use crate::cluster::{Class, Cluster, Legacy, Library, Replica, Service, REPLICAS};
 use crate::object::{InstanceClass, Object};
-use crate::route::*;
 use crate::state::State;
+
+use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
 mod class;
 mod dir;
 mod library;
+mod service;
 
 pub struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
@@ -204,60 +207,28 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
     }
 }
 
-// TODO: consolidate impl Route for Cluster into just one impl
-impl Route for Cluster<BlockChain<Class>> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match path {
-            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-            path => self.state().route(path),
+// TODO: replace with a single impl
+macro_rules! route_cluster {
+    ($t:ty) => {
+        impl Route for Cluster<$t> {
+            fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+                match path {
+                    path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+                    path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+                    path => self.state().route(path),
+                }
+            }
         }
-    }
+    };
 }
 
-// TODO: consolidate impl Route for Cluster into just one impl
-impl Route for Cluster<Dir<Class>> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match path {
-            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-            path => self.state().route(path),
-        }
-    }
-}
-
-// TODO: consolidate impl Route for Cluster into just one impl
-impl Route for Cluster<BlockChain<Library>> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match path {
-            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-            path => self.state().route(path),
-        }
-    }
-}
-
-// TODO: consolidate impl Route for Cluster into just one impl
-impl Route for Cluster<Dir<Library>> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match path {
-            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-            path => self.state().route(path),
-        }
-    }
-}
-
-// TODO: delete
-impl Route for Cluster<Legacy> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match path {
-            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-            path => self.state().route(path),
-        }
-    }
-}
+route_cluster!(BlockChain<Class>);
+route_cluster!(Dir<Class>);
+route_cluster!(BlockChain<Library>);
+route_cluster!(Dir<Library>);
+route_cluster!(BlockChain<Service>);
+route_cluster!(Dir<Service>);
+route_cluster!(Legacy);
 
 impl Route for Legacy {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
