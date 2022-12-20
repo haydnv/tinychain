@@ -4,11 +4,11 @@ use safecast::{CastInto, TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::{Link, Value, Version as VersionNumber};
-use tcgeneric::TCPathBuf;
+use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::{library, DirItem, Library};
 use crate::object::InstanceClass;
-use crate::route::*;
+use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRefType, Scalar};
 use crate::state::State;
 use crate::CLASS;
