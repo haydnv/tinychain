@@ -5,8 +5,10 @@ use destream::de;
 use futures::future::{FutureExt, TryFutureExt};
 use log::debug;
 use safecast::TryCastFrom;
+use tc_btree::BTreeInstance;
 
 use tc_error::*;
+use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
@@ -17,7 +19,7 @@ use crate::fs;
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
-use super::schema::{CollectionSchema, CollectionType};
+use super::schema::{CollectionSchema as Schema, CollectionType};
 use super::{BTree, BTreeFile, Collection, CollectionView, Table, TableIndex};
 #[cfg(feature = "tensor")]
 use super::{DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType};
@@ -31,6 +33,19 @@ pub enum CollectionBase {
     Dense(DenseTensor<DenseTensorFile>),
     #[cfg(feature = "tensor")]
     Sparse(SparseTensor<SparseTable>),
+}
+
+impl CollectionBase {
+    pub fn schema(&self) -> Schema {
+        match self {
+            Self::BTree(btree) => Schema::BTree(btree.schema().clone()),
+            Self::Table(table) => Schema::Table(table.schema()),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => Schema::Dense(dense.schema()),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => Schema::Sparse(sparse.schema()),
+        }
+    }
 }
 
 impl Instance for CollectionBase {
@@ -51,28 +66,28 @@ impl Instance for CollectionBase {
 #[async_trait]
 impl Persist<fs::Dir> for CollectionBase {
     type Txn = Txn;
-    type Schema = CollectionSchema;
+    type Schema = Schema;
 
     async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
-            CollectionSchema::BTree(btree_schema) => {
+            Schema::BTree(btree_schema) => {
                 BTreeFile::create(txn, btree_schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
-            CollectionSchema::Table(table_schema) => {
+            Schema::Table(table_schema) => {
                 TableIndex::create(txn, table_schema, store)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(tensor_schema) => {
+            Schema::Dense(tensor_schema) => {
                 DenseTensor::create(txn, tensor_schema, store)
                     .map_ok(Self::Dense)
                     .await
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(tensor_schema) => {
+            Schema::Sparse(tensor_schema) => {
                 SparseTensor::create(txn, tensor_schema, store)
                     .map_ok(Self::Sparse)
                     .await
@@ -82,24 +97,24 @@ impl Persist<fs::Dir> for CollectionBase {
 
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
-            CollectionSchema::BTree(btree_schema) => {
+            Schema::BTree(btree_schema) => {
                 BTreeFile::load(txn, btree_schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
-            CollectionSchema::Table(table_schema) => {
+            Schema::Table(table_schema) => {
                 TableIndex::load(txn, table_schema, store)
                     .map_ok(Self::Table)
                     .await
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(tensor_schema) => {
+            Schema::Dense(tensor_schema) => {
                 DenseTensor::load(txn, tensor_schema, store)
                     .map_ok(Self::Dense)
                     .await
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(tensor_schema) => {
+            Schema::Sparse(tensor_schema) => {
                 SparseTensor::load(txn, tensor_schema, store)
                     .map_ok(Self::Sparse)
                     .await

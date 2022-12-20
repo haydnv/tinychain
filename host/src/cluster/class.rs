@@ -111,10 +111,12 @@ impl DirItem for Class {
 
     async fn create_version(
         &self,
-        txn_id: TxnId,
+        txn: &Txn,
         number: VersionNumber,
         version: Self::Version,
     ) -> TCResult<()> {
+        let txn_id = *txn.id();
+
         let mut dir = self.dir.write(txn_id).await?;
         let file = dir.create_file(number.into())?;
         let mut blocks = file.write(txn_id).await?;

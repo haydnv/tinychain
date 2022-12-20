@@ -13,7 +13,7 @@ use tc_error::*;
 use tcgeneric::Id;
 
 /// A semantic version with a major, minor, and revision number, e.g. "0.1.12"
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, std::hash::Hash, Eq, PartialEq)]
 pub struct Version {
     major: u32,
     minor: u32,

@@ -139,6 +139,15 @@ impl<T> IntoIterator for Map<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a Map<T> {
+    type Item = (&'a Id, &'a T);
+    type IntoIter = std::collections::btree_map::Iter<'a, Id, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
 impl<F, T> FromIterator<(Id, F)> for Map<T>
 where
     T: CastFrom<F>,

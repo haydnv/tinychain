@@ -113,7 +113,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                             .await?;
                     }
 
-                    self.lib.create_version(*txn.id(), number, version).await
+                    self.lib.create_version(txn, number, version).await
                 })
             } else {
                 Box::pin(async move {

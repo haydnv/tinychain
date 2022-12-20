@@ -47,15 +47,21 @@ impl TryCastFrom<Scalar> for Version {
     }
 }
 
+impl From<Version> for Map<Scalar> {
+    fn from(version: Version) -> Self {
+        version.lib
+    }
+}
+
 impl From<Version> for Scalar {
-    fn from(version: Version) -> Scalar {
-        Scalar::Map(version.lib)
+    fn from(version: Version) -> Self {
+        Self::Map(version.into())
     }
 }
 
 impl From<Version> for State {
-    fn from(version: Version) -> State {
-        State::Scalar(version.into())
+    fn from(version: Version) -> Self {
+        Self::Scalar(version.into())
     }
 }
 
@@ -138,11 +144,11 @@ impl DirItem for Library {
 
     async fn create_version(
         &self,
-        txn_id: TxnId,
+        txn: &Txn,
         number: VersionNumber,
         version: Self::Version,
     ) -> TCResult<()> {
-        let mut file = self.file.write(txn_id).await?;
+        let mut file = self.file.write(*txn.id()).await?;
         if file.contains(&number) {
             error!("duplicate library version {}", number);
 

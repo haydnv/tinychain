@@ -12,7 +12,7 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate, DirCreateFile, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, DirCreate, DirCreateFile, File, Persist, Restore};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label};
@@ -263,6 +263,20 @@ where
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
         self.subject.dir()
+    }
+}
+
+#[async_trait]
+impl<T> CopyFrom<fs::Dir, SyncChain<T>> for SyncChain<T>
+where
+    T: Route + Public + Persist<fs::Dir, Txn = Txn>,
+{
+    async fn copy_from(
+        _txn: &<Self as Persist<fs::Dir>>::Txn,
+        _store: fs::Store,
+        _instance: SyncChain<T>,
+    ) -> TCResult<Self> {
+        Err(TCError::not_implemented("SyncChain::copy_from"))
     }
 }
 

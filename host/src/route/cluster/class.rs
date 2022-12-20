@@ -103,7 +103,7 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
                         })
                         .collect::<TCResult<Map<InstanceClass>>>()?;
 
-                    self.class.create_version(*txn.id(), number, version).await
+                    self.class.create_version(txn, number, version).await
                 } else {
                     let number = self.path[0].as_str().parse()?;
                     let version = self.class.get_version(*txn.id(), &number).await?;

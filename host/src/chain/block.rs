@@ -13,7 +13,7 @@ use log::debug;
 use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::{CopyFrom, Dir, Persist};
 use tc_transact::{IntoView, Transact};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
@@ -200,6 +200,20 @@ where
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
         self.subject.dir()
+    }
+}
+
+#[async_trait]
+impl<T> CopyFrom<fs::Dir, BlockChain<T>> for BlockChain<T>
+where
+    T: Route + Public + Persist<fs::Dir, Txn = Txn>,
+{
+    async fn copy_from(
+        _txn: &<Self as Persist<fs::Dir>>::Txn,
+        _store: fs::Store,
+        _instance: BlockChain<T>,
+    ) -> TCResult<Self> {
+        Err(TCError::not_implemented("BlockChain::copy_from"))
     }
 }
 
