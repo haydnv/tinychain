@@ -26,11 +26,17 @@ pub type Class = Cluster<Dir<crate::cluster::Class>>;
 /// The type of the library directory
 pub type Library = Cluster<Dir<crate::cluster::Library>>;
 
+/// The type of the service directory
+pub type Service = Cluster<Dir<crate::cluster::Service>>;
+
 /// The class directory path
 pub const CLASS: PathLabel = path_label(&["class"]);
 
 /// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);
+
+/// The service directory path
+pub const SERVICE: PathLabel = path_label(&["service"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
@@ -38,11 +44,12 @@ pub struct UserSpace {
     hypothetical: Hypothetical,
     class: Class,
     library: Library,
+    service: Service,
 }
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(class: Class, library: Library, clusters: I) -> Self
+    pub fn new<I>(class: Class, library: Library, service: Service, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
@@ -51,6 +58,7 @@ impl UserSpace {
             hypothetical: Hypothetical::new(),
             class,
             library,
+            service,
         }
     }
 
@@ -59,7 +67,8 @@ impl UserSpace {
             return false;
         }
 
-        &path[..1] == &CLASS[..]
+        &path[..1] == &SERVICE[..]
+            || &path[..1] == &CLASS[..]
             || &path[..1] == &LIB[..]
             || &path[..] == &hypothetical::PATH[..]
             || self.hosted.contains(&path[0])
@@ -148,6 +157,8 @@ impl Dispatch for UserSpace {
             Dispatch::get(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::get(&self.class, txn, &path[1..], key).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::get(&self.service, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -209,6 +220,8 @@ impl Dispatch for UserSpace {
             Dispatch::put(&self.library, txn, &path[1..], key, value).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::put(&self.class, txn, &path[1..], key, value).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::put(&self.service, txn, &path[1..], key, value).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -242,6 +255,8 @@ impl Dispatch for UserSpace {
             Dispatch::post(&self.library, txn, &path[1..], data).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::post(&self.class, txn, &path[1..], data).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::post(&self.service, txn, &path[1..], data).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -309,6 +324,8 @@ impl Dispatch for UserSpace {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::delete(&self.service, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }

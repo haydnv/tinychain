@@ -8,7 +8,7 @@ use log::debug;
 use safecast::CastInto;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{DirRead, Persist};
 use tc_transact::lock::map::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
@@ -418,13 +418,15 @@ impl Persist<fs::Dir> for Dir<Service> {
     async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
         let txn_id = *txn.id();
         let dir = fs::Dir::try_from(store)?;
-        let _lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let contents = HashMap::with_capacity(lock.len());
 
-        // Ok(Self {
-        //     cache: tc_transact::fs::Dir::into_inner(dir),
-        //     contents: TxnMapLock::with_contents("service directory", contents),
-        // })
-        Err(TCError::not_implemented("load a service directory"))
+        log::warn!("not implemented: load a service directory");
+
+        Ok(Self {
+            cache: tc_transact::fs::Dir::into_inner(dir),
+            contents: TxnMapLock::with_contents("service directory", contents),
+        })
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {

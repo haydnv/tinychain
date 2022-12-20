@@ -211,10 +211,16 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
     let class: kernel::Class = load(&config, &data_dir, &txn, kernel::CLASS).await?;
+    let service: kernel::Service = load(&config, &data_dir, &txn, kernel::SERVICE).await?;
 
     data_dir.commit(&txn_id).await;
 
-    let kernel = tinychain::Kernel::with_userspace(class.clone(), library.clone(), clusters);
+    let kernel = tinychain::Kernel::with_userspace(
+        class.clone(),
+        library.clone(),
+        service.clone(),
+        clusters,
+    );
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
