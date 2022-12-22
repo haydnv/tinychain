@@ -55,7 +55,7 @@ impl History {
 
     pub async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         debug!("History::append_delete {} {}", txn_id, key);
-        let mut block = self.write_latest(txn_id).await?;
+        let mut block = self.write_pending().await?;
         block.append_delete(txn_id, key);
         Ok(())
     }
@@ -66,7 +66,7 @@ impl History {
 
         debug!("History::append_put {} {} {:?}", txn_id, key, value);
 
-        let mut block = self.write_latest(txn_id).await?;
+        let mut block = self.write_pending().await?;
         block.append_put(txn_id, key, value);
 
         Ok(())
@@ -96,12 +96,13 @@ impl History {
         block.write().map_err(fs::io_err).await
     }
 
-    pub async fn write_latest(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
-        let latest = self.latest.read(txn_id).await?;
-        self.write_block(*latest).await
+    pub async fn write_pending(&self) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
+        let file = self.file.read().await;
+        let block = file
+            .get_file(&block_name(PENDING))
+            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+
+        block.write().map_err(fs::io_err).await
     }
 
     pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
