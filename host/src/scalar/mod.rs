@@ -675,6 +675,20 @@ impl TryFrom<Scalar> for Range {
     }
 }
 
+impl TryFrom<Scalar> for TCRef {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Ok(*tc_ref),
+            other => Err(TCError::bad_request(
+                "expected a reference but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl TryFrom<Scalar> for Value {
     type Error = TCError;
 
@@ -1037,16 +1051,16 @@ impl ScalarVisitor {
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
         if params.is_none() {
-            match subject {
-                Subject::Ref(id, path) if path.is_empty() => {
-                    Ok(Scalar::Ref(Box::new(TCRef::Id(id))))
-                }
-                Subject::Ref(id, path) => Ok(Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
+            let scalar = match subject {
+                Subject::Ref(id, path) if path.is_empty() => Scalar::Ref(Box::new(TCRef::Id(id))),
+                Subject::Ref(id, path) => Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
                     Subject::Ref(id, path),
                     Value::default().into(),
-                )))))),
-                Subject::Link(link) => Ok(Scalar::Value(Value::Link(link))),
-            }
+                ))))),
+                Subject::Link(link) => Scalar::Value(Value::Link(link)),
+            };
+
+            Ok(scalar)
         } else {
             OpRefVisitor::visit_ref_value(subject, params)
                 .map(TCRef::Op)
