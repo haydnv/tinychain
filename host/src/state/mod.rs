@@ -1306,9 +1306,9 @@ impl<'a> de::Visitor for StateVisitor {
                 }
             }
 
-            debug!("deserialize Op with subject {}", key);
             if let Ok(subject) = reference::Subject::from_str(&key) {
                 let params = access.next_value(()).await?;
+                debug!("deserialize Scalar from key {} and value {}", key, params);
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
