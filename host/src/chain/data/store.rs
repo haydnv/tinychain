@@ -12,7 +12,7 @@ use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{AsyncHash, Transact, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, NativeClass};
 
@@ -45,11 +45,7 @@ impl Store {
             ));
         }
 
-        let hash = state
-            .clone()
-            .hash(txn.clone())
-            .map_ok(Id::from_hash)
-            .await?;
+        let hash = state.clone().hash(txn).map_ok(Id::from_hash).await?;
 
         debug!("computed hash of {}: {}", state, hash);
 

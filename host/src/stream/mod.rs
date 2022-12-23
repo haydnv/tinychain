@@ -6,8 +6,6 @@ use async_trait::async_trait;
 use destream::en;
 use futures::stream::TryStreamExt;
 use log::debug;
-use sha2::digest::{Digest, Output};
-use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -95,20 +93,6 @@ impl TCStream {
         }
 
         Ok(())
-    }
-
-    /// Compute the SHA256 hash of this `TCStream`.
-    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        let stream = self.into_stream(txn.clone()).await?;
-        let mut hashes = stream
-            .map_ok(|state| state.hash(txn.clone()))
-            .try_buffered(num_cpus::get());
-
-        let mut hasher = Sha256::default();
-        while let Some(hash) = hashes.try_next().await? {
-            hasher.update(&hash);
-        }
-        Ok(hasher.finalize())
     }
 
     /// Return a `TCStream` produced by calling the given [`Closure`] on each item in this stream.

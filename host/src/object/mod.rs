@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
@@ -11,7 +10,7 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::IntoView;
+use tc_transact::{AsyncHash, IntoView};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
@@ -76,15 +75,6 @@ pub enum Object {
     Instance(InstanceExt<State>),
 }
 
-impl Object {
-    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        match self {
-            Self::Class(class) => Ok(Hash::<Sha256>::hash(class)),
-            Self::Instance(instance) => instance.hash(txn).await,
-        }
-    }
-}
-
 impl tcgeneric::Instance for Object {
     type Class = ObjectType;
 
@@ -92,6 +82,21 @@ impl tcgeneric::Instance for Object {
         match self {
             Self::Class(_) => ObjectType::Class,
             Self::Instance(_) => ObjectType::Instance,
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncHash<Dir> for Object {
+    type Txn = Txn;
+
+    async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Class(class) => Ok(async_hash::Hash::<Sha256>::hash(class)),
+            Self::Instance(instance) => Err(TCError::bad_request(
+                "cannot hash a user-defined instance",
+                instance,
+            )),
         }
     }
 }

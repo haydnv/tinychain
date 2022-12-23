@@ -17,7 +17,7 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{AsyncHash, Transaction};
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -200,52 +200,6 @@ pub enum State {
 }
 
 impl State {
-    /// Compute the SHA256 hash of this `State`.
-    pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
-        Box::pin(async move {
-            match self {
-                Self::Collection(collection) => collection.hash(txn).await,
-                Self::Chain(_chain) => Err(TCError::not_implemented("Chain hash")),
-                Self::Closure(closure) => closure.hash(txn).await,
-                Self::Map(map) => {
-                    let mut hashes = stream::iter(map)
-                        .map(|(id, state)| {
-                            state
-                                .hash(txn.clone())
-                                .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
-                        })
-                        .buffered(num_cpus::get())
-                        .map_ok(|(id, state)| {
-                            let mut inner_hasher = Sha256::default();
-                            inner_hasher.update(&id);
-                            inner_hasher.update(&state);
-                            inner_hasher.finalize()
-                        });
-
-                    let mut hasher = Sha256::default();
-                    while let Some(hash) = hashes.try_next().await? {
-                        hasher.update(&hash);
-                    }
-                    Ok(hasher.finalize())
-                }
-                Self::Object(object) => object.hash(txn).await,
-                Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-                Self::Stream(stream) => stream.hash(txn).await,
-                Self::Tuple(tuple) => {
-                    let mut hashes = stream::iter(tuple)
-                        .map(|state| state.hash(txn.clone()))
-                        .buffered(num_cpus::get());
-
-                    let mut hasher = Sha256::default();
-                    while let Some(hash) = hashes.try_next().await? {
-                        hasher.update(&hash);
-                    }
-                    Ok(hasher.finalize())
-                }
-            }
-        })
-    }
-
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
@@ -468,6 +422,57 @@ impl Instance for State {
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Stream(_) => StateType::Stream,
             Self::Tuple(_) => StateType::Tuple,
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncHash<crate::fs::Dir> for State {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Collection(collection) => collection.hash(txn).await,
+            Self::Chain(_chain) => Err(TCError::not_implemented("Chain hash")),
+            Self::Closure(closure) => closure.hash(txn).await,
+            Self::Map(map) => {
+                let mut hashes = stream::iter(map)
+                    .map(|(id, state)| {
+                        state
+                            .hash(txn)
+                            .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
+                    })
+                    .buffered(num_cpus::get())
+                    .map_ok(|(id, state)| {
+                        let mut inner_hasher = Sha256::default();
+                        inner_hasher.update(&id);
+                        inner_hasher.update(&state);
+                        inner_hasher.finalize()
+                    });
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+
+                Ok(hasher.finalize())
+            }
+            Self::Object(object) => object.hash(txn).await,
+            Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
+            Self::Stream(_stream) => Err(TCError::unsupported(
+                "cannot hash a Stream; hash its source instead",
+            )),
+            Self::Tuple(tuple) => {
+                let mut hashes = stream::iter(tuple)
+                    .map(|state| state.hash(txn))
+                    .buffered(num_cpus::get());
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+                Ok(hasher.finalize())
+            }
         }
     }
 }
