@@ -433,7 +433,7 @@ impl AsyncHash<crate::fs::Dir> for State {
     async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
         match self {
             Self::Collection(collection) => collection.hash(txn).await,
-            Self::Chain(_chain) => Err(TCError::not_implemented("Chain hash")),
+            Self::Chain(chain) => chain.hash(txn).await,
             Self::Closure(closure) => closure.hash(txn).await,
             Self::Map(map) => {
                 let mut hashes = stream::iter(map)

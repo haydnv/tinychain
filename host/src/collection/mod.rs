@@ -91,7 +91,7 @@ impl Collection {
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => CollectionSchema::Dense(dense.schema()),
                 Tensor::Sparse(sparse) => CollectionSchema::Sparse(sparse.schema()),
-            }
+            },
         }
     }
 }

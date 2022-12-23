@@ -112,6 +112,31 @@ pub struct ChainBlock {
 }
 
 impl ChainBlock {
+    /// Compute the hash of a [`ChainBlock`] with the given contents
+    pub fn hash<'a, M, R>(last_hash: &'a [u8], mutations: M) -> Output<Sha256>
+    where
+        M: IntoIterator<Item = (&'a TxnId, &'a R)> + 'a,
+        &'a R: IntoIterator<Item = &'a Mutation> + 'a,
+    {
+        let mut hasher = Sha256::new();
+        hasher.update(last_hash);
+
+        let mut txn_hasher = Sha256::new();
+        for (txn_id, mutations) in mutations {
+            let mut mutation_hasher = Sha256::new();
+            mutation_hasher.update(Hash::<Sha256>::hash(txn_id));
+
+            for mutation in mutations {
+                mutation_hasher.update(Hash::<Sha256>::hash(mutation));
+            }
+
+            txn_hasher.update(mutation_hasher.finalize());
+        }
+
+        hasher.update(txn_hasher.finalize());
+        hasher.finalize()
+    }
+
     /// Return a new, empty block.
     pub fn new<H: Into<Bytes>>(hash: H) -> Self {
         Self {
@@ -151,31 +176,28 @@ impl ChainBlock {
         }
     }
 
-    /// Append a DELETE op to this `ChainBlock`.
+    /// Append a DELETE op to this `ChainBlock`
     pub fn append_delete(&mut self, txn_id: TxnId, key: Value) {
         self.append(txn_id, Mutation::Delete(key))
     }
 
-    /// Append a PUT op to the this `ChainBlock`.
+    /// Append a PUT op to the this `ChainBlock`
     pub fn append_put(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
         debug!("ChainBlock::append_put {} <- {}", key, value);
         self.append(txn_id, Mutation::Put(key, value))
     }
 
-    /// The hash of the previous block in the chain.
+    /// The current hash of this block
+    pub fn current_hash(&self) -> Output<Sha256> {
+        Self::hash(&self.last_hash, &self.mutations)
+    }
+
+    /// The hash of the previous block in the chain
     pub fn last_hash(&self) -> &Bytes {
         &self.last_hash
     }
 
-    /// The current hash of this block.
-    pub fn hash(&self) -> Output<Sha256> {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.last_hash);
-        hasher.update(Hash::<Sha256>::hash(&self.mutations));
-        hasher.finalize()
-    }
-
-    /// The current size of this block.
+    /// The current size of this block
     pub async fn size(&self) -> TCResult<usize> {
         let encoded = tbon::en::encode(self).map_err(TCError::internal)?;
 

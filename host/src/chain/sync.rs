@@ -10,10 +10,12 @@ use futures::future::TryFutureExt;
 use futures::try_join;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, DirCreate, DirCreateFile, File, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label};
 
@@ -127,6 +129,15 @@ where
         *committed = ChainBlock::new(null_hash().to_vec());
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl<T: AsyncHash<fs::Dir, Txn = Txn> + Send + Sync> AsyncHash<fs::Dir> for SyncChain<T> {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        self.subject.hash(txn).await
     }
 }
 

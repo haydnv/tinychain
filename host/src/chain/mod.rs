@@ -12,7 +12,7 @@ use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{IntoView, Transact, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
@@ -166,6 +166,18 @@ where
         match self {
             Self::Block(chain) => chain.replicate(txn, source).await,
             Self::Sync(chain) => chain.replicate(txn, source).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<T: AsyncHash<fs::Dir, Txn = Txn> + Send + Sync> AsyncHash<fs::Dir> for Chain<T> {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Block(chain) => chain.hash(txn).await,
+            Self::Sync(chain) => chain.hash(txn).await,
         }
     }
 }

@@ -5,14 +5,16 @@ use destream::de;
 use futures::future::{FutureExt, TryFutureExt};
 use log::debug;
 use safecast::TryCastFrom;
-use tc_btree::BTreeInstance;
+use sha2::digest::Output;
+use sha2::Sha256;
 
+use tc_btree::BTreeInstance;
 use tc_error::*;
 use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction};
 use tcgeneric::{Instance, NativeClass, TCPathBuf};
 
 use crate::fs;
@@ -60,6 +62,15 @@ impl Instance for CollectionBase {
             #[cfg(feature = "tensor")]
             Self::Sparse(_sparse) => TensorType::Sparse.into(),
         }
+    }
+}
+
+#[async_trait]
+impl AsyncHash<fs::Dir> for CollectionBase {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        Collection::from(self).hash(txn).await
     }
 }
 

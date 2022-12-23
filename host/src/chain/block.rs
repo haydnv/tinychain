@@ -11,10 +11,12 @@ use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
 use safecast::TryCastInto;
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{IntoView, Transact};
+use tc_transact::{AsyncHash, IntoView, Transact};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 
@@ -214,6 +216,15 @@ where
         _instance: BlockChain<T>,
     ) -> TCResult<Self> {
         Err(TCError::not_implemented("BlockChain::copy_from"))
+    }
+}
+
+#[async_trait]
+impl<T: Send + Sync> AsyncHash<fs::Dir> for BlockChain<T> {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        self.history.hash(txn).await
     }
 }
 

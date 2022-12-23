@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::iter;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -10,11 +11,14 @@ use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, error};
 use safecast::*;
+use sha2::digest::generic_array::GenericArray;
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, DirCreate, Persist};
 use tc_transact::lock::TxnLock;
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, Tuple};
 
@@ -94,6 +98,15 @@ impl History {
             .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
 
         block.write().map_err(fs::io_err).await
+    }
+
+    pub async fn read_pending(&self) -> TCResult<freqfs::FileReadGuard<CacheBlock, ChainBlock>> {
+        let file = self.file.read().await;
+        let block = file
+            .get_file(&block_name(PENDING))
+            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+
+        block.read().map_err(fs::io_err).await
     }
 
     pub async fn write_pending(&self) -> TCResult<freqfs::FileWriteGuard<CacheBlock, ChainBlock>> {
@@ -182,8 +195,8 @@ impl History {
                 .await?;
             }
 
-            let last_hash = dest.hash().to_vec();
-            if &last_hash[..] != &source.hash()[..] {
+            let last_hash = dest.current_hash().to_vec();
+            if &last_hash[..] != &source.current_hash()[..] {
                 return Err(TCError::internal(err_divergent(*latest)));
             }
 
@@ -225,8 +238,8 @@ impl History {
                 .await?;
             }
 
-            last_hash = dest.hash().to_vec();
-            if &last_hash[..] != &source.hash()[..] {
+            last_hash = dest.current_hash().to_vec();
+            if &last_hash[..] != &source.current_hash()[..] {
                 return Err(TCError::internal(err_divergent(block_id)));
             }
         }
@@ -345,6 +358,57 @@ impl Persist<fs::Dir> for History {
     }
 }
 
+#[async_trait]
+impl AsyncHash<fs::Dir> for History {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        let latest_block_id = self.latest.read(*txn.id()).await?;
+        let latest_block = self.read_block(*latest_block_id).await?;
+
+        let latest_block = if latest_block.mutations.is_empty() {
+            if *latest_block_id == 0 {
+                latest_block
+            } else {
+                self.read_block(*latest_block_id - 1).await?
+            }
+        } else {
+            latest_block
+        };
+
+        if let Some(past_txn_id) = latest_block.mutations.keys().next() {
+            if past_txn_id > txn.id() {
+                return Err(TCError::conflict("requested a hash too far in the past"));
+            }
+        }
+
+        let log = self.read_log().await?;
+        if let Some(mutations) = log.mutations.get(txn.id()) {
+            let mutations = latest_block
+                .mutations
+                .iter()
+                .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
+                .chain(iter::once((txn.id(), mutations)));
+
+            Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
+        } else {
+            let pending = self.read_pending().await?;
+            if let Some(mutations) = pending.mutations.get(txn.id()) {
+                let mutations = latest_block
+                    .mutations
+                    .iter()
+                    .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
+                    .chain(iter::once((txn.id(), mutations)));
+
+                Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
+            } else {
+                // TODO: validate the length of the hash before calling clone_from_slice
+                Ok(GenericArray::clone_from_slice(latest_block.last_hash()))
+            }
+        }
+    }
+}
+
 async fn get_or_create_block<I: fmt::Display>(
     cache: &mut DirWriteGuard<CacheBlock>,
     name: I,
@@ -416,7 +480,7 @@ impl Transact for History {
 
                         *cutoff = *txn_id;
 
-                        let hash = latest_block.hash();
+                        let hash = latest_block.current_hash();
 
                         let new_block = file
                             .create_file(
@@ -550,7 +614,7 @@ impl de::Visitor for HistoryVisitor {
                 .await?;
 
             let block = ChainBlock::with_mutations(hash, mutations);
-            last_hash = block.hash();
+            last_hash = block.current_hash();
 
             file_lock
                 .create_file(block_name(i), block, None)
