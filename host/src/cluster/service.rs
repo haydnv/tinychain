@@ -5,21 +5,20 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
 use futures::try_join;
-use safecast::{as_type, AsType, CastFrom};
+use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::fs::*;
 use tc_transact::lock::{TxnMapLock, TxnMapLockCommitGuard, TxnMapRead, TxnMapWrite};
 use tc_transact::{Transact, Transaction};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{label, Id, Instance, Label, Map, NativeClass};
+use tcgeneric::{label, Id, Label, Map, NativeClass};
 
-use crate::chain::{Chain, ChainInstance};
+use crate::chain::{Chain, ChainType};
 use crate::cluster::DirItem;
-use crate::collection::{CollectionBase, CollectionBaseCommitGuard};
+use crate::collection::{CollectionBase, CollectionBaseCommitGuard, CollectionSchema};
 use crate::fs;
-use crate::scalar::Scalar;
-use crate::state::State;
+use crate::scalar::{OpRef, Scalar, Subject, TCRef};
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
@@ -40,45 +39,6 @@ pub struct Version {
 }
 
 impl Version {
-    async fn new(txn: &Txn, dir: fs::Dir, state: Map<State>) -> TCResult<Self> {
-        let mut attrs = Map::new();
-
-        for (name, state) in state {
-            if state.is_ref() {
-                return Err(TCError::unsupported(format!(
-                    "invalid Service attribute {}: {}",
-                    name, state
-                )));
-            }
-
-            match state {
-                State::Chain(chain) => {
-                    let dir = dir.write(*txn.id()).await?;
-                    let store = dir.create_store(name.clone());
-                    let chain = Chain::copy_from(txn, store, chain).await?;
-                    attrs.insert(name, chain.into());
-                }
-                State::Scalar(scalar) => {
-                    attrs.insert(name, scalar.into());
-                }
-                State::Collection(collection) => {
-                    return Err(TCError::unsupported(format!(
-                        "{} must be wrapped in a Chain",
-                        collection
-                    )));
-                }
-                other => {
-                    return Err(TCError::unsupported(format!(
-                        "invalid Service attribute {}: {}",
-                        name, other
-                    )));
-                }
-            }
-        }
-
-        Ok(Self { attrs })
-    }
-
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
     }
@@ -90,48 +50,68 @@ impl Persist<fs::Dir> for Version {
     type Schema = Map<Scalar>;
 
     async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
         let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
+
         let mut attrs = Map::new();
 
-        for (name, scalar) in schema {
-            match scalar {
-                Scalar::Ref(tc_ref) => {
-                    let dir = dir.write(txn_id).await?;
-                    let _store = dir.create_store(name);
-                    return Err(TCError::not_implemented(format!(
-                        "create new chain with schema {}",
-                        tc_ref
-                    )));
+        for (name, attr) in schema {
+            let attr = match attr {
+                Scalar::Ref(tc_ref) => match *tc_ref {
+                    TCRef::Op(OpRef::Get((chain_type, collection))) => {
+                        let chain_type = resolve_type::<ChainType>(chain_type)?;
+
+                        let schema = TCRef::try_from(collection)?;
+                        let schema = CollectionSchema::from_scalar(schema)?;
+
+                        let store = dir.create_store(txn_id, name.clone()).await?;
+                        let chain = Chain::create(txn, (chain_type, schema), store).await?;
+
+                        Ok(Attr::Chain(chain))
+                    }
+                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                },
+                scalar if scalar.is_ref() => {
+                    Err(TCError::bad_request("invalid Service attribute", scalar))
                 }
-                scalar => {
-                    attrs.insert(name, scalar.into());
-                }
-            }
+                scalar => Ok(Attr::Scalar(scalar)),
+            }?;
+
+            attrs.insert(name, attr);
         }
 
         Ok(Self { attrs })
     }
 
     async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
         let txn_id = *txn.id();
+        let dir = fs::Dir::try_from(store)?;
+
         let mut attrs = Map::new();
 
-        for (name, scalar) in schema {
-            match scalar {
-                Scalar::Ref(tc_ref) => {
-                    let dir = dir.read(txn_id).await?;
-                    let _store = dir.get_store(name);
-                    return Err(TCError::not_implemented(format!(
-                        "load chain with schema {}",
-                        tc_ref
-                    )));
+        for (name, attr) in schema {
+            let attr = match attr {
+                Scalar::Ref(tc_ref) => match *tc_ref {
+                    TCRef::Op(OpRef::Get((chain_type, collection))) => {
+                        let chain_type = resolve_type::<ChainType>(chain_type)?;
+
+                        let schema = TCRef::try_from(collection)?;
+                        let schema = CollectionSchema::from_scalar(schema)?;
+
+                        let store = dir.get_or_create_store(txn_id, name.clone()).await?;
+                        let chain = Chain::load(txn, (chain_type, schema), store).await?;
+
+                        Ok(Attr::Chain(chain))
+                    }
+                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                },
+                scalar if scalar.is_ref() => {
+                    Err(TCError::bad_request("invalid Service attribute", scalar))
                 }
-                scalar => {
-                    attrs.insert(name, scalar.into());
-                }
-            }
+                scalar => Ok(Attr::Scalar(scalar)),
+            }?;
+
+            attrs.insert(name, attr);
         }
 
         Ok(Self { attrs })
@@ -194,50 +174,28 @@ impl Service {
 
 #[async_trait]
 impl DirItem for Service {
-    type Version = Map<State>;
+    type Version = Map<Scalar>;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        version: Self::Version,
+        schema: Self::Version,
     ) -> TCResult<()> {
-        let mut schema = Map::new();
-        for (name, state) in &version {
-            match state {
-                State::Chain(chain) => {
-                    let chain_schema = (
-                        Scalar::from(chain.class().path()),
-                        Scalar::cast_from(chain.subject().schema()),
-                    );
-
-                    schema.insert(name.clone(), Scalar::Tuple(chain_schema.into()));
-                }
-                State::Scalar(scalar) if !scalar.is_ref() => {
-                    schema.insert(name.clone(), scalar.clone());
-                }
-                State::Collection(_) => {
-                    return Err(TCError::unsupported(
-                        "a Collection in a Service must be wrapped in a Chain",
-                    ))
-                }
-                other => return Err(TCError::bad_request("invalid Service attribute", other)),
-            }
-        }
-
         let txn_id = *txn.id();
-        let (mut dir, mut schemata, mut versions) = try_join!(
+        let (dir, mut schemata, mut versions) = try_join!(
             self.dir.write(txn_id),
             self.schema.write(txn_id),
             self.versions.write(txn_id)
         )?;
 
         schemata
-            .create_block(number.clone(), schema.into(), 0)
+            .create_block(number.clone(), schema.clone().into(), 0)
             .await?;
 
-        let dir = dir.create_dir(number.clone().into())?;
-        let version = Version::new(txn, dir, version).await?;
+        let store = dir.create_store(number.clone().into());
+        let version = Version::create(txn, schema, store).await?;
+
         versions.insert(number, version);
 
         Ok(())
@@ -348,5 +306,28 @@ impl Persist<fs::Dir> for Service {
 impl fmt::Display for Service {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a versioned hosted Service")
+    }
+}
+
+fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
+    match subject {
+        Subject::Link(link) if link.host().is_none() => {
+            T::from_path(link.path()).ok_or_else(|| {
+                TCError::unsupported(format!(
+                    "{} is not a {}",
+                    link.path(),
+                    std::any::type_name::<T>()
+                ))
+            })
+        }
+        Subject::Link(link) => Err(TCError::not_implemented(format!(
+            "support for a user-defined Class of {} in a Service: {}",
+            std::any::type_name::<T>(),
+            link
+        ))),
+        subject => Err(TCError::bad_request(
+            format!("expected a {} but found", std::any::type_name::<T>()),
+            subject,
+        )),
     }
 }

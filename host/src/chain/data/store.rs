@@ -14,7 +14,7 @@ use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
 use tc_transact::{AsyncHash, Transact, Transaction};
 use tc_value::Value;
-use tcgeneric::{Id, Instance, NativeClass};
+use tcgeneric::{Id, NativeClass};
 
 use crate::collection::{BTreeFile, BTreeType, Collection, CollectionType, TableIndex, TableType};
 #[cfg(feature = "tensor")]
@@ -37,13 +37,6 @@ impl Store {
 
     pub async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
         debug!("chain data store saving state {}...", state);
-
-        if state.is_ref() {
-            return Err(TCError::bad_request(
-                "cannot update Chain with reference",
-                state,
-            ));
-        }
 
         let hash = state.clone().hash(txn).map_ok(Id::from_hash).await?;
 
@@ -101,7 +94,7 @@ impl Store {
                     let shape = tensor.shape().clone();
                     let dtype = tensor.dtype();
                     let schema = tc_tensor::Schema { shape, dtype };
-                    let classpath = tensor.class().path();
+                    let classpath = tcgeneric::Instance::class(&tensor).path();
 
                     if dir.contains(&hash) {
                         debug!("Tensor with hash {} is already saved", tensor);
@@ -132,11 +125,9 @@ impl Store {
                 }
             },
             State::Scalar(value) => Ok(value),
-            other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
-            other => Err(TCError::bad_request(
-                "Chain does not support value",
-                other.class(),
-            )),
+            other => {
+                other.try_cast_into(|s| TCError::bad_request("Chain does not support value", s))
+            }
         }
     }
 

@@ -4,18 +4,16 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::Persist;
 use tc_transact::Transaction;
 use tc_value::{Link, Value};
-use tcgeneric::{Map, NativeClass, PathSegment, TCPath};
+use tcgeneric::{Map, PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainType};
-use crate::cluster::{service, Service};
-use crate::collection::CollectionSchema;
+use crate::cluster::{service, DirItem, Service};
 use crate::object::InstanceClass;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
-use crate::scalar::{OpRef, OpRefType, Subject, TCRef};
+use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
+use crate::txn::Txn;
 
 use super::dir::DirHandler;
 
@@ -46,6 +44,53 @@ impl<'a> ServiceHandler<'a> {
     fn new(service: &'a Service, path: &'a [PathSegment]) -> Self {
         Self { service, path }
     }
+
+    fn create_version<'b>(self: Box<Self>) -> PutHandler<'a, 'b>
+    where
+        'b: 'a,
+    {
+        Box::new(|txn, key, value| {
+            Box::pin(async move {
+                let number =
+                    key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+
+                let value = value
+                    .try_into_map(|s| TCError::bad_request("invalid Service definition", s))?;
+
+                let mut classes = Map::new();
+                let mut schema = Map::new();
+
+                for (name, state) in value {
+                    let scalar = Scalar::try_from(state)?;
+                    match scalar {
+                        Scalar::Ref(tc_ref) => match *tc_ref {
+                            TCRef::Op(OpRef::Post((Subject::Link(classpath), proto)))
+                                if !proto.is_empty() =>
+                            {
+                                let class = InstanceClass::anonymous(Some(classpath), proto);
+                                classes.insert(name, class);
+                            }
+                            tc_ref => {
+                                schema.insert(name, Scalar::from(tc_ref));
+                            }
+                        },
+                        scalar => {
+                            schema.insert(name, scalar);
+                        }
+                    }
+                }
+
+                if !classes.is_empty() {
+                    return Err(TCError::not_implemented(format!(
+                        "install Class dependencies {}",
+                        classes
+                    )));
+                }
+
+                self.service.create_version(txn, number, schema).await
+            })
+        })
+    }
 }
 
 impl<'a> Handler<'a> for ServiceHandler<'a> {
@@ -74,19 +119,17 @@ impl<'a> Handler<'a> for ServiceHandler<'a> {
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key, value| {
-            Box::pin(async move {
-                if self.path.len() == 0 {
-                    return Err(TCError::not_implemented(
-                        "create a new version of a Service",
-                    ));
-                }
-
-                let number = self.path[0].as_str().parse()?;
-                let version = self.service.get_version(*txn.id(), &number).await?;
-                version.put(txn, &self.path[1..], key, value).await
-            })
-        }))
+        if self.path.is_empty() {
+            Some(self.create_version())
+        } else {
+            Some(Box::new(|txn: &Txn, key: Value, value: State| {
+                Box::pin(async move {
+                    let number = self.path[0].as_str().parse()?;
+                    let version = self.service.get_version(*txn.id(), &number).await?;
+                    version.put(txn, &self.path[1..], key, value).await
+                })
+            }))
+        }
     }
 
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
@@ -163,65 +206,19 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
 
                 if Link::can_cast_from(&value) {
                     let link = Link::opt_cast_from(value).expect("service directory host link");
-                    return self
-                        .create_item_or_dir::<Map<State>>(txn, link, name, None)
-                        .await;
+                    self.create_item_or_dir::<Map<State>>(txn, link, name, None)
+                        .await
+                } else {
+                    let class = InstanceClass::try_cast_from(value, |s| {
+                        TCError::bad_request("invalid Service definition", s)
+                    })?;
+
+                    let (link, proto) = class.into_inner();
+                    let link = link
+                        .ok_or_else(|| TCError::bad_request("missing cluster link for", &proto))?;
+
+                    self.create_item_or_dir(txn, link, name, Some(proto)).await
                 }
-
-                let class = InstanceClass::try_cast_from(value, |s| {
-                    TCError::bad_request("invalid Service definition", s)
-                })?;
-
-                let (link, mut proto) = class.into_inner();
-                let link =
-                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &proto))?;
-
-                let refs = proto
-                    .iter()
-                    .filter_map(|(name, attr)| if attr.is_ref() { Some(name) } else { None })
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                let mut version = Map::<State>::new();
-                let mut classes = Map::<InstanceClass>::new();
-
-                for name in refs {
-                    let attr = proto.remove(&name).expect("service attr");
-                    let tc_ref = TCRef::try_from(attr)?;
-                    match tc_ref {
-                        TCRef::Op(OpRef::Post((Subject::Link(link), proto))) => {
-                            classes.insert(name, InstanceClass::anonymous(Some(link), proto));
-                        }
-                        TCRef::Op(OpRef::Get((chain_type, collection))) => {
-                            let chain_type = resolve_type::<ChainType>(chain_type)?;
-                            let schema = TCRef::try_from(collection)?;
-                            let schema = CollectionSchema::from_scalar(schema)?;
-                            let store = txn.context().create_store(*txn.id(), name.clone()).await?;
-
-                            let chain = Chain::create(txn, (chain_type, schema), store).await?;
-                            version.insert(name, State::Chain(chain));
-                        }
-                        other => {
-                            return Err(TCError::bad_request("invalid Service attribute", other));
-                        }
-                    }
-                }
-
-                if !classes.is_empty() {
-                    return Err(TCError::not_implemented(format!(
-                        "install Class dependencies {}",
-                        classes
-                    )));
-                }
-
-                version.extend(
-                    proto
-                        .into_iter()
-                        .map(|(name, op)| (name, State::Scalar(op))),
-                );
-
-                self.create_item_or_dir(txn, link, name, Some(version))
-                    .await
             })
         }))
     }
@@ -238,28 +235,5 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
         'b: 'a,
     {
         Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
-    }
-}
-
-fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
-    match subject {
-        Subject::Link(link) if link.host().is_none() => {
-            T::from_path(link.path()).ok_or_else(|| {
-                TCError::unsupported(format!(
-                    "{} is not a {}",
-                    link.path(),
-                    std::any::type_name::<T>()
-                ))
-            })
-        }
-        Subject::Link(link) => Err(TCError::not_implemented(format!(
-            "support for a user-defined Class of {} in a Service: {}",
-            std::any::type_name::<T>(),
-            link
-        ))),
-        subject => Err(TCError::bad_request(
-            format!("expected a {} but found", std::any::type_name::<T>()),
-            subject,
-        )),
     }
 }

@@ -14,7 +14,7 @@ class Persistent(tc.app.Service):
     NAME = "btree"
     VERSION = tc.Version("0.0.0")
 
-    __uri__ = HOST + NS.extend(NAME, VERSION)
+    __uri__ = HOST + tc.URI(tc.app.Service) + NS.extend(NAME, VERSION)
 
 
 class BTreeChainTests(PersistenceTest, unittest.TestCase):

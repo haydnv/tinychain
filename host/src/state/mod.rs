@@ -775,6 +775,23 @@ impl TryFrom<State> for Scalar {
     }
 }
 
+impl TryFrom<State> for Map<Scalar> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Map<Scalar>> {
+        match state {
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
+                .collect(),
+
+            State::Scalar(Scalar::Map(map)) => Ok(map),
+
+            other => Err(TCError::bad_request("expected a Map but found", other)),
+        }
+    }
+}
+
 impl TryFrom<State> for Map<State> {
     type Error = TCError;
 

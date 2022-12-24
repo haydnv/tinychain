@@ -30,7 +30,7 @@ class PersistenceTest(object):
             host = start_host(f"test_{service.NAME}_{i}", [], host_uri=host_uri, cache_size=self.CACHE_SIZE)
             hosts.append(host)
 
-        hosts[0].put(tc.URI(tc.app.Service), str(service.NS)[1:], {})
+        hosts[0].put(tc.URI(tc.app.Service), str(service.NS)[1:], tc.URI(service)[:-2])
         hosts[0].put(tc.URI(service).path()[:-2], tc.URI(service)[-2], service)
 
         time.sleep(1)
