@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::{debug, trace};
+use log::{debug, info, trace};
 use tokio::sync::{Mutex, Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use tc_error::*;
@@ -366,7 +366,7 @@ impl LockState {
 
             if reserved > &self.last_commit && reserved < &txn_id {
                 // if there's a pending write that can change the value at this txn_id, wait it out
-                debug!("TxnLock waiting on a pending write at {}", reserved);
+                info!("TxnLock at {} waiting on a pending write at {}", txn_id, reserved);
                 return false;
             }
         }

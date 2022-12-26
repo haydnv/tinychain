@@ -98,6 +98,11 @@ where
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
         debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+        debug!(
+            "cluster is {}, endpoint is {}",
+            cluster,
+            TCPath::from(suffix)
+        );
 
         if suffix.is_empty() && key.is_none() {
             // it's a synchronization message

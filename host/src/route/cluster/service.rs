@@ -1,19 +1,18 @@
-use std::convert::TryFrom;
-
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, Value};
-use tcgeneric::{Map, PathSegment, TCPath};
+use tc_value::{Value, Version as VersionNumber};
+use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{service, DirItem, Service};
+use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;
+use crate::CLASS;
 
 use super::dir::DirHandler;
 
@@ -51,17 +50,24 @@ impl<'a> ServiceHandler<'a> {
     {
         Box::new(|txn, key, value| {
             Box::pin(async move {
-                let number =
-                    key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+                debug!("{} <- {}: {}", self.service, key, value);
 
-                let value = value
-                    .try_into_map(|s| TCError::bad_request("invalid Service definition", s))?;
+                let number = VersionNumber::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid version number", v)
+                })?;
+
+                let class = InstanceClass::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Class", v)
+                })?;
+
+                let (link, version) = class.into_inner();
+                let link =
+                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
 
                 let mut classes = Map::new();
                 let mut schema = Map::new();
 
-                for (name, state) in value {
-                    let scalar = Scalar::try_from(state)?;
+                for (name, scalar) in version {
                     match scalar {
                         Scalar::Ref(tc_ref) => match *tc_ref {
                             TCRef::Op(OpRef::Post((Subject::Link(classpath), proto)))
@@ -80,14 +86,16 @@ impl<'a> ServiceHandler<'a> {
                     }
                 }
 
-                if !classes.is_empty() {
-                    return Err(TCError::not_implemented(format!(
-                        "install Class dependencies {}",
-                        classes
-                    )));
+                if !classes.is_empty() && txn.is_leader(link.path()) {
+                    let mut class_path = TCPathBuf::from(CLASS);
+                    class_path.extend(link.path()[1..].iter().cloned());
+
+                    txn.put(class_path.into(), number.clone().into(), classes.into())
+                        .await?;
                 }
 
-                self.service.create_version(txn, number, schema).await
+                let version = self.service.create_version(txn, number, schema).await?;
+                version.replicate(txn, link).await
             })
         })
     }
@@ -198,20 +206,22 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
                     ))?;
                 }
 
-                if Link::can_cast_from(&value) {
-                    let link = Link::opt_cast_from(value).expect("service directory host link");
+                let class = InstanceClass::try_cast_from(value, |v| {
+                    TCError::bad_request("invalid Class", v)
+                })?;
+
+                let (link, version) = class.into_inner();
+                let link =
+                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
+
+                if version.is_empty() {
                     self.create_item_or_dir::<Map<State>>(txn, link, name, None)
                         .await
                 } else {
-                    let class = InstanceClass::try_cast_from(value, |s| {
-                        TCError::bad_request("invalid Service definition", s)
-                    })?;
+                    let version = InstanceClass::anonymous(Some(link.clone()), version);
 
-                    let (link, proto) = class.into_inner();
-                    let link = link
-                        .ok_or_else(|| TCError::bad_request("missing cluster link for", &proto))?;
-
-                    self.create_item_or_dir(txn, link, name, Some(proto)).await
+                    self.create_item_or_dir(txn, link, name, Some(version))
+                        .await
                 }
             })
         }))

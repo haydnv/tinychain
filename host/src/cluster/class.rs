@@ -107,25 +107,26 @@ impl Class {
 
 #[async_trait]
 impl DirItem for Class {
+    type Schema = Map<InstanceClass>;
     type Version = Map<InstanceClass>;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        version: Self::Version,
-    ) -> TCResult<()> {
+        schema: Map<InstanceClass>,
+    ) -> TCResult<Map<InstanceClass>> {
         let txn_id = *txn.id();
 
         let mut dir = self.dir.write(txn_id).await?;
         let file = dir.create_file(number.into())?;
         let mut blocks = file.write(txn_id).await?;
 
-        for (name, class) in version {
-            blocks.create_block(name, class, 0).await?;
+        for (name, class) in &schema {
+            blocks.create_block(name.clone(), class.clone(), 0).await?;
         }
 
-        Ok(())
+        Ok(schema)
     }
 }
 

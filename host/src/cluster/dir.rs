@@ -49,14 +49,15 @@ pub trait DirCreateItem<T: DirItem> {
 pub trait DirItem:
     Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
+    type Schema;
     type Version;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        version: Self::Version,
-    ) -> TCResult<()>;
+        schema: <Self as DirItem>::Schema,
+    ) -> TCResult<Self::Version>;
 }
 
 #[derive(Clone)]
@@ -200,6 +201,8 @@ where
         name: PathSegment,
         link: Link,
     ) -> TCResult<Cluster<BlockChain<T>>> {
+        debug!("cluster::Dir::create_item {} at {}", name, link);
+
         if link.path().last() != Some(&name) {
             return Err(TCError::unsupported(format!(
                 "cluster link for {} must end with {} (found {})",
@@ -368,16 +371,16 @@ impl Persist<fs::Dir> for Dir<Library> {
         let mut contents = HashMap::new();
 
         for (name, entry) in lock.iter() {
-            let link = link.clone().append(name.clone());
+            let entry_link = link.clone().append(name.clone());
 
             match entry {
                 fs::DirEntry::Dir(dir) => {
-                    let dir = Cluster::load(txn, link, dir.into()).await?;
+                    let dir = Cluster::load(txn, entry_link, dir.into()).await?;
                     contents.insert(name.clone(), DirEntry::Dir(dir));
                 }
                 fs::DirEntry::File(file) => match file {
                     fs::FileEntry::Library(file) => {
-                        let lib = Cluster::load(txn, link, file.into()).await?;
+                        let lib = Cluster::load(txn, entry_link, file.into()).await?;
                         contents.insert(name.clone(), DirEntry::Item(lib));
                     }
                     file => {
@@ -387,12 +390,12 @@ impl Persist<fs::Dir> for Dir<Library> {
                         )))
                     }
                 },
-            }
+            };
         }
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnMapLock::with_contents("service directory", contents),
+            contents: TxnMapLock::with_contents("library directory", contents),
         })
     }
 
@@ -406,22 +409,56 @@ impl Persist<fs::Dir> for Dir<Service> {
     type Txn = Txn;
     type Schema = Link;
 
-    async fn create(_txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
+    async fn create(txn: &Txn, _schema: Link, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
-        Ok(Self {
-            cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnMapLock::new("service directory"),
-        })
+        let lock = tc_transact::fs::Dir::read(&dir, *txn.id()).await?;
+        if lock.is_empty() {
+            Ok(Self {
+                cache: tc_transact::fs::Dir::into_inner(dir),
+                contents: TxnMapLock::new("service directory"),
+            })
+        } else {
+            Err(TCError::unsupported(
+                "cannot create a cluster directory from a non-empty filesystem directory",
+            ))
+        }
     }
 
-    async fn load(txn: &Txn, _link: Link, store: fs::Store) -> TCResult<Self> {
+    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
         let txn_id = *txn.id();
         let dir = fs::Dir::try_from(store)?;
         let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
-        let contents = HashMap::with_capacity(lock.len());
+        let mut contents = HashMap::with_capacity(lock.len());
 
-        log::warn!("not implemented: load a service directory");
+        for (name, entry) in lock.iter() {
+            let entry_link = link.clone().append(name.clone());
+
+            match entry {
+                fs::DirEntry::File(file) => {
+                    return Err(TCError::internal(format!(
+                        "invalid Service directory entry: {}",
+                        file
+                    )))
+                }
+                fs::DirEntry::Dir(dir) => {
+                    let is_service = {
+                        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+                        lock.contains(&super::service::SCHEMA.into())
+                    };
+
+                    let entry = if is_service {
+                        let cluster = Cluster::load(txn, entry_link, dir.into()).await?;
+                        DirEntry::Item(cluster)
+                    } else {
+                        let cluster = Cluster::load(txn, entry_link, dir.into()).await?;
+                        DirEntry::Dir(cluster)
+                    };
+
+                    contents.insert(name.clone(), entry);
+                }
+            }
+        }
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),

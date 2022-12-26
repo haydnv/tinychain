@@ -140,14 +140,15 @@ impl Library {
 
 #[async_trait]
 impl DirItem for Library {
-    type Version = Map<Scalar>;
+    type Schema = Map<Scalar>;
+    type Version = Version;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        version: Self::Version,
-    ) -> TCResult<()> {
+        schema: Map<Scalar>,
+    ) -> TCResult<Version> {
         let mut file = self.file.write(*txn.id()).await?;
         if file.contains(&number) {
             error!("duplicate library version {}", number);
@@ -158,9 +159,12 @@ impl DirItem for Library {
             )))
         } else {
             info!("create new library version {}", number);
-            file.create_block(number, version.into(), 0)
+            let version = Version::from(schema);
+            file.create_block(number, version.clone(), 0)
                 .map_ok(|_| ())
-                .await
+                .await?;
+
+            Ok(version)
         }
     }
 }

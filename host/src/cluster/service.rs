@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::try_join;
 use safecast::{as_type, AsType};
 
@@ -15,14 +15,17 @@ use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Id, Label, Map, NativeClass};
 
 use crate::chain::{Chain, ChainType};
-use crate::cluster::DirItem;
+use crate::cluster::{DirItem, Replica};
 use crate::collection::{CollectionBase, CollectionBaseCommitGuard, CollectionSchema};
 use crate::fs;
+use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Scalar, Subject, TCRef};
+use crate::state::State;
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
-const SCHEMA: Label = label("schemata");
+pub const CHAINS: Label = label("chains");
+pub(super) const SCHEMA: Label = label("schemata");
 
 #[derive(Clone)]
 pub enum Attr {
@@ -41,6 +44,27 @@ pub struct Version {
 impl Version {
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
+    }
+}
+
+#[async_trait]
+impl Replica for Version {
+    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
+        unimplemented!()
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        try_join_all(self.attrs.iter().filter_map(|(name, attr)| {
+            if let Attr::Chain(chain) = attr {
+                let source = source.clone().append(name.clone());
+                Some(chain.replicate(txn, source))
+            } else {
+                None
+            }
+        }))
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -168,20 +192,40 @@ impl Service {
 
         versions
             .get(number)
-            .ok_or_else(|| TCError::not_found(number))
+            .ok_or_else(|| TCError::not_found(format!("Service version {}", number)))
+    }
+
+    pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
+        self.schema
+            .read(txn_id)
+            .map_ok(|file| file.block_ids().last().cloned())
+            .await
+    }
+
+    pub async fn schemata(&self, txn_id: TxnId) -> TCResult<Map<Map<Scalar>>> {
+        let file = self.schema.read(txn_id).await?;
+        let mut schemata = Map::new();
+
+        for number in file.block_ids() {
+            let version = file.read_block(number).await?;
+            schemata.insert(number.clone().into(), (&*version).clone().into());
+        }
+
+        Ok(schemata)
     }
 }
 
 #[async_trait]
 impl DirItem for Service {
-    type Version = Map<Scalar>;
+    type Schema = Map<Scalar>;
+    type Version = Version;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        schema: Self::Version,
-    ) -> TCResult<()> {
+        schema: Map<Scalar>,
+    ) -> TCResult<Version> {
         let txn_id = *txn.id();
         let (dir, mut schemata, mut versions) = try_join!(
             self.dir.write(txn_id),
@@ -196,9 +240,9 @@ impl DirItem for Service {
         let store = dir.create_store(number.clone().into());
         let version = Version::create(txn, schema, store).await?;
 
-        versions.insert(number, version);
+        versions.insert(number, version.clone());
 
-        Ok(())
+        Ok(version)
     }
 }
 

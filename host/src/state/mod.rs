@@ -513,6 +513,12 @@ impl From<CollectionBase> for State {
     }
 }
 
+impl From<Id> for State {
+    fn from(id: Id) -> Self {
+        Self::Scalar(id.into())
+    }
+}
+
 impl From<InstanceClass> for State {
     fn from(class: InstanceClass) -> Self {
         Self::Object(class.into())

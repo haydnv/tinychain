@@ -106,7 +106,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
             .await?;
 
         let library: Map<Map<Scalar>> =
-            state.try_cast_into(|s| TCError::bad_request("invalid library version history", s))?;
+            state.try_cast_into(|s| TCError::bad_request("invalid Library version history", s))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -128,12 +128,39 @@ impl Replica for BlockChain<crate::cluster::Library> {
 
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Service> {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Err(TCError::not_implemented("replication state of a Service"))
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        let schema = self.subject.schemata(txn_id).await?;
+        let schema = schema
+            .into_iter()
+            .map(|(number, version)| (number, State::from(version)))
+            .collect();
+
+        Ok(State::Map(schema))
     }
 
-    async fn replicate(&self, _txn: &Txn, _source: Link) -> TCResult<()> {
-        Err(TCError::not_implemented("replicate a Service"))
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let state = txn
+            .get(source.clone().append(CHAIN), Value::default())
+            .await?;
+
+        let library: Map<Map<Scalar>> =
+            state.try_cast_into(|s| TCError::bad_request("invalid Service version history", s))?;
+
+        // TODO: verify equality of existing versions
+        let latest_version = self.subject.latest(*txn.id()).await?;
+        for (number, version) in library {
+            let number: VersionNumber = number.as_str().parse()?;
+            let class = InstanceClass::anonymous(Some(source.clone()), version);
+            if let Some(latest) = latest_version {
+                if number > latest {
+                    self.put(txn, &[], number.into(), class.into()).await?;
+                }
+            } else {
+                self.put(txn, &[], number.into(), class.into()).await?;
+            }
+        }
+
+        Ok(())
     }
 }
 

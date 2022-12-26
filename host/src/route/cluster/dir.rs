@@ -1,5 +1,5 @@
 use futures::future;
-use log::{debug, info};
+use log::debug;
 
 use tc_error::*;
 use tc_transact::Transaction;
@@ -82,29 +82,28 @@ where
     where
         State: From<Item>,
     {
-        if let Some(item) = item {
-            let cluster = self.dir.create_item(txn, name, link.clone()).await?;
+        let replicate_from_this_host = {
+            if link.host().is_none() {
+                true
+            } else {
+                let self_link = txn.link(link.path().clone());
+                self_link == link
+            }
+        };
 
-            let replicate_from_this_host = {
-                if cluster.link().host().is_none() {
-                    true
-                } else {
-                    let self_link = txn.link(link.path().clone());
-                    self_link == link
-                }
-            };
+        let dir_path = TCPathBuf::from(link.path()[..link.path().len() - 1].to_vec());
+        let leader = if let Some(host) = link.host() {
+            (host.clone(), dir_path).into()
+        } else {
+            dir_path.into()
+        };
+
+        if let Some(item) = item {
+            let cluster = self.dir.create_item(txn, name, link).await?;
 
             if replicate_from_this_host {
                 let txn = cluster.lead(txn.clone()).await?;
-                let dir_path = TCPathBuf::from(link.path()[..link.path().len() - 1].to_vec());
-                debug_assert_eq!(dir_path.len(), link.path().len() - 1);
-
-                let leader = if let Some(host) = link.host() {
-                    (host.clone(), dir_path).into()
-                } else {
-                    dir_path.into()
-                };
-
+                let link = cluster.link().clone();
                 txn.put(leader, Value::default(), link.into()).await?;
 
                 cluster
@@ -116,14 +115,17 @@ where
                     .await
             }
         } else {
-            info!("create new cluster directory {}", link);
-
             let cluster = self.dir.create_dir(txn, name, link).await?;
-            debug!("created new cluster directory");
 
-            cluster
-                .add_replica(txn, txn.link(cluster.link().path().clone()))
-                .await
+            if replicate_from_this_host {
+                let txn = cluster.lead(txn.clone()).await?;
+                let link = cluster.link().clone();
+                txn.put(leader, Value::default(), link.into()).await
+            } else {
+                cluster
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
+                    .await
+            }
         }
     }
 }

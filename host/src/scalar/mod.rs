@@ -552,6 +552,12 @@ impl tc_transact::fs::BlockData for Scalar {
     }
 }
 
+impl From<Id> for Scalar {
+    fn from(id: Id) -> Self {
+        Self::Value(id.into())
+    }
+}
+
 impl From<IdRef> for Scalar {
     fn from(id_ref: IdRef) -> Self {
         Self::Ref(Box::new(TCRef::Id(id_ref)))

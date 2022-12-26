@@ -7,7 +7,7 @@ use bytes::Bytes;
 use clap::Parser;
 use destream::de::FromStream;
 use futures::future::{self, TryFutureExt};
-use futures::{stream, try_join};
+use futures::{join, stream, try_join};
 use tokio::time::Duration;
 
 use tc_error::*;
@@ -178,7 +178,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let kernel = tinychain::Kernel::bootstrap();
     let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
     let token = gateway.new_token(&txn_id)?;
-    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
+    let txn = txn_server.new_txn(gateway.clone(), txn_id, token).await?;
 
     // TODO: delete
     let mut clusters = Vec::with_capacity(config.clusters.len());
@@ -209,11 +209,21 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
-    let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
+    data_dir.commit(&txn_id).await;
+
+    let txn_id = TxnId::new(Gateway::time());
+    let token = gateway.new_token(&txn_id)?;
+    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
+
     let class: kernel::Class = load(&config, &data_dir, &txn, kernel::CLASS).await?;
+    let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
     let service: kernel::Service = load(&config, &data_dir, &txn, kernel::SERVICE).await?;
 
-    data_dir.commit(&txn_id).await;
+    join!(
+        class.commit(&txn_id),
+        library.commit(&txn_id),
+        service.commit(&txn_id),
+    );
 
     let kernel = tinychain::Kernel::with_userspace(
         class.clone(),
@@ -221,6 +231,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         service.clone(),
         clusters,
     );
+
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
@@ -231,7 +242,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     try_join!(
         gateway.clone().listen().map_err(TokioError::from),
-        replicate(gateway, class, library).map_err(TokioError::from)
+        replicate(gateway, class, library, service).map_err(TokioError::from)
     )?;
 
     Ok(())
@@ -254,7 +265,12 @@ where
     tc_transact::fs::Persist::load(txn, link, store).await
 }
 
-async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCResult<()> {
+async fn replicate(
+    gateway: Arc<Gateway>,
+    class: Class,
+    library: Library,
+    service: Service,
+) -> TCResult<()> {
     let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
 
     async fn replicate_cluster<T>(txn: &Txn, cluster: Cluster<T>) -> TCResult<()>
@@ -270,9 +286,11 @@ async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCR
         cluster.distribute_commit(&txn).await
     }
 
+    replicate_cluster(&txn, class).await?;
+
     try_join!(
-        replicate_cluster(&txn, class),
-        replicate_cluster(&txn, library)
+        replicate_cluster(&txn, library),
+        replicate_cluster(&txn, service),
     )?;
 
     Ok(())
