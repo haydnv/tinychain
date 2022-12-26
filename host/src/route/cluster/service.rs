@@ -173,18 +173,12 @@ impl<'a> Handler<'a> for ServiceHandler<'a> {
 
 impl Route for Service {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Service::route {}", TCPath::from(path));
         Some(Box::new(ServiceHandler::new(self, path)))
     }
 }
 
 impl<'a> Handler<'a> for DirHandler<'a, Service> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        self.get_entry()
-    }
-
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,

@@ -143,13 +143,6 @@ impl Route for Class {
 }
 
 impl<'a> Handler<'a> for DirHandler<'a, Class> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        self.get_entry()
-    }
-
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,

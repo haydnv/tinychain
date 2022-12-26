@@ -26,25 +26,6 @@ impl<'a, T> DirHandler<'a, T> {
 
 impl<'a, T> DirHandler<'a, T>
 where
-    DirEntry<T>: Route + Clone + fmt::Display,
-{
-    pub(super) fn get_entry<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                match self.dir.entry(*txn.id(), &self.path[0]).await? {
-                    Some(entry) => entry.get(txn, &self.path[1..], key).await,
-                    None => Err(TCError::not_found(&self.path[0])),
-                }
-            })
-        }))
-    }
-}
-
-impl<'a, T> DirHandler<'a, T>
-where
     T: DirItem,
 {
     pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
@@ -196,6 +177,8 @@ where
     Cluster<Dir<T>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Dir::route {}", TCPath::from(path));
+
         match self {
             Self::Dir(dir) => dir.route(path),
             Self::Item(item) => item.route(path),

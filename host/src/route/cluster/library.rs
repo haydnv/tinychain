@@ -159,13 +159,6 @@ impl Route for Library {
 }
 
 impl<'a> Handler<'a> for DirHandler<'a, Library> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        self.get_entry()
-    }
-
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
